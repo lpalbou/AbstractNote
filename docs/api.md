@@ -95,6 +95,22 @@ signed-in principal for their own notebook. The few write actions are bookkeepin
 Response envelopes are plain JSON objects; lists return `{items, next_cursor}`. Times are ISO
 8601 UTC. Errors use the gateway's error shape.
 
+Pinned response shapes (clients decode these strictly; absent lists mean empty):
+
+| Endpoint | Shape |
+|---|---|
+| `GET /note/changes` | `{cursor, notes: [NoteRef], entities: [{entity_id, name, kind, first_seen}], superseded_claims: [{claim_id, text, superseded_by, note_id}], closed_loops: [{task_id, text, closed_at}], failed_notes: [{note_id, title, error}], insights: [Insight]}` |
+| `NoteRef` | `{note_id, title, kind, occurred_at, excerpt}` |
+| `Insight` | `{note_id, title, body, insight_kind, occurred_at, acked_at, evidence_note_ids, entity_ids}` |
+| `GET /note/overview` | `{recent: [NoteRef], entities: [{entity_id, name, kind, note_count, last_seen}], insights: [Insight], resurfacing: [NoteRef], activity: [{day, notes, revisions}]}` |
+| `GET /note/cues` | `{items: [{cue_id, text, kind, subject: {kind, id, title}}]}` (cues are insight notes; `cue_id` is the note id) |
+| `GET /note/tasks` | `{items: [{task_id, note_id, text, status, due, closed_at}]}` |
+| `GET /note/notes/{id}` | `{note_id, title, text, kind, occurred_at, received_at, status, topics, summary, source, location, attachments: [...], revision: {...} or null, entities: [...], claims: [...], revisits: [NoteRef]}` |
+| `note-capture` output | `{response, note_id, status, revision_summary?}` |
+| `note-recall` output | `{response, answer, evidence: [NoteRef], evolution, open_loops, follow_ups, dossier_note_id?}` |
+
+Linking a new note to a subject: clients may send `input_data.context.about = {kind: insight|task|cue|entity|note, id, title}` on `note-capture`; `note_capture` records it and the revision links the note to that subject (`dcterms:references`), so answering a cue or commenting an insight is traceable.
+
 Graph response:
 
 ```json
@@ -112,7 +128,7 @@ Flows call them through `tool_calls` nodes; agents may list them in `allowed_too
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `note_capture` | `text, idempotency_key?, title?, occurred_at?, location?, source?, priority?, attachments? ([{"$artifact": id}] inside the gateway; local paths only headless), session_id?` | `{note_id, status: new|duplicate, duplicate_of?, first_saved_at?, received_at, revisits: [{note_id, occurred_at}], similar: [{note_id, title, occurred_at, score}], topics: [...], attachments: [{attachment_id, sha256, mime, size, extracted_by, extracted_chars}], warnings: [...]}` |
+| `note_capture` | `text, idempotency_key?, title?, occurred_at?, location?, source?, priority?, attachments? ([{"$artifact": id}] inside the gateway; local paths only headless), session_id?, about?` | `{note_id, status: new|duplicate, duplicate_of?, first_saved_at?, received_at, revisits: [{note_id, occurred_at}], similar: [{note_id, title, occurred_at, score}], topics: [...], attachments: [{attachment_id, sha256, mime, size, extracted_by, extracted_chars}], warnings: [...]}` |
 | `note_file` | `note_id, title, kind, topics, urgency, language, one_line` | `{note_id, priority, status}` |
 | `note_context` | `note_id, max_chars?` | `{note: {...}, sections: [...], similar_notes: [...], candidate_entities: [{entity_id, name, kind, aliases, summary, last_seen, active_claims: [...]}], open_tasks: [...], topics: [...], vocabulary: [{predicate, gloss}]}` |
 | `note_resolve_candidates` | `note_id, mentions: [{ref, name, kind, aliases}]` | `{mentions: [{ref, candidates: [{entity_id, name, kind, aliases, summary, last_seen, score, matched_by}]}]}` |

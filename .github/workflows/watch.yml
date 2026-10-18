@@ -1,0 +1,77 @@
+# GitHub workflow for the watch app. GitHub runs workflows only from the repository root:
+# copy this file to .github/workflows/watch.yml (outside the watch lane's paths, so not done here).
+name: Watch app
+
+# Builds and tests watch/apple on every change. No release job: App Store and TestFlight
+# publishing is a later, maintainer-approved step.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "watch/apple/**"
+  pull_request:
+    paths:
+      - "watch/apple/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The newest released (not beta) Xcode of this major version (the xcode-27 runner image).
+  XCODE_MAJOR: "27"
+  PROJECT_DIR: watch/apple
+  SCHEME: AbstractNoteWatch
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode ${{ env.XCODE_MAJOR }}
+        run: |
+          app=$(ls -d /Applications/Xcode_${XCODE_MAJOR}.*.app 2>/dev/null | grep -vi beta | sort -V | tail -1)
+          if [ -z "$app" ]; then
+            echo "::error::No released Xcode ${XCODE_MAJOR}.x on this runner image. Installed:"
+            ls -d /Applications/Xcode*.app
+            exit 1
+          fi
+          sudo xcode-select -s "$app/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate the Xcode project
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: xcodegen generate --spec project.yml
+
+      - name: Package tests (AbstractGatewayClient)
+        working-directory: ${{ env.PROJECT_DIR }}/Packages/AbstractGatewayClient
+        run: swift test
+
+      - name: Simulator build
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          xcodebuild -project AbstractNoteWatch.xcodeproj -scheme "$SCHEME" \
+            -destination "generic/platform=watchOS Simulator" -configuration Debug \
+            -derivedDataPath build/DerivedData build CODE_SIGNING_ALLOWED=NO -quiet
+
+      - name: Device build (Release, unsigned)
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          xcodebuild -project AbstractNoteWatch.xcodeproj -scheme "$SCHEME" \
+            -destination "generic/platform=watchOS" -configuration Release \
+            -derivedDataPath build/DerivedData build CODE_SIGNING_ALLOWED=NO -quiet
+
+      - name: The app is watch-only (a missing WKWatchOnly builds fine and fails at install)
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          plist=build/DerivedData/Build/Products/Release-watchos/AbstractNoteWatch.app/Info.plist
+          test "$(plutil -extract WKWatchOnly raw "$plist")" = "true"
+          test "$(plutil -extract WKApplication raw "$plist")" = "true"
+          echo "version $(plutil -extract CFBundleShortVersionString raw "$plist")"
