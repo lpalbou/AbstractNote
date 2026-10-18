@@ -1,0 +1,2273 @@
+{
+  "id": "note-mine",
+  "name": "Dig through your notes",
+  "description": "Plan a multi-step search across time, read each slice, and write a dossier note.",
+  "interfaces": [],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "on_flow_start",
+      "position": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "on_flow_start",
+        "label": "Start",
+        "inputs": [],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "question",
+            "label": "question",
+            "type": "string"
+          },
+          {
+            "id": "since",
+            "label": "since",
+            "type": "string"
+          },
+          {
+            "id": "until",
+            "label": "until",
+            "type": "string"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          }
+        ],
+        "pinDefaults": {
+          "question": "",
+          "provider": "",
+          "model": ""
+        }
+      }
+    },
+    {
+      "id": "search_args",
+      "type": "code",
+      "position": {
+        "x": 480.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "First search: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "query",
+            "label": "query",
+            "type": "string"
+          },
+          {
+            "id": "since",
+            "label": "since",
+            "type": "string"
+          },
+          {
+            "id": "until",
+            "label": "until",
+            "type": "string"
+          },
+          {
+            "id": "limit",
+            "label": "limit",
+            "type": "number"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox",
+          "limit": 20
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif query is not None:\n    arguments[\"query\"] = query\nif since is not None:\n    arguments[\"since\"] = since\nif until is not None:\n    arguments[\"until\"] = until\nif limit is not None:\n    arguments[\"limit\"] = limit\nreturn {\"tool_calls\": [{\"name\": \"note_search\", \"call_id\": \"search\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "search",
+      "type": "tool_calls",
+      "position": {
+        "x": 960.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "First search",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_search"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_search"
+          ]
+        }
+      }
+    },
+    {
+      "id": "search_out",
+      "type": "code",
+      "position": {
+        "x": 1440.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "First search: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "notes",
+            "label": "notes",
+            "type": "array"
+          },
+          {
+            "id": "entities",
+            "label": "entities",
+            "type": "array"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_search returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_search failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_search returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "plan_prompt",
+      "type": "string_template",
+      "position": {
+        "x": 1440.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "string_template",
+        "label": "Planning prompt",
+        "inputs": [
+          {
+            "id": "template",
+            "label": "template",
+            "type": "string"
+          },
+          {
+            "id": "question",
+            "label": "question",
+            "type": "any"
+          },
+          {
+            "id": "since",
+            "label": "since",
+            "type": "any"
+          },
+          {
+            "id": "until",
+            "label": "until",
+            "type": "any"
+          },
+          {
+            "id": "hits",
+            "label": "hits",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "result",
+            "label": "result",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "template": "Plan a deep search through the notes to answer the question.\n\nQuestion: {{question}}\nTime window: since {{since}} until {{until}}\n\nFirst search results:\n{{hits}}\n\nReturn up to six steps (a sub-question each, with an optional time slice and the names to trace), the contradictions worth testing, and the number of search rounds (1-8).\n\nOutput JSON only, matching the schema.\n"
+        }
+      }
+    },
+    {
+      "id": "plan",
+      "type": "llm_call",
+      "position": {
+        "x": 1920.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "llm_call",
+        "label": "Plan the search",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          },
+          {
+            "id": "system",
+            "label": "system",
+            "type": "string"
+          },
+          {
+            "id": "prompt",
+            "label": "prompt",
+            "type": "string"
+          },
+          {
+            "id": "tools",
+            "label": "tools",
+            "type": "tools"
+          },
+          {
+            "id": "temperature",
+            "label": "temperature",
+            "type": "number"
+          },
+          {
+            "id": "resp_schema",
+            "label": "resp_schema",
+            "type": "json_schema"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          },
+          {
+            "id": "meta",
+            "label": "meta",
+            "type": "object"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "tools": [],
+          "system": "You file and connect a person's notes. Output JSON only, matching the schema.",
+          "temperature": 0.2,
+          "resp_schema": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "question": {
+                      "type": "string",
+                      "description": "a sub-question to search for"
+                    },
+                    "since": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "ISO or null"
+                    },
+                    "until": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "ISO or null"
+                    },
+                    "entities": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "names to trace"
+                    }
+                  },
+                  "required": [
+                    "question",
+                    "since",
+                    "until",
+                    "entities"
+                  ]
+                }
+              },
+              "contradictions_to_test": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "rounds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 8
+              }
+            },
+            "required": [
+              "steps",
+              "contradictions_to_test",
+              "rounds"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "steps",
+      "type": "code",
+      "position": {
+        "x": 2400.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Steps",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "plan",
+            "label": "plan",
+            "type": "object"
+          },
+          {
+            "id": "question",
+            "label": "question",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "p = plan if isinstance(plan, dict) else {}\nrounds = int(p.get(\"rounds\") or 6)\nrounds = max(1, min(rounds, 6))\nsteps = [s for s in (p.get(\"steps\") or []) if isinstance(s, dict) and str(s.get(\"question\") or \"\").strip()]\nif not steps:\n    steps = [{\"question\": question, \"since\": None, \"until\": None, \"entities\": []}]\nreturn {\"items\": steps[:rounds]}\n"
+      }
+    },
+    {
+      "id": "each_step",
+      "type": "loop",
+      "position": {
+        "x": 2880.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "loop",
+        "label": "For each step",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "loop",
+            "label": "loop",
+            "type": "execution"
+          },
+          {
+            "id": "done",
+            "label": "done",
+            "type": "execution"
+          },
+          {
+            "id": "item",
+            "label": "item",
+            "type": "any"
+          },
+          {
+            "id": "index",
+            "label": "index",
+            "type": "number"
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_query",
+      "type": "code",
+      "position": {
+        "x": 3360.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Step query",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "item",
+            "label": "item",
+            "type": "object"
+          },
+          {
+            "id": "since",
+            "label": "since",
+            "type": "string"
+          },
+          {
+            "id": "until",
+            "label": "until",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "query",
+            "label": "query",
+            "type": "string"
+          },
+          {
+            "id": "step_since",
+            "label": "step_since",
+            "type": "string"
+          },
+          {
+            "id": "step_until",
+            "label": "step_until",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "s = item if isinstance(item, dict) else {}\nreturn {\"query\": str(s.get(\"question\") or \"\"), \"step_since\": s.get(\"since\") or since,\n        \"step_until\": s.get(\"until\") or until}\n"
+      }
+    },
+    {
+      "id": "step_search_args",
+      "type": "code",
+      "position": {
+        "x": 3840.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Search this slice: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "query",
+            "label": "query",
+            "type": "string"
+          },
+          {
+            "id": "since",
+            "label": "since",
+            "type": "string"
+          },
+          {
+            "id": "until",
+            "label": "until",
+            "type": "string"
+          },
+          {
+            "id": "limit",
+            "label": "limit",
+            "type": "number"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox",
+          "limit": 20
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif query is not None:\n    arguments[\"query\"] = query\nif since is not None:\n    arguments[\"since\"] = since\nif until is not None:\n    arguments[\"until\"] = until\nif limit is not None:\n    arguments[\"limit\"] = limit\nreturn {\"tool_calls\": [{\"name\": \"note_search\", \"call_id\": \"step_search\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "step_search",
+      "type": "tool_calls",
+      "position": {
+        "x": 4320.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Search this slice",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_search"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_search"
+          ]
+        }
+      }
+    },
+    {
+      "id": "step_search_out",
+      "type": "code",
+      "position": {
+        "x": 4800.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Search this slice: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "notes",
+            "label": "notes",
+            "type": "array"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_search returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_search failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_search returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "findings_prompt",
+      "type": "string_template",
+      "position": {
+        "x": 4800.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "string_template",
+        "label": "Findings prompt",
+        "inputs": [
+          {
+            "id": "template",
+            "label": "template",
+            "type": "string"
+          },
+          {
+            "id": "question",
+            "label": "question",
+            "type": "any"
+          },
+          {
+            "id": "step",
+            "label": "step",
+            "type": "any"
+          },
+          {
+            "id": "hits",
+            "label": "hits",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "result",
+            "label": "result",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "template": "Read the search results for one step of a deep search.\n\nMain question: {{question}}\nThis step: {{step}}\n\nSearch results:\n{{hits}}\n\nReturn the facts with the note ids that support them, what changed over time, and what is missing.\n\nOutput JSON only, matching the schema.\n"
+        }
+      }
+    },
+    {
+      "id": "findings",
+      "type": "llm_call",
+      "position": {
+        "x": 5280.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "llm_call",
+        "label": "Read this slice",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          },
+          {
+            "id": "system",
+            "label": "system",
+            "type": "string"
+          },
+          {
+            "id": "prompt",
+            "label": "prompt",
+            "type": "string"
+          },
+          {
+            "id": "tools",
+            "label": "tools",
+            "type": "tools"
+          },
+          {
+            "id": "temperature",
+            "label": "temperature",
+            "type": "number"
+          },
+          {
+            "id": "resp_schema",
+            "label": "resp_schema",
+            "type": "json_schema"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          },
+          {
+            "id": "meta",
+            "label": "meta",
+            "type": "object"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "tools": [],
+          "system": "You file and connect a person's notes. Output JSON only, matching the schema.",
+          "temperature": 0.2,
+          "resp_schema": {
+            "type": "object",
+            "properties": {
+              "facts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "citations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "note ids"
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "citations"
+                  ]
+                }
+              },
+              "changes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "gaps": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "facts",
+              "changes",
+              "gaps"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "finding",
+      "type": "code",
+      "position": {
+        "x": 5760.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Keep the findings",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "item",
+            "label": "item",
+            "type": "object"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "notes",
+            "label": "notes",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "entry",
+            "label": "entry",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "return {\"entry\": {\"step\": item, \"findings\": data if isinstance(data, dict) else {},\n        \"notes\": [n for n in (notes or []) if isinstance(n, dict)]}}\n"
+      }
+    },
+    {
+      "id": "keep_finding",
+      "type": "add_to_list",
+      "position": {
+        "x": 6240.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "add_to_list",
+        "label": "Keep the findings",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "item",
+            "label": "item",
+            "type": "any"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "list",
+            "label": "list",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "name": "mine_findings"
+        }
+      }
+    },
+    {
+      "id": "all_findings",
+      "type": "get_var",
+      "position": {
+        "x": 3360.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get mine_findings",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "mine_findings",
+          "default": []
+        }
+      }
+    },
+    {
+      "id": "dossier_prompt",
+      "type": "string_template",
+      "position": {
+        "x": 2880.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "string_template",
+        "label": "Dossier prompt",
+        "inputs": [
+          {
+            "id": "template",
+            "label": "template",
+            "type": "string"
+          },
+          {
+            "id": "question",
+            "label": "question",
+            "type": "any"
+          },
+          {
+            "id": "plan",
+            "label": "plan",
+            "type": "any"
+          },
+          {
+            "id": "findings",
+            "label": "findings",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "result",
+            "label": "result",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "template": "Write a dossier that answers the question from the findings of a deep search.\n\nQuestion: {{question}}\nPlan: {{plan}}\n\nFindings per step:\n{{findings}}\n\nWrite a title, a narrative with inline citations [nt_...], a timeline, how the view evolved, the contradictions, forgotten items worth revisiting, suggestions, and a confidence statement. Use only the note ids in the findings.\n\nOutput JSON only, matching the schema.\n"
+        }
+      }
+    },
+    {
+      "id": "dossier",
+      "type": "llm_call",
+      "position": {
+        "x": 3360.0,
+        "y": 640.0
+      },
+      "data": {
+        "nodeType": "llm_call",
+        "label": "Write the dossier",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          },
+          {
+            "id": "system",
+            "label": "system",
+            "type": "string"
+          },
+          {
+            "id": "prompt",
+            "label": "prompt",
+            "type": "string"
+          },
+          {
+            "id": "tools",
+            "label": "tools",
+            "type": "tools"
+          },
+          {
+            "id": "temperature",
+            "label": "temperature",
+            "type": "number"
+          },
+          {
+            "id": "resp_schema",
+            "label": "resp_schema",
+            "type": "json_schema"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          },
+          {
+            "id": "meta",
+            "label": "meta",
+            "type": "object"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "tools": [],
+          "system": "You file and connect a person's notes. Output JSON only, matching the schema.",
+          "temperature": 0.2,
+          "resp_schema": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "narrative": {
+                "type": "string",
+                "description": "with inline citations [nt_...]"
+              },
+              "timeline": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "at": {
+                      "type": "string"
+                    },
+                    "event": {
+                      "type": "string"
+                    },
+                    "note_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "at",
+                    "event",
+                    "note_ids"
+                  ]
+                }
+              },
+              "evolution": {
+                "type": "string",
+                "description": "how the view evolved"
+              },
+              "contradictions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "forgotten": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "items worth revisiting"
+              },
+              "suggestions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "confidence": {
+                "type": "string",
+                "description": "a confidence statement"
+              }
+            },
+            "required": [
+              "title",
+              "narrative",
+              "timeline",
+              "evolution",
+              "contradictions",
+              "forgotten",
+              "suggestions",
+              "confidence"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "dossier_note",
+      "type": "code",
+      "position": {
+        "x": 3840.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Dossier note",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "findings",
+            "label": "findings",
+            "type": "array"
+          },
+          {
+            "id": "first_notes",
+            "label": "first_notes",
+            "type": "array"
+          },
+          {
+            "id": "first_entities",
+            "label": "first_entities",
+            "type": "array"
+          },
+          {
+            "id": "question",
+            "label": "question",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "title",
+            "label": "title",
+            "type": "string"
+          },
+          {
+            "id": "body",
+            "label": "body",
+            "type": "string"
+          },
+          {
+            "id": "narrative",
+            "label": "narrative",
+            "type": "string"
+          },
+          {
+            "id": "evidence",
+            "label": "evidence",
+            "type": "array"
+          },
+          {
+            "id": "evidence_note_ids",
+            "label": "evidence_note_ids",
+            "type": "array"
+          },
+          {
+            "id": "entity_ids",
+            "label": "entity_ids",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "d = data if isinstance(data, dict) else {}\nseen, evidence = set(), []\npools = [first_notes or []] + [e.get(\"notes\") or [] for e in (findings or []) if isinstance(e, dict)]\nfor pool in pools:\n    for n in pool:\n        nid = n.get(\"note_id\") if isinstance(n, dict) else None\n        if nid and nid not in seen:\n            seen.add(nid)\n            evidence.append({\"note_id\": nid, \"title\": n.get(\"title\"), \"occurred_at\": n.get(\"occurred_at\"),\n                             \"excerpt\": n.get(\"excerpt\")})\nentity_ids = [x.get(\"entity_id\") for x in (first_entities or []) if isinstance(x, dict) and x.get(\"entity_id\")]\nnarrative = str(d.get(\"narrative\") or \"\").strip()\nif not narrative:\n    raise ValueError(\"The dossier came back empty.\")\nlines = [narrative]\ndef section(title, items):\n    rows = [str(i).strip() for i in (items or []) if str(i).strip()]\n    if rows:\n        lines.append(\"\")\n        lines.append(\"## \" + title)\n        lines.extend([\"- \" + r for r in rows])\nsection(\"Timeline\", [str(t.get(\"at\") or \"\") + \": \" + str(t.get(\"event\") or \"\") for t in (d.get(\"timeline\") or []) if isinstance(t, dict)])\nif str(d.get(\"evolution\") or \"\").strip():\n    lines.extend([\"\", \"## How the view evolved\", str(d.get(\"evolution\")).strip()])\nsection(\"Contradictions\", d.get(\"contradictions\"))\nsection(\"Worth revisiting\", d.get(\"forgotten\"))\nsection(\"Suggestions\", d.get(\"suggestions\"))\nif str(d.get(\"confidence\") or \"\").strip():\n    lines.extend([\"\", \"## Confidence\", str(d.get(\"confidence\")).strip()])\nreturn {\"title\": str(d.get(\"title\") or question)[:120], \"body\": \"\\n\".join(lines), \"narrative\": narrative,\n        \"evidence\": evidence, \"evidence_note_ids\": [e[\"note_id\"] for e in evidence], \"entity_ids\": entity_ids}\n"
+      }
+    },
+    {
+      "id": "write_args",
+      "type": "code",
+      "position": {
+        "x": 4320.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Keep the dossier: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "kind",
+            "label": "kind",
+            "type": "string"
+          },
+          {
+            "id": "title",
+            "label": "title",
+            "type": "string"
+          },
+          {
+            "id": "body",
+            "label": "body",
+            "type": "string"
+          },
+          {
+            "id": "evidence_note_ids",
+            "label": "evidence_note_ids",
+            "type": "array"
+          },
+          {
+            "id": "entity_ids",
+            "label": "entity_ids",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox",
+          "kind": "dossier"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif kind is not None:\n    arguments[\"kind\"] = kind\nif title is not None:\n    arguments[\"title\"] = title\nif body is not None:\n    arguments[\"body\"] = body\nif evidence_note_ids is not None:\n    arguments[\"evidence_note_ids\"] = evidence_note_ids\nif entity_ids is not None:\n    arguments[\"entity_ids\"] = entity_ids\nreturn {\"tool_calls\": [{\"name\": \"note_insight_write\", \"call_id\": \"write\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "write",
+      "type": "tool_calls",
+      "position": {
+        "x": 4800.0,
+        "y": 640.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Keep the dossier",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_insight_write"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_insight_write"
+          ]
+        }
+      }
+    },
+    {
+      "id": "write_out",
+      "type": "code",
+      "position": {
+        "x": 5280.0,
+        "y": 372.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Keep the dossier: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_insight_write returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_insight_write failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_insight_write returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "shape",
+      "type": "code",
+      "position": {
+        "x": 5760.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Shape the answer",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "narrative",
+            "label": "narrative",
+            "type": "string"
+          },
+          {
+            "id": "evidence",
+            "label": "evidence",
+            "type": "array"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "answer",
+            "label": "answer",
+            "type": "string"
+          },
+          {
+            "id": "evidence",
+            "label": "evidence",
+            "type": "array"
+          },
+          {
+            "id": "evolution",
+            "label": "evolution",
+            "type": "object"
+          },
+          {
+            "id": "open_loops",
+            "label": "open_loops",
+            "type": "array"
+          },
+          {
+            "id": "follow_ups",
+            "label": "follow_ups",
+            "type": "array"
+          },
+          {
+            "id": "dossier_note_id",
+            "label": "dossier_note_id",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "d = data if isinstance(data, dict) else {}\nev = d.get(\"evolution\")\nreturn {\"response\": narrative, \"answer\": narrative, \"evidence\": evidence,\n        \"evolution\": {\"summary\": ev} if ev else {}, \"open_loops\": d.get(\"forgotten\") or [],\n        \"follow_ups\": d.get(\"suggestions\") or [], \"dossier_note_id\": note_id}\n"
+      }
+    },
+    {
+      "id": "end",
+      "type": "on_flow_end",
+      "position": {
+        "x": 6240.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "on_flow_end",
+        "label": "Done",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "answer",
+            "label": "answer",
+            "type": "string"
+          },
+          {
+            "id": "evidence",
+            "label": "evidence",
+            "type": "array"
+          },
+          {
+            "id": "evolution",
+            "label": "evolution",
+            "type": "object"
+          },
+          {
+            "id": "open_loops",
+            "label": "open_loops",
+            "type": "array"
+          },
+          {
+            "id": "follow_ups",
+            "label": "follow_ups",
+            "type": "array"
+          },
+          {
+            "id": "dossier_note_id",
+            "label": "dossier_note_id",
+            "type": "string"
+          }
+        ],
+        "outputs": []
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-start-question-search_args-query",
+      "source": "start",
+      "sourceHandle": "question",
+      "target": "search_args",
+      "targetHandle": "query"
+    },
+    {
+      "id": "e-start-since-search_args-since",
+      "source": "start",
+      "sourceHandle": "since",
+      "target": "search_args",
+      "targetHandle": "since"
+    },
+    {
+      "id": "e-start-until-search_args-until",
+      "source": "start",
+      "sourceHandle": "until",
+      "target": "search_args",
+      "targetHandle": "until"
+    },
+    {
+      "id": "e-start-exec-out-search_args-exec-in",
+      "source": "start",
+      "sourceHandle": "exec-out",
+      "target": "search_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-search_args-tool_calls-search-tool_calls",
+      "source": "search_args",
+      "sourceHandle": "tool_calls",
+      "target": "search",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-search_args-exec-out-search-exec-in",
+      "source": "search_args",
+      "sourceHandle": "exec-out",
+      "target": "search",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-search-results-search_out-results",
+      "source": "search",
+      "sourceHandle": "results",
+      "target": "search_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-search-exec-out-search_out-exec-in",
+      "source": "search",
+      "sourceHandle": "exec-out",
+      "target": "search_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-start-question-plan_prompt-question",
+      "source": "start",
+      "sourceHandle": "question",
+      "target": "plan_prompt",
+      "targetHandle": "question"
+    },
+    {
+      "id": "e-start-since-plan_prompt-since",
+      "source": "start",
+      "sourceHandle": "since",
+      "target": "plan_prompt",
+      "targetHandle": "since"
+    },
+    {
+      "id": "e-start-until-plan_prompt-until",
+      "source": "start",
+      "sourceHandle": "until",
+      "target": "plan_prompt",
+      "targetHandle": "until"
+    },
+    {
+      "id": "e-search_out-tool_output-plan_prompt-hits",
+      "source": "search_out",
+      "sourceHandle": "tool_output",
+      "target": "plan_prompt",
+      "targetHandle": "hits"
+    },
+    {
+      "id": "e-plan_prompt-result-plan-prompt",
+      "source": "plan_prompt",
+      "sourceHandle": "result",
+      "target": "plan",
+      "targetHandle": "prompt"
+    },
+    {
+      "id": "e-start-provider-plan-provider",
+      "source": "start",
+      "sourceHandle": "provider",
+      "target": "plan",
+      "targetHandle": "provider"
+    },
+    {
+      "id": "e-start-model-plan-model",
+      "source": "start",
+      "sourceHandle": "model",
+      "target": "plan",
+      "targetHandle": "model"
+    },
+    {
+      "id": "e-search_out-exec-out-plan-exec-in",
+      "source": "search_out",
+      "sourceHandle": "exec-out",
+      "target": "plan",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-plan-data-steps-plan",
+      "source": "plan",
+      "sourceHandle": "data",
+      "target": "steps",
+      "targetHandle": "plan"
+    },
+    {
+      "id": "e-start-question-steps-question",
+      "source": "start",
+      "sourceHandle": "question",
+      "target": "steps",
+      "targetHandle": "question"
+    },
+    {
+      "id": "e-plan-exec-out-steps-exec-in",
+      "source": "plan",
+      "sourceHandle": "exec-out",
+      "target": "steps",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-steps-items-each_step-items",
+      "source": "steps",
+      "sourceHandle": "items",
+      "target": "each_step",
+      "targetHandle": "items"
+    },
+    {
+      "id": "e-steps-exec-out-each_step-exec-in",
+      "source": "steps",
+      "sourceHandle": "exec-out",
+      "target": "each_step",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-each_step-item-step_query-item",
+      "source": "each_step",
+      "sourceHandle": "item",
+      "target": "step_query",
+      "targetHandle": "item"
+    },
+    {
+      "id": "e-start-since-step_query-since",
+      "source": "start",
+      "sourceHandle": "since",
+      "target": "step_query",
+      "targetHandle": "since"
+    },
+    {
+      "id": "e-start-until-step_query-until",
+      "source": "start",
+      "sourceHandle": "until",
+      "target": "step_query",
+      "targetHandle": "until"
+    },
+    {
+      "id": "e-each_step-loop-step_query-exec-in",
+      "source": "each_step",
+      "sourceHandle": "loop",
+      "target": "step_query",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-step_query-query-step_search_args-query",
+      "source": "step_query",
+      "sourceHandle": "query",
+      "target": "step_search_args",
+      "targetHandle": "query"
+    },
+    {
+      "id": "e-step_query-step_since-step_search_args-since",
+      "source": "step_query",
+      "sourceHandle": "step_since",
+      "target": "step_search_args",
+      "targetHandle": "since"
+    },
+    {
+      "id": "e-step_query-step_until-step_search_args-until",
+      "source": "step_query",
+      "sourceHandle": "step_until",
+      "target": "step_search_args",
+      "targetHandle": "until"
+    },
+    {
+      "id": "e-step_query-exec-out-step_search_args-exec-in",
+      "source": "step_query",
+      "sourceHandle": "exec-out",
+      "target": "step_search_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-step_search_args-tool_calls-step_search-tool_calls",
+      "source": "step_search_args",
+      "sourceHandle": "tool_calls",
+      "target": "step_search",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-step_search_args-exec-out-step_search-exec-in",
+      "source": "step_search_args",
+      "sourceHandle": "exec-out",
+      "target": "step_search",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-step_search-results-step_search_out-results",
+      "source": "step_search",
+      "sourceHandle": "results",
+      "target": "step_search_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-step_search-exec-out-step_search_out-exec-in",
+      "source": "step_search",
+      "sourceHandle": "exec-out",
+      "target": "step_search_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-start-question-findings_prompt-question",
+      "source": "start",
+      "sourceHandle": "question",
+      "target": "findings_prompt",
+      "targetHandle": "question"
+    },
+    {
+      "id": "e-each_step-item-findings_prompt-step",
+      "source": "each_step",
+      "sourceHandle": "item",
+      "target": "findings_prompt",
+      "targetHandle": "step"
+    },
+    {
+      "id": "e-step_search_out-tool_output-findings_prompt-hits",
+      "source": "step_search_out",
+      "sourceHandle": "tool_output",
+      "target": "findings_prompt",
+      "targetHandle": "hits"
+    },
+    {
+      "id": "e-findings_prompt-result-findings-prompt",
+      "source": "findings_prompt",
+      "sourceHandle": "result",
+      "target": "findings",
+      "targetHandle": "prompt"
+    },
+    {
+      "id": "e-start-provider-findings-provider",
+      "source": "start",
+      "sourceHandle": "provider",
+      "target": "findings",
+      "targetHandle": "provider"
+    },
+    {
+      "id": "e-start-model-findings-model",
+      "source": "start",
+      "sourceHandle": "model",
+      "target": "findings",
+      "targetHandle": "model"
+    },
+    {
+      "id": "e-step_search_out-exec-out-findings-exec-in",
+      "source": "step_search_out",
+      "sourceHandle": "exec-out",
+      "target": "findings",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-each_step-item-finding-item",
+      "source": "each_step",
+      "sourceHandle": "item",
+      "target": "finding",
+      "targetHandle": "item"
+    },
+    {
+      "id": "e-findings-data-finding-data",
+      "source": "findings",
+      "sourceHandle": "data",
+      "target": "finding",
+      "targetHandle": "data"
+    },
+    {
+      "id": "e-step_search_out-notes-finding-notes",
+      "source": "step_search_out",
+      "sourceHandle": "notes",
+      "target": "finding",
+      "targetHandle": "notes"
+    },
+    {
+      "id": "e-findings-exec-out-finding-exec-in",
+      "source": "findings",
+      "sourceHandle": "exec-out",
+      "target": "finding",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-finding-entry-keep_finding-item",
+      "source": "finding",
+      "sourceHandle": "entry",
+      "target": "keep_finding",
+      "targetHandle": "item"
+    },
+    {
+      "id": "e-finding-exec-out-keep_finding-exec-in",
+      "source": "finding",
+      "sourceHandle": "exec-out",
+      "target": "keep_finding",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-start-question-dossier_prompt-question",
+      "source": "start",
+      "sourceHandle": "question",
+      "target": "dossier_prompt",
+      "targetHandle": "question"
+    },
+    {
+      "id": "e-plan-data-dossier_prompt-plan",
+      "source": "plan",
+      "sourceHandle": "data",
+      "target": "dossier_prompt",
+      "targetHandle": "plan"
+    },
+    {
+      "id": "e-all_findings-value-dossier_prompt-findings",
+      "source": "all_findings",
+      "sourceHandle": "value",
+      "target": "dossier_prompt",
+      "targetHandle": "findings"
+    },
+    {
+      "id": "e-dossier_prompt-result-dossier-prompt",
+      "source": "dossier_prompt",
+      "sourceHandle": "result",
+      "target": "dossier",
+      "targetHandle": "prompt"
+    },
+    {
+      "id": "e-start-provider-dossier-provider",
+      "source": "start",
+      "sourceHandle": "provider",
+      "target": "dossier",
+      "targetHandle": "provider"
+    },
+    {
+      "id": "e-start-model-dossier-model",
+      "source": "start",
+      "sourceHandle": "model",
+      "target": "dossier",
+      "targetHandle": "model"
+    },
+    {
+      "id": "e-each_step-done-dossier-exec-in",
+      "source": "each_step",
+      "sourceHandle": "done",
+      "target": "dossier",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-dossier-data-dossier_note-data",
+      "source": "dossier",
+      "sourceHandle": "data",
+      "target": "dossier_note",
+      "targetHandle": "data"
+    },
+    {
+      "id": "e-all_findings-value-dossier_note-findings",
+      "source": "all_findings",
+      "sourceHandle": "value",
+      "target": "dossier_note",
+      "targetHandle": "findings"
+    },
+    {
+      "id": "e-search_out-notes-dossier_note-first_notes",
+      "source": "search_out",
+      "sourceHandle": "notes",
+      "target": "dossier_note",
+      "targetHandle": "first_notes"
+    },
+    {
+      "id": "e-search_out-entities-dossier_note-first_entities",
+      "source": "search_out",
+      "sourceHandle": "entities",
+      "target": "dossier_note",
+      "targetHandle": "first_entities"
+    },
+    {
+      "id": "e-start-question-dossier_note-question",
+      "source": "start",
+      "sourceHandle": "question",
+      "target": "dossier_note",
+      "targetHandle": "question"
+    },
+    {
+      "id": "e-dossier-exec-out-dossier_note-exec-in",
+      "source": "dossier",
+      "sourceHandle": "exec-out",
+      "target": "dossier_note",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-dossier_note-title-write_args-title",
+      "source": "dossier_note",
+      "sourceHandle": "title",
+      "target": "write_args",
+      "targetHandle": "title"
+    },
+    {
+      "id": "e-dossier_note-body-write_args-body",
+      "source": "dossier_note",
+      "sourceHandle": "body",
+      "target": "write_args",
+      "targetHandle": "body"
+    },
+    {
+      "id": "e-dossier_note-evidence_note_ids-write_args-evidence_note_ids",
+      "source": "dossier_note",
+      "sourceHandle": "evidence_note_ids",
+      "target": "write_args",
+      "targetHandle": "evidence_note_ids"
+    },
+    {
+      "id": "e-dossier_note-entity_ids-write_args-entity_ids",
+      "source": "dossier_note",
+      "sourceHandle": "entity_ids",
+      "target": "write_args",
+      "targetHandle": "entity_ids"
+    },
+    {
+      "id": "e-dossier_note-exec-out-write_args-exec-in",
+      "source": "dossier_note",
+      "sourceHandle": "exec-out",
+      "target": "write_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-write_args-tool_calls-write-tool_calls",
+      "source": "write_args",
+      "sourceHandle": "tool_calls",
+      "target": "write",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-write_args-exec-out-write-exec-in",
+      "source": "write_args",
+      "sourceHandle": "exec-out",
+      "target": "write",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-write-results-write_out-results",
+      "source": "write",
+      "sourceHandle": "results",
+      "target": "write_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-write-exec-out-write_out-exec-in",
+      "source": "write",
+      "sourceHandle": "exec-out",
+      "target": "write_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-dossier-data-shape-data",
+      "source": "dossier",
+      "sourceHandle": "data",
+      "target": "shape",
+      "targetHandle": "data"
+    },
+    {
+      "id": "e-dossier_note-narrative-shape-narrative",
+      "source": "dossier_note",
+      "sourceHandle": "narrative",
+      "target": "shape",
+      "targetHandle": "narrative"
+    },
+    {
+      "id": "e-dossier_note-evidence-shape-evidence",
+      "source": "dossier_note",
+      "sourceHandle": "evidence",
+      "target": "shape",
+      "targetHandle": "evidence"
+    },
+    {
+      "id": "e-write_out-note_id-shape-note_id",
+      "source": "write_out",
+      "sourceHandle": "note_id",
+      "target": "shape",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-write_out-exec-out-shape-exec-in",
+      "source": "write_out",
+      "sourceHandle": "exec-out",
+      "target": "shape",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-shape-response-end-response",
+      "source": "shape",
+      "sourceHandle": "response",
+      "target": "end",
+      "targetHandle": "response"
+    },
+    {
+      "id": "e-shape-answer-end-answer",
+      "source": "shape",
+      "sourceHandle": "answer",
+      "target": "end",
+      "targetHandle": "answer"
+    },
+    {
+      "id": "e-shape-evidence-end-evidence",
+      "source": "shape",
+      "sourceHandle": "evidence",
+      "target": "end",
+      "targetHandle": "evidence"
+    },
+    {
+      "id": "e-shape-evolution-end-evolution",
+      "source": "shape",
+      "sourceHandle": "evolution",
+      "target": "end",
+      "targetHandle": "evolution"
+    },
+    {
+      "id": "e-shape-open_loops-end-open_loops",
+      "source": "shape",
+      "sourceHandle": "open_loops",
+      "target": "end",
+      "targetHandle": "open_loops"
+    },
+    {
+      "id": "e-shape-follow_ups-end-follow_ups",
+      "source": "shape",
+      "sourceHandle": "follow_ups",
+      "target": "end",
+      "targetHandle": "follow_ups"
+    },
+    {
+      "id": "e-shape-dossier_note_id-end-dossier_note_id",
+      "source": "shape",
+      "sourceHandle": "dossier_note_id",
+      "target": "end",
+      "targetHandle": "dossier_note_id"
+    },
+    {
+      "id": "e-shape-exec-out-end-exec-in",
+      "source": "shape",
+      "sourceHandle": "exec-out",
+      "target": "end",
+      "targetHandle": "exec-in"
+    }
+  ],
+  "entryNode": "start"
+}

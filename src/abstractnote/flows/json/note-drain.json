@@ -1,0 +1,1774 @@
+{
+  "id": "note-drain",
+  "name": "Process queued notes",
+  "description": "Take queued notes by priority and understand them one at a time, within a count and time budget.",
+  "interfaces": [
+    "abstractnote.drain.v1"
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "on_flow_start",
+      "position": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "on_flow_start",
+        "label": "Start",
+        "inputs": [],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "max_items",
+            "label": "max_items",
+            "type": "number"
+          },
+          {
+            "id": "budget_s",
+            "label": "budget_s",
+            "type": "number"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          }
+        ],
+        "pinDefaults": {
+          "max_items": 20,
+          "budget_s": 90,
+          "provider": "",
+          "model": ""
+        }
+      }
+    },
+    {
+      "id": "init",
+      "type": "code",
+      "position": {
+        "x": 480.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Budget",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "max_items",
+            "label": "max_items",
+            "type": "number"
+          },
+          {
+            "id": "budget_s",
+            "label": "budget_s",
+            "type": "number"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "import time\nleft = int(max_items if max_items is not None else 20)\nif left < 1:\n    raise ValueError(\"max_items must be at least 1.\")\nbudget = float(budget_s if budget_s is not None else 90)\nnow = time.time()\nreturn {\"updates\": {\"drain_deadline\": now + budget, \"drain_left\": left, \"drain_continue\": True,\n        \"drain_processed\": 0, \"drain_failed\": 0, \"drain_errors\": [],\n        \"drain_worker\": \"drain-\" + str(int(now * 1000))}}\n"
+      }
+    },
+    {
+      "id": "init_vars",
+      "type": "set_vars",
+      "position": {
+        "x": 960.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "set_vars",
+        "label": "Remember the budget",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ]
+      }
+    },
+    {
+      "id": "continue",
+      "type": "get_var",
+      "position": {
+        "x": 960.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get drain_continue",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "drain_continue",
+          "default": false
+        }
+      }
+    },
+    {
+      "id": "drain_loop",
+      "type": "while",
+      "position": {
+        "x": 1440.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "while",
+        "label": "While there is budget",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "loop",
+            "label": "loop",
+            "type": "execution"
+          },
+          {
+            "id": "done",
+            "label": "done",
+            "type": "execution"
+          },
+          {
+            "id": "index",
+            "label": "index",
+            "type": "number"
+          },
+          {
+            "id": "item",
+            "label": "item",
+            "type": "any"
+          }
+        ]
+      }
+    },
+    {
+      "id": "worker",
+      "type": "get_var",
+      "position": {
+        "x": 1440.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get drain_worker",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "drain_worker",
+          "default": ""
+        }
+      }
+    },
+    {
+      "id": "lease_args",
+      "type": "code",
+      "position": {
+        "x": 1920.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Take the next note: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "worker_id",
+            "label": "worker_id",
+            "type": "string"
+          },
+          {
+            "id": "max_items",
+            "label": "max_items",
+            "type": "number"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox",
+          "max_items": 1
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif worker_id is not None:\n    arguments[\"worker_id\"] = worker_id\nif max_items is not None:\n    arguments[\"max_items\"] = max_items\nreturn {\"tool_calls\": [{\"name\": \"note_queue_lease\", \"call_id\": \"lease\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "lease",
+      "type": "tool_calls",
+      "position": {
+        "x": 2400.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Take the next note",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_queue_lease"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_queue_lease"
+          ]
+        }
+      }
+    },
+    {
+      "id": "lease_out",
+      "type": "code",
+      "position": {
+        "x": 2880.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Take the next note: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_queue_lease returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_queue_lease failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_queue_lease returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "pick",
+      "type": "code",
+      "position": {
+        "x": 3360.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Next note",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "has_item",
+            "label": "has_item",
+            "type": "boolean"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "first = items[0] if isinstance(items, list) and items else None\nreturn {\"has_item\": isinstance(first, dict), \"note_id\": first.get(\"note_id\") if isinstance(first, dict) else None}\n"
+      }
+    },
+    {
+      "id": "has_item",
+      "type": "if",
+      "position": {
+        "x": 3840.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Anything queued?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "stop",
+      "type": "set_var",
+      "position": {
+        "x": 4320.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "set_var",
+        "label": "Stop: queue empty",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "drain_continue",
+          "value": false
+        }
+      }
+    },
+    {
+      "id": "process",
+      "type": "subflow",
+      "position": {
+        "x": 4320.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "subflow",
+        "label": "Understand the note",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "inherit_context",
+            "label": "inherit_context",
+            "type": "boolean"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "output",
+            "label": "output",
+            "type": "object"
+          },
+          {
+            "id": "child_output",
+            "label": "child_output",
+            "type": "object"
+          },
+          {
+            "id": "revision_id",
+            "label": "revision_id",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "inherit_context": false
+        },
+        "subflowId": "note-process"
+      }
+    },
+    {
+      "id": "outcome",
+      "type": "code",
+      "position": {
+        "x": 4800.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Outcome",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "output",
+            "label": "output",
+            "type": "object"
+          },
+          {
+            "id": "child_output",
+            "label": "child_output",
+            "type": "object"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "outcome",
+            "label": "outcome",
+            "type": "string"
+          },
+          {
+            "id": "failure",
+            "label": "failure",
+            "type": "string"
+          },
+          {
+            "id": "revision_id",
+            "label": "revision_id",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "o = output if isinstance(output, dict) else {}\nc = child_output if isinstance(child_output, dict) else {}\nerr = c.get(\"error\") or o.get(\"error\")\nfailed = c.get(\"success\") is False or o.get(\"success\") is False or bool(err) or not o.get(\"revision_id\")\nreturn {\"outcome\": \"error\" if failed else \"ok\",\n        \"failure\": (str(err) if err else \"The note could not be processed.\") if failed else None,\n        \"revision_id\": None if failed else o.get(\"revision_id\")}\n"
+      }
+    },
+    {
+      "id": "ack_args",
+      "type": "code",
+      "position": {
+        "x": 5280.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Record the outcome: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "outcome",
+            "label": "outcome",
+            "type": "string"
+          },
+          {
+            "id": "error",
+            "label": "error",
+            "type": "string"
+          },
+          {
+            "id": "revision_id",
+            "label": "revision_id",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif note_id is not None:\n    arguments[\"note_id\"] = note_id\nif outcome is not None:\n    arguments[\"outcome\"] = outcome\nif error is not None:\n    arguments[\"error\"] = error\nif revision_id is not None:\n    arguments[\"revision_id\"] = revision_id\nreturn {\"tool_calls\": [{\"name\": \"note_queue_ack\", \"call_id\": \"ack\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "ack",
+      "type": "tool_calls",
+      "position": {
+        "x": 5760.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Record the outcome",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_queue_ack"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_queue_ack"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ack_out",
+      "type": "code",
+      "position": {
+        "x": 6240.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Record the outcome: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "status",
+            "label": "status",
+            "type": "string"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_queue_ack returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_queue_ack failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_queue_ack returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "left",
+      "type": "get_var",
+      "position": {
+        "x": 6240.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get drain_left",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "drain_left",
+          "default": 0
+        }
+      }
+    },
+    {
+      "id": "deadline",
+      "type": "get_var",
+      "position": {
+        "x": 6240.0,
+        "y": 640.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get drain_deadline",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "drain_deadline",
+          "default": 0
+        }
+      }
+    },
+    {
+      "id": "processed",
+      "type": "get_var",
+      "position": {
+        "x": 6240.0,
+        "y": 960.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get drain_processed",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "drain_processed",
+          "default": 0
+        }
+      }
+    },
+    {
+      "id": "failed",
+      "type": "get_var",
+      "position": {
+        "x": 6240.0,
+        "y": 1280.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get drain_failed",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "drain_failed",
+          "default": 0
+        }
+      }
+    },
+    {
+      "id": "errors",
+      "type": "get_var",
+      "position": {
+        "x": 6240.0,
+        "y": 1600.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get drain_errors",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "drain_errors",
+          "default": []
+        }
+      }
+    },
+    {
+      "id": "budget",
+      "type": "code",
+      "position": {
+        "x": 6720.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Budget left?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "outcome",
+            "label": "outcome",
+            "type": "string"
+          },
+          {
+            "id": "failure",
+            "label": "failure",
+            "type": "string"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "left",
+            "label": "left",
+            "type": "number"
+          },
+          {
+            "id": "deadline",
+            "label": "deadline",
+            "type": "number"
+          },
+          {
+            "id": "processed",
+            "label": "processed",
+            "type": "number"
+          },
+          {
+            "id": "failed",
+            "label": "failed",
+            "type": "number"
+          },
+          {
+            "id": "errors",
+            "label": "errors",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "import time\nok = outcome == \"ok\"\nerrs = list(errors or [])\nif not ok:\n    errs.append({\"note_id\": note_id, \"error\": failure})\nremaining = int(left or 0) - 1\nreturn {\"updates\": {\"drain_left\": remaining,\n        \"drain_processed\": int(processed or 0) + (1 if ok else 0),\n        \"drain_failed\": int(failed or 0) + (0 if ok else 1), \"drain_errors\": errs,\n        \"drain_continue\": remaining > 0 and time.time() < float(deadline or 0)}}\n"
+      }
+    },
+    {
+      "id": "budget_vars",
+      "type": "set_vars",
+      "position": {
+        "x": 7200.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "set_vars",
+        "label": "Remember the budget",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ]
+      }
+    },
+    {
+      "id": "r_processed",
+      "type": "get_var",
+      "position": {
+        "x": 1440.0,
+        "y": 640.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get drain_processed",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "drain_processed",
+          "default": 0
+        }
+      }
+    },
+    {
+      "id": "r_failed",
+      "type": "get_var",
+      "position": {
+        "x": 1440.0,
+        "y": 960.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get drain_failed",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "drain_failed",
+          "default": 0
+        }
+      }
+    },
+    {
+      "id": "r_errors",
+      "type": "get_var",
+      "position": {
+        "x": 1440.0,
+        "y": 1280.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get drain_errors",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "drain_errors",
+          "default": []
+        }
+      }
+    },
+    {
+      "id": "report",
+      "type": "code",
+      "position": {
+        "x": 1920.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Report",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "processed",
+            "label": "processed",
+            "type": "number"
+          },
+          {
+            "id": "failed",
+            "label": "failed",
+            "type": "number"
+          },
+          {
+            "id": "errors",
+            "label": "errors",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "message",
+            "label": "message",
+            "type": "string"
+          },
+          {
+            "id": "processed",
+            "label": "processed",
+            "type": "number"
+          },
+          {
+            "id": "failed",
+            "label": "failed",
+            "type": "number"
+          },
+          {
+            "id": "errors",
+            "label": "errors",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "n = int(processed or 0)\nk = int(failed or 0)\nif n == 0 and k == 0:\n    msg = \"Nothing to process.\"\nelse:\n    msg = \"Processed \" + str(n) + (\" note.\" if n == 1 else \" notes.\")\n    if k:\n        msg = msg[:-1] + \"; \" + str(k) + (\" could not be processed.\" if k > 1 else \" could not be processed.\")\nreturn {\"message\": msg, \"processed\": n, \"failed\": k, \"errors\": list(errors or [])}\n"
+      }
+    },
+    {
+      "id": "end",
+      "type": "on_flow_end",
+      "position": {
+        "x": 2400.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "on_flow_end",
+        "label": "Done",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "processed",
+            "label": "processed",
+            "type": "number"
+          },
+          {
+            "id": "failed",
+            "label": "failed",
+            "type": "number"
+          },
+          {
+            "id": "errors",
+            "label": "errors",
+            "type": "array"
+          }
+        ],
+        "outputs": []
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-start-max_items-init-max_items",
+      "source": "start",
+      "sourceHandle": "max_items",
+      "target": "init",
+      "targetHandle": "max_items"
+    },
+    {
+      "id": "e-start-budget_s-init-budget_s",
+      "source": "start",
+      "sourceHandle": "budget_s",
+      "target": "init",
+      "targetHandle": "budget_s"
+    },
+    {
+      "id": "e-start-exec-out-init-exec-in",
+      "source": "start",
+      "sourceHandle": "exec-out",
+      "target": "init",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-init-updates-init_vars-updates",
+      "source": "init",
+      "sourceHandle": "updates",
+      "target": "init_vars",
+      "targetHandle": "updates"
+    },
+    {
+      "id": "e-init-exec-out-init_vars-exec-in",
+      "source": "init",
+      "sourceHandle": "exec-out",
+      "target": "init_vars",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-continue-value-drain_loop-condition",
+      "source": "continue",
+      "sourceHandle": "value",
+      "target": "drain_loop",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-init_vars-exec-out-drain_loop-exec-in",
+      "source": "init_vars",
+      "sourceHandle": "exec-out",
+      "target": "drain_loop",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-worker-value-lease_args-worker_id",
+      "source": "worker",
+      "sourceHandle": "value",
+      "target": "lease_args",
+      "targetHandle": "worker_id"
+    },
+    {
+      "id": "e-drain_loop-loop-lease_args-exec-in",
+      "source": "drain_loop",
+      "sourceHandle": "loop",
+      "target": "lease_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-lease_args-tool_calls-lease-tool_calls",
+      "source": "lease_args",
+      "sourceHandle": "tool_calls",
+      "target": "lease",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-lease_args-exec-out-lease-exec-in",
+      "source": "lease_args",
+      "sourceHandle": "exec-out",
+      "target": "lease",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-lease-results-lease_out-results",
+      "source": "lease",
+      "sourceHandle": "results",
+      "target": "lease_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-lease-exec-out-lease_out-exec-in",
+      "source": "lease",
+      "sourceHandle": "exec-out",
+      "target": "lease_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-lease_out-items-pick-items",
+      "source": "lease_out",
+      "sourceHandle": "items",
+      "target": "pick",
+      "targetHandle": "items"
+    },
+    {
+      "id": "e-lease_out-exec-out-pick-exec-in",
+      "source": "lease_out",
+      "sourceHandle": "exec-out",
+      "target": "pick",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-pick-has_item-has_item-condition",
+      "source": "pick",
+      "sourceHandle": "has_item",
+      "target": "has_item",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-pick-exec-out-has_item-exec-in",
+      "source": "pick",
+      "sourceHandle": "exec-out",
+      "target": "has_item",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-has_item-false-stop-exec-in",
+      "source": "has_item",
+      "sourceHandle": "false",
+      "target": "stop",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-pick-note_id-process-note_id",
+      "source": "pick",
+      "sourceHandle": "note_id",
+      "target": "process",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-start-provider-process-provider",
+      "source": "start",
+      "sourceHandle": "provider",
+      "target": "process",
+      "targetHandle": "provider"
+    },
+    {
+      "id": "e-start-model-process-model",
+      "source": "start",
+      "sourceHandle": "model",
+      "target": "process",
+      "targetHandle": "model"
+    },
+    {
+      "id": "e-has_item-true-process-exec-in",
+      "source": "has_item",
+      "sourceHandle": "true",
+      "target": "process",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-process-output-outcome-output",
+      "source": "process",
+      "sourceHandle": "output",
+      "target": "outcome",
+      "targetHandle": "output"
+    },
+    {
+      "id": "e-process-child_output-outcome-child_output",
+      "source": "process",
+      "sourceHandle": "child_output",
+      "target": "outcome",
+      "targetHandle": "child_output"
+    },
+    {
+      "id": "e-process-exec-out-outcome-exec-in",
+      "source": "process",
+      "sourceHandle": "exec-out",
+      "target": "outcome",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-pick-note_id-ack_args-note_id",
+      "source": "pick",
+      "sourceHandle": "note_id",
+      "target": "ack_args",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-outcome-outcome-ack_args-outcome",
+      "source": "outcome",
+      "sourceHandle": "outcome",
+      "target": "ack_args",
+      "targetHandle": "outcome"
+    },
+    {
+      "id": "e-outcome-failure-ack_args-error",
+      "source": "outcome",
+      "sourceHandle": "failure",
+      "target": "ack_args",
+      "targetHandle": "error"
+    },
+    {
+      "id": "e-outcome-revision_id-ack_args-revision_id",
+      "source": "outcome",
+      "sourceHandle": "revision_id",
+      "target": "ack_args",
+      "targetHandle": "revision_id"
+    },
+    {
+      "id": "e-outcome-exec-out-ack_args-exec-in",
+      "source": "outcome",
+      "sourceHandle": "exec-out",
+      "target": "ack_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-ack_args-tool_calls-ack-tool_calls",
+      "source": "ack_args",
+      "sourceHandle": "tool_calls",
+      "target": "ack",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-ack_args-exec-out-ack-exec-in",
+      "source": "ack_args",
+      "sourceHandle": "exec-out",
+      "target": "ack",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-ack-results-ack_out-results",
+      "source": "ack",
+      "sourceHandle": "results",
+      "target": "ack_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-ack-exec-out-ack_out-exec-in",
+      "source": "ack",
+      "sourceHandle": "exec-out",
+      "target": "ack_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-outcome-outcome-budget-outcome",
+      "source": "outcome",
+      "sourceHandle": "outcome",
+      "target": "budget",
+      "targetHandle": "outcome"
+    },
+    {
+      "id": "e-outcome-failure-budget-failure",
+      "source": "outcome",
+      "sourceHandle": "failure",
+      "target": "budget",
+      "targetHandle": "failure"
+    },
+    {
+      "id": "e-pick-note_id-budget-note_id",
+      "source": "pick",
+      "sourceHandle": "note_id",
+      "target": "budget",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-left-value-budget-left",
+      "source": "left",
+      "sourceHandle": "value",
+      "target": "budget",
+      "targetHandle": "left"
+    },
+    {
+      "id": "e-deadline-value-budget-deadline",
+      "source": "deadline",
+      "sourceHandle": "value",
+      "target": "budget",
+      "targetHandle": "deadline"
+    },
+    {
+      "id": "e-processed-value-budget-processed",
+      "source": "processed",
+      "sourceHandle": "value",
+      "target": "budget",
+      "targetHandle": "processed"
+    },
+    {
+      "id": "e-failed-value-budget-failed",
+      "source": "failed",
+      "sourceHandle": "value",
+      "target": "budget",
+      "targetHandle": "failed"
+    },
+    {
+      "id": "e-errors-value-budget-errors",
+      "source": "errors",
+      "sourceHandle": "value",
+      "target": "budget",
+      "targetHandle": "errors"
+    },
+    {
+      "id": "e-ack_out-exec-out-budget-exec-in",
+      "source": "ack_out",
+      "sourceHandle": "exec-out",
+      "target": "budget",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-budget-updates-budget_vars-updates",
+      "source": "budget",
+      "sourceHandle": "updates",
+      "target": "budget_vars",
+      "targetHandle": "updates"
+    },
+    {
+      "id": "e-budget-exec-out-budget_vars-exec-in",
+      "source": "budget",
+      "sourceHandle": "exec-out",
+      "target": "budget_vars",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-r_processed-value-report-processed",
+      "source": "r_processed",
+      "sourceHandle": "value",
+      "target": "report",
+      "targetHandle": "processed"
+    },
+    {
+      "id": "e-r_failed-value-report-failed",
+      "source": "r_failed",
+      "sourceHandle": "value",
+      "target": "report",
+      "targetHandle": "failed"
+    },
+    {
+      "id": "e-r_errors-value-report-errors",
+      "source": "r_errors",
+      "sourceHandle": "value",
+      "target": "report",
+      "targetHandle": "errors"
+    },
+    {
+      "id": "e-drain_loop-done-report-exec-in",
+      "source": "drain_loop",
+      "sourceHandle": "done",
+      "target": "report",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-report-message-end-response",
+      "source": "report",
+      "sourceHandle": "message",
+      "target": "end",
+      "targetHandle": "response"
+    },
+    {
+      "id": "e-report-processed-end-processed",
+      "source": "report",
+      "sourceHandle": "processed",
+      "target": "end",
+      "targetHandle": "processed"
+    },
+    {
+      "id": "e-report-failed-end-failed",
+      "source": "report",
+      "sourceHandle": "failed",
+      "target": "end",
+      "targetHandle": "failed"
+    },
+    {
+      "id": "e-report-errors-end-errors",
+      "source": "report",
+      "sourceHandle": "errors",
+      "target": "end",
+      "targetHandle": "errors"
+    },
+    {
+      "id": "e-report-exec-out-end-exec-in",
+      "source": "report",
+      "sourceHandle": "exec-out",
+      "target": "end",
+      "targetHandle": "exec-in"
+    }
+  ],
+  "entryNode": "start",
+  "automation_defaults": {
+    "schema_version": 1,
+    "title": "Note processor",
+    "trigger": {
+      "source_id": "schedule",
+      "source_version": 2,
+      "config": {
+        "kind": "every",
+        "every": "2m"
+      }
+    },
+    "context": {
+      "mode": "independent"
+    },
+    "input_data": {
+      "max_items": 20,
+      "budget_s": 90,
+      "_runtime": {
+        "allowed_tools": [
+          "note_capture",
+          "note_file",
+          "note_context",
+          "note_resolve_candidates",
+          "note_apply_revision",
+          "note_queue_lease",
+          "note_queue_ack",
+          "note_queue_stats",
+          "note_search",
+          "note_expand",
+          "note_changes",
+          "note_entity",
+          "note_timeline",
+          "note_open_loops",
+          "note_contradictions",
+          "note_resurface",
+          "note_anniversaries",
+          "note_insight_write"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,1849 @@
+{
+  "id": "note-process",
+  "name": "Understand a note",
+  "description": "Read one note against what the notebook knows, extract, link and revise the graph.",
+  "interfaces": [],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "on_flow_start",
+      "position": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "on_flow_start",
+        "label": "Start",
+        "inputs": [],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          }
+        ],
+        "pinDefaults": {
+          "note_id": "",
+          "provider": "",
+          "model": ""
+        }
+      }
+    },
+    {
+      "id": "context_args",
+      "type": "code",
+      "position": {
+        "x": 480.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Look at what is known: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif note_id is not None:\n    arguments[\"note_id\"] = note_id\nreturn {\"tool_calls\": [{\"name\": \"note_context\", \"call_id\": \"context\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "context",
+      "type": "tool_calls",
+      "position": {
+        "x": 960.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Look at what is known",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_context"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_context"
+          ]
+        }
+      }
+    },
+    {
+      "id": "context_out",
+      "type": "code",
+      "position": {
+        "x": 1440.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Look at what is known: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note",
+            "label": "note",
+            "type": "object"
+          },
+          {
+            "id": "sections",
+            "label": "sections",
+            "type": "array"
+          },
+          {
+            "id": "similar_notes",
+            "label": "similar_notes",
+            "type": "array"
+          },
+          {
+            "id": "candidate_entities",
+            "label": "candidate_entities",
+            "type": "array"
+          },
+          {
+            "id": "open_tasks",
+            "label": "open_tasks",
+            "type": "array"
+          },
+          {
+            "id": "topics",
+            "label": "topics",
+            "type": "array"
+          },
+          {
+            "id": "vocabulary",
+            "label": "vocabulary",
+            "type": "array"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_context returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_context failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_context returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "sections",
+      "type": "code",
+      "position": {
+        "x": 1920.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Sections to read",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "sections",
+            "label": "sections",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "if not isinstance(sections, list) or not sections:\n    raise ValueError(\"The note has no text to read.\")\nreturn {\"items\": sections}\n"
+      }
+    },
+    {
+      "id": "each_section",
+      "type": "loop",
+      "position": {
+        "x": 2400.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "loop",
+        "label": "For each section",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "loop",
+            "label": "loop",
+            "type": "execution"
+          },
+          {
+            "id": "done",
+            "label": "done",
+            "type": "execution"
+          },
+          {
+            "id": "item",
+            "label": "item",
+            "type": "any"
+          },
+          {
+            "id": "index",
+            "label": "index",
+            "type": "number"
+          }
+        ]
+      }
+    },
+    {
+      "id": "extract_prompt",
+      "type": "string_template",
+      "position": {
+        "x": 2400.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "string_template",
+        "label": "Extraction prompt",
+        "inputs": [
+          {
+            "id": "template",
+            "label": "template",
+            "type": "string"
+          },
+          {
+            "id": "note",
+            "label": "note",
+            "type": "any"
+          },
+          {
+            "id": "section",
+            "label": "section",
+            "type": "any"
+          },
+          {
+            "id": "similar_notes",
+            "label": "similar_notes",
+            "type": "any"
+          },
+          {
+            "id": "candidate_entities",
+            "label": "candidate_entities",
+            "type": "any"
+          },
+          {
+            "id": "open_tasks",
+            "label": "open_tasks",
+            "type": "any"
+          },
+          {
+            "id": "topics",
+            "label": "topics",
+            "type": "any"
+          },
+          {
+            "id": "vocabulary",
+            "label": "vocabulary",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "result",
+            "label": "result",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "template": "Read one section of a note and extract what it says.\n\nNote: {{note}}\n\nSection to read:\n{{section}}\n\nWhat the notebook already knows (for orientation, do not copy it into the output):\n- similar notes: {{similar_notes}}\n- entities that may be mentioned: {{candidate_entities}}\n- open tasks: {{open_tasks}}\n- topics: {{topics}}\n\nPredicate vocabulary (use these CURIEs when one fits, else ex:snake_case):\n{{vocabulary}}\n\nReturn a 1-3 sentence summary, the mentions (ref m1, m2, ...; name as written; kind; aliases seen; role in the note), the claims (subject and object are mention refs unless object_is_literal), the tasks opened or completed, the time references, and the topics.\n\nRules:\n- Use only the note and the provided context; never invent entities or dates.\n- Prefer reusing an existing entity when the candidate list contains it; create sparingly.\n- Keep names as written by the author; put variants in aliases.\n- Quote evidence verbatim; one claim per statement; no inferred hierarchy.\n- When unsure whether two things are the same, answer `unsure` rather than guessing.\n- Output JSON only, matching the schema.\n"
+        }
+      }
+    },
+    {
+      "id": "extract",
+      "type": "llm_call",
+      "position": {
+        "x": 2880.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "llm_call",
+        "label": "Extract",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          },
+          {
+            "id": "system",
+            "label": "system",
+            "type": "string"
+          },
+          {
+            "id": "prompt",
+            "label": "prompt",
+            "type": "string"
+          },
+          {
+            "id": "tools",
+            "label": "tools",
+            "type": "tools"
+          },
+          {
+            "id": "temperature",
+            "label": "temperature",
+            "type": "number"
+          },
+          {
+            "id": "resp_schema",
+            "label": "resp_schema",
+            "type": "json_schema"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          },
+          {
+            "id": "meta",
+            "label": "meta",
+            "type": "object"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "tools": [],
+          "system": "You file and connect a person's notes. Output JSON only, matching the schema.",
+          "temperature": 0.2,
+          "resp_schema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string",
+                "description": "1-3 sentences"
+              },
+              "mentions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "ref": {
+                      "type": "string",
+                      "description": "m1, m2, ..."
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "person",
+                        "org",
+                        "project",
+                        "concept",
+                        "place",
+                        "event",
+                        "artifact",
+                        "software",
+                        "thing"
+                      ]
+                    },
+                    "aliases": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "as written in the note"
+                    },
+                    "role": {
+                      "type": "string",
+                      "description": "what the note says about it, one phrase"
+                    }
+                  },
+                  "required": [
+                    "ref",
+                    "name",
+                    "kind",
+                    "aliases",
+                    "role"
+                  ]
+                }
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "subject": {
+                      "type": "string",
+                      "description": "a mention ref"
+                    },
+                    "predicate": {
+                      "type": "string",
+                      "description": "CURIE from the vocabulary or ex:snake_case"
+                    },
+                    "object": {
+                      "type": "string",
+                      "description": "a mention ref or a literal"
+                    },
+                    "object_is_literal": {
+                      "type": "boolean"
+                    },
+                    "certainty": {
+                      "type": "string",
+                      "enum": [
+                        "stated",
+                        "probable",
+                        "possible",
+                        "reported",
+                        "disputed"
+                      ]
+                    },
+                    "stance": {
+                      "type": "string",
+                      "enum": [
+                        "assert",
+                        "revise",
+                        "retract"
+                      ]
+                    },
+                    "evidence": {
+                      "type": "string",
+                      "description": "verbatim excerpt"
+                    },
+                    "valid_from": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "ISO date or null"
+                    },
+                    "valid_until": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "ISO date or null"
+                    }
+                  },
+                  "required": [
+                    "subject",
+                    "predicate",
+                    "object",
+                    "object_is_literal",
+                    "certainty",
+                    "stance",
+                    "evidence",
+                    "valid_from",
+                    "valid_until"
+                  ]
+                }
+              },
+              "tasks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "open",
+                        "done"
+                      ]
+                    },
+                    "due": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "ISO date or null"
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "status",
+                    "due"
+                  ]
+                }
+              },
+              "time_refs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "iso": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "ISO or null"
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "iso"
+                  ]
+                }
+              },
+              "topics": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "summary",
+              "mentions",
+              "claims",
+              "tasks",
+              "time_refs",
+              "topics"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "keep_extraction",
+      "type": "add_to_list",
+      "position": {
+        "x": 3360.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "add_to_list",
+        "label": "Keep the extraction",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "item",
+            "label": "item",
+            "type": "any"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "list",
+            "label": "list",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "name": "extractions"
+        }
+      }
+    },
+    {
+      "id": "extractions",
+      "type": "get_var",
+      "position": {
+        "x": 2400.0,
+        "y": 718.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get extractions",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "extractions",
+          "default": []
+        }
+      }
+    },
+    {
+      "id": "merge",
+      "type": "code",
+      "position": {
+        "x": 2880.0,
+        "y": 372.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Merge the sections",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "extractions",
+            "label": "extractions",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "extraction",
+            "label": "extraction",
+            "type": "object"
+          },
+          {
+            "id": "mentions",
+            "label": "mentions",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "parts = [e for e in (extractions or []) if isinstance(e, dict)]\nif not parts:\n    raise ValueError(\"The note could not be read.\")\nif len(parts) == 1:\n    merged = parts[0]\nelse:\n    mentions, refmap, by_key = [], {}, {}\n    claims, tasks, time_refs, topics, summaries = [], [], [], [], []\n    for i, part in enumerate(parts):\n        for m in part.get(\"mentions\") or []:\n            key = (str(m.get(\"name\") or \"\").casefold(), str(m.get(\"kind\") or \"\"))\n            if key in by_key:\n                kept = by_key[key]\n                for a in m.get(\"aliases\") or []:\n                    if a not in kept[\"aliases\"]:\n                        kept[\"aliases\"].append(a)\n            else:\n                kept = dict(m, ref=\"m\" + str(len(mentions) + 1), aliases=list(m.get(\"aliases\") or []))\n                by_key[key] = kept\n                mentions.append(kept)\n            refmap[(i, m.get(\"ref\"))] = kept[\"ref\"]\n        for c in part.get(\"claims\") or []:\n            c2 = dict(c)\n            c2[\"subject\"] = refmap.get((i, c.get(\"subject\")), c.get(\"subject\"))\n            if not c.get(\"object_is_literal\"):\n                c2[\"object\"] = refmap.get((i, c.get(\"object\")), c.get(\"object\"))\n            claims.append(c2)\n        tasks.extend(part.get(\"tasks\") or [])\n        time_refs.extend(part.get(\"time_refs\") or [])\n        for t in part.get(\"topics\") or []:\n            if t not in topics:\n                topics.append(t)\n        if part.get(\"summary\"):\n            summaries.append(str(part.get(\"summary\")))\n    merged = {\"summary\": \" \".join(summaries), \"mentions\": mentions, \"claims\": claims,\n              \"tasks\": tasks, \"time_refs\": time_refs, \"topics\": topics}\nnames = [{\"ref\": m.get(\"ref\"), \"name\": m.get(\"name\"), \"kind\": m.get(\"kind\"), \"aliases\": m.get(\"aliases\") or []}\n         for m in merged.get(\"mentions\") or []]\nreturn {\"extraction\": merged, \"mentions\": names}\n"
+      }
+    },
+    {
+      "id": "resolve_args",
+      "type": "code",
+      "position": {
+        "x": 3360.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Find candidate entities: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "mentions",
+            "label": "mentions",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif note_id is not None:\n    arguments[\"note_id\"] = note_id\nif mentions is not None:\n    arguments[\"mentions\"] = mentions\nreturn {\"tool_calls\": [{\"name\": \"note_resolve_candidates\", \"call_id\": \"resolve\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "resolve",
+      "type": "tool_calls",
+      "position": {
+        "x": 3840.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Find candidate entities",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_resolve_candidates"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_resolve_candidates"
+          ]
+        }
+      }
+    },
+    {
+      "id": "resolve_out",
+      "type": "code",
+      "position": {
+        "x": 4320.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Find candidate entities: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "mentions",
+            "label": "mentions",
+            "type": "array"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_resolve_candidates returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_resolve_candidates failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_resolve_candidates returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "link_prompt",
+      "type": "string_template",
+      "position": {
+        "x": 4320.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "string_template",
+        "label": "Linking prompt",
+        "inputs": [
+          {
+            "id": "template",
+            "label": "template",
+            "type": "string"
+          },
+          {
+            "id": "note",
+            "label": "note",
+            "type": "any"
+          },
+          {
+            "id": "extraction",
+            "label": "extraction",
+            "type": "any"
+          },
+          {
+            "id": "candidates",
+            "label": "candidates",
+            "type": "any"
+          },
+          {
+            "id": "packet",
+            "label": "packet",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "result",
+            "label": "result",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "template": "Decide how this note changes what the notebook knows.\n\nNote: {{note}}\n\nExtraction from the note:\n{{extraction}}\n\nCandidate existing entities per mention (refer to them by index in each list):\n{{candidates}}\n\nContext packet (entities with their active claims, open tasks, similar notes; refer to existing claims and open tasks by their index in these lists):\n{{packet}}\n\nFor each mention decide reuse (give the candidate index), create, merge (give two candidate indexes) or unsure. For each extracted claim (by index) say whether it is new, restates, refines, supersedes or contradicts an existing claim (give its index). For each extracted task (by index) say which open task it closes, if any. Write an updated one-paragraph summary for an entity only when the note changes what is known, and one sentence summarising the revision.\n\nRules:\n- Use only the note and the provided context; never invent entities or dates.\n- Prefer reusing an existing entity when the candidate list contains it; create sparingly.\n- Keep names as written by the author; put variants in aliases.\n- Quote evidence verbatim; one claim per statement; no inferred hierarchy.\n- When unsure whether two things are the same, answer `unsure` rather than guessing.\n- Output JSON only, matching the schema.\n"
+        }
+      }
+    },
+    {
+      "id": "link",
+      "type": "llm_call",
+      "position": {
+        "x": 4800.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "llm_call",
+        "label": "Link",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          },
+          {
+            "id": "system",
+            "label": "system",
+            "type": "string"
+          },
+          {
+            "id": "prompt",
+            "label": "prompt",
+            "type": "string"
+          },
+          {
+            "id": "tools",
+            "label": "tools",
+            "type": "tools"
+          },
+          {
+            "id": "temperature",
+            "label": "temperature",
+            "type": "number"
+          },
+          {
+            "id": "resp_schema",
+            "label": "resp_schema",
+            "type": "json_schema"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          },
+          {
+            "id": "meta",
+            "label": "meta",
+            "type": "object"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "tools": [],
+          "system": "You file and connect a person's notes. Output JSON only, matching the schema.",
+          "temperature": 0.2,
+          "resp_schema": {
+            "type": "object",
+            "properties": {
+              "mentions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "ref": {
+                      "type": "string"
+                    },
+                    "decision": {
+                      "type": "string",
+                      "enum": [
+                        "reuse",
+                        "create",
+                        "merge",
+                        "unsure"
+                      ]
+                    },
+                    "candidate": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "index in this mention's candidate list"
+                    },
+                    "merge_candidates": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "description": "two candidate indexes to merge"
+                    },
+                    "name": {
+                      "type": "string",
+                      "description": "preferred name"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "person",
+                        "org",
+                        "project",
+                        "concept",
+                        "place",
+                        "event",
+                        "artifact",
+                        "software",
+                        "thing"
+                      ]
+                    },
+                    "aliases": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "summary": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "updated one-paragraph summary or null"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "short"
+                    }
+                  },
+                  "required": [
+                    "ref",
+                    "decision",
+                    "candidate",
+                    "merge_candidates",
+                    "name",
+                    "kind",
+                    "aliases",
+                    "summary",
+                    "reason"
+                  ]
+                }
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "description": "index of the claim in the extraction"
+                    },
+                    "relation_to_existing": {
+                      "type": "string",
+                      "enum": [
+                        "new",
+                        "restates",
+                        "refines",
+                        "supersedes",
+                        "contradicts"
+                      ]
+                    },
+                    "existing": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "index of the existing claim in the context packet"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "short"
+                    }
+                  },
+                  "required": [
+                    "index",
+                    "relation_to_existing",
+                    "existing",
+                    "reason"
+                  ]
+                }
+              },
+              "tasks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer"
+                    },
+                    "closes_open_task": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "index of the open task it closes"
+                    }
+                  },
+                  "required": [
+                    "index",
+                    "closes_open_task"
+                  ]
+                }
+              },
+              "revision_summary": {
+                "type": "string",
+                "description": "one sentence"
+              }
+            },
+            "required": [
+              "mentions",
+              "claims",
+              "tasks",
+              "revision_summary"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "apply_args",
+      "type": "code",
+      "position": {
+        "x": 5280.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Revise the graph: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "extraction",
+            "label": "extraction",
+            "type": "object"
+          },
+          {
+            "id": "linking",
+            "label": "linking",
+            "type": "object"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif note_id is not None:\n    arguments[\"note_id\"] = note_id\nif extraction is not None:\n    arguments[\"extraction\"] = extraction\nif linking is not None:\n    arguments[\"linking\"] = linking\nreturn {\"tool_calls\": [{\"name\": \"note_apply_revision\", \"call_id\": \"apply\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "apply",
+      "type": "tool_calls",
+      "position": {
+        "x": 5760.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Revise the graph",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_apply_revision"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_apply_revision"
+          ]
+        }
+      }
+    },
+    {
+      "id": "apply_out",
+      "type": "code",
+      "position": {
+        "x": 6240.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Revise the graph: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "revision_id",
+            "label": "revision_id",
+            "type": "string"
+          },
+          {
+            "id": "summary",
+            "label": "summary",
+            "type": "string"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_apply_revision returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_apply_revision failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_apply_revision returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "end",
+      "type": "on_flow_end",
+      "position": {
+        "x": 6720.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "on_flow_end",
+        "label": "Done",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "revision_id",
+            "label": "revision_id",
+            "type": "string"
+          },
+          {
+            "id": "revision",
+            "label": "revision",
+            "type": "object"
+          },
+          {
+            "id": "status",
+            "label": "status",
+            "type": "string"
+          }
+        ],
+        "outputs": [],
+        "pinDefaults": {
+          "status": "processed"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-start-note_id-context_args-note_id",
+      "source": "start",
+      "sourceHandle": "note_id",
+      "target": "context_args",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-start-exec-out-context_args-exec-in",
+      "source": "start",
+      "sourceHandle": "exec-out",
+      "target": "context_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-context_args-tool_calls-context-tool_calls",
+      "source": "context_args",
+      "sourceHandle": "tool_calls",
+      "target": "context",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-context_args-exec-out-context-exec-in",
+      "source": "context_args",
+      "sourceHandle": "exec-out",
+      "target": "context",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-context-results-context_out-results",
+      "source": "context",
+      "sourceHandle": "results",
+      "target": "context_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-context-exec-out-context_out-exec-in",
+      "source": "context",
+      "sourceHandle": "exec-out",
+      "target": "context_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-context_out-sections-sections-sections",
+      "source": "context_out",
+      "sourceHandle": "sections",
+      "target": "sections",
+      "targetHandle": "sections"
+    },
+    {
+      "id": "e-context_out-exec-out-sections-exec-in",
+      "source": "context_out",
+      "sourceHandle": "exec-out",
+      "target": "sections",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-sections-items-each_section-items",
+      "source": "sections",
+      "sourceHandle": "items",
+      "target": "each_section",
+      "targetHandle": "items"
+    },
+    {
+      "id": "e-sections-exec-out-each_section-exec-in",
+      "source": "sections",
+      "sourceHandle": "exec-out",
+      "target": "each_section",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-context_out-note-extract_prompt-note",
+      "source": "context_out",
+      "sourceHandle": "note",
+      "target": "extract_prompt",
+      "targetHandle": "note"
+    },
+    {
+      "id": "e-each_section-item-extract_prompt-section",
+      "source": "each_section",
+      "sourceHandle": "item",
+      "target": "extract_prompt",
+      "targetHandle": "section"
+    },
+    {
+      "id": "e-context_out-similar_notes-extract_prompt-similar_notes",
+      "source": "context_out",
+      "sourceHandle": "similar_notes",
+      "target": "extract_prompt",
+      "targetHandle": "similar_notes"
+    },
+    {
+      "id": "e-context_out-candidate_entities-extract_prompt-candidate_entities",
+      "source": "context_out",
+      "sourceHandle": "candidate_entities",
+      "target": "extract_prompt",
+      "targetHandle": "candidate_entities"
+    },
+    {
+      "id": "e-context_out-open_tasks-extract_prompt-open_tasks",
+      "source": "context_out",
+      "sourceHandle": "open_tasks",
+      "target": "extract_prompt",
+      "targetHandle": "open_tasks"
+    },
+    {
+      "id": "e-context_out-topics-extract_prompt-topics",
+      "source": "context_out",
+      "sourceHandle": "topics",
+      "target": "extract_prompt",
+      "targetHandle": "topics"
+    },
+    {
+      "id": "e-context_out-vocabulary-extract_prompt-vocabulary",
+      "source": "context_out",
+      "sourceHandle": "vocabulary",
+      "target": "extract_prompt",
+      "targetHandle": "vocabulary"
+    },
+    {
+      "id": "e-extract_prompt-result-extract-prompt",
+      "source": "extract_prompt",
+      "sourceHandle": "result",
+      "target": "extract",
+      "targetHandle": "prompt"
+    },
+    {
+      "id": "e-start-provider-extract-provider",
+      "source": "start",
+      "sourceHandle": "provider",
+      "target": "extract",
+      "targetHandle": "provider"
+    },
+    {
+      "id": "e-start-model-extract-model",
+      "source": "start",
+      "sourceHandle": "model",
+      "target": "extract",
+      "targetHandle": "model"
+    },
+    {
+      "id": "e-each_section-loop-extract-exec-in",
+      "source": "each_section",
+      "sourceHandle": "loop",
+      "target": "extract",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-extract-data-keep_extraction-item",
+      "source": "extract",
+      "sourceHandle": "data",
+      "target": "keep_extraction",
+      "targetHandle": "item"
+    },
+    {
+      "id": "e-extract-exec-out-keep_extraction-exec-in",
+      "source": "extract",
+      "sourceHandle": "exec-out",
+      "target": "keep_extraction",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-extractions-value-merge-extractions",
+      "source": "extractions",
+      "sourceHandle": "value",
+      "target": "merge",
+      "targetHandle": "extractions"
+    },
+    {
+      "id": "e-each_section-done-merge-exec-in",
+      "source": "each_section",
+      "sourceHandle": "done",
+      "target": "merge",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-start-note_id-resolve_args-note_id",
+      "source": "start",
+      "sourceHandle": "note_id",
+      "target": "resolve_args",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-merge-mentions-resolve_args-mentions",
+      "source": "merge",
+      "sourceHandle": "mentions",
+      "target": "resolve_args",
+      "targetHandle": "mentions"
+    },
+    {
+      "id": "e-merge-exec-out-resolve_args-exec-in",
+      "source": "merge",
+      "sourceHandle": "exec-out",
+      "target": "resolve_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-resolve_args-tool_calls-resolve-tool_calls",
+      "source": "resolve_args",
+      "sourceHandle": "tool_calls",
+      "target": "resolve",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-resolve_args-exec-out-resolve-exec-in",
+      "source": "resolve_args",
+      "sourceHandle": "exec-out",
+      "target": "resolve",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-resolve-results-resolve_out-results",
+      "source": "resolve",
+      "sourceHandle": "results",
+      "target": "resolve_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-resolve-exec-out-resolve_out-exec-in",
+      "source": "resolve",
+      "sourceHandle": "exec-out",
+      "target": "resolve_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-context_out-note-link_prompt-note",
+      "source": "context_out",
+      "sourceHandle": "note",
+      "target": "link_prompt",
+      "targetHandle": "note"
+    },
+    {
+      "id": "e-merge-extraction-link_prompt-extraction",
+      "source": "merge",
+      "sourceHandle": "extraction",
+      "target": "link_prompt",
+      "targetHandle": "extraction"
+    },
+    {
+      "id": "e-resolve_out-mentions-link_prompt-candidates",
+      "source": "resolve_out",
+      "sourceHandle": "mentions",
+      "target": "link_prompt",
+      "targetHandle": "candidates"
+    },
+    {
+      "id": "e-context_out-tool_output-link_prompt-packet",
+      "source": "context_out",
+      "sourceHandle": "tool_output",
+      "target": "link_prompt",
+      "targetHandle": "packet"
+    },
+    {
+      "id": "e-link_prompt-result-link-prompt",
+      "source": "link_prompt",
+      "sourceHandle": "result",
+      "target": "link",
+      "targetHandle": "prompt"
+    },
+    {
+      "id": "e-start-provider-link-provider",
+      "source": "start",
+      "sourceHandle": "provider",
+      "target": "link",
+      "targetHandle": "provider"
+    },
+    {
+      "id": "e-start-model-link-model",
+      "source": "start",
+      "sourceHandle": "model",
+      "target": "link",
+      "targetHandle": "model"
+    },
+    {
+      "id": "e-resolve_out-exec-out-link-exec-in",
+      "source": "resolve_out",
+      "sourceHandle": "exec-out",
+      "target": "link",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-start-note_id-apply_args-note_id",
+      "source": "start",
+      "sourceHandle": "note_id",
+      "target": "apply_args",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-merge-extraction-apply_args-extraction",
+      "source": "merge",
+      "sourceHandle": "extraction",
+      "target": "apply_args",
+      "targetHandle": "extraction"
+    },
+    {
+      "id": "e-link-data-apply_args-linking",
+      "source": "link",
+      "sourceHandle": "data",
+      "target": "apply_args",
+      "targetHandle": "linking"
+    },
+    {
+      "id": "e-link-exec-out-apply_args-exec-in",
+      "source": "link",
+      "sourceHandle": "exec-out",
+      "target": "apply_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-apply_args-tool_calls-apply-tool_calls",
+      "source": "apply_args",
+      "sourceHandle": "tool_calls",
+      "target": "apply",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-apply_args-exec-out-apply-exec-in",
+      "source": "apply_args",
+      "sourceHandle": "exec-out",
+      "target": "apply",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-apply-results-apply_out-results",
+      "source": "apply",
+      "sourceHandle": "results",
+      "target": "apply_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-apply-exec-out-apply_out-exec-in",
+      "source": "apply",
+      "sourceHandle": "exec-out",
+      "target": "apply_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-apply_out-summary-end-response",
+      "source": "apply_out",
+      "sourceHandle": "summary",
+      "target": "end",
+      "targetHandle": "response"
+    },
+    {
+      "id": "e-start-note_id-end-note_id",
+      "source": "start",
+      "sourceHandle": "note_id",
+      "target": "end",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-apply_out-revision_id-end-revision_id",
+      "source": "apply_out",
+      "sourceHandle": "revision_id",
+      "target": "end",
+      "targetHandle": "revision_id"
+    },
+    {
+      "id": "e-apply_out-tool_output-end-revision",
+      "source": "apply_out",
+      "sourceHandle": "tool_output",
+      "target": "end",
+      "targetHandle": "revision"
+    },
+    {
+      "id": "e-apply_out-exec-out-end-exec-in",
+      "source": "apply_out",
+      "sourceHandle": "exec-out",
+      "target": "end",
+      "targetHandle": "exec-in"
+    }
+  ],
+  "entryNode": "start"
+}

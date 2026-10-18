@@ -1,0 +1,1938 @@
+{
+  "id": "note-reflect",
+  "name": "Reflect on your notes",
+  "description": "Gather open loops, contradictions, resurfacing material and anniversaries; choose what deserves attention and write it down as insights.",
+  "interfaces": [
+    "abstractnote.reflect.v1"
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "on_flow_start",
+      "position": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "on_flow_start",
+        "label": "Start",
+        "inputs": [],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "limit",
+            "label": "limit",
+            "type": "number"
+          },
+          {
+            "id": "since",
+            "label": "since",
+            "type": "string"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          }
+        ],
+        "pinDefaults": {
+          "limit": 10,
+          "provider": "",
+          "model": ""
+        }
+      }
+    },
+    {
+      "id": "open_loops_args",
+      "type": "code",
+      "position": {
+        "x": 480.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Open loops: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "limit",
+            "label": "limit",
+            "type": "number"
+          },
+          {
+            "id": "since",
+            "label": "since",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif limit is not None:\n    arguments[\"limit\"] = limit\nif since is not None:\n    arguments[\"since\"] = since\nreturn {\"tool_calls\": [{\"name\": \"note_open_loops\", \"call_id\": \"open_loops\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "open_loops",
+      "type": "tool_calls",
+      "position": {
+        "x": 960.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Open loops",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_open_loops"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_open_loops"
+          ]
+        }
+      }
+    },
+    {
+      "id": "open_loops_out",
+      "type": "code",
+      "position": {
+        "x": 1440.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Open loops: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_open_loops returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_open_loops failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_open_loops returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "contradictions_args",
+      "type": "code",
+      "position": {
+        "x": 1920.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Contradictions: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "limit",
+            "label": "limit",
+            "type": "number"
+          },
+          {
+            "id": "since",
+            "label": "since",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif limit is not None:\n    arguments[\"limit\"] = limit\nif since is not None:\n    arguments[\"since\"] = since\nreturn {\"tool_calls\": [{\"name\": \"note_contradictions\", \"call_id\": \"contradictions\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "contradictions",
+      "type": "tool_calls",
+      "position": {
+        "x": 2400.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Contradictions",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_contradictions"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_contradictions"
+          ]
+        }
+      }
+    },
+    {
+      "id": "contradictions_out",
+      "type": "code",
+      "position": {
+        "x": 2880.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Contradictions: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_contradictions returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_contradictions failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_contradictions returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "resurface_args",
+      "type": "code",
+      "position": {
+        "x": 3360.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Gone quiet: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "limit",
+            "label": "limit",
+            "type": "number"
+          },
+          {
+            "id": "since",
+            "label": "since",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif limit is not None:\n    arguments[\"limit\"] = limit\nif since is not None:\n    arguments[\"since\"] = since\nreturn {\"tool_calls\": [{\"name\": \"note_resurface\", \"call_id\": \"resurface\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "resurface",
+      "type": "tool_calls",
+      "position": {
+        "x": 3840.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Gone quiet",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_resurface"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_resurface"
+          ]
+        }
+      }
+    },
+    {
+      "id": "resurface_out",
+      "type": "code",
+      "position": {
+        "x": 4320.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Gone quiet: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_resurface returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_resurface failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_resurface returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "anniversaries_args",
+      "type": "code",
+      "position": {
+        "x": 4800.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Anniversaries: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "limit",
+            "label": "limit",
+            "type": "number"
+          },
+          {
+            "id": "since",
+            "label": "since",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif limit is not None:\n    arguments[\"limit\"] = limit\nif since is not None:\n    arguments[\"since\"] = since\nreturn {\"tool_calls\": [{\"name\": \"note_anniversaries\", \"call_id\": \"anniversaries\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "anniversaries",
+      "type": "tool_calls",
+      "position": {
+        "x": 5280.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Anniversaries",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_anniversaries"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_anniversaries"
+          ]
+        }
+      }
+    },
+    {
+      "id": "anniversaries_out",
+      "type": "code",
+      "position": {
+        "x": 5760.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Anniversaries: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_anniversaries returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_anniversaries failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_anniversaries returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "candidates",
+      "type": "code",
+      "position": {
+        "x": 6240.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Candidates",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "open_loops",
+            "label": "open_loops",
+            "type": "array"
+          },
+          {
+            "id": "contradictions",
+            "label": "contradictions",
+            "type": "array"
+          },
+          {
+            "id": "resurface",
+            "label": "resurface",
+            "type": "array"
+          },
+          {
+            "id": "anniversaries",
+            "label": "anniversaries",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "candidates",
+            "label": "candidates",
+            "type": "array"
+          },
+          {
+            "id": "count",
+            "label": "count",
+            "type": "number"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "cands = []\nfor source, items in ((\"open_loops\", open_loops), (\"contradictions\", contradictions),\n                      (\"resurface\", resurface), (\"anniversaries\", anniversaries)):\n    for it in items or []:\n        if isinstance(it, dict):\n            cands.append(dict(it, index=len(cands), source=source))\nreturn {\"candidates\": cands, \"count\": len(cands)}\n"
+      }
+    },
+    {
+      "id": "reflect_prompt",
+      "type": "string_template",
+      "position": {
+        "x": 6240.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "string_template",
+        "label": "Reflection prompt",
+        "inputs": [
+          {
+            "id": "template",
+            "label": "template",
+            "type": "string"
+          },
+          {
+            "id": "candidates",
+            "label": "candidates",
+            "type": "any"
+          },
+          {
+            "id": "limit",
+            "label": "limit",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "result",
+            "label": "result",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "template": "Look over these candidates from the notebook and choose what deserves the author's attention.\n\nCandidates (refer to them by index):\n{{candidates}}\n\nChoose at most {{limit}} items. For each, give the candidate index, the kind (warning, reminder, connection, contradiction or evolution), a short title and a body of two or three sentences that says why it matters now. Choose nothing when nothing deserves attention.\n\nOutput JSON only, matching the schema.\n"
+        }
+      }
+    },
+    {
+      "id": "reflect",
+      "type": "llm_call",
+      "position": {
+        "x": 6720.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "llm_call",
+        "label": "Choose what matters",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          },
+          {
+            "id": "system",
+            "label": "system",
+            "type": "string"
+          },
+          {
+            "id": "prompt",
+            "label": "prompt",
+            "type": "string"
+          },
+          {
+            "id": "tools",
+            "label": "tools",
+            "type": "tools"
+          },
+          {
+            "id": "temperature",
+            "label": "temperature",
+            "type": "number"
+          },
+          {
+            "id": "resp_schema",
+            "label": "resp_schema",
+            "type": "json_schema"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          },
+          {
+            "id": "meta",
+            "label": "meta",
+            "type": "object"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "tools": [],
+          "system": "You file and connect a person's notes. Output JSON only, matching the schema.",
+          "temperature": 0.2,
+          "resp_schema": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "candidate": {
+                      "type": "integer",
+                      "description": "index in the candidate list"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "warning",
+                        "reminder",
+                        "connection",
+                        "contradiction",
+                        "evolution"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "body": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "candidate",
+                    "kind",
+                    "title",
+                    "body"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "items"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "chosen",
+      "type": "code",
+      "position": {
+        "x": 7200.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Chosen insights",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "candidates",
+            "label": "candidates",
+            "type": "array"
+          },
+          {
+            "id": "limit",
+            "label": "limit",
+            "type": "number"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          },
+          {
+            "id": "dropped",
+            "label": "dropped",
+            "type": "number"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "d = data if isinstance(data, dict) else {}\nby_index = {c.get(\"index\"): c for c in (candidates or []) if isinstance(c, dict)}\nout, dropped = [], 0\nfor it in d.get(\"items\") or []:\n    c = by_index.get(it.get(\"candidate\")) if isinstance(it, dict) else None\n    if c is None:\n        dropped += 1\n        continue\n    out.append({\"kind\": it.get(\"kind\"), \"title\": str(it.get(\"title\") or \"\"), \"body\": str(it.get(\"body\") or \"\"),\n                \"evidence_note_ids\": list(c.get(\"note_ids\") or []), \"entity_ids\": list(c.get(\"entity_ids\") or [])})\ncap = int(limit or 10)\nreturn {\"items\": out[:cap], \"dropped\": dropped}\n"
+      }
+    },
+    {
+      "id": "each_insight",
+      "type": "loop",
+      "position": {
+        "x": 7680.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "loop",
+        "label": "For each insight",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "loop",
+            "label": "loop",
+            "type": "execution"
+          },
+          {
+            "id": "done",
+            "label": "done",
+            "type": "execution"
+          },
+          {
+            "id": "item",
+            "label": "item",
+            "type": "any"
+          },
+          {
+            "id": "index",
+            "label": "index",
+            "type": "number"
+          }
+        ]
+      }
+    },
+    {
+      "id": "insight",
+      "type": "break_object",
+      "position": {
+        "x": 7680.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "break_object",
+        "label": "Insight",
+        "inputs": [
+          {
+            "id": "object",
+            "label": "object",
+            "type": "object"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "kind",
+            "label": "kind",
+            "type": "string"
+          },
+          {
+            "id": "title",
+            "label": "title",
+            "type": "string"
+          },
+          {
+            "id": "body",
+            "label": "body",
+            "type": "string"
+          },
+          {
+            "id": "evidence_note_ids",
+            "label": "evidence_note_ids",
+            "type": "array"
+          },
+          {
+            "id": "entity_ids",
+            "label": "entity_ids",
+            "type": "array"
+          }
+        ],
+        "breakConfig": {
+          "selectedPaths": [
+            "kind",
+            "title",
+            "body",
+            "evidence_note_ids",
+            "entity_ids"
+          ]
+        }
+      }
+    },
+    {
+      "id": "write_args",
+      "type": "code",
+      "position": {
+        "x": 8160.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Write the insight: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "kind",
+            "label": "kind",
+            "type": "string"
+          },
+          {
+            "id": "title",
+            "label": "title",
+            "type": "string"
+          },
+          {
+            "id": "body",
+            "label": "body",
+            "type": "string"
+          },
+          {
+            "id": "evidence_note_ids",
+            "label": "evidence_note_ids",
+            "type": "array"
+          },
+          {
+            "id": "entity_ids",
+            "label": "entity_ids",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif kind is not None:\n    arguments[\"kind\"] = kind\nif title is not None:\n    arguments[\"title\"] = title\nif body is not None:\n    arguments[\"body\"] = body\nif evidence_note_ids is not None:\n    arguments[\"evidence_note_ids\"] = evidence_note_ids\nif entity_ids is not None:\n    arguments[\"entity_ids\"] = entity_ids\nreturn {\"tool_calls\": [{\"name\": \"note_insight_write\", \"call_id\": \"write\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "write",
+      "type": "tool_calls",
+      "position": {
+        "x": 8640.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Write the insight",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_insight_write"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_insight_write"
+          ]
+        }
+      }
+    },
+    {
+      "id": "write_out",
+      "type": "code",
+      "position": {
+        "x": 9120.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Write the insight: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_insight_write returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_insight_write failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_insight_write returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "keep_written",
+      "type": "add_to_list",
+      "position": {
+        "x": 9600.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "add_to_list",
+        "label": "Remember it",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "item",
+            "label": "item",
+            "type": "any"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "list",
+            "label": "list",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "name": "reflect_written"
+        }
+      }
+    },
+    {
+      "id": "written",
+      "type": "get_var",
+      "position": {
+        "x": 7680.0,
+        "y": 640.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get reflect_written",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "reflect_written",
+          "default": []
+        }
+      }
+    },
+    {
+      "id": "report",
+      "type": "code",
+      "position": {
+        "x": 8160.0,
+        "y": 346.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Report",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "written",
+            "label": "written",
+            "type": "array"
+          },
+          {
+            "id": "count",
+            "label": "count",
+            "type": "number"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "message",
+            "label": "message",
+            "type": "string"
+          },
+          {
+            "id": "insight_note_ids",
+            "label": "insight_note_ids",
+            "type": "array"
+          },
+          {
+            "id": "considered",
+            "label": "considered",
+            "type": "number"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "n = len(written or [])\nmsg = \"Nothing needs your attention.\" if n == 0 else (\"Wrote \" + str(n) + (\" insight.\" if n == 1 else \" insights.\"))\nreturn {\"message\": msg, \"insight_note_ids\": list(written or []), \"considered\": int(count or 0)}\n"
+      }
+    },
+    {
+      "id": "end",
+      "type": "on_flow_end",
+      "position": {
+        "x": 8640.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "on_flow_end",
+        "label": "Done",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "insight_note_ids",
+            "label": "insight_note_ids",
+            "type": "array"
+          },
+          {
+            "id": "considered",
+            "label": "considered",
+            "type": "number"
+          }
+        ],
+        "outputs": []
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-start-limit-open_loops_args-limit",
+      "source": "start",
+      "sourceHandle": "limit",
+      "target": "open_loops_args",
+      "targetHandle": "limit"
+    },
+    {
+      "id": "e-start-since-open_loops_args-since",
+      "source": "start",
+      "sourceHandle": "since",
+      "target": "open_loops_args",
+      "targetHandle": "since"
+    },
+    {
+      "id": "e-start-exec-out-open_loops_args-exec-in",
+      "source": "start",
+      "sourceHandle": "exec-out",
+      "target": "open_loops_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-open_loops_args-tool_calls-open_loops-tool_calls",
+      "source": "open_loops_args",
+      "sourceHandle": "tool_calls",
+      "target": "open_loops",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-open_loops_args-exec-out-open_loops-exec-in",
+      "source": "open_loops_args",
+      "sourceHandle": "exec-out",
+      "target": "open_loops",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-open_loops-results-open_loops_out-results",
+      "source": "open_loops",
+      "sourceHandle": "results",
+      "target": "open_loops_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-open_loops-exec-out-open_loops_out-exec-in",
+      "source": "open_loops",
+      "sourceHandle": "exec-out",
+      "target": "open_loops_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-start-limit-contradictions_args-limit",
+      "source": "start",
+      "sourceHandle": "limit",
+      "target": "contradictions_args",
+      "targetHandle": "limit"
+    },
+    {
+      "id": "e-start-since-contradictions_args-since",
+      "source": "start",
+      "sourceHandle": "since",
+      "target": "contradictions_args",
+      "targetHandle": "since"
+    },
+    {
+      "id": "e-open_loops_out-exec-out-contradictions_args-exec-in",
+      "source": "open_loops_out",
+      "sourceHandle": "exec-out",
+      "target": "contradictions_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-contradictions_args-tool_calls-contradictions-tool_calls",
+      "source": "contradictions_args",
+      "sourceHandle": "tool_calls",
+      "target": "contradictions",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-contradictions_args-exec-out-contradictions-exec-in",
+      "source": "contradictions_args",
+      "sourceHandle": "exec-out",
+      "target": "contradictions",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-contradictions-results-contradictions_out-results",
+      "source": "contradictions",
+      "sourceHandle": "results",
+      "target": "contradictions_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-contradictions-exec-out-contradictions_out-exec-in",
+      "source": "contradictions",
+      "sourceHandle": "exec-out",
+      "target": "contradictions_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-start-limit-resurface_args-limit",
+      "source": "start",
+      "sourceHandle": "limit",
+      "target": "resurface_args",
+      "targetHandle": "limit"
+    },
+    {
+      "id": "e-start-since-resurface_args-since",
+      "source": "start",
+      "sourceHandle": "since",
+      "target": "resurface_args",
+      "targetHandle": "since"
+    },
+    {
+      "id": "e-contradictions_out-exec-out-resurface_args-exec-in",
+      "source": "contradictions_out",
+      "sourceHandle": "exec-out",
+      "target": "resurface_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-resurface_args-tool_calls-resurface-tool_calls",
+      "source": "resurface_args",
+      "sourceHandle": "tool_calls",
+      "target": "resurface",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-resurface_args-exec-out-resurface-exec-in",
+      "source": "resurface_args",
+      "sourceHandle": "exec-out",
+      "target": "resurface",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-resurface-results-resurface_out-results",
+      "source": "resurface",
+      "sourceHandle": "results",
+      "target": "resurface_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-resurface-exec-out-resurface_out-exec-in",
+      "source": "resurface",
+      "sourceHandle": "exec-out",
+      "target": "resurface_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-start-limit-anniversaries_args-limit",
+      "source": "start",
+      "sourceHandle": "limit",
+      "target": "anniversaries_args",
+      "targetHandle": "limit"
+    },
+    {
+      "id": "e-start-since-anniversaries_args-since",
+      "source": "start",
+      "sourceHandle": "since",
+      "target": "anniversaries_args",
+      "targetHandle": "since"
+    },
+    {
+      "id": "e-resurface_out-exec-out-anniversaries_args-exec-in",
+      "source": "resurface_out",
+      "sourceHandle": "exec-out",
+      "target": "anniversaries_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-anniversaries_args-tool_calls-anniversaries-tool_calls",
+      "source": "anniversaries_args",
+      "sourceHandle": "tool_calls",
+      "target": "anniversaries",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-anniversaries_args-exec-out-anniversaries-exec-in",
+      "source": "anniversaries_args",
+      "sourceHandle": "exec-out",
+      "target": "anniversaries",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-anniversaries-results-anniversaries_out-results",
+      "source": "anniversaries",
+      "sourceHandle": "results",
+      "target": "anniversaries_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-anniversaries-exec-out-anniversaries_out-exec-in",
+      "source": "anniversaries",
+      "sourceHandle": "exec-out",
+      "target": "anniversaries_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-open_loops_out-items-candidates-open_loops",
+      "source": "open_loops_out",
+      "sourceHandle": "items",
+      "target": "candidates",
+      "targetHandle": "open_loops"
+    },
+    {
+      "id": "e-contradictions_out-items-candidates-contradictions",
+      "source": "contradictions_out",
+      "sourceHandle": "items",
+      "target": "candidates",
+      "targetHandle": "contradictions"
+    },
+    {
+      "id": "e-resurface_out-items-candidates-resurface",
+      "source": "resurface_out",
+      "sourceHandle": "items",
+      "target": "candidates",
+      "targetHandle": "resurface"
+    },
+    {
+      "id": "e-anniversaries_out-items-candidates-anniversaries",
+      "source": "anniversaries_out",
+      "sourceHandle": "items",
+      "target": "candidates",
+      "targetHandle": "anniversaries"
+    },
+    {
+      "id": "e-anniversaries_out-exec-out-candidates-exec-in",
+      "source": "anniversaries_out",
+      "sourceHandle": "exec-out",
+      "target": "candidates",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-candidates-candidates-reflect_prompt-candidates",
+      "source": "candidates",
+      "sourceHandle": "candidates",
+      "target": "reflect_prompt",
+      "targetHandle": "candidates"
+    },
+    {
+      "id": "e-start-limit-reflect_prompt-limit",
+      "source": "start",
+      "sourceHandle": "limit",
+      "target": "reflect_prompt",
+      "targetHandle": "limit"
+    },
+    {
+      "id": "e-reflect_prompt-result-reflect-prompt",
+      "source": "reflect_prompt",
+      "sourceHandle": "result",
+      "target": "reflect",
+      "targetHandle": "prompt"
+    },
+    {
+      "id": "e-start-provider-reflect-provider",
+      "source": "start",
+      "sourceHandle": "provider",
+      "target": "reflect",
+      "targetHandle": "provider"
+    },
+    {
+      "id": "e-start-model-reflect-model",
+      "source": "start",
+      "sourceHandle": "model",
+      "target": "reflect",
+      "targetHandle": "model"
+    },
+    {
+      "id": "e-candidates-exec-out-reflect-exec-in",
+      "source": "candidates",
+      "sourceHandle": "exec-out",
+      "target": "reflect",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-reflect-data-chosen-data",
+      "source": "reflect",
+      "sourceHandle": "data",
+      "target": "chosen",
+      "targetHandle": "data"
+    },
+    {
+      "id": "e-candidates-candidates-chosen-candidates",
+      "source": "candidates",
+      "sourceHandle": "candidates",
+      "target": "chosen",
+      "targetHandle": "candidates"
+    },
+    {
+      "id": "e-start-limit-chosen-limit",
+      "source": "start",
+      "sourceHandle": "limit",
+      "target": "chosen",
+      "targetHandle": "limit"
+    },
+    {
+      "id": "e-reflect-exec-out-chosen-exec-in",
+      "source": "reflect",
+      "sourceHandle": "exec-out",
+      "target": "chosen",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-chosen-items-each_insight-items",
+      "source": "chosen",
+      "sourceHandle": "items",
+      "target": "each_insight",
+      "targetHandle": "items"
+    },
+    {
+      "id": "e-chosen-exec-out-each_insight-exec-in",
+      "source": "chosen",
+      "sourceHandle": "exec-out",
+      "target": "each_insight",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-each_insight-item-insight-object",
+      "source": "each_insight",
+      "sourceHandle": "item",
+      "target": "insight",
+      "targetHandle": "object"
+    },
+    {
+      "id": "e-insight-kind-write_args-kind",
+      "source": "insight",
+      "sourceHandle": "kind",
+      "target": "write_args",
+      "targetHandle": "kind"
+    },
+    {
+      "id": "e-insight-title-write_args-title",
+      "source": "insight",
+      "sourceHandle": "title",
+      "target": "write_args",
+      "targetHandle": "title"
+    },
+    {
+      "id": "e-insight-body-write_args-body",
+      "source": "insight",
+      "sourceHandle": "body",
+      "target": "write_args",
+      "targetHandle": "body"
+    },
+    {
+      "id": "e-insight-evidence_note_ids-write_args-evidence_note_ids",
+      "source": "insight",
+      "sourceHandle": "evidence_note_ids",
+      "target": "write_args",
+      "targetHandle": "evidence_note_ids"
+    },
+    {
+      "id": "e-insight-entity_ids-write_args-entity_ids",
+      "source": "insight",
+      "sourceHandle": "entity_ids",
+      "target": "write_args",
+      "targetHandle": "entity_ids"
+    },
+    {
+      "id": "e-each_insight-loop-write_args-exec-in",
+      "source": "each_insight",
+      "sourceHandle": "loop",
+      "target": "write_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-write_args-tool_calls-write-tool_calls",
+      "source": "write_args",
+      "sourceHandle": "tool_calls",
+      "target": "write",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-write_args-exec-out-write-exec-in",
+      "source": "write_args",
+      "sourceHandle": "exec-out",
+      "target": "write",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-write-results-write_out-results",
+      "source": "write",
+      "sourceHandle": "results",
+      "target": "write_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-write-exec-out-write_out-exec-in",
+      "source": "write",
+      "sourceHandle": "exec-out",
+      "target": "write_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-write_out-note_id-keep_written-item",
+      "source": "write_out",
+      "sourceHandle": "note_id",
+      "target": "keep_written",
+      "targetHandle": "item"
+    },
+    {
+      "id": "e-write_out-exec-out-keep_written-exec-in",
+      "source": "write_out",
+      "sourceHandle": "exec-out",
+      "target": "keep_written",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-written-value-report-written",
+      "source": "written",
+      "sourceHandle": "value",
+      "target": "report",
+      "targetHandle": "written"
+    },
+    {
+      "id": "e-candidates-count-report-count",
+      "source": "candidates",
+      "sourceHandle": "count",
+      "target": "report",
+      "targetHandle": "count"
+    },
+    {
+      "id": "e-each_insight-done-report-exec-in",
+      "source": "each_insight",
+      "sourceHandle": "done",
+      "target": "report",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-report-message-end-response",
+      "source": "report",
+      "sourceHandle": "message",
+      "target": "end",
+      "targetHandle": "response"
+    },
+    {
+      "id": "e-report-insight_note_ids-end-insight_note_ids",
+      "source": "report",
+      "sourceHandle": "insight_note_ids",
+      "target": "end",
+      "targetHandle": "insight_note_ids"
+    },
+    {
+      "id": "e-report-considered-end-considered",
+      "source": "report",
+      "sourceHandle": "considered",
+      "target": "end",
+      "targetHandle": "considered"
+    },
+    {
+      "id": "e-report-exec-out-end-exec-in",
+      "source": "report",
+      "sourceHandle": "exec-out",
+      "target": "end",
+      "targetHandle": "exec-in"
+    }
+  ],
+  "entryNode": "start",
+  "automation_defaults": {
+    "schema_version": 1,
+    "title": "Note reflection",
+    "trigger": {
+      "source_id": "schedule",
+      "source_version": 2,
+      "config": {
+        "kind": "every",
+        "every": "7d"
+      }
+    },
+    "context": {
+      "mode": "independent"
+    },
+    "input_data": {
+      "limit": 10,
+      "_runtime": {
+        "allowed_tools": [
+          "note_capture",
+          "note_file",
+          "note_context",
+          "note_resolve_candidates",
+          "note_apply_revision",
+          "note_queue_lease",
+          "note_queue_ack",
+          "note_queue_stats",
+          "note_search",
+          "note_expand",
+          "note_changes",
+          "note_entity",
+          "note_timeline",
+          "note_open_loops",
+          "note_contradictions",
+          "note_resurface",
+          "note_anniversaries",
+          "note_insight_write"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,2077 @@
+{
+  "id": "note-capture",
+  "name": "Capture a note",
+  "description": "Store a note, file it quickly, answer, and queue it for understanding (optionally right away).",
+  "interfaces": [
+    "abstractnote.capture.v1"
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "on_flow_start",
+      "position": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "on_flow_start",
+        "label": "Start",
+        "inputs": [],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "text",
+            "label": "text",
+            "type": "string"
+          },
+          {
+            "id": "title",
+            "label": "title",
+            "type": "string"
+          },
+          {
+            "id": "occurred_at",
+            "label": "occurred_at",
+            "type": "string"
+          },
+          {
+            "id": "location",
+            "label": "location",
+            "type": "object"
+          },
+          {
+            "id": "source",
+            "label": "source",
+            "type": "object"
+          },
+          {
+            "id": "idempotency_key",
+            "label": "idempotency_key",
+            "type": "string"
+          },
+          {
+            "id": "priority",
+            "label": "priority",
+            "type": "number"
+          },
+          {
+            "id": "process_inline",
+            "label": "process_inline",
+            "type": "boolean"
+          },
+          {
+            "id": "session_id",
+            "label": "session_id",
+            "type": "string"
+          },
+          {
+            "id": "context",
+            "label": "context",
+            "type": "object"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          }
+        ],
+        "pinDefaults": {
+          "text": "",
+          "process_inline": false,
+          "provider": "",
+          "model": ""
+        }
+      }
+    },
+    {
+      "id": "attachments",
+      "type": "get",
+      "position": {
+        "x": 0.0,
+        "y": 502.0
+      },
+      "data": {
+        "nodeType": "get",
+        "label": "Attachments",
+        "inputs": [
+          {
+            "id": "object",
+            "label": "object",
+            "type": "object"
+          },
+          {
+            "id": "key",
+            "label": "key",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "key": "attachments",
+          "default": []
+        }
+      }
+    },
+    {
+      "id": "capture_args",
+      "type": "code",
+      "position": {
+        "x": 480.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Store the note: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "text",
+            "label": "text",
+            "type": "string"
+          },
+          {
+            "id": "title",
+            "label": "title",
+            "type": "string"
+          },
+          {
+            "id": "occurred_at",
+            "label": "occurred_at",
+            "type": "string"
+          },
+          {
+            "id": "location",
+            "label": "location",
+            "type": "object"
+          },
+          {
+            "id": "source",
+            "label": "source",
+            "type": "object"
+          },
+          {
+            "id": "idempotency_key",
+            "label": "idempotency_key",
+            "type": "string"
+          },
+          {
+            "id": "priority",
+            "label": "priority",
+            "type": "number"
+          },
+          {
+            "id": "session_id",
+            "label": "session_id",
+            "type": "string"
+          },
+          {
+            "id": "attachments",
+            "label": "attachments",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif text is not None:\n    arguments[\"text\"] = text\nif title is not None:\n    arguments[\"title\"] = title\nif occurred_at is not None:\n    arguments[\"occurred_at\"] = occurred_at\nif location is not None:\n    arguments[\"location\"] = location\nif source is not None:\n    arguments[\"source\"] = source\nif idempotency_key is not None:\n    arguments[\"idempotency_key\"] = idempotency_key\nif priority is not None:\n    arguments[\"priority\"] = priority\nif session_id is not None:\n    arguments[\"session_id\"] = session_id\nif attachments is not None:\n    arguments[\"attachments\"] = attachments\nreturn {\"tool_calls\": [{\"name\": \"note_capture\", \"call_id\": \"capture\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "capture",
+      "type": "tool_calls",
+      "position": {
+        "x": 960.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Store the note",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_capture"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_capture"
+          ]
+        }
+      }
+    },
+    {
+      "id": "capture_out",
+      "type": "code",
+      "position": {
+        "x": 1440.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Store the note: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "status",
+            "label": "status",
+            "type": "string"
+          },
+          {
+            "id": "first_saved_at",
+            "label": "first_saved_at",
+            "type": "string"
+          },
+          {
+            "id": "similar",
+            "label": "similar",
+            "type": "array"
+          },
+          {
+            "id": "revisits",
+            "label": "revisits",
+            "type": "array"
+          },
+          {
+            "id": "topics",
+            "label": "topics",
+            "type": "array"
+          },
+          {
+            "id": "warnings",
+            "label": "warnings",
+            "type": "array"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_capture returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_capture failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_capture returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "is_dup",
+      "type": "code",
+      "position": {
+        "x": 1440.0,
+        "y": 398.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Saved before?",
+        "inputs": [
+          {
+            "id": "status",
+            "label": "status",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "duplicate",
+            "label": "duplicate",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "return {\"duplicate\": status == \"duplicate\"}\n"
+      }
+    },
+    {
+      "id": "dup_branch",
+      "type": "if",
+      "position": {
+        "x": 1920.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Already saved?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "dup_msg",
+      "type": "code",
+      "position": {
+        "x": 2400.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Already-saved answer",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "first_saved_at",
+            "label": "first_saved_at",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "message",
+            "label": "message",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "when = str(first_saved_at or \"\")[:10]\nreturn {\"message\": (\"Already saved on \" + when + \".\") if when else \"Already saved.\"}\n"
+      }
+    },
+    {
+      "id": "dup_answer",
+      "type": "answer_user",
+      "position": {
+        "x": 2880.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "answer_user",
+        "label": "Say it was saved before",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "message",
+            "label": "message",
+            "type": "string"
+          },
+          {
+            "id": "level",
+            "label": "level",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "message",
+            "label": "message",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "level": "message"
+        }
+      }
+    },
+    {
+      "id": "end_duplicate",
+      "type": "on_flow_end",
+      "position": {
+        "x": 3360.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "on_flow_end",
+        "label": "Done (already saved)",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "status",
+            "label": "status",
+            "type": "string"
+          }
+        ],
+        "outputs": [],
+        "pinDefaults": {
+          "status": "duplicate"
+        }
+      }
+    },
+    {
+      "id": "filing_prompt",
+      "type": "string_template",
+      "position": {
+        "x": 1920.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "string_template",
+        "label": "Filing prompt",
+        "inputs": [
+          {
+            "id": "template",
+            "label": "template",
+            "type": "string"
+          },
+          {
+            "id": "title",
+            "label": "title",
+            "type": "any"
+          },
+          {
+            "id": "text",
+            "label": "text",
+            "type": "any"
+          },
+          {
+            "id": "similar",
+            "label": "similar",
+            "type": "any"
+          },
+          {
+            "id": "revisits",
+            "label": "revisits",
+            "type": "any"
+          },
+          {
+            "id": "topics",
+            "label": "topics",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "result",
+            "label": "result",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "template": "File this note quickly.\n\nNote title (may be empty): {{title}}\nNote text:\n{{text}}\n\nSimilar earlier notes: {{similar}}\nEarlier notes with the same words: {{revisits}}\nExisting topics (prefer these, at most 4): {{topics}}\n\nReturn a short title (at most 80 characters), the kind of note, its topics, how urgent it is (urgent or high only for deadlines, warnings, or anything the author marks urgent; bulk never for a live note), its language as a BCP-47 tag, and the note in one line.\n\nRules:\n- Use only the note and the provided context; never invent entities or dates.\n- Prefer reusing an existing entity when the candidate list contains it; create sparingly.\n- Keep names as written by the author; put variants in aliases.\n- Quote evidence verbatim; one claim per statement; no inferred hierarchy.\n- When unsure whether two things are the same, answer `unsure` rather than guessing.\n- Output JSON only, matching the schema.\n"
+        }
+      }
+    },
+    {
+      "id": "filing",
+      "type": "llm_call",
+      "position": {
+        "x": 2400.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "llm_call",
+        "label": "File it quickly",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          },
+          {
+            "id": "system",
+            "label": "system",
+            "type": "string"
+          },
+          {
+            "id": "prompt",
+            "label": "prompt",
+            "type": "string"
+          },
+          {
+            "id": "tools",
+            "label": "tools",
+            "type": "tools"
+          },
+          {
+            "id": "temperature",
+            "label": "temperature",
+            "type": "number"
+          },
+          {
+            "id": "resp_schema",
+            "label": "resp_schema",
+            "type": "json_schema"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          },
+          {
+            "id": "meta",
+            "label": "meta",
+            "type": "object"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "tools": [],
+          "system": "You file and connect a person's notes. Output JSON only, matching the schema.",
+          "temperature": 0.2,
+          "resp_schema": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "maxLength": 80,
+                "description": "short title, at most 80 characters"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "idea",
+                  "task",
+                  "decision",
+                  "fact",
+                  "event",
+                  "question",
+                  "reflection",
+                  "reference",
+                  "log",
+                  "conversation",
+                  "personal"
+                ]
+              },
+              "topics": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "prefer existing topics, at most 4"
+              },
+              "urgency": {
+                "type": "string",
+                "enum": [
+                  "bulk",
+                  "normal",
+                  "high",
+                  "urgent"
+                ]
+              },
+              "language": {
+                "type": "string",
+                "description": "BCP-47 language tag"
+              },
+              "one_line": {
+                "type": "string",
+                "description": "the note in one line"
+              }
+            },
+            "required": [
+              "title",
+              "kind",
+              "topics",
+              "urgency",
+              "language",
+              "one_line"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "filing_fields",
+      "type": "break_object",
+      "position": {
+        "x": 2400.0,
+        "y": 692.0
+      },
+      "data": {
+        "nodeType": "break_object",
+        "label": "Filing",
+        "inputs": [
+          {
+            "id": "object",
+            "label": "object",
+            "type": "object"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "title",
+            "label": "title",
+            "type": "string"
+          },
+          {
+            "id": "kind",
+            "label": "kind",
+            "type": "string"
+          },
+          {
+            "id": "topics",
+            "label": "topics",
+            "type": "array"
+          },
+          {
+            "id": "urgency",
+            "label": "urgency",
+            "type": "string"
+          },
+          {
+            "id": "language",
+            "label": "language",
+            "type": "string"
+          },
+          {
+            "id": "one_line",
+            "label": "one_line",
+            "type": "string"
+          }
+        ],
+        "breakConfig": {
+          "selectedPaths": [
+            "title",
+            "kind",
+            "topics",
+            "urgency",
+            "language",
+            "one_line"
+          ]
+        }
+      }
+    },
+    {
+      "id": "file_args",
+      "type": "code",
+      "position": {
+        "x": 2880.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "File the note: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "title",
+            "label": "title",
+            "type": "string"
+          },
+          {
+            "id": "kind",
+            "label": "kind",
+            "type": "string"
+          },
+          {
+            "id": "topics",
+            "label": "topics",
+            "type": "array"
+          },
+          {
+            "id": "urgency",
+            "label": "urgency",
+            "type": "string"
+          },
+          {
+            "id": "language",
+            "label": "language",
+            "type": "string"
+          },
+          {
+            "id": "one_line",
+            "label": "one_line",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif note_id is not None:\n    arguments[\"note_id\"] = note_id\nif title is not None:\n    arguments[\"title\"] = title\nif kind is not None:\n    arguments[\"kind\"] = kind\nif topics is not None:\n    arguments[\"topics\"] = topics\nif urgency is not None:\n    arguments[\"urgency\"] = urgency\nif language is not None:\n    arguments[\"language\"] = language\nif one_line is not None:\n    arguments[\"one_line\"] = one_line\nreturn {\"tool_calls\": [{\"name\": \"note_file\", \"call_id\": \"file\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "file",
+      "type": "tool_calls",
+      "position": {
+        "x": 3360.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "File the note",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_file"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_file"
+          ]
+        }
+      }
+    },
+    {
+      "id": "file_out",
+      "type": "code",
+      "position": {
+        "x": 3840.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "File the note: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "priority",
+            "label": "priority",
+            "type": "number"
+          },
+          {
+            "id": "status",
+            "label": "status",
+            "type": "string"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_file returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_file failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_file returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "saved_msg",
+      "type": "code",
+      "position": {
+        "x": 4320.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Saved answer",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "kind",
+            "label": "kind",
+            "type": "string"
+          },
+          {
+            "id": "title",
+            "label": "title",
+            "type": "string"
+          },
+          {
+            "id": "similar",
+            "label": "similar",
+            "type": "array"
+          },
+          {
+            "id": "revisits",
+            "label": "revisits",
+            "type": "array"
+          },
+          {
+            "id": "warnings",
+            "label": "warnings",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "message",
+            "label": "message",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "titles = []\nfor s in similar or []:\n    t = s.get(\"title\") if isinstance(s, dict) else None\n    if t and t not in titles:\n        titles.append(t)\nparts = [\"Saved as \" + str(kind or \"note\") + \" \\u201c\" + str(title or \"\") + \"\\u201d.\"]\nif titles:\n    parts.append(\"Related: \" + \", \".join(titles[:3]) + \".\")\ndates = [str(r.get(\"occurred_at\") or \"\")[:10] for r in (revisits or []) if isinstance(r, dict)]\ndates = [d for d in dates if d]\nif dates:\n    parts.append(\"You noted this on \" + dates[0] + \".\")\nfor w in warnings or []:\n    if isinstance(w, str) and w.strip():\n        parts.append(w.strip())\nreturn {\"message\": \" \".join(parts)}\n"
+      }
+    },
+    {
+      "id": "saved_answer",
+      "type": "answer_user",
+      "position": {
+        "x": 4800.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "answer_user",
+        "label": "Say where it was filed",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "message",
+            "label": "message",
+            "type": "string"
+          },
+          {
+            "id": "level",
+            "label": "level",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "message",
+            "label": "message",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "level": "message"
+        }
+      }
+    },
+    {
+      "id": "inline_branch",
+      "type": "if",
+      "position": {
+        "x": 5280.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Process now?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "end_queued",
+      "type": "on_flow_end",
+      "position": {
+        "x": 5760.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "on_flow_end",
+        "label": "Done (queued)",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "status",
+            "label": "status",
+            "type": "string"
+          }
+        ],
+        "outputs": [],
+        "pinDefaults": {
+          "status": "queued"
+        }
+      }
+    },
+    {
+      "id": "process",
+      "type": "subflow",
+      "position": {
+        "x": 5760.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "subflow",
+        "label": "Understand the note",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "inherit_context",
+            "label": "inherit_context",
+            "type": "boolean"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "output",
+            "label": "output",
+            "type": "object"
+          },
+          {
+            "id": "child_output",
+            "label": "child_output",
+            "type": "object"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "revision_id",
+            "label": "revision_id",
+            "type": "string"
+          },
+          {
+            "id": "revision",
+            "label": "revision",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "inherit_context": false
+        },
+        "subflowId": "note-process"
+      }
+    },
+    {
+      "id": "inline_ack_args",
+      "type": "code",
+      "position": {
+        "x": 6240.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Mark it processed: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "outcome",
+            "label": "outcome",
+            "type": "string"
+          },
+          {
+            "id": "revision_id",
+            "label": "revision_id",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox",
+          "outcome": "ok"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif note_id is not None:\n    arguments[\"note_id\"] = note_id\nif outcome is not None:\n    arguments[\"outcome\"] = outcome\nif revision_id is not None:\n    arguments[\"revision_id\"] = revision_id\nreturn {\"tool_calls\": [{\"name\": \"note_queue_ack\", \"call_id\": \"inline_ack\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "inline_ack",
+      "type": "tool_calls",
+      "position": {
+        "x": 6720.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Mark it processed",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_queue_ack"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_queue_ack"
+          ]
+        }
+      }
+    },
+    {
+      "id": "inline_ack_out",
+      "type": "code",
+      "position": {
+        "x": 7200.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Mark it processed: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "status",
+            "label": "status",
+            "type": "string"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_queue_ack returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_queue_ack failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_queue_ack returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "processed_msg",
+      "type": "code",
+      "position": {
+        "x": 7680.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Processed answer",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "message",
+            "label": "message",
+            "type": "string"
+          },
+          {
+            "id": "summary",
+            "label": "summary",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "message",
+            "label": "message",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "extra = str(summary or \"\").strip()\nreturn {\"message\": (str(message) + \" \" + extra).strip()}\n"
+      }
+    },
+    {
+      "id": "end_processed",
+      "type": "on_flow_end",
+      "position": {
+        "x": 8160.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "on_flow_end",
+        "label": "Done (processed)",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "status",
+            "label": "status",
+            "type": "string"
+          },
+          {
+            "id": "revision",
+            "label": "revision",
+            "type": "object"
+          }
+        ],
+        "outputs": [],
+        "pinDefaults": {
+          "status": "processed"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-start-context-attachments-object",
+      "source": "start",
+      "sourceHandle": "context",
+      "target": "attachments",
+      "targetHandle": "object"
+    },
+    {
+      "id": "e-start-text-capture_args-text",
+      "source": "start",
+      "sourceHandle": "text",
+      "target": "capture_args",
+      "targetHandle": "text"
+    },
+    {
+      "id": "e-start-title-capture_args-title",
+      "source": "start",
+      "sourceHandle": "title",
+      "target": "capture_args",
+      "targetHandle": "title"
+    },
+    {
+      "id": "e-start-occurred_at-capture_args-occurred_at",
+      "source": "start",
+      "sourceHandle": "occurred_at",
+      "target": "capture_args",
+      "targetHandle": "occurred_at"
+    },
+    {
+      "id": "e-start-location-capture_args-location",
+      "source": "start",
+      "sourceHandle": "location",
+      "target": "capture_args",
+      "targetHandle": "location"
+    },
+    {
+      "id": "e-start-source-capture_args-source",
+      "source": "start",
+      "sourceHandle": "source",
+      "target": "capture_args",
+      "targetHandle": "source"
+    },
+    {
+      "id": "e-start-idempotency_key-capture_args-idempotency_key",
+      "source": "start",
+      "sourceHandle": "idempotency_key",
+      "target": "capture_args",
+      "targetHandle": "idempotency_key"
+    },
+    {
+      "id": "e-start-priority-capture_args-priority",
+      "source": "start",
+      "sourceHandle": "priority",
+      "target": "capture_args",
+      "targetHandle": "priority"
+    },
+    {
+      "id": "e-start-session_id-capture_args-session_id",
+      "source": "start",
+      "sourceHandle": "session_id",
+      "target": "capture_args",
+      "targetHandle": "session_id"
+    },
+    {
+      "id": "e-attachments-value-capture_args-attachments",
+      "source": "attachments",
+      "sourceHandle": "value",
+      "target": "capture_args",
+      "targetHandle": "attachments"
+    },
+    {
+      "id": "e-start-exec-out-capture_args-exec-in",
+      "source": "start",
+      "sourceHandle": "exec-out",
+      "target": "capture_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-capture_args-tool_calls-capture-tool_calls",
+      "source": "capture_args",
+      "sourceHandle": "tool_calls",
+      "target": "capture",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-capture_args-exec-out-capture-exec-in",
+      "source": "capture_args",
+      "sourceHandle": "exec-out",
+      "target": "capture",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-capture-results-capture_out-results",
+      "source": "capture",
+      "sourceHandle": "results",
+      "target": "capture_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-capture-exec-out-capture_out-exec-in",
+      "source": "capture",
+      "sourceHandle": "exec-out",
+      "target": "capture_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-capture_out-status-is_dup-status",
+      "source": "capture_out",
+      "sourceHandle": "status",
+      "target": "is_dup",
+      "targetHandle": "status"
+    },
+    {
+      "id": "e-is_dup-duplicate-dup_branch-condition",
+      "source": "is_dup",
+      "sourceHandle": "duplicate",
+      "target": "dup_branch",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-capture_out-exec-out-dup_branch-exec-in",
+      "source": "capture_out",
+      "sourceHandle": "exec-out",
+      "target": "dup_branch",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-capture_out-first_saved_at-dup_msg-first_saved_at",
+      "source": "capture_out",
+      "sourceHandle": "first_saved_at",
+      "target": "dup_msg",
+      "targetHandle": "first_saved_at"
+    },
+    {
+      "id": "e-dup_branch-true-dup_msg-exec-in",
+      "source": "dup_branch",
+      "sourceHandle": "true",
+      "target": "dup_msg",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-dup_msg-message-dup_answer-message",
+      "source": "dup_msg",
+      "sourceHandle": "message",
+      "target": "dup_answer",
+      "targetHandle": "message"
+    },
+    {
+      "id": "e-dup_msg-exec-out-dup_answer-exec-in",
+      "source": "dup_msg",
+      "sourceHandle": "exec-out",
+      "target": "dup_answer",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-dup_msg-message-end_duplicate-response",
+      "source": "dup_msg",
+      "sourceHandle": "message",
+      "target": "end_duplicate",
+      "targetHandle": "response"
+    },
+    {
+      "id": "e-capture_out-note_id-end_duplicate-note_id",
+      "source": "capture_out",
+      "sourceHandle": "note_id",
+      "target": "end_duplicate",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-dup_answer-exec-out-end_duplicate-exec-in",
+      "source": "dup_answer",
+      "sourceHandle": "exec-out",
+      "target": "end_duplicate",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-start-title-filing_prompt-title",
+      "source": "start",
+      "sourceHandle": "title",
+      "target": "filing_prompt",
+      "targetHandle": "title"
+    },
+    {
+      "id": "e-start-text-filing_prompt-text",
+      "source": "start",
+      "sourceHandle": "text",
+      "target": "filing_prompt",
+      "targetHandle": "text"
+    },
+    {
+      "id": "e-capture_out-similar-filing_prompt-similar",
+      "source": "capture_out",
+      "sourceHandle": "similar",
+      "target": "filing_prompt",
+      "targetHandle": "similar"
+    },
+    {
+      "id": "e-capture_out-revisits-filing_prompt-revisits",
+      "source": "capture_out",
+      "sourceHandle": "revisits",
+      "target": "filing_prompt",
+      "targetHandle": "revisits"
+    },
+    {
+      "id": "e-capture_out-topics-filing_prompt-topics",
+      "source": "capture_out",
+      "sourceHandle": "topics",
+      "target": "filing_prompt",
+      "targetHandle": "topics"
+    },
+    {
+      "id": "e-filing_prompt-result-filing-prompt",
+      "source": "filing_prompt",
+      "sourceHandle": "result",
+      "target": "filing",
+      "targetHandle": "prompt"
+    },
+    {
+      "id": "e-start-provider-filing-provider",
+      "source": "start",
+      "sourceHandle": "provider",
+      "target": "filing",
+      "targetHandle": "provider"
+    },
+    {
+      "id": "e-start-model-filing-model",
+      "source": "start",
+      "sourceHandle": "model",
+      "target": "filing",
+      "targetHandle": "model"
+    },
+    {
+      "id": "e-dup_branch-false-filing-exec-in",
+      "source": "dup_branch",
+      "sourceHandle": "false",
+      "target": "filing",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-filing-data-filing_fields-object",
+      "source": "filing",
+      "sourceHandle": "data",
+      "target": "filing_fields",
+      "targetHandle": "object"
+    },
+    {
+      "id": "e-capture_out-note_id-file_args-note_id",
+      "source": "capture_out",
+      "sourceHandle": "note_id",
+      "target": "file_args",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-filing_fields-title-file_args-title",
+      "source": "filing_fields",
+      "sourceHandle": "title",
+      "target": "file_args",
+      "targetHandle": "title"
+    },
+    {
+      "id": "e-filing_fields-kind-file_args-kind",
+      "source": "filing_fields",
+      "sourceHandle": "kind",
+      "target": "file_args",
+      "targetHandle": "kind"
+    },
+    {
+      "id": "e-filing_fields-topics-file_args-topics",
+      "source": "filing_fields",
+      "sourceHandle": "topics",
+      "target": "file_args",
+      "targetHandle": "topics"
+    },
+    {
+      "id": "e-filing_fields-urgency-file_args-urgency",
+      "source": "filing_fields",
+      "sourceHandle": "urgency",
+      "target": "file_args",
+      "targetHandle": "urgency"
+    },
+    {
+      "id": "e-filing_fields-language-file_args-language",
+      "source": "filing_fields",
+      "sourceHandle": "language",
+      "target": "file_args",
+      "targetHandle": "language"
+    },
+    {
+      "id": "e-filing_fields-one_line-file_args-one_line",
+      "source": "filing_fields",
+      "sourceHandle": "one_line",
+      "target": "file_args",
+      "targetHandle": "one_line"
+    },
+    {
+      "id": "e-filing-exec-out-file_args-exec-in",
+      "source": "filing",
+      "sourceHandle": "exec-out",
+      "target": "file_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-file_args-tool_calls-file-tool_calls",
+      "source": "file_args",
+      "sourceHandle": "tool_calls",
+      "target": "file",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-file_args-exec-out-file-exec-in",
+      "source": "file_args",
+      "sourceHandle": "exec-out",
+      "target": "file",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-file-results-file_out-results",
+      "source": "file",
+      "sourceHandle": "results",
+      "target": "file_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-file-exec-out-file_out-exec-in",
+      "source": "file",
+      "sourceHandle": "exec-out",
+      "target": "file_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-filing_fields-kind-saved_msg-kind",
+      "source": "filing_fields",
+      "sourceHandle": "kind",
+      "target": "saved_msg",
+      "targetHandle": "kind"
+    },
+    {
+      "id": "e-filing_fields-title-saved_msg-title",
+      "source": "filing_fields",
+      "sourceHandle": "title",
+      "target": "saved_msg",
+      "targetHandle": "title"
+    },
+    {
+      "id": "e-capture_out-similar-saved_msg-similar",
+      "source": "capture_out",
+      "sourceHandle": "similar",
+      "target": "saved_msg",
+      "targetHandle": "similar"
+    },
+    {
+      "id": "e-capture_out-revisits-saved_msg-revisits",
+      "source": "capture_out",
+      "sourceHandle": "revisits",
+      "target": "saved_msg",
+      "targetHandle": "revisits"
+    },
+    {
+      "id": "e-capture_out-warnings-saved_msg-warnings",
+      "source": "capture_out",
+      "sourceHandle": "warnings",
+      "target": "saved_msg",
+      "targetHandle": "warnings"
+    },
+    {
+      "id": "e-file_out-exec-out-saved_msg-exec-in",
+      "source": "file_out",
+      "sourceHandle": "exec-out",
+      "target": "saved_msg",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-saved_msg-message-saved_answer-message",
+      "source": "saved_msg",
+      "sourceHandle": "message",
+      "target": "saved_answer",
+      "targetHandle": "message"
+    },
+    {
+      "id": "e-saved_msg-exec-out-saved_answer-exec-in",
+      "source": "saved_msg",
+      "sourceHandle": "exec-out",
+      "target": "saved_answer",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-start-process_inline-inline_branch-condition",
+      "source": "start",
+      "sourceHandle": "process_inline",
+      "target": "inline_branch",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-saved_answer-exec-out-inline_branch-exec-in",
+      "source": "saved_answer",
+      "sourceHandle": "exec-out",
+      "target": "inline_branch",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-saved_msg-message-end_queued-response",
+      "source": "saved_msg",
+      "sourceHandle": "message",
+      "target": "end_queued",
+      "targetHandle": "response"
+    },
+    {
+      "id": "e-capture_out-note_id-end_queued-note_id",
+      "source": "capture_out",
+      "sourceHandle": "note_id",
+      "target": "end_queued",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-inline_branch-false-end_queued-exec-in",
+      "source": "inline_branch",
+      "sourceHandle": "false",
+      "target": "end_queued",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-capture_out-note_id-process-note_id",
+      "source": "capture_out",
+      "sourceHandle": "note_id",
+      "target": "process",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-start-provider-process-provider",
+      "source": "start",
+      "sourceHandle": "provider",
+      "target": "process",
+      "targetHandle": "provider"
+    },
+    {
+      "id": "e-start-model-process-model",
+      "source": "start",
+      "sourceHandle": "model",
+      "target": "process",
+      "targetHandle": "model"
+    },
+    {
+      "id": "e-inline_branch-true-process-exec-in",
+      "source": "inline_branch",
+      "sourceHandle": "true",
+      "target": "process",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-capture_out-note_id-inline_ack_args-note_id",
+      "source": "capture_out",
+      "sourceHandle": "note_id",
+      "target": "inline_ack_args",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-process-revision_id-inline_ack_args-revision_id",
+      "source": "process",
+      "sourceHandle": "revision_id",
+      "target": "inline_ack_args",
+      "targetHandle": "revision_id"
+    },
+    {
+      "id": "e-process-exec-out-inline_ack_args-exec-in",
+      "source": "process",
+      "sourceHandle": "exec-out",
+      "target": "inline_ack_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-inline_ack_args-tool_calls-inline_ack-tool_calls",
+      "source": "inline_ack_args",
+      "sourceHandle": "tool_calls",
+      "target": "inline_ack",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-inline_ack_args-exec-out-inline_ack-exec-in",
+      "source": "inline_ack_args",
+      "sourceHandle": "exec-out",
+      "target": "inline_ack",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-inline_ack-results-inline_ack_out-results",
+      "source": "inline_ack",
+      "sourceHandle": "results",
+      "target": "inline_ack_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-inline_ack-exec-out-inline_ack_out-exec-in",
+      "source": "inline_ack",
+      "sourceHandle": "exec-out",
+      "target": "inline_ack_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-saved_msg-message-processed_msg-message",
+      "source": "saved_msg",
+      "sourceHandle": "message",
+      "target": "processed_msg",
+      "targetHandle": "message"
+    },
+    {
+      "id": "e-process-response-processed_msg-summary",
+      "source": "process",
+      "sourceHandle": "response",
+      "target": "processed_msg",
+      "targetHandle": "summary"
+    },
+    {
+      "id": "e-inline_ack_out-exec-out-processed_msg-exec-in",
+      "source": "inline_ack_out",
+      "sourceHandle": "exec-out",
+      "target": "processed_msg",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-processed_msg-message-end_processed-response",
+      "source": "processed_msg",
+      "sourceHandle": "message",
+      "target": "end_processed",
+      "targetHandle": "response"
+    },
+    {
+      "id": "e-capture_out-note_id-end_processed-note_id",
+      "source": "capture_out",
+      "sourceHandle": "note_id",
+      "target": "end_processed",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-process-revision-end_processed-revision",
+      "source": "process",
+      "sourceHandle": "revision",
+      "target": "end_processed",
+      "targetHandle": "revision"
+    },
+    {
+      "id": "e-processed_msg-exec-out-end_processed-exec-in",
+      "source": "processed_msg",
+      "sourceHandle": "exec-out",
+      "target": "end_processed",
+      "targetHandle": "exec-in"
+    }
+  ],
+  "entryNode": "start"
+}
