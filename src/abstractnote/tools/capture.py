@@ -55,12 +55,13 @@ def resolve_attachments(ctx: ToolContext, attachments: Optional[List[Any]]) -> L
 def note_capture(ctx: ToolContext, text: str = "", idempotency_key: Optional[str] = None, title: Optional[str] = None,
                  occurred_at: Optional[str] = None, location: Optional[Dict[str, Any]] = None,
                  source: Optional[Dict[str, Any]] = None, priority: Optional[int] = None,
-                 attachments: Optional[List[Any]] = None, session_id: Optional[str] = None) -> Dict[str, Any]:
+                 attachments: Optional[List[Any]] = None, session_id: Optional[str] = None,
+                 about: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     resolved = resolve_attachments(ctx, attachments)
     result = ctx.nb.capture(
         text, title=title, occurred_at=occurred_at, location=location, source=source,
         priority=None if priority is None else int(priority), attachments=resolved,
-        idempotency_key=idempotency_key, session_id=session_id, account=ctx.account,
+        idempotency_key=idempotency_key, session_id=session_id, account=ctx.account, about=about,
         default_client=ctx.default_client, vision=ctx.extractors.get("vision"), stt=ctx.extractors.get("stt"),
     )
     return result.model_dump()

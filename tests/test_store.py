@@ -109,7 +109,7 @@ def test_user_actions_are_revisions_with_account(nb):
                           claim("cl_1", "ex:person-dana", "schema:jobTitle", literal="Lead", at=t(1))))
     closed = nb.close_task("tk_1", "user:7", note="sent", occurred_at=t(3))
     assert closed["tasks_closed"] == ["tk_1"]
-    assert nb.tasks(status="done")[0]["closed_at"] == t(3)
+    assert nb.tasks(status="done")["items"][0]["closed_at"] == t(3)
     with pytest.raises(ValueError):
         nb.close_task("tk_1", "user:7")
     retracted = nb.retract_claim("cl_1", "user:7", "never true", occurred_at=t(4))

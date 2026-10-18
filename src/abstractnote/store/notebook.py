@@ -319,33 +319,53 @@ class Notebook:
         return file_note(self, note_id, **kwargs)
 
     def note(self, note_id: str) -> Optional[Dict[str, Any]]:
-        """A note with attachments, its revision, claims, linked entities and revisits."""
+        """A note in the pinned shape of ``GET /note/notes/{id}``: ``{note_id, title, text, kind, occurred_at,
+        received_at, status, topics, summary, source, location, attachments, revision, entities, claims, revisits}``.
+
+        ``revision`` is the note's applied revision (or null); ``revisits`` lists the notes linked to it by
+        ``ex:revisits`` in either direction as ``NoteRef``.
+        """
+        from ..recall import shapes
+
         row = self.store.note_row(note_id)
         if row is None:
             return None
-        out = self.store.note_dict(row)
         atts = self.store.attachments_of(note_id)
         for a in atts:
             path = self.root / "extracted" / f"{a['sha256']}.txt"
             a["extracted_text"] = path.read_text(encoding="utf-8") if a["extracted_chars"] and path.exists() else None
-        out["attachments"] = atts
-        revs = self.store.q("SELECT * FROM revisions WHERE note_id=? AND applied_index=1 ORDER BY seq", (note_id,))
-        out["revisions"] = [{k: v for k, v in self.store.revision_dict(r).items() if k != "ops"} for r in revs]
-        out["claims"] = [self.store.claim_dict(r) for r in self.store.q(
-            "SELECT * FROM claims WHERE note_id=? ORDER BY seq", (note_id,))]
-        out["entities"] = [b for b in (self.store.entity_brief(r[0]) for r in self.store.q(
-            "SELECT entity_id FROM entity_notes WHERE note_id=? ORDER BY entity_id", (note_id,))) if b]
-        out["revisits"] = [dict(r) for r in self.store.q(
-            "SELECT l.dst_note_id AS note_id, n.occurred_at, n.title, l.matched_by, l.score FROM note_links l"
-            " JOIN notes n ON n.note_id=l.dst_note_id WHERE l.src_note_id=? AND l.predicate='ex:revisits'"
-            " ORDER BY n.occurred_at", (note_id,))]
-        out["revisited_by"] = [dict(r) for r in self.store.q(
-            "SELECT l.src_note_id AS note_id, n.occurred_at, n.title, l.matched_by, l.score FROM note_links l"
-            " JOIN notes n ON n.note_id=l.src_note_id WHERE l.dst_note_id=? AND l.predicate='ex:revisits'"
-            " ORDER BY n.occurred_at", (note_id,))]
-        out["same_bytes_as"] = [{"note_id": r["dst_note_id"], **(_uj(r["detail_json"], {}) or {})} for r in self.store.q(
-            "SELECT * FROM note_links WHERE src_note_id=? AND predicate='same_bytes_as'", (note_id,))]
-        out["queue"] = self.queue.item(note_id)
+        rev = self.store.q1("SELECT * FROM revisions WHERE note_id=? AND applied_index=1 ORDER BY seq DESC LIMIT 1",
+                            (note_id,))
+        revisits = self.store.q(
+            "SELECT n.* FROM note_links l JOIN notes n ON n.note_id=l.dst_note_id WHERE l.src_note_id=?"
+            " AND l.predicate='ex:revisits' UNION SELECT n.* FROM note_links l JOIN notes n"
+            " ON n.note_id=l.src_note_id WHERE l.dst_note_id=? AND l.predicate='ex:revisits'"
+            " ORDER BY occurred_at, note_id", (note_id, note_id))
+        return {
+            "note_id": row["note_id"], "title": row["title"], "text": row["text"], "kind": row["kind"],
+            "occurred_at": row["occurred_at"], "received_at": row["received_at"], "status": row["status"],
+            "topics": self.store.note_topics(note_id), "summary": row["summary"] or row["one_line"],
+            "source": _uj(row["source_json"], {}), "location": _uj(row["location_json"]),
+            "attachments": atts,
+            "revision": self.store.revision_dict(rev) if rev else None,
+            "entities": [b for b in (self.store.entity_brief(r[0]) for r in self.store.q(
+                "SELECT entity_id FROM entity_notes WHERE note_id=? ORDER BY entity_id", (note_id,))) if b],
+            "claims": [self.store.claim_dict(r) for r in self.store.q(
+                "SELECT * FROM claims WHERE note_id=? ORDER BY seq", (note_id,))],
+            "revisits": [shapes.note_ref(r) for r in revisits],
+        }
+
+    def note_links(self, note_id: str) -> Dict[str, Any]:
+        """Every link of a note (revisits both ways, same bytes, references) with how it matched."""
+        out = {"outgoing": [], "incoming": []}
+        for r in self.store.q("SELECT * FROM note_links WHERE src_note_id=? ORDER BY created_at", (note_id,)):
+            out["outgoing"].append({"note_id": r["dst_note_id"], "predicate": r["predicate"],
+                                    "matched_by": r["matched_by"], "score": r["score"],
+                                    "detail": _uj(r["detail_json"])})
+        for r in self.store.q("SELECT * FROM note_links WHERE dst_note_id=? ORDER BY created_at", (note_id,)):
+            out["incoming"].append({"note_id": r["src_note_id"], "predicate": r["predicate"],
+                                    "matched_by": r["matched_by"], "score": r["score"],
+                                    "detail": _uj(r["detail_json"])})
         return out
 
     def attachment_bytes(self, note_id: str, attachment_id: str) -> Dict[str, Any]:
@@ -405,16 +425,50 @@ class Notebook:
     def revisions(self, **kwargs: Any) -> Dict[str, Any]:
         return self.store.revisions_feed(**kwargs)
 
-    def topics(self) -> List[Dict[str, Any]]:
-        return self.store.topics()
+    def topics(self) -> Dict[str, Any]:
+        return {"items": self.store.topics()}
 
     def tasks(self, status: Optional[str] = "open", entity: Optional[str] = None, limit: int = 100
-              ) -> List[Dict[str, Any]]:
-        return self.store.tasks(status=status, entity=entity, limit=limit)
+              ) -> Dict[str, Any]:
+        """``{items: [{task_id, note_id, text, status, due, closed_at}]}`` (``status=None`` for all)."""
+        keys = ("task_id", "note_id", "text", "status", "due", "closed_at")
+        return {"items": [{k: t[k] for k in keys} for t in self.store.tasks(status=status, entity=entity,
+                                                                           limit=limit)]}
 
     def insights(self, kind: Optional[str] = None, acked: Optional[bool] = None, limit: int = 50
-                 ) -> List[Dict[str, Any]]:
-        return self.store.insights(kind=kind, acked=acked, limit=limit)
+                 ) -> Dict[str, Any]:
+        """``{items: [Insight]}``, newest first."""
+        from ..recall import shapes
+        from .notes import clamp_limit
+
+        sql = "SELECT * FROM notes WHERE insight_kind IS NOT NULL AND archived_at IS NULL"
+        params: List[Any] = []
+        if kind:
+            sql += " AND insight_kind=?"
+            params.append(kind)
+        if acked is True:
+            sql += " AND acked_at IS NOT NULL"
+        elif acked is False:
+            sql += " AND acked_at IS NULL"
+        sql += " ORDER BY received_at DESC, note_id DESC LIMIT ?"
+        params.append(clamp_limit(limit))
+        return {"items": [shapes.insight(r) for r in self.store.q(sql, params)]}
+
+    def changes(self, since: Optional[str] = None, limit: int = 50) -> Dict[str, Any]:
+        """Since you last looked; see :func:`abstractnote.recall.changes.changes`."""
+        from ..recall.changes import changes
+
+        return changes(self, since, limit)
+
+    def overview(self, days: int = 30, *, now: Optional[str] = None) -> Dict[str, Any]:
+        from ..recall.changes import overview
+
+        return overview(self, days, now=now)
+
+    def cues(self, limit: int = 3) -> Dict[str, Any]:
+        from ..recall.changes import cues
+
+        return cues(self, limit)
 
     # ------------------------------------------------------------------ settings and status
 
@@ -539,13 +593,14 @@ class Notebook:
                 c.execute("BEGIN IMMEDIATE")
                 c.execute("DELETE FROM meta")
                 c.execute("INSERT INTO meta SELECT * FROM old.meta" + (" WHERE key!='embedding_pin'" if reembed else ""))
-                for table in ("notes", "attachments", "note_links", "queue", "context_packets"):
-                    c.execute(f"INSERT INTO {table} SELECT * FROM old.{table}")
+                tables = ["notes", "attachments", "note_links", "queue", "context_packets", "revisions"]
                 if not reembed:
-                    c.execute("INSERT INTO vectors SELECT * FROM old.vectors")
-                cols = [r[1] for r in c.execute("PRAGMA table_info(revisions)")]
-                collist = ",".join(cols)
-                c.execute(f"INSERT INTO revisions({collist}) SELECT {collist} FROM old.revisions")
+                    tables.append("vectors")
+                for table in tables:
+                    new_cols = [r[1] for r in c.execute(f"PRAGMA main.table_info({table})")]
+                    old_cols = {r[1] for r in c.execute(f"PRAGMA old.table_info({table})")}
+                    collist = ",".join(col for col in new_cols if col in old_cols)
+                    c.execute(f"INSERT INTO main.{table}({collist}) SELECT {collist} FROM old.{table}")
                 c.execute("UPDATE revisions SET applied_index=0, applied_kg=0, result_json=NULL WHERE abandoned=0")
                 c.execute("UPDATE notes SET summary=NULL")
                 c.execute("COMMIT")

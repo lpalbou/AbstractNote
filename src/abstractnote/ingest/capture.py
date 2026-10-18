@@ -42,6 +42,30 @@ def _source(source: Optional[Dict[str, Any]], default_client: str, account: Opti
         raise ValueError(f"The source is not valid ({loc}: {first.get('msg')}).") from None
 
 
+ABOUT_KINDS = ("insight", "task", "cue", "entity", "note")
+
+
+def _about(nb: Any, about: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The subject a note answers or comments (``context.about``): ``{kind, id, title?}``, checked to exist."""
+    if not about:
+        return None
+    if not isinstance(about, dict) or about.get("kind") not in ABOUT_KINDS or not str(about.get("id") or "").strip():
+        raise ValueError("The subject of a note needs a kind (insight, task, cue, entity or note) and an id.")
+    kind, ref = about["kind"], str(about["id"]).strip()
+    if kind == "task":
+        found = nb.store.q1("SELECT 1 FROM tasks WHERE task_id=?", (ref,))
+    elif kind == "entity":
+        found = nb.store.entity_row(ref)
+    else:
+        found = nb.store.note_row(ref)
+    if found is None:
+        raise ValueError("The subject this note refers to is not in this notebook.")
+    out = {"kind": kind, "id": ref}
+    if about.get("title"):
+        out["title"] = str(about["title"])
+    return out
+
+
 def _location(location: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if location is None:
         return None
@@ -56,6 +80,7 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
             priority: Optional[int] = None, attachments: Optional[Sequence[Dict[str, Any]]] = None,
             idempotency_key: Optional[str] = None, session_id: Optional[str] = None, run_id: Optional[str] = None,
             importer: Optional[str] = None, source_key: Optional[str] = None, account: Optional[str] = None,
+            about: Optional[Dict[str, Any]] = None,
             default_client: str = "cli", vision: Any = None, stt: Any = None, now: Optional[str] = None
             ) -> CaptureResult:
     """Store one note. ``attachments`` are resolved inputs: ``{"data": bytes, "mime"?, "filename"?, "artifact_ref"?}``."""
@@ -73,6 +98,7 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
     if importer:
         src["importer"] = importer
     loc = _location(location)
+    about_ref = _about(nb, about)
     norm = text_norm(text)
     blobs = BlobStore(nb.root / "blobs")
     hashes = [ids.sha256_bytes(a["data"]) for a in atts]
@@ -167,8 +193,12 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
             "client": src.get("client"), "location_json": _j(loc) if loc else None, "priority": prio,
             "priority_explicit": 1 if priority is not None else 0, "status": "received",
             "session_id": session_id, "run_id": run_id, "idempotency_key": idempotency_key, "size": size,
-            "vector_key": vkey,
+            "vector_key": vkey, "about_json": _j(about_ref) if about_ref else None,
         })
+        if about_ref:
+            c.execute("INSERT OR IGNORE INTO note_links(src_note_id, dst_note_id, predicate, score, matched_by,"
+                      " detail_json, created_at) VALUES (?,?,?,1.0,?,?,?)",
+                      (note_id, about_ref["id"], "dcterms:references", about_ref["kind"], _j(about_ref), now))
         for row in att_rows:
             cols = ",".join(row)
             c.execute(f"INSERT OR IGNORE INTO attachments({cols}) VALUES ({','.join('?' for _ in row)})",

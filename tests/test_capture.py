@@ -33,7 +33,8 @@ def test_same_words_on_another_day_are_a_new_note_that_revisits(nb):
     note = nb.note(b.note_id)
     assert note["location"]["label"] == "Paris"
     assert [r["note_id"] for r in note["revisits"]] == [a.note_id]
-    assert [r["note_id"] for r in nb.note(a.note_id)["revisited_by"]] == [b.note_id]
+    assert [r["note_id"] for r in nb.note(a.note_id)["revisits"]] == [b.note_id]
+    assert set(note["revisits"][0]) == {"note_id", "title", "kind", "occurred_at", "excerpt"}
 
 
 def test_no_key_same_minute_same_client_is_a_retry(nb):
@@ -72,7 +73,8 @@ def test_same_file_twice_stores_one_blob_and_links(nb, tmp_path):
     blobs = [p for p in (nb.root / "blobs").rglob("*") if p.is_file()]
     assert len(blobs) == 1
     note_b = nb.note(b.note_id)
-    assert note_b["same_bytes_as"][0]["note_id"] == a.note_id
+    [link] = [x for x in nb.note_links(b.note_id)["outgoing"] if x["predicate"] == "same_bytes_as"]
+    assert link["note_id"] == a.note_id and link["matched_by"] == "sha256"
     assert note_b["attachments"][0]["extracted_by"] == "plain"
     assert note_b["attachments"][0]["extracted_text"] == "hello world"
     got = nb.attachment_bytes(b.note_id, note_b["attachments"][0]["attachment_id"])
@@ -170,7 +172,7 @@ def test_tool_artifacts_need_a_reader_and_stamp_the_account(nb):
                        source={"client": "web", "account": "someone-else"}, session_id="s-1", idempotency_key="u1")
     assert seen == [{"$artifact": "art-1", "run_id": "run-9"}]
     note = nb.note(out["note_id"])
-    assert note["source"]["account"] == "user:42" and note["session_id"] == "s-1"
+    assert note["source"]["account"] == "user:42" and nb.store.note_row(out["note_id"])["session_id"] == "s-1"
     assert note["attachments"][0]["artifact_ref"] == {"artifact_id": "art-1", "run_id": "run-9"}
     filed = note_file(ctx, out["note_id"], kind="reference")
     assert filed["status"] == "queued"

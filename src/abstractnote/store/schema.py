@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS notes (
   evidence_note_ids_json TEXT,
   entity_ids_json TEXT,
   acked_at TEXT,
+  about_json TEXT,
   seq INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_notes_occurred ON notes(occurred_at);
@@ -323,8 +324,17 @@ def connect(path: str) -> sqlite3.Connection:
     return conn
 
 
+# Columns added after the first notebooks were created (in-place upgrade on open).
+_ADDED_COLUMNS = {"notes": [("about_json", "TEXT")]}
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(DDL)
+    for table, cols in _ADDED_COLUMNS.items():
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for name, decl in cols:
+            if name not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
     try:
         conn.executescript(FTS_DDL)
     except sqlite3.OperationalError as exc:  # pragma: no cover - every supported Python ships FTS5
