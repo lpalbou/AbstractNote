@@ -178,3 +178,42 @@ def test_a_plane_runtime_loads_the_workflows_binds_and_auto_approves_the_note_to
     assert "send_email" in policy.default_require_approval_tools            # the default caution list survives
     tool_map = chain[-1]._tool_map
     assert set(NOTE_TOOLS) <= set(tool_map)
+
+
+def test_pinned_reads_on_an_empty_notebook(gw):
+    c, h = gw["client"], gw["alice"]
+    shapes = {
+        "/api/gateway/note/changes": {"cursor", "notes", "entities", "superseded_claims", "closed_loops", "failed_notes", "insights"},
+        "/api/gateway/note/overview": {"recent", "entities", "insights", "resurfacing", "activity"},
+        "/api/gateway/note/cues": {"items"},
+        "/api/gateway/note/tasks": {"items"},
+        "/api/gateway/note/insights": {"items"},
+        "/api/gateway/note/topics": {"items"},
+    }
+    for path, keys in shapes.items():
+        r = c.get(path, headers=h)
+        assert r.status_code == 200, (path, r.text)
+        assert keys <= set(r.json()), (path, r.json())
+
+
+def test_unknown_ids_are_404_and_bad_input_is_400(gw):
+    c, h = gw["client"], gw["alice"]
+    for path in ("/api/gateway/note/entities/ex:person-nobody", "/api/gateway/note/entities/ex:person-nobody/timeline",
+                 "/api/gateway/note/claims/cl_nope", "/api/gateway/note/relations/ex:a/ex:b"):
+        r = c.get(path, headers=h)
+        assert r.status_code == 404, (path, r.status_code, r.text)
+    r = c.post("/api/gateway/note/tasks/tk_nope/close", headers=h, json={})
+    assert r.status_code == 404 and r.json()["detail"] == "That task is not in your notebook."
+    r = c.post("/api/gateway/note/claims/cl_nope/retract", headers=h, json={"reason": "wrong"})
+    assert r.status_code == 404
+    assert c.get("/api/gateway/note/timeline?granularity=year", headers=h).status_code == 422
+
+
+def test_the_plane_tools_are_the_core_lane_tools(gw):
+    from abstractgateway.service import get_gateway_service_for_principal
+
+    principal = gw["registry"].authenticate(gw["alice"]["Authorization"].split(" ", 1)[1])
+    host = get_gateway_service_for_principal(principal).host
+    tool_map = _executor_chain(host.runtime)[-1]._tool_map
+    td = getattr(tool_map["note_capture"], "_tool_definition", None)
+    assert td is not None and td.name == "note_capture" and "about" in td.parameters

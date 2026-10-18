@@ -81,6 +81,26 @@ def _missing(what: str) -> HTTPException:
     return HTTPException(status_code=404, detail=f"That {what} is not in your notebook.")
 
 
+def _exists(nb: Any, kind: str, ident: str) -> bool:
+    """Is this id in the caller's notebook? (an existence check, so an absent id is 404 and only
+    genuinely bad input is 400; the core lane signals both with ValueError)."""
+    store = nb.store
+    if kind == "note":
+        return store.note_row(ident) is not None
+    if kind == "entity":
+        return store.entity_row(ident) is not None
+    if kind == "claim":
+        return store.claim_row(ident) is not None
+    if kind == "task":
+        return store.q1("SELECT 1 FROM tasks WHERE task_id=?", (ident,)) is not None
+    raise ValueError(kind)
+
+
+def _require(nb: Any, kind: str, ident: str, what: str) -> None:
+    if not _exists(nb, kind, ident):
+        raise _missing(what)
+
+
 def _call(nb: Any, name: str, *args: Any, **kwargs: Any) -> Any:
     fn = getattr(nb, name, None)
     if not callable(fn):  # a core-lane method this version does not have yet: loud, never a fake answer
@@ -179,8 +199,7 @@ async def note_get(request: Request, note_id: str) -> Dict[str, Any]:
 @router.get("/notes/{note_id}/attachments/{attachment_id}")
 async def note_attachment(request: Request, note_id: str, attachment_id: str) -> Response:
     def work(nb, svc, p):
-        if _call(nb, "note", note_id) is None:
-            raise _missing("note")
+        _require(nb, "note", note_id, "note")
         try:
             blob = nb.attachment_bytes(note_id, attachment_id)
         except ValueError:
@@ -198,8 +217,7 @@ async def note_attachment(request: Request, note_id: str, attachment_id: str) ->
 @router.post("/notes/{note_id}/archive")
 async def note_archive(request: Request, note_id: str) -> Dict[str, Any]:
     def work(nb, svc, p):
-        if _call(nb, "note", note_id) is None:
-            raise _missing("note")
+        _require(nb, "note", note_id, "note")
         return _call(nb, "archive_note", note_id)
 
     return await _run(request, work)
@@ -230,17 +248,14 @@ async def note_entities(
 @router.get("/entities/{entity_id}")
 async def note_entity(request: Request, entity_id: str, at: Optional[str] = None) -> Dict[str, Any]:
     def work(nb, svc, p):
-        card = _call(nb, "entity", entity_id, **_clean(at=at))
-        if card is None:
-            raise _missing("entity")
-        return card
+        _require(nb, "entity", entity_id, "entity")
+        return _call(nb, "entity", entity_id, **_clean(at=at))
 
     return await _run(request, work)
 
 
 def _entity_or_404(nb: Any, entity_id: str) -> None:
-    if _call(nb, "entity", entity_id) is None:
-        raise _missing("entity")
+    _require(nb, "entity", entity_id, "entity")
 
 
 @router.get("/entities/{entity_id}/timeline")
@@ -297,10 +312,8 @@ async def note_unmerge(request: Request, entity_id: str, body: UnmergeBody) -> D
 @router.get("/claims/{claim_id}")
 async def note_claim(request: Request, claim_id: str) -> Dict[str, Any]:
     def work(nb, svc, p):
-        chain = _call(nb, "claim", claim_id)
-        if chain is None:
-            raise _missing("statement")
-        return chain
+        _require(nb, "claim", claim_id, "statement")
+        return _call(nb, "claim", claim_id)
 
     return await _run(request, work)
 
@@ -315,8 +328,7 @@ class RetractBody(BaseModel):
 @router.post("/claims/{claim_id}/retract")
 async def note_claim_retract(request: Request, claim_id: str, body: RetractBody) -> Dict[str, Any]:
     def work(nb, svc, p):
-        if _call(nb, "claim", claim_id) is None:
-            raise _missing("statement")
+        _require(nb, "claim", claim_id, "statement")
         return _call(nb, "retract_claim", claim_id, _account(p), body.reason, client=body.client)
 
     return await _run(request, work)
@@ -334,9 +346,7 @@ async def note_task_close(request: Request, task_id: str, body: Optional[CloseTa
     body = body or CloseTaskBody()
 
     def work(nb, svc, p):
-        task = _call(nb, "task", task_id)
-        if task is None:
-            raise _missing("task")
+        _require(nb, "task", task_id, "task")
         return _call(nb, "close_task", task_id, _account(p), body.note, client=body.client)
 
     return await _run(request, work)
@@ -403,8 +413,7 @@ async def note_insights(request: Request, kind: Optional[str] = None, acked: Opt
 @router.post("/insights/{note_id}/ack")
 async def note_insight_ack(request: Request, note_id: str) -> Dict[str, Any]:
     def work(nb, svc, p):
-        if _call(nb, "note", note_id) is None:
-            raise _missing("insight")
+        _require(nb, "note", note_id, "insight")
         return _call(nb, "ack_insight", note_id)
 
     return await _run(request, work)
@@ -423,8 +432,7 @@ async def note_queue(request: Request, limit: int = Query(50, ge=1, le=500)) -> 
 @router.post("/queue/{note_id}/retry")
 async def note_queue_retry(request: Request, note_id: str) -> Dict[str, Any]:
     def work(nb, svc, p):
-        if _call(nb, "note", note_id) is None:
-            raise _missing("note")
+        _require(nb, "note", note_id, "note")
         return _call(nb.queue, "retry", note_id)
 
     return await _run(request, work)

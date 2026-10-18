@@ -284,3 +284,31 @@ def test_core_tools_capture_then_drain_then_recall(tmp_path):
     assert runner.run_drain()["response"] == "Nothing to process."
     hits = runner.run_recall("Dana", effort="quick")
     assert cap["note_id"] in hits["response"]
+
+
+def test_the_flow_merge_matches_the_core_lane_merge(doubles):
+    """note-process merges section extractions in a code node; the core lane has the same rule
+    (abstractnote.process.merge). Two sections, overlapping mentions: both must agree exactly."""
+    try:
+        from abstractnote.process.merge import merge_extractions
+    except ImportError as e:
+        pytest.skip(f"abstractnote.process.merge is not importable yet ({e})")
+    part1 = copy.deepcopy(EXTRACTION)
+    part2 = {"summary": "Dana moved the deadline.", "mentions": [
+        {"ref": "m1", "name": "dana", "kind": "person", "aliases": ["D."], "role": "moved it"},
+        {"ref": "m2", "name": "Pareto", "kind": "artifact", "aliases": ["Pareto"], "role": "the deliverable"}],
+        "claims": [{"subject": "m1", "predicate": "ex:moved_deadline_of", "object": "m2", "object_is_literal": False,
+                    "certainty": "stated", "stance": "revise", "evidence": "moved the deadline",
+                    "valid_from": None, "valid_until": None}],
+        "tasks": [], "time_refs": [{"text": "next week", "iso": None}], "topics": ["lut", "deadlines"]}
+    tools = doubles.tools()
+    tools["note_context"] = doubles._rec("note_context", lambda **k: {
+        "note": {"note_id": k["note_id"]}, "sections": ["one", "two"], "similar_notes": [], "candidate_entities": [],
+        "open_tasks": [], "topics": [], "vocabulary": []})
+    script = dict(SCRIPT, Extraction=[part1, part2])
+    r = NoteRunner.with_llm(ScriptedLLM(script), tools)
+    r.run("note-process", {"note_id": "nt_1"})
+    (applied,) = doubles.args("note_apply_revision")
+    merged, mentions = merge_extractions([part1, part2])
+    assert applied["extraction"] == merged
+    assert doubles.args("note_resolve_candidates")[0]["mentions"] == mentions
