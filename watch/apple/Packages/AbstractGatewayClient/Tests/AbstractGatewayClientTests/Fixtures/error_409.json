@@ -1,0 +1,2 @@
+{"request": {"method": "POST", "path": "/api/gateway/note/tasks/t-7/close"}, "status": 409,
+ "body": {"detail": {"reason_code": "invalid_state", "message": "This loop is already closed."}}}

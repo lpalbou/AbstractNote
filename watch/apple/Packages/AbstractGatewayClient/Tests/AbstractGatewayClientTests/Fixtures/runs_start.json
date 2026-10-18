@@ -1,0 +1,2 @@
+{"request": {"method": "POST", "path": "/api/gateway/runs/start"}, "status": 200,
+ "body": {"run_id": "run-cap-1", "runner_warning": null, "resolved_workflow": {"bundle_id": "abstractnote", "flow_id": "note-capture"}}}

@@ -1,0 +1,6 @@
+{"request": {"method": "GET", "path": "/api/gateway/runs/run-rec-1"}, "status": 200,
+ "body": {"run_id": "run-rec-1", "workflow_id": "abstractnote:note-recall", "status": "completed",
+          "output": {"response": "You settled on 50k on 17 October.", "answer": "You settled on 50k on 17 October.",
+                     "evidence": [{"note_id": "n-12", "title": "LUT budget with Dana", "occurred_at": "2026-10-12T09:12:00Z", "excerpt": "she wants the Pareto"},
+                                  {"note_id": "n-17", "title": "Budget settled at 50k", "occurred_at": "2026-10-17T16:40:00Z", "excerpt": null}],
+                     "evolution": {"earliest": null, "latest": null, "turning_points": []}, "open_loops": [], "follow_ups": []}}}

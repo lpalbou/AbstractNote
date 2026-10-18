@@ -1,0 +1,2 @@
+{"request": {"method": "GET", "path": "/api/gateway/runs/run-x"}, "status": 200,
+ "body": {"run_id": "run-x", "status": "failed", "error": "model unavailable", "output": null}}

@@ -1,0 +1,1 @@
+{"request": {"method": "POST", "path": "/api/gateway/note/insights/i-1/ack"}, "status": 200, "body": {"ok": true, "note_id": "i-1", "acked_at": "2026-10-19T09:30:00Z"}}

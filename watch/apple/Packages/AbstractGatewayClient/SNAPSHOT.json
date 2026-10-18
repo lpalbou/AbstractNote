@@ -1,0 +1,43 @@
+{
+  "source": "../../../../../abstractassistant/watch/apple/Packages/AbstractGatewayClient",
+  "source_commit": "15b614f2ad22598f9053d326e772c92da29b3fe7",
+  "date": "2026-10-19",
+  "sha256": {
+    "Sources/AbstractGatewayClient/Auth.swift": "0e33b58b627eccee82d0133bd9400ac5992d279ac969147cd0c28cec357cad35",
+    "Sources/AbstractGatewayClient/GatewayClient.swift": "70555ec9a73f8cabf52b06aaa11ae3871ffcbb833f68776ad3d6c9653082d19e",
+    "Sources/AbstractGatewayClient/Models.swift": "38a96fe841e2fdfb0ae5414b7d5c1c0fc677e96e833c57d63658c64ae561ff48",
+    "Sources/AbstractGatewayClient/MockGatewayClient.swift": "ab215e4964f395ad4372fb39e73d6071107a04d1c9f457a29f1c8455831cf6d6",
+    "Tests/AbstractGatewayClientTests/SignInTests.swift": "9c897ee948234a03c9236e0ab668e0eb0c74245bf0a4f0247c3ef28d6b52ba7a",
+    "Tests/AbstractGatewayClientTests/RetryTests.swift": "52dcb4ce9b20f1e12c61290c8c5414bd62ed56fb87991734a85bb280c2efaf5c"
+  },
+  "local_sha256": {
+    "Sources/AbstractGatewayClient/Auth.swift": "0e33b58b627eccee82d0133bd9400ac5992d279ac969147cd0c28cec357cad35",
+    "Sources/AbstractGatewayClient/GatewayClient.swift": "77e89f49fbd1933547faa8233e0a8009afe3f9928026065c878bfc5e8a2eecc4",
+    "Sources/AbstractGatewayClient/Models.swift": "2be0c70910c8fc5ed19f631de3d948f0cf8c7da5aea1d7d831d33d1a17c19228",
+    "Sources/AbstractGatewayClient/MockGatewayClient.swift": "37e0dba830e3677fa7447f2ee146b671c7f19ef373645519a4df443462556f68",
+    "Tests/AbstractGatewayClientTests/SignInTests.swift": "9c897ee948234a03c9236e0ab668e0eb0c74245bf0a4f0247c3ef28d6b52ba7a",
+    "Tests/AbstractGatewayClientTests/RetryTests.swift": "12ceace121bcaa89191c6ca8e892ddeac20edb171c1e09d1b547b3c6f6810f7f"
+  },
+  "how": {
+    "Sources/AbstractGatewayClient/Auth.swift": "verbatim",
+    "Sources/AbstractGatewayClient/GatewayClient.swift": "trimmed: request/retry/401 lockout kept; assistant calls replaced by the note calls; 409/413 added",
+    "Sources/AbstractGatewayClient/Models.swift": "trimmed: JSONValue, Principal, StartRunResponse kept; RunSummary reduced; error body and ISO8601 added",
+    "Sources/AbstractGatewayClient/MockGatewayClient.swift": "rewritten for a notebook (same role: previews, screenshots, UI tests)",
+    "Tests/AbstractGatewayClientTests/SignInTests.swift": "verbatim",
+    "Tests/AbstractGatewayClientTests/RetryTests.swift": "adapted: the write test sends a capture"
+  },
+  "dropped": [
+    "Activity.swift",
+    "Markdown.swift",
+    "Media.swift",
+    "WebPageText.swift",
+    "the assistant's tools, voice, entities, automations, sessions and media calls"
+  ],
+  "added": [
+    "NoteModels.swift",
+    "CredentialFile.swift (ADR 0006)",
+    "Fixtures and the note tests"
+  ],
+  "notes": "Candidates for one shared Swift client once both APIs settle (docs/clients.md). Re-check sha256 against the source before porting a fix either way.",
+  "source_state": "working tree on 2026-10-19 01:30 CEST: GatewayClient.swift, Models.swift, MockGatewayClient.swift and RetryTests.swift had staged, uncommitted changes on top of source_commit; the sha256 values are of those working-tree files"
+}

@@ -1,0 +1,2 @@
+{"request": {"method": "GET", "path": "/api/gateway/note/cues"}, "status": 200,
+ "body": {"items": [{"cue_id": "cue-1", "text": "You have not mentioned Marc in five weeks. Anything new?", "kind": "quiet_person"}], "next_cursor": null}}

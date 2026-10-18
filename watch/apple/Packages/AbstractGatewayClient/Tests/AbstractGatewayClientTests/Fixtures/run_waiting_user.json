@@ -1,0 +1,2 @@
+{"request": {"method": "GET", "path": "/api/gateway/runs/run-w"}, "status": 200,
+ "body": {"run_id": "run-w", "status": "waiting", "waiting": {"reason": "user", "wait_key": "tool_approval:run-w:act:1"}, "output": null}}

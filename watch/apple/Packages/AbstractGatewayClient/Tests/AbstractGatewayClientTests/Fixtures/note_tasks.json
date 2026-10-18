@@ -1,0 +1,2 @@
+{"request": {"method": "GET", "path": "/api/gateway/note/tasks"}, "status": 200,
+ "body": {"items": [{"task_id": "t-7", "note_id": "n-40", "text": "Send Dana the Pareto", "status": "open", "due": "2026-10-23"}], "next_cursor": null}}

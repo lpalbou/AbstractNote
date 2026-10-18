@@ -1,0 +1,4 @@
+{"request": {"method": "GET", "path": "/api/gateway/note/insights"}, "status": 200,
+ "body": {"items": [{"note_id": "i-1", "title": "The LUT budget changed twice this month", "body": "40k, then 55k, then 50k.",
+                     "insight_kind": "evolution", "occurred_at": "2026-10-18T06:00:00Z", "acked_at": null,
+                     "evidence_note_ids": ["n-12", "n-17"], "entity_ids": ["ex:project-lut"]}], "next_cursor": null}}

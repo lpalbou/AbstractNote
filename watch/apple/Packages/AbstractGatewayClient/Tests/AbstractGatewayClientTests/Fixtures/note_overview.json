@@ -1,0 +1,4 @@
+{"request": {"method": "GET", "path": "/api/gateway/note/overview"}, "status": 200,
+ "body": {"recent_notes": [], "active_entities": [], "insights": [],
+          "resurfacing": [{"note_id": "n-2025-10-19", "title": "First sketch of the reading list", "kind": "idea", "occurred_at": "2025-10-19T08:30:00Z"}],
+          "sparkline": [0, 2, 1]}}

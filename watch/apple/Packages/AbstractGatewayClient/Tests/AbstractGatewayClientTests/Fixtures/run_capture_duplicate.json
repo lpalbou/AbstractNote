@@ -1,0 +1,3 @@
+{"request": {"method": "GET", "path": "/api/gateway/runs/run-cap-2"}, "status": 200,
+ "body": {"run_id": "run-cap-2", "workflow_id": "abstractnote:note-capture", "status": "completed",
+          "output": {"response": "Already saved at 09:12.", "note_id": "n-41", "status": "duplicate"}}}

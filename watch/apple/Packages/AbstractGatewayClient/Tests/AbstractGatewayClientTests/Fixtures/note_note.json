@@ -1,0 +1,3 @@
+{"request": {"method": "GET", "path": "/api/gateway/note/notes/n-12"}, "status": 200,
+ "body": {"note_id": "n-12", "title": "LUT budget with Dana", "text": "Met Dana about the LUT budget; she wants the Pareto by Friday.",
+          "kind": "decision", "occurred_at": "2026-10-12T09:12:00Z", "attachments": [], "claims": [], "entities": []}}

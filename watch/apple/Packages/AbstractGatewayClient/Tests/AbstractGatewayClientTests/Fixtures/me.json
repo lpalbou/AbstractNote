@@ -1,0 +1,2 @@
+{"request": {"method": "GET", "path": "/api/gateway/me"}, "status": 200,
+ "body": {"ok": true, "principal": {"user_id": "alice", "tenant_id": "t1", "roles": ["user"]}, "auth": {"kind": "token"}}}

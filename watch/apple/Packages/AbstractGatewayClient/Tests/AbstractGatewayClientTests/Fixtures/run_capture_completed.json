@@ -1,0 +1,4 @@
+{"request": {"method": "GET", "path": "/api/gateway/runs/run-cap-1"}, "status": 200,
+ "body": {"run_id": "run-cap-1", "workflow_id": "abstractnote:note-capture", "status": "completed", "session_id": "note-watch-1",
+          "waiting": null, "error": null,
+          "output": {"response": "Saved as idea ‘LUT budget’. Related: Dana, LUT.", "note_id": "n-41", "status": "new", "success": true}}}
