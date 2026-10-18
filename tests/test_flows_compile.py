@@ -131,7 +131,7 @@ def test_automation_defaults_are_valid_for_the_gateway():
 def test_bundle_packs_and_loads(tmp_path):
     from abstractruntime.workflow_bundle import open_workflow_bundle
 
-    path = pack(tmp_path)
+    path = pack(tmp_path, check_fresh=True)
     assert path.name == f"abstractnote@{build._version()}.flow"
     bundle = open_workflow_bundle(path)
     assert sorted(ep.flow_id for ep in bundle.manifest.entrypoints) == sorted(build.ENTRYPOINTS)

@@ -784,7 +784,7 @@
           }
         ],
         "pinDefaults": {
-          "template": "Look over these candidates from the notebook and choose what deserves the author's attention.\n\nCandidates (refer to them by index):\n{{candidates}}\n\nChoose at most {{limit}} items. For each, give the candidate index, the kind (warning, reminder, connection, contradiction or evolution), a short title and a body of two or three sentences that says why it matters now. Choose nothing when nothing deserves attention.\n\nOutput JSON only, matching the schema.\n"
+          "template": "You look over candidates drawn from a person's notebook and choose what deserves their attention now.\n\nCandidates (each has an `index` and the `rule` that found it):\n{{candidates}}\n\nChoose at most {{limit}} items. For each, give the `candidate` index, the `kind` (warning, reminder, connection, contradiction or evolution), a short `title`, and a `body` of two or three sentences that says why it matters now and invites the person to add a note about it. Choose nothing when nothing deserves attention.\n\nRules:\n- Use only the candidates above; never invent notes, people or dates.\n- Output JSON only, matching the schema.\n"
         }
       }
     },

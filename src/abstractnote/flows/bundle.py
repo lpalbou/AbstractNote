@@ -15,15 +15,16 @@ def bundle_version() -> str:
     return str(__version__)
 
 
-def pack(out_dir: Path, *, flows_dir: Path = JSON_DIR, version: Optional[str] = None) -> Path:
+def pack(out_dir: Path, *, flows_dir: Path = JSON_DIR, version: Optional[str] = None, check_fresh: bool = False) -> Path:
     """Write ``<out_dir>/abstractnote@<version>.flow`` and return its path.
 
-    Refuses to pack flows that are stale relative to the generator (run
-    ``python -m abstractnote.flows.build`` first), so a bundle always matches the code.
+    The JSON documents on disk are the shipped artifact. ``check_fresh`` (the ``abstractnote
+    bundle`` command and the tests) refuses flows that are stale relative to the generator, so a
+    bundle someone publishes always matches the code; the gateway packs what is installed.
     """
     from abstractruntime.workflow_bundle import pack_workflow_bundle
 
-    if flows_dir == JSON_DIR:
+    if check_fresh and flows_dir == JSON_DIR:
         bad = stale(flows_dir)
         if bad:
             raise RuntimeError("the generated flows are stale (" + ", ".join(bad) + "); run python -m abstractnote.flows.build")
@@ -53,7 +54,7 @@ def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m abstractnote.flows.bundle", description=__doc__.splitlines()[0])
     ap.add_argument("--out", type=Path, default=Path("."), help="directory for the .flow file (default: .)")
     args = ap.parse_args(argv)
-    print(pack(args.out))
+    print(pack(args.out, check_fresh=True))
     return 0
 
 

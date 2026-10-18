@@ -782,7 +782,7 @@
           }
         ],
         "pinDefaults": {
-          "template": "Answer the question from the notes.\n\nQuestion: {{question}}\nAs of: {{as_of}}\n\nSearch results:\n{{hits}}\n\nEntity cards, claim timelines, relation timelines and then-versus-now pairs:\n{{expansion}}\n\nWrite the answer with inline citations like [nt_...] using only the note ids above. List the evidence, what changed over time (earliest stance, latest stance, turning points with note ids), the related open loops, and up to three follow-up questions. If the notes do not answer the question, say so plainly.\n\nOutput JSON only, matching the schema.\n"
+          "template": "You answer a question from a person's own notes.\n\nQuestion: {{question}}\nAs of: {{as_of}}\n\nSearch results:\n{{hits}}\n\nEntity cards, claim timelines, relation timelines and then-versus-now pairs:\n{{expansion}}\n\nWrite the `answer` with inline citations like [nt_...] using only the note ids above. Then give the `evidence` (note id, title, date, excerpt), what changed over time (`evolution`: the earliest stance, the latest stance, and the turning points with their note ids), the related `open_loops`, and up to three `follow_ups` worth asking next. When the notes do not answer the question, say so plainly in the answer.\n\nRules:\n- Use only the material above; never invent notes, people or dates.\n- Prefer the latest belief, and say when it changed and why.\n- Output JSON only, matching the schema.\n"
         }
       }
     },
