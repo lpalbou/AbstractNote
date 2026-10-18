@@ -45,7 +45,9 @@ SCRIPT = {
                     "language": "en", "one_line": "Met Dana about the LUT budget"},
     "Extraction": EXTRACTION,
     "Linking": LINKING,
-    "Answer": {"answer": "You agreed to send Dana the Pareto by Friday [nt_1].", "evidence": [],
+    "Answer": {"answer": "You agreed to send Dana the Pareto by Friday [nt_1].",
+               "evidence": [{"note_id": "nt_1", "title": "x", "occurred_at": "x", "excerpt": "she wants the Pareto"},
+                            {"note_id": "nt_invented", "title": "x", "occurred_at": "x", "excerpt": "x"}],
                "evolution": {"earliest": "", "latest": "", "turning_points": []}, "open_loops": [], "follow_ups": []},
     "MiningPlan": {"steps": [{"question": "Dana", "since": None, "until": None, "entities": []},
                              {"question": "LUT budget", "since": "2026-01-01", "until": None, "entities": []}],
@@ -101,8 +103,8 @@ class Doubles:
                 return {"items": []}
             return {"items": [{"note_id": self.queue.pop(0), "priority": 1, "attempts": 0}]}
 
-        search = {"notes": [{"note_id": "nt_1", "title": "Dana and the LUT budget", "occurred_at": "2026-10-19T09:12:00Z",
-                             "excerpt": "Met Dana"}], "entities": [{"entity_id": "ex:person-dana"}], "claims": [], "facets": {}}
+        search = {"notes": [{"note_id": "nt_1", "title": "Dana and the LUT budget", "kind": "event",
+                             "occurred_at": "2026-10-19T09:12:00Z", "excerpt": "Met Dana"}], "entities": [{"entity_id": "ex:person-dana"}], "claims": [], "facets": {}}
         tools = {
             "note_capture": capture,
             "note_file": lambda **k: {"note_id": k["note_id"], "priority": 1, "status": "queued"},
@@ -147,6 +149,13 @@ def test_capture_answers_early_and_in_the_output(runner, doubles):
     assert "note_queue_ack" not in doubles.names()
 
 
+def test_capture_passes_what_the_note_is_about(runner, doubles):
+    about = {"kind": "cue", "id": "nt_cue", "title": "Dana has gone quiet"}
+    runner.run_capture("She is on leave.", context={"about": about})
+    (cap,) = doubles.args("note_capture")
+    assert cap["about"] == about
+
+
 def test_capture_of_a_retry_says_already_saved(runner, doubles):
     doubles.capture_status = "duplicate"
     out = runner.run_capture("Met Dana", idempotency_key="k-1")
@@ -158,6 +167,7 @@ def test_capture_inline_processes_and_acks(runner, doubles):
     out = runner.run_capture("Met Dana about the LUT budget.", process_inline=True)
     assert out["status"] == "processed"
     assert out["revision"]["revision_id"] == "rv_nt_1"
+    assert out["revision_summary"] == "Linked Dana to the LUT project."
     assert out["response"].endswith("Linked Dana to the LUT project.")
     (ack,) = doubles.args("note_queue_ack")
     assert ack == {"note_id": "nt_1", "outcome": "ok", "revision_id": "rv_nt_1"}
@@ -205,6 +215,9 @@ def test_recall_every_effort_answers_on_response(runner, doubles, effort):
     if effort == "standard":
         (exp,) = doubles.args("note_expand")
         assert exp == {"note_ids": ["nt_1"], "entity_ids": ["ex:person-dana"]}
+        # evidence is NoteRef-shaped and limited to notes the search returned (no invented ids)
+        assert out["evidence"] == [{"note_id": "nt_1", "title": "Dana and the LUT budget", "kind": "event",
+                                    "occurred_at": "2026-10-19T09:12:00Z", "excerpt": "she wants the Pareto"}]
     if effort == "deep":
         assert out["dossier_note_id"].startswith("nt_insight_")
         (written,) = doubles.args("note_insight_write")

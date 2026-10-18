@@ -160,6 +160,13 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
            outputs=[{"id": "value", "label": "value", "type": "any"}],
            pin_defaults={"key": "attachments", "default": []})
     f.wire(S("context"), "attachments", "object")
+    f.node("about", "get", "What it is about",
+           inputs=[{"id": "object", "label": "object", "type": "object"},
+                   {"id": "key", "label": "key", "type": "string"},
+                   {"id": "default", "label": "default", "type": "any"}],
+           outputs=[{"id": "value", "label": "value", "type": "any"}],
+           pin_defaults={"key": "about", "default": None})
+    f.wire(S("context"), "about", "object")
     cap = f.tool_step(
         "capture", "Store the note", "note_capture",
         {
@@ -168,6 +175,7 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
             "source": ("object", S("source")), "idempotency_key": ("string", S("idempotency_key")),
             "priority": ("number", S("priority")), "session_id": ("string", S("session_id")),
             "attachments": ("array", ("attachments", "value")),
+            "about": ("object", ("about", "value")),
         },
         [("note_id", "string"), ("status", "string"), ("first_saved_at", "string"), ("similar", "array"),
          ("revisits", "array"), ("topics", "array"), ("warnings", "array")],
@@ -277,7 +285,8 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
     f.then(ack, "processed_msg")
     f.end("end_processed", "Done (processed)", {
         "response": ("string", ("processed_msg", "message")), "note_id": ("string", (cap, "note_id")),
-        "status": ("string", "processed"), "revision": ("object", ("process", "revision")),
+        "status": ("string", "processed"), "revision_summary": ("string", ("process", "response")),
+        "revision": ("object", ("process", "revision")),
     })
     f.then("processed_msg", "end_processed")
     return f.finish()
@@ -579,8 +588,8 @@ def build_recall(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, 
     f.code(
         "quick", "List what was found",
         "found = [n for n in (notes or []) if isinstance(n, dict)]\n"
-        "evidence = [{\"note_id\": n.get(\"note_id\"), \"title\": n.get(\"title\"), \"occurred_at\": n.get(\"occurred_at\"),\n"
-        "             \"excerpt\": n.get(\"excerpt\")} for n in found]\n"
+        "evidence = [{\"note_id\": n.get(\"note_id\"), \"title\": n.get(\"title\"), \"kind\": n.get(\"kind\"),\n"
+        "             \"occurred_at\": n.get(\"occurred_at\"), \"excerpt\": n.get(\"excerpt\")} for n in found]\n"
         "if not found:\n"
         "    text = \"I found nothing in your notes about that.\"\n"
         "else:\n"
@@ -623,10 +632,19 @@ def build_recall(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, 
         "text = str(d.get(\"answer\") or \"\").strip()\n"
         "if not text:\n"
         "    raise ValueError(\"The answer came back empty.\")\n"
-        "return {\"response\": text, \"answer\": text, \"evidence\": d.get(\"evidence\") or [],\n"
+        "found = {n.get(\"note_id\"): n for n in (notes or []) if isinstance(n, dict) and n.get(\"note_id\")}\n"
+        "evidence, seen = [], set()\n"
+        "for e in d.get(\"evidence\") or []:\n"
+        "    n = found.get(e.get(\"note_id\")) if isinstance(e, dict) else None\n"
+        "    if n is None or n[\"note_id\"] in seen:\n"
+        "        continue\n"
+        "    seen.add(n[\"note_id\"])\n"
+        "    evidence.append({\"note_id\": n[\"note_id\"], \"title\": n.get(\"title\"), \"kind\": n.get(\"kind\"),\n"
+        "                     \"occurred_at\": n.get(\"occurred_at\"), \"excerpt\": e.get(\"excerpt\") or n.get(\"excerpt\")})\n"
+        "return {\"response\": text, \"answer\": text, \"evidence\": evidence,\n"
         "        \"evolution\": d.get(\"evolution\") or {}, \"open_loops\": d.get(\"open_loops\") or [],\n"
         "        \"follow_ups\": d.get(\"follow_ups\") or [], \"dossier_note_id\": None}",
-        inputs={"data": ("object", ("synthesize", "data"))},
+        inputs={"data": ("object", ("synthesize", "data")), "notes": ("array", (hits, "notes"))},
         outputs=[(p, t) for p, t in RECALL_OUT_PINS if p != "hits"],
     )
     f.then("synthesize", "standard")
@@ -731,7 +749,7 @@ def build_mine(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, An
         "        nid = n.get(\"note_id\") if isinstance(n, dict) else None\n"
         "        if nid and nid not in seen:\n"
         "            seen.add(nid)\n"
-        "            evidence.append({\"note_id\": nid, \"title\": n.get(\"title\"), \"occurred_at\": n.get(\"occurred_at\"),\n"
+        "            evidence.append({\"note_id\": nid, \"title\": n.get(\"title\"), \"kind\": n.get(\"kind\"), \"occurred_at\": n.get(\"occurred_at\"),\n"
         "                             \"excerpt\": n.get(\"excerpt\")})\n"
         "entity_ids = [x.get(\"entity_id\") for x in (first_entities or []) if isinstance(x, dict) and x.get(\"entity_id\")]\n"
         "narrative = str(d.get(\"narrative\") or \"\").strip()\n"

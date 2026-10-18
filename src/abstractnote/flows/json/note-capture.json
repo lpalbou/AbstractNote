@@ -133,6 +133,46 @@
       }
     },
     {
+      "id": "about",
+      "type": "get",
+      "position": {
+        "x": 0.0,
+        "y": 822.0
+      },
+      "data": {
+        "nodeType": "get",
+        "label": "What it is about",
+        "inputs": [
+          {
+            "id": "object",
+            "label": "object",
+            "type": "object"
+          },
+          {
+            "id": "key",
+            "label": "key",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "key": "about",
+          "default": null
+        }
+      }
+    },
+    {
       "id": "capture_args",
       "type": "code",
       "position": {
@@ -194,6 +234,11 @@
             "type": "array"
           },
           {
+            "id": "about",
+            "label": "about",
+            "type": "object"
+          },
+          {
             "id": "permissions",
             "label": "permissions",
             "type": "string"
@@ -215,7 +260,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif text is not None:\n    arguments[\"text\"] = text\nif title is not None:\n    arguments[\"title\"] = title\nif occurred_at is not None:\n    arguments[\"occurred_at\"] = occurred_at\nif location is not None:\n    arguments[\"location\"] = location\nif source is not None:\n    arguments[\"source\"] = source\nif idempotency_key is not None:\n    arguments[\"idempotency_key\"] = idempotency_key\nif priority is not None:\n    arguments[\"priority\"] = priority\nif session_id is not None:\n    arguments[\"session_id\"] = session_id\nif attachments is not None:\n    arguments[\"attachments\"] = attachments\nreturn {\"tool_calls\": [{\"name\": \"note_capture\", \"call_id\": \"capture\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif text is not None:\n    arguments[\"text\"] = text\nif title is not None:\n    arguments[\"title\"] = title\nif occurred_at is not None:\n    arguments[\"occurred_at\"] = occurred_at\nif location is not None:\n    arguments[\"location\"] = location\nif source is not None:\n    arguments[\"source\"] = source\nif idempotency_key is not None:\n    arguments[\"idempotency_key\"] = idempotency_key\nif priority is not None:\n    arguments[\"priority\"] = priority\nif session_id is not None:\n    arguments[\"session_id\"] = session_id\nif attachments is not None:\n    arguments[\"attachments\"] = attachments\nif about is not None:\n    arguments[\"about\"] = about\nreturn {\"tool_calls\": [{\"name\": \"note_capture\", \"call_id\": \"capture\", \"arguments\": arguments}]}\n"
       }
     },
     {
@@ -726,7 +771,8 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "prefer existing topics, at most 4"
+                "description": "prefer existing topics, at most 4",
+                "maxItems": 4
               },
               "urgency": {
                 "type": "string",
@@ -1513,6 +1559,11 @@
             "type": "string"
           },
           {
+            "id": "revision_summary",
+            "label": "revision_summary",
+            "type": "string"
+          },
+          {
             "id": "revision",
             "label": "revision",
             "type": "object"
@@ -1531,6 +1582,13 @@
       "source": "start",
       "sourceHandle": "context",
       "target": "attachments",
+      "targetHandle": "object"
+    },
+    {
+      "id": "e-start-context-about-object",
+      "source": "start",
+      "sourceHandle": "context",
+      "target": "about",
       "targetHandle": "object"
     },
     {
@@ -1595,6 +1653,13 @@
       "sourceHandle": "value",
       "target": "capture_args",
       "targetHandle": "attachments"
+    },
+    {
+      "id": "e-about-value-capture_args-about",
+      "source": "about",
+      "sourceHandle": "value",
+      "target": "capture_args",
+      "targetHandle": "about"
     },
     {
       "id": "e-start-exec-out-capture_args-exec-in",
@@ -2057,6 +2122,13 @@
       "sourceHandle": "note_id",
       "target": "end_processed",
       "targetHandle": "note_id"
+    },
+    {
+      "id": "e-process-response-end_processed-revision_summary",
+      "source": "process",
+      "sourceHandle": "response",
+      "target": "end_processed",
+      "targetHandle": "revision_summary"
     },
     {
       "id": "e-process-revision-end_processed-revision",

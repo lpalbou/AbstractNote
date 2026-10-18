@@ -462,7 +462,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "found = [n for n in (notes or []) if isinstance(n, dict)]\nevidence = [{\"note_id\": n.get(\"note_id\"), \"title\": n.get(\"title\"), \"occurred_at\": n.get(\"occurred_at\"),\n             \"excerpt\": n.get(\"excerpt\")} for n in found]\nif not found:\n    text = \"I found nothing in your notes about that.\"\nelse:\n    items = [\"\\u201c\" + str(n.get(\"title\") or \"Untitled\") + \"\\u201d (\" + str(n.get(\"occurred_at\") or \"\")[:10] + \") [\" + str(n.get(\"note_id\")) + \"]\" for n in found[:5]]\n    text = \"I found \" + str(len(found)) + (\" note: \" if len(found) == 1 else \" notes: \") + \"; \".join(items) + \".\"\nreturn {\"response\": text, \"answer\": text, \"evidence\": evidence, \"evolution\": {}, \"open_loops\": [],\n        \"follow_ups\": [], \"dossier_note_id\": None}\n"
+        "codeBody": "found = [n for n in (notes or []) if isinstance(n, dict)]\nevidence = [{\"note_id\": n.get(\"note_id\"), \"title\": n.get(\"title\"), \"kind\": n.get(\"kind\"),\n             \"occurred_at\": n.get(\"occurred_at\"), \"excerpt\": n.get(\"excerpt\")} for n in found]\nif not found:\n    text = \"I found nothing in your notes about that.\"\nelse:\n    items = [\"\\u201c\" + str(n.get(\"title\") or \"Untitled\") + \"\\u201d (\" + str(n.get(\"occurred_at\") or \"\")[:10] + \") [\" + str(n.get(\"note_id\")) + \"]\" for n in found[:5]]\n    text = \"I found \" + str(len(found)) + (\" note: \" if len(found) == 1 else \" notes: \") + \"; \".join(items) + \".\"\nreturn {\"response\": text, \"answer\": text, \"evidence\": evidence, \"evolution\": {}, \"open_loops\": [],\n        \"follow_ups\": [], \"dossier_note_id\": None}\n"
       }
     },
     {
@@ -993,6 +993,11 @@
             "type": "object"
           },
           {
+            "id": "notes",
+            "label": "notes",
+            "type": "array"
+          },
+          {
             "id": "permissions",
             "label": "permissions",
             "type": "string"
@@ -1044,7 +1049,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "d = data if isinstance(data, dict) else {}\ntext = str(d.get(\"answer\") or \"\").strip()\nif not text:\n    raise ValueError(\"The answer came back empty.\")\nreturn {\"response\": text, \"answer\": text, \"evidence\": d.get(\"evidence\") or [],\n        \"evolution\": d.get(\"evolution\") or {}, \"open_loops\": d.get(\"open_loops\") or [],\n        \"follow_ups\": d.get(\"follow_ups\") or [], \"dossier_note_id\": None}\n"
+        "codeBody": "d = data if isinstance(data, dict) else {}\ntext = str(d.get(\"answer\") or \"\").strip()\nif not text:\n    raise ValueError(\"The answer came back empty.\")\nfound = {n.get(\"note_id\"): n for n in (notes or []) if isinstance(n, dict) and n.get(\"note_id\")}\nevidence, seen = [], set()\nfor e in d.get(\"evidence\") or []:\n    n = found.get(e.get(\"note_id\")) if isinstance(e, dict) else None\n    if n is None or n[\"note_id\"] in seen:\n        continue\n    seen.add(n[\"note_id\"])\n    evidence.append({\"note_id\": n[\"note_id\"], \"title\": n.get(\"title\"), \"kind\": n.get(\"kind\"),\n                     \"occurred_at\": n.get(\"occurred_at\"), \"excerpt\": e.get(\"excerpt\") or n.get(\"excerpt\")})\nreturn {\"response\": text, \"answer\": text, \"evidence\": evidence,\n        \"evolution\": d.get(\"evolution\") or {}, \"open_loops\": d.get(\"open_loops\") or [],\n        \"follow_ups\": d.get(\"follow_ups\") or [], \"dossier_note_id\": None}\n"
       }
     },
     {
@@ -1611,6 +1616,13 @@
       "sourceHandle": "data",
       "target": "standard",
       "targetHandle": "data"
+    },
+    {
+      "id": "e-search_out-notes-standard-notes",
+      "source": "search_out",
+      "sourceHandle": "notes",
+      "target": "standard",
+      "targetHandle": "notes"
     },
     {
       "id": "e-synthesize-exec-out-standard-exec-in",

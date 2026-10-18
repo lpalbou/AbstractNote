@@ -488,7 +488,8 @@
                       "description": "m1, m2, ..."
                     },
                     "name": {
-                      "type": "string"
+                      "type": "string",
+                      "description": "as written in the note"
                     },
                     "kind": {
                       "type": "string",
@@ -509,7 +510,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "as written in the note"
+                      "description": "other names as written in the note"
                     },
                     "role": {
                       "type": "string",
@@ -536,11 +537,11 @@
                     },
                     "predicate": {
                       "type": "string",
-                      "description": "CURIE from the vocabulary or ex:snake_case"
+                      "description": "a CURIE from the vocabulary, or ex:snake_case"
                     },
                     "object": {
                       "type": "string",
-                      "description": "a mention ref or a literal"
+                      "description": "a mention ref, or a literal value"
                     },
                     "object_is_literal": {
                       "type": "boolean"
@@ -565,7 +566,7 @@
                     },
                     "evidence": {
                       "type": "string",
-                      "description": "verbatim excerpt"
+                      "description": "verbatim excerpt of the note"
                     },
                     "valid_from": {
                       "type": [
@@ -1105,7 +1106,8 @@
                   "type": "object",
                   "properties": {
                     "ref": {
-                      "type": "string"
+                      "type": "string",
+                      "description": "the mention ref from the extraction"
                     },
                     "decision": {
                       "type": "string",
@@ -1128,7 +1130,7 @@
                       "items": {
                         "type": "integer"
                       },
-                      "description": "two candidate indexes to merge"
+                      "description": "two candidate indexes that are the same entity"
                     },
                     "name": {
                       "type": "string",
@@ -1159,7 +1161,7 @@
                         "string",
                         "null"
                       ],
-                      "description": "updated one-paragraph summary or null"
+                      "description": "updated one-paragraph summary, or null when nothing changed"
                     },
                     "reason": {
                       "type": "string",
@@ -1203,7 +1205,7 @@
                         "integer",
                         "null"
                       ],
-                      "description": "index of the existing claim in the context packet"
+                      "description": "index of the existing claim in the packet"
                     },
                     "reason": {
                       "type": "string",
@@ -1224,7 +1226,8 @@
                   "type": "object",
                   "properties": {
                     "index": {
-                      "type": "integer"
+                      "type": "integer",
+                      "description": "index of the task in the extraction"
                     },
                     "closes_open_task": {
                       "type": [
