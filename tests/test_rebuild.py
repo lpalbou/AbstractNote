@@ -79,7 +79,7 @@ def test_failed_rebuild_restores_the_previous_stores(tmp_path, monkeypatch):
         _fill(nb, 10)
         before = _snapshot(nb)
 
-        def boom(self):
+        def boom(self, **kwargs):
             raise RuntimeError("disk full")
 
         monkeypatch.setattr(Notebook, "_reindex_notes", boom)
@@ -87,3 +87,27 @@ def test_failed_rebuild_restores_the_previous_stores(tmp_path, monkeypatch):
             nb.rebuild()
         monkeypatch.undo()
         assert _snapshot(nb) == before
+
+
+def test_rebuild_keeps_notes_topics_links_and_search(tmp_path):
+    emb = CountingEmbedder(32)
+    with Notebook.open(tmp_path / "nb", embedder=emb) as nb:
+        a = nb.capture("Dana wants the Pareto by Friday", occurred_at="2026-10-19T09:00:00Z",
+                       attachments=[{"data": b"pareto table", "filename": "p.txt"}])
+        nb.file_note(a.note_id, title="Pareto", kind="task", topics=["lut"], urgency="high")
+        b = nb.capture("Dana wants the Pareto by Friday", occurred_at="2026-10-22T09:00:00Z")
+        nb.apply_revision(rev(ids.revision_id_for_note(a.note_id, 1), "2026-10-19T09:00:00Z",
+                              create("ex:person-dana", "Dana"), {"op": "entity.mention", "payload": {
+                                  "entity_id": "ex:person-dana", "note_id": a.note_id}},
+                              {"op": "topic.assign", "payload": {"note_id": a.note_id, "topic": "people"}},
+                              {"op": "note.summary", "payload": {"note_id": a.note_id, "summary": "Pareto due."}},
+                              note_id=a.note_id))
+        before = (_snapshot(nb), nb.note(a.note_id)["topics"], nb.note(b.note_id)["revisits"],
+                  nb.note(a.note_id)["summary"], [n["note_id"] for n in nb.notes(q="table")["items"]])
+        calls = len(emb.calls)
+        nb.rebuild()
+        after = (_snapshot(nb), nb.note(a.note_id)["topics"], nb.note(b.note_id)["revisits"],
+                 nb.note(a.note_id)["summary"], [n["note_id"] for n in nb.notes(q="table")["items"]])
+        assert after == before
+        assert before[1] == ["lut", "people"] and before[4] == [a.note_id]
+        assert len(emb.calls) == calls

@@ -303,6 +303,80 @@ class Notebook:
             "entity_id": entity_id, "from_id": from_id, "reason": reason or "undone by the user"}}], account,
             f"Separated {row['name']} again.", client=client, occurred_at=occurred_at)
 
+    # ------------------------------------------------------------------ capture and filing (0002)
+
+    def capture(self, text: str = "", **kwargs: Any) -> Any:
+        """Store a note now; see :func:`abstractnote.ingest.capture.capture`. Returns a ``CaptureResult``."""
+        from ..ingest.capture import capture
+
+        kwargs.setdefault("vision", self.extractors.get("vision"))
+        kwargs.setdefault("stt", self.extractors.get("stt"))
+        return capture(self, text, **kwargs)
+
+    def file_note(self, note_id: str, **kwargs: Any) -> Dict[str, Any]:
+        from ..ingest.capture import file_note
+
+        return file_note(self, note_id, **kwargs)
+
+    def note(self, note_id: str) -> Optional[Dict[str, Any]]:
+        """A note with attachments, its revision, claims, linked entities and revisits."""
+        row = self.store.note_row(note_id)
+        if row is None:
+            return None
+        out = self.store.note_dict(row)
+        atts = self.store.attachments_of(note_id)
+        for a in atts:
+            path = self.root / "extracted" / f"{a['sha256']}.txt"
+            a["extracted_text"] = path.read_text(encoding="utf-8") if a["extracted_chars"] and path.exists() else None
+        out["attachments"] = atts
+        revs = self.store.q("SELECT * FROM revisions WHERE note_id=? AND applied_index=1 ORDER BY seq", (note_id,))
+        out["revisions"] = [{k: v for k, v in self.store.revision_dict(r).items() if k != "ops"} for r in revs]
+        out["claims"] = [self.store.claim_dict(r) for r in self.store.q(
+            "SELECT * FROM claims WHERE note_id=? ORDER BY seq", (note_id,))]
+        out["entities"] = [b for b in (self.store.entity_brief(r[0]) for r in self.store.q(
+            "SELECT entity_id FROM entity_notes WHERE note_id=? ORDER BY entity_id", (note_id,))) if b]
+        out["revisits"] = [dict(r) for r in self.store.q(
+            "SELECT l.dst_note_id AS note_id, n.occurred_at, n.title, l.matched_by, l.score FROM note_links l"
+            " JOIN notes n ON n.note_id=l.dst_note_id WHERE l.src_note_id=? AND l.predicate='ex:revisits'"
+            " ORDER BY n.occurred_at", (note_id,))]
+        out["revisited_by"] = [dict(r) for r in self.store.q(
+            "SELECT l.src_note_id AS note_id, n.occurred_at, n.title, l.matched_by, l.score FROM note_links l"
+            " JOIN notes n ON n.note_id=l.src_note_id WHERE l.dst_note_id=? AND l.predicate='ex:revisits'"
+            " ORDER BY n.occurred_at", (note_id,))]
+        out["same_bytes_as"] = [{"note_id": r["dst_note_id"], **(_uj(r["detail_json"], {}) or {})} for r in self.store.q(
+            "SELECT * FROM note_links WHERE src_note_id=? AND predicate='same_bytes_as'", (note_id,))]
+        out["queue"] = self.queue.item(note_id)
+        return out
+
+    def attachment_bytes(self, note_id: str, attachment_id: str) -> Dict[str, Any]:
+        """``{data, mime, filename, size}`` of one attachment of a note."""
+        row = self.store.q1("SELECT * FROM attachments WHERE note_id=? AND attachment_id=?", (note_id, attachment_id))
+        if row is None:
+            raise ValueError("That attachment is not part of this note.")
+        from ..ingest.blobs import BlobStore
+
+        data = BlobStore(self.root / "blobs").read(row["sha256"])
+        return {"data": data, "mime": row["mime"], "filename": row["filename"], "size": row["size"]}
+
+    def archive_note(self, note_id: str) -> Dict[str, Any]:
+        """Archive a note (never deleted); it leaves lists and search but keeps its links."""
+        if self.store.note_row(note_id) is None:
+            raise ValueError("That note is not in this notebook.")
+        now = ids.utc_now()
+        with self.store.tx() as c:
+            c.execute("UPDATE notes SET archived_at=COALESCE(archived_at, ?), status='archived' WHERE note_id=?",
+                      (now, note_id))
+        return {"note_id": note_id, "status": "archived", "archived_at": self.store.note_row(note_id)["archived_at"]}
+
+    def ack_insight(self, note_id: str) -> Dict[str, Any]:
+        row = self.store.note_row(note_id)
+        if row is None or not row["insight_kind"]:
+            raise ValueError("That insight is not in this notebook.")
+        now = ids.utc_now()
+        with self.store.tx() as c:
+            c.execute("UPDATE notes SET acked_at=COALESCE(acked_at, ?) WHERE note_id=?", (now, note_id))
+        return {"note_id": note_id, "acked_at": self.store.note_row(note_id)["acked_at"]}
+
     # ------------------------------------------------------------------ reads (store-level)
 
     def beliefs_at(self, at: str, *, entity_id: Optional[str] = None, subject_id: Optional[str] = None
@@ -426,7 +500,7 @@ class Notebook:
                 cache = self._make_cache(store, new_embedder, force_new_pin=reembed)
                 self.store, self.cache = store, cache
                 self.queue.store = store
-                self._reindex_notes()
+                self._reindex_notes(reembed=reembed)
                 self.kg = ClaimStore(kg_path, cache)
                 replayed = 0
                 for row in self.store.q("SELECT * FROM revisions WHERE abandoned=0 ORDER BY seq"):
@@ -481,9 +555,11 @@ class Notebook:
             finally:
                 c.execute("DETACH DATABASE old")
 
-    def _reindex_notes(self) -> None:
-        """Note FTS rows, filing topics and note vectors from the truth tables."""
-        rows = self.store.q("SELECT note_id, title, text, filing_topics_json, occurred_at FROM notes ORDER BY seq")
+    def _reindex_notes(self, *, reembed: bool = False) -> None:
+        """Note FTS rows, filing topics and (when missing or re-embedding) note vectors."""
+        rows = self.store.q("SELECT n.note_id, n.title, n.text, n.filing_topics_json, n.occurred_at, n.vector_key,"
+                            " v.vector_key AS have FROM notes n LEFT JOIN vectors v ON v.vector_key=n.vector_key"
+                            " ORDER BY n.seq")
         texts = []
         with self.store.tx() as c:
             for r in rows:
@@ -491,9 +567,10 @@ class Notebook:
                 self.store.refresh_note_fts(c, r["note_id"], extracted)
                 for topic in _uj(r["filing_topics_json"], []) or []:
                     self.store.assign_topic(c, r["note_id"], topic, by="filing", revision_id=None, at=r["occurred_at"])
-                text = note_vector_text(r["title"], r["text"], extracted, NOTE_EMBED_BUDGET)
-                if text:
-                    texts.append((r["note_id"], text))
+                if reembed or (r["vector_key"] and not r["have"]):
+                    text = note_vector_text(r["title"], r["text"], extracted, NOTE_EMBED_BUDGET)
+                    if text.strip():
+                        texts.append((r["note_id"], text))
         if texts:
             keys = self.cache.ensure([t for _, t in texts])
             with self.store.tx() as c:
