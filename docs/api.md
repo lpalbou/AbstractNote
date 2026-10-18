@@ -136,7 +136,7 @@ Flows call them through `tool_calls` nodes; agents may list them in `allowed_too
 | `note_queue_lease` | `worker_id, max_items=1` | `{items: [{note_id, priority, attempts}]}` |
 | `note_queue_ack` | `note_id, outcome: ok|error, error?, revision_id?` | `{note_id, status, next_attempt_at?}` |
 | `note_queue_stats` | | `{queued, processing, failed, by_priority, oldest_enqueued_at}` |
-| `note_search` | `query, since?, until?, kinds?, entities?, topics?, limit=20` | `{notes: [...], entities: [...], claims: [...], facets: {...}}` |
+| `note_search` | `query, since?, until?, kinds?, entities?, topics?, limit=20, as_of?` | `{notes: [...], entities: [...], claims: [...], facets: {...}}` |
 | `note_expand` | `note_ids, entity_ids, as_of?` | `{entities: [card...], claims_timeline: [...], relation_timelines: [...], neighbours: [...], then_now: [...]}` |
 | `note_changes` | `since, limit` | the since-you-last-looked delta (same shape as `GET /note/changes`) |
 | `note_entity` | `entity_id, at?` | the entity card |

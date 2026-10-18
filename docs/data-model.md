@@ -145,6 +145,7 @@ Operations:
 | `topic.assign` | `{note_id, topic}` |
 | `task.open` / `task.close` / `task.drop` | `{task_id, text, due?, by_note_id?}` |
 | `entity.unmerge` | `{entity_id, from_id, reason}` (a user action; re-points the claims that came from `from_id`) |
+| `entity.mention` | `{entity_id, note_id}` (the note talks about the entity; drives `note_count`, `first_seen`, `last_seen`) |
 | `note.summary` | `{note_id, summary, kind, language}` |
 
 User actions (`close a task`, `retract a claim`, `undo a merge`) produce revisions with
@@ -162,7 +163,7 @@ flat; entities carry the structure.
 ## Task
 
 Open loops extracted from notes: `{task_id, note_id, text, status open|done|dropped, due?,
-closed_by_note_id?}`. A later note that reports the task done closes it with a `task.close` op,
+closed_by_note_id?}`; `task_id` is `tk_<...>` deterministic from `(note_id, normalised text)`. A later note that reports the task done closes it with a `task.close` op,
 decided by the model during processing.
 
 ## Insight
@@ -170,7 +171,8 @@ decided by the model during processing.
 System-authored notes with `kind = insight` or `synthesis`: dossiers from deep recall and the
 findings of the reflect flow (open loops, contradictions, resurfaced material, connections).
 They carry `evidence_note_ids`, `entity_ids`, `insight_kind` (`warning`, `reminder`,
-`connection`, `contradiction`, `evolution`, `dossier`) and `acked_at`.
+`connection`, `contradiction`, `evolution`, `dossier`, `cue`) and `acked_at`. Cue cards are the
+unacknowledged insights other than dossiers, newest first.
 
 ## Time
 
@@ -184,8 +186,9 @@ AbstractNote is bitemporal.
 
 Rules:
 
-- The graph **as of T** = entities whose creating revision has `at <= T`, relations with
-  `first_seen <= T`, claims with `observed_at <= T`.
+- The graph **as of T** = entities first seen at or before T (their creating revision's `at`, or an
+  earlier note that mentions them when notes are processed out of history order), not merged away
+  by T; edges from claims with `observed_at <= T`.
 - **Beliefs at T** = claims with `valid_from <= T` and (`valid_until` is null or `> T`).
 - Supersession sets `valid_until` of the old claim to the `occurred_at` of the superseding note.
 - Importers set `occurred_at` from the source (message timestamp, commit date, file date);
@@ -223,7 +226,7 @@ Every claim is written to the AbstractMemory store as a `TripleAssertion`:
 | `valid_from`, `valid_until` | the claim's window |
 | `confidence` | mapped from certainty: stated 0.9, probable 0.7, possible 0.5, reported 0.6, disputed 0.3 |
 | `provenance` | `{source: "abstractnote", note_id, revision_id, run_id, evidence_quote, recorded_at}` |
-| `attributes` | `{subject_type, object_type, certainty, stance, literal?}` |
+| `attributes` | `{subject_type, object_type, certainty, stance, literal?, evidence_quote?, abstractnote_kind}` (`abstractnote_kind` is `claim`, `name`, `alias` or `same_as`) |
 
 Entity names and aliases are written as `(entity_id, schema:name, "Name")` and
 `(entity_id, skos:altLabel, "Alias")`; merges as `(from_id, schema:sameAs, into_id)`. Supersession
@@ -235,11 +238,14 @@ with the note index. AbstractMemory lowercases subjects, predicates and objects 
 literals; the note index keeps the original case, and every AbstractMemory query from AbstractNote
 passes `owner_id="abstractnote"`.
 
-Write order for one revision: the revision row (intent) first, then the index projection, then
-the AbstractMemory projection, then the two `applied_*` flags. Embeddings are computed once in the
+Write order for one revision: the revision row (intent) first, then the index projection (one
+transaction that also sets `applied_index`), then the AbstractMemory projection, then `applied_kg`.
+A revision whose index projection raises is set aside (nothing applied) instead of replayed. Embeddings are computed once in the
 note index and handed to the triple store, so a rebuild never re-embeds over the network unless
 `rebuild --reembed` is requested (for example after the embedding model changed; the pin is shown
 by `GET /note/status`).
 
 Store: `SQLiteTripleStore` at `<plane>/abstractnote/kg.sqlite3` with the gateway's embedding
-route as embedder (vectors are pinned to that embedding space) and a `SQLiteJournal` next to it.
+route as embedder (vectors are pinned to that embedding space) and a `SQLiteJournal` in the same
+file (tables `memj_*`). A retraction (user action or a note's `retract` stance) closes the assertion
+the same way with `ClosureRecord(kind="retract")`; an undone merge closes its `schema:sameAs`.
