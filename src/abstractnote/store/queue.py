@@ -62,8 +62,10 @@ class Queue:
                 " ORDER BY priority DESC, occurred_at ASC, size ASC, note_id ASC LIMIT ?", (now, n)).fetchall()
             until = _plus(now, LEASE_S)
             for r in rows:
-                c.execute("UPDATE queue SET state='leased', leased_by=?, lease_until=?, attempts=attempts+1"
-                          " WHERE note_id=? AND state='queued'", (worker, until, r["note_id"]))
+                cur = c.execute("UPDATE queue SET state='leased', leased_by=?, lease_until=?, attempts=attempts+1"
+                                " WHERE note_id=? AND state='queued'", (worker, until, r["note_id"]))
+                if cur.rowcount != 1:
+                    continue
                 c.execute("UPDATE notes SET status='processing' WHERE note_id=? AND archived_at IS NULL",
                           (r["note_id"],))
                 items.append({"note_id": r["note_id"], "priority": r["priority"], "attempts": r["attempts"] + 1,
