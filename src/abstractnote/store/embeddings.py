@@ -239,6 +239,22 @@ class VectorCache:
             row = self._conn.execute("SELECT vector FROM vectors WHERE vector_key=?", (key,)).fetchone()
         return unpack(row[0]) if row else None
 
+    def embed_queries(self, texts: Sequence[str]) -> List[Optional[List[float]]]:
+        """Vectors for several query texts in one embedder call (stored vectors reused; nothing stored)."""
+        out: List[Optional[List[float]]] = [self.get(vector_key(t, self.model_id)) for t in texts]
+        missing = [i for i, v in enumerate(out) if v is None]
+        if missing and self.embedder is not None:
+            vecs = self.embedder.embed_texts([texts[i] for i in missing])
+            for i, v in zip(missing, vecs):
+                v = [float(x) for x in v]
+                if self.dimension is not None and len(v) != self.dimension:
+                    raise RuntimeError(
+                        f"The embedder returned a {len(v)}-dimension vector but this notebook is pinned to "
+                        f"{self.dimension}; rebuild with --reembed after changing the embedding model."
+                    )
+                out[i] = v
+        return out
+
     def embed_query(self, text: str) -> Optional[List[float]]:
         """Vector for a query text: a stored vector when the text was embedded
         before, else one embedder call (queries are not stored). None when the
