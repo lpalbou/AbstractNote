@@ -75,7 +75,7 @@ describe("api client (ADR-0039 retry rule)", () => {
 
   it("classifies retryable statuses", () => {
     expect([0, 408, 429, 500, 503].every(retryable)).toBe(true);
-    expect([400, 401, 403, 404, 409, 413].some(retryable)).toBe(false);
+    expect([400, 401, 403, 404, 409, 413, 501].some(retryable)).toBe(false);
   });
 
   it("reads its own CSRF cookie only", () => {

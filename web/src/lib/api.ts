@@ -31,9 +31,12 @@ export class ApiError extends Error {
   }
 }
 
-/** A read worth another try (ADR-0039 point 2). Status 0 = no answer (network, timeout). */
+/**
+ * A read worth another try (ADR-0039 point 2). Status 0 = no answer (network, timeout).
+ * 501 (a route the server does not implement yet) is final: another try cannot meet it.
+ */
 export function retryable(status: number): boolean {
-  return status === 0 || status === 408 || status === 429 || status >= 500;
+  return status === 0 || status === 408 || status === 429 || (status >= 500 && status !== 501);
 }
 
 export type ApiOptions = {
@@ -170,6 +173,7 @@ export function errorSentence(err: unknown, what = "this"): string {
   if (e.status === 403) return "You are not allowed to do that.";
   if (e.status === 404) return `${what[0].toUpperCase()}${what.slice(1)} is not in your notebook.`;
   if (e.status === 409 && e.code === "automation_busy") return "Already running.";
+  if (e.status === 501) return `Your notebook cannot show ${what} yet.`;
   if (e.status >= 500) return `Your notebook had a problem loading ${what}.`;
   return `${what[0].toUpperCase()}${what.slice(1)} could not be loaded.`;
 }
