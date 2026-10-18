@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "abstractnote"
+version = "0.1.0"
+description = "AbstractNote: one endpoint for your notes; a temporal semantic knowledge graph of your life, built on AbstractGateway, AbstractRuntime and AbstractMemory"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{name = "Laurent-Philippe Albou", email = "contact@abstractcore.ai"}]
+keywords = ["notes", "knowledge-graph", "memory", "temporal", "abstractframework"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "abstractmemory>=0.3.0",
+    "abstractsemantics>=0.0.5",
+    "abstractruntime>=0.10.2",
+    "abstractcore>=2.26.3",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+gateway = ["abstractgateway>=0.15.4", "fastapi>=0.110"]
+dev = ["pytest>=7.0", "ruff>=0.1"]
+
+[project.scripts]
+abstractnote = "abstractnote.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/lpalbou/abstractnote"
+Repository = "https://github.com/lpalbou/abstractnote"
+Issues = "https://github.com/lpalbou/abstractnote/issues"
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["abstractnote*"]
+
+[tool.setuptools.package-data]
+abstractnote = ["flows/json/*.json", "process/prompts/*.md"]
+
+[tool.ruff]
+line-length = 110
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
