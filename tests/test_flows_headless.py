@@ -1,0 +1,273 @@
+"""The flows run headlessly: routing, early answers, the drain loop, recall efforts, reflection.
+
+Part 1 drives the generated flows with a ScriptedLLM and recording test doubles that follow the
+tool contract of docs/api.md (they check the FLOW, not the tools). Part 2 runs the same flows on
+the core lane's real note tools (``abstractnote.tools.bind``) and skips loudly while that lane
+has not landed.
+"""
+
+from __future__ import annotations
+
+import copy
+from typing import Any, Dict, List
+
+import pytest
+
+from abstractnote.flows.runner import (
+    FlowRunError,
+    NoteRunner,
+    ScriptedLLM,
+    ToolApprovalWaitError,
+    answer_user_messages,
+    drive_until_done,
+)
+
+EXTRACTION = {
+    "summary": "Met Dana about the LUT budget.",
+    "mentions": [{"ref": "m1", "name": "Dana", "kind": "person", "aliases": ["Dana"], "role": "met"},
+                 {"ref": "m2", "name": "LUT", "kind": "project", "aliases": ["LUT"], "role": "budget"}],
+    "claims": [{"subject": "m1", "predicate": "schema:participant", "object": "m2", "object_is_literal": False,
+                "certainty": "stated", "stance": "assert", "evidence": "Met Dana about the LUT budget",
+                "valid_from": None, "valid_until": None}],
+    "tasks": [{"text": "Send the Pareto by Friday", "status": "open", "due": None}],
+    "time_refs": [], "topics": ["lut"],
+}
+LINKING = {
+    "mentions": [{"ref": "m1", "decision": "create", "candidate": None, "merge_candidates": [], "name": "Dana",
+                  "kind": "person", "aliases": ["Dana"], "summary": None, "reason": "new person"},
+                 {"ref": "m2", "decision": "create", "candidate": None, "merge_candidates": [], "name": "LUT",
+                  "kind": "project", "aliases": ["LUT"], "summary": None, "reason": "new project"}],
+    "claims": [{"index": 0, "relation_to_existing": "new", "existing": None, "reason": "first mention"}],
+    "tasks": [], "revision_summary": "Linked Dana to the LUT project.",
+}
+SCRIPT = {
+    "QuickFiling": {"title": "Dana and the LUT budget", "kind": "event", "topics": ["lut"], "urgency": "normal",
+                    "language": "en", "one_line": "Met Dana about the LUT budget"},
+    "Extraction": EXTRACTION,
+    "Linking": LINKING,
+    "Answer": {"answer": "You agreed to send Dana the Pareto by Friday [nt_1].", "evidence": [],
+               "evolution": {"earliest": "", "latest": "", "turning_points": []}, "open_loops": [], "follow_ups": []},
+    "MiningPlan": {"steps": [{"question": "Dana", "since": None, "until": None, "entities": []},
+                             {"question": "LUT budget", "since": "2026-01-01", "until": None, "entities": []}],
+                   "contradictions_to_test": [], "rounds": 2},
+    "SliceFindings": {"facts": [{"text": "Met Dana", "citations": ["nt_1"]}], "changes": [], "gaps": []},
+    "Dossier": {"title": "Dana and LUT", "narrative": "Dana asked for the Pareto [nt_1].", "timeline": [],
+                "evolution": "", "contradictions": [], "forgotten": [], "suggestions": [], "confidence": "low"},
+    "Reflections": {"items": [{"candidate": 0, "kind": "reminder", "title": "Pareto", "body": "Still open."},
+                              {"candidate": 42, "kind": "warning", "title": "Invented", "body": "Out of range."}]},
+}
+
+
+class Doubles:
+    """Recording doubles of the note tools with the result shapes of docs/api.md."""
+
+    def __init__(self) -> None:
+        self.calls: List[tuple] = []
+        self.queue: List[str] = []
+        self.capture_status = "new"
+        self.fail_apply_for: set = set()
+
+    def _rec(self, name, fn):
+        def tool(**kw):
+            self.calls.append((name, kw))
+            return fn(**kw)
+        tool.__name__ = name
+        return tool
+
+    def names(self, prefix: str = "") -> List[str]:
+        return [c[0] for c in self.calls if c[0].startswith(prefix)]
+
+    def args(self, name: str) -> List[Dict[str, Any]]:
+        return [c[1] for c in self.calls if c[0] == name]
+
+    def tools(self) -> Dict[str, Any]:
+        def capture(**k):
+            if not str(k.get("text") or "").strip():
+                raise ValueError("The note is empty.")
+            return {"note_id": "nt_1", "status": self.capture_status, "first_saved_at": "2026-10-01T08:00:00Z",
+                    "received_at": "2026-10-19T09:12:01Z", "revisits": [{"note_id": "nt_0", "occurred_at": "2026-09-30T10:00:00Z"}],
+                    "similar": [{"note_id": "nt_0", "title": "LUT budget plan", "occurred_at": "2026-09-30", "score": 0.8}],
+                    "topics": ["lut"], "attachments": [], "warnings": []}
+
+        def apply(**k):
+            if k["note_id"] in self.fail_apply_for:
+                raise ValueError("The revision could not be applied.")
+            return {"revision_id": "rv_" + k["note_id"], "summary": "Linked Dana to the LUT project.",
+                    "entities_created": ["ex:person-dana"], "entities_merged": [], "claims_added": ["cl_1"],
+                    "claims_reinforced": [], "claims_superseded": [], "tasks_opened": [], "tasks_closed": [], "warnings": []}
+
+        def lease(**k):
+            if not self.queue:
+                return {"items": []}
+            return {"items": [{"note_id": self.queue.pop(0), "priority": 1, "attempts": 0}]}
+
+        search = {"notes": [{"note_id": "nt_1", "title": "Dana and the LUT budget", "occurred_at": "2026-10-19T09:12:00Z",
+                             "excerpt": "Met Dana"}], "entities": [{"entity_id": "ex:person-dana"}], "claims": [], "facets": {}}
+        tools = {
+            "note_capture": capture,
+            "note_file": lambda **k: {"note_id": k["note_id"], "priority": 1, "status": "queued"},
+            "note_context": lambda **k: {"note": {"note_id": k["note_id"], "text": "Met Dana"},
+                                         "sections": ["Met Dana about the LUT budget."], "similar_notes": [],
+                                         "candidate_entities": [], "open_tasks": [], "topics": ["lut"], "vocabulary": []},
+            "note_resolve_candidates": lambda **k: {"mentions": [{"ref": m["ref"], "candidates": []} for m in k["mentions"]]},
+            "note_apply_revision": apply,
+            "note_queue_lease": lease,
+            "note_queue_ack": lambda **k: {"note_id": k["note_id"], "status": "processed" if k["outcome"] == "ok" else "queued"},
+            "note_search": lambda **k: copy.deepcopy(search),
+            "note_expand": lambda **k: {"entities": [], "claims_timeline": [], "relation_timelines": [], "neighbours": [], "then_now": []},
+            "note_insight_write": lambda **k: {"note_id": "nt_insight_" + str(len(self.args("note_insight_write")))},
+        }
+        for name in ("note_open_loops", "note_contradictions", "note_resurface", "note_anniversaries"):
+            tools[name] = lambda **k: {"items": [{"rule": "open_task_older_than", "note_ids": ["nt_1"], "entity_ids": ["ex:person-dana"]}]}
+        return {name: self._rec(name, fn) for name, fn in tools.items()}
+
+
+@pytest.fixture
+def doubles():
+    return Doubles()
+
+
+@pytest.fixture
+def runner(doubles):
+    return NoteRunner.with_llm(ScriptedLLM(SCRIPT), doubles.tools())
+
+
+def test_capture_answers_early_and_in_the_output(runner, doubles):
+    out = runner.run_capture("Met Dana about the LUT budget.", session_id="s-1", idempotency_key="k-1",
+                             context={"attachments": [{"$artifact": "a-1"}]})
+    assert out["status"] == "queued" and out["note_id"] == "nt_1"
+    assert out["response"].startswith("Saved as event “Dana and the LUT budget”.")
+    assert "Related: LUT budget plan." in out["response"] and "You noted this on 2026-09-30." in out["response"]
+    assert answer_user_messages(runner, out["run_id"]) == [out["response"]]
+    (cap,) = doubles.args("note_capture")
+    assert cap == {"text": "Met Dana about the LUT budget.", "idempotency_key": "k-1", "session_id": "s-1",
+                   "attachments": [{"$artifact": "a-1"}]}
+    (filed,) = doubles.args("note_file")
+    assert filed["kind"] == "event" and filed["urgency"] == "normal" and filed["note_id"] == "nt_1"
+    assert "note_queue_ack" not in doubles.names()
+
+
+def test_capture_of_a_retry_says_already_saved(runner, doubles):
+    doubles.capture_status = "duplicate"
+    out = runner.run_capture("Met Dana", idempotency_key="k-1")
+    assert out == {**out, "status": "duplicate", "response": "Already saved on 2026-10-01."}
+    assert doubles.names("note_file") == []
+
+
+def test_capture_inline_processes_and_acks(runner, doubles):
+    out = runner.run_capture("Met Dana about the LUT budget.", process_inline=True)
+    assert out["status"] == "processed"
+    assert out["revision"]["revision_id"] == "rv_nt_1"
+    assert out["response"].endswith("Linked Dana to the LUT project.")
+    (ack,) = doubles.args("note_queue_ack")
+    assert ack == {"note_id": "nt_1", "outcome": "ok", "revision_id": "rv_nt_1"}
+    (applied,) = doubles.args("note_apply_revision")
+    assert applied["extraction"] == EXTRACTION and applied["linking"] == LINKING
+
+
+def test_a_failing_tool_ends_the_run_with_its_own_sentence(runner):
+    with pytest.raises(FlowRunError, match=r"^The note is empty\.$"):
+        runner.run_capture("   ")
+
+
+def test_drain_processes_by_lease_until_max_items(runner, doubles):
+    doubles.queue[:] = ["nt_a", "nt_b", "nt_c"]
+    out = runner.run_drain(max_items=2, budget_s=60)
+    assert out["processed"] == 2 and out["failed"] == 0 and out["response"] == "Processed 2 notes."
+    assert [a["note_id"] for a in doubles.args("note_queue_ack")] == ["nt_a", "nt_b"]
+    assert doubles.queue == ["nt_c"]
+    assert len({a["worker_id"] for a in doubles.args("note_queue_lease")}) == 1
+
+
+def test_drain_stops_when_the_queue_is_empty_and_counts_failures(runner, doubles):
+    doubles.queue[:] = ["nt_a", "nt_bad"]
+    doubles.fail_apply_for = {"nt_bad"}
+    out = runner.run_drain(max_items=20, budget_s=60)
+    assert out["processed"] == 1 and out["failed"] == 1
+    assert out["errors"] == [{"note_id": "nt_bad", "error": "The revision could not be applied."}]
+    acks = doubles.args("note_queue_ack")
+    assert [(a["note_id"], a["outcome"]) for a in acks] == [("nt_a", "ok"), ("nt_bad", "error")]
+    assert acks[1]["error"] == "The revision could not be applied."
+    assert len(doubles.args("note_queue_lease")) == 3  # the third lease found the queue empty
+
+
+def test_drain_with_nothing_queued(runner):
+    assert runner.run_drain()["response"] == "Nothing to process."
+
+
+@pytest.mark.parametrize("effort", ["quick", "standard", "deep"])
+def test_recall_every_effort_answers_on_response(runner, doubles, effort):
+    out = runner.run_recall("What did I decide about the LUT budget?", effort=effort)
+    assert out["effort"] == effort and out["response"].strip()
+    assert out["hits"]["notes"][0]["note_id"] == "nt_1"
+    if effort == "quick":
+        assert doubles.names("note_expand") == [] and "nt_1" in out["response"]
+    if effort == "standard":
+        (exp,) = doubles.args("note_expand")
+        assert exp == {"note_ids": ["nt_1"], "entity_ids": ["ex:person-dana"]}
+    if effort == "deep":
+        assert out["dossier_note_id"].startswith("nt_insight_")
+        (written,) = doubles.args("note_insight_write")
+        assert written["kind"] == "dossier" and written["evidence_note_ids"] == ["nt_1"]
+        assert len(doubles.args("note_search")) == 1 + 1 + 2  # recall, mine's first search, two plan steps
+
+
+def test_recall_serves_the_agent_contract_prompt_alias(runner):
+    # S3 (review 01): a chat client sends `prompt` and reads output.response.
+    out = runner.run("note-recall", {"prompt": "What did I decide about the LUT budget?"})
+    assert out["response"] == "You agreed to send Dana the Pareto by Friday [nt_1]."
+
+
+def test_recall_refuses_an_unknown_effort(runner):
+    with pytest.raises(FlowRunError, match="Effort must be quick, standard or deep"):
+        runner.run_recall("anything", effort="extreme")
+
+
+def test_reflect_writes_only_insights_for_real_candidates(runner, doubles):
+    out = runner.run_reflect(limit=5)
+    assert out["response"] == "Wrote 1 insight." and out["considered"] == 4
+    (written,) = doubles.args("note_insight_write")
+    assert written["kind"] == "reminder" and written["evidence_note_ids"] == ["nt_1"]
+
+
+def test_an_approval_wait_is_a_loud_failure(doubles):
+    from abstractruntime.integrations.abstractcore.tool_executor import (
+        ApprovalToolExecutor,
+        MappingToolExecutor,
+        ToolApprovalPolicy,
+    )
+
+    tools = doubles.tools()
+    gated = ApprovalToolExecutor(delegate=MappingToolExecutor(tools), policy=ToolApprovalPolicy(auto_approve_tools=set()))
+    r = NoteRunner.with_llm(ScriptedLLM(SCRIPT), tools, tool_executor=gated)
+    run_id = r.start("note-capture", {"text": "Met Dana"})
+    with pytest.raises(ToolApprovalWaitError, match="note_capture"):
+        drive_until_done(r.runtime, run_id, registry=r.registry)
+
+
+# --------------------------------------------------------------------------- the core lane's tools
+
+
+def _core_tools():
+    try:
+        from abstractnote.tools import bind  # noqa: F401
+    except ImportError as e:  # the core lane (W1) has not landed abstractnote.tools yet
+        pytest.skip(f"abstractnote.tools is not importable yet ({e}); these tests run once the core lane lands")
+    return bind
+
+
+def test_core_tools_capture_then_drain_then_recall(tmp_path):
+    bind = _core_tools()
+    tools = bind(tmp_path / "notebook")
+    runner = NoteRunner.with_llm(ScriptedLLM(SCRIPT), tools)
+    cap = runner.run_capture("Met Dana about the LUT budget; she wants the Pareto by Friday.",
+                             idempotency_key="k-1", source={"client": "cli"}, occurred_at="2026-10-19T09:12:00Z")
+    assert cap["status"] == "queued" and cap["note_id"].startswith("nt_")
+    again = runner.run_capture("Met Dana about the LUT budget; she wants the Pareto by Friday.",
+                               idempotency_key="k-1", source={"client": "cli"}, occurred_at="2026-10-19T09:12:00Z")
+    assert again["status"] == "duplicate" and again["note_id"] == cap["note_id"]
+    drained = runner.run_drain(max_items=5, budget_s=60)
+    assert drained["processed"] == 1 and drained["failed"] == 0
+    assert runner.run_drain()["response"] == "Nothing to process."
+    hits = runner.run_recall("Dana", effort="quick")
+    assert cap["note_id"] in hits["response"]

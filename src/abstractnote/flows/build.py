@@ -452,7 +452,10 @@ def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, A
         "outcome", "Outcome",
         "o = output if isinstance(output, dict) else {}\n"
         "c = child_output if isinstance(child_output, dict) else {}\n"
-        "err = c.get(\"error\") or o.get(\"error\")\n"
+        "err = str(c.get(\"error\") or o.get(\"error\") or \"\")\n"
+        "for prefix in (\"Runtime error: \", \"Execution error: \"):\n"
+        "    if err.startswith(prefix):\n"
+        "        err = err[len(prefix):]\n"
         "failed = c.get(\"success\") is False or o.get(\"success\") is False or bool(err) or not o.get(\"revision_id\")\n"
         "return {\"outcome\": \"error\" if failed else \"ok\",\n"
         "        \"failure\": (str(err) if err else \"The note could not be processed.\") if failed else None,\n"

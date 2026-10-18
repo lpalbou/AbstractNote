@@ -669,7 +669,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "o = output if isinstance(output, dict) else {}\nc = child_output if isinstance(child_output, dict) else {}\nerr = c.get(\"error\") or o.get(\"error\")\nfailed = c.get(\"success\") is False or o.get(\"success\") is False or bool(err) or not o.get(\"revision_id\")\nreturn {\"outcome\": \"error\" if failed else \"ok\",\n        \"failure\": (str(err) if err else \"The note could not be processed.\") if failed else None,\n        \"revision_id\": None if failed else o.get(\"revision_id\")}\n"
+        "codeBody": "o = output if isinstance(output, dict) else {}\nc = child_output if isinstance(child_output, dict) else {}\nerr = str(c.get(\"error\") or o.get(\"error\") or \"\")\nfor prefix in (\"Runtime error: \", \"Execution error: \"):\n    if err.startswith(prefix):\n        err = err[len(prefix):]\nfailed = c.get(\"success\") is False or o.get(\"success\") is False or bool(err) or not o.get(\"revision_id\")\nreturn {\"outcome\": \"error\" if failed else \"ok\",\n        \"failure\": (str(err) if err else \"The note could not be processed.\") if failed else None,\n        \"revision_id\": None if failed else o.get(\"revision_id\")}\n"
       }
     },
     {
