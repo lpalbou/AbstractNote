@@ -2,7 +2,7 @@
 
 :root {
   --nt-gap: 12px;
-  --nt-line: var(--ui-border-1, color-mix(in srgb, var(--text-primary) 14%, transparent));
+  --nt-line: color-mix(in srgb, var(--text-primary) 16%, transparent);
   --nt-soft: color-mix(in srgb, var(--accent) 12%, var(--bg-secondary));
   --nt-card: var(--bg-card, var(--bg-secondary));
 }

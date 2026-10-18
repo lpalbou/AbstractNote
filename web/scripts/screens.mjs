@@ -103,6 +103,13 @@ async function main() {
       for (const width of WIDTHS) {
         await page.setViewportSize({ width, height: width < 600 ? 860 : 860 });
         const shot = async (name, full = true) => page.screenshot({ path: join(OUT, `${name}-${theme}-${width}.png`), fullPage: full });
+        // The app scrolls inside its main area; for a picture of the whole view, let the page grow.
+        const fullShot = async (name) => {
+          const tag = await page.addStyleTag({ content: ".nt-app{height:auto!important}.nt-main{overflow:visible!important}.nt-graph{height:auto!important}" });
+          await page.waitForTimeout(150);
+          await page.screenshot({ path: join(OUT, `${name}.png`), fullPage: true });
+          await tag.evaluate((el) => el.remove());
+        };
         await page.goto(`${base}#/capture`);
         await page.reload();
         await page.locator(".nt-filing").last().waitFor();
@@ -111,19 +118,22 @@ async function main() {
         await page.locator(".nt-node").first().waitFor();
         await page.locator(".nt-panel h2").first().waitFor();
         await page.waitForTimeout(300);
-        await shot("graph");
+        await shot("graph", false);
+        await fullShot(`graph-full-${theme}-${width}`);
         await page.goto(`${base}#/remember`);
         await page.locator(".nt-card").first().waitFor();
         await page.locator(".nt-thennow").first().waitFor();
         await page.locator(".nt-revisit .nt-item").first().waitFor();
         await page.waitForTimeout(300);
-        await shot("remember");
+        await shot("remember", false);
+        await fullShot(`remember-full-${theme}-${width}`);
       }
     }
     // One extra state each, default theme, wide: an answer with sources, a scrubbed graph, the evidence chain, settings.
     await page.evaluate(() => localStorage.setItem("af_appearance_abstractnote_v1", JSON.stringify({ theme: "dark", font_scale: "md", header_density: "standard" })));
     await page.setViewportSize({ width: 1280, height: 860 });
     await page.goto(`${base}#/remember`);
+    await page.reload();
     await page.getByRole("searchbox", { name: "Question" }).fill("LUT budget");
     await page.getByRole("button", { name: "Ask", exact: true }).click();
     await page.locator(".nt-answer-card .nt-cite").first().waitFor({ timeout: 30_000 });
@@ -157,6 +167,23 @@ async function main() {
     await page.screenshot({ path: join(OUT, "settings-dark-1280.png") });
     await page.setViewportSize({ width: 400, height: 860 });
     await page.screenshot({ path: join(OUT, "settings-dark-400.png") });
+    if (!live) {
+      // ADR-0039: three failed reads, then one sentence with Retry in place of the content.
+      await page.setViewportSize({ width: 1280, height: 860 });
+      await page.keyboard.press("Escape");
+      await page.locator(".af-drawer-backdrop").waitFor({ state: "detached", timeout: 5000 }).catch(() => undefined);
+      await page.request.post(`${gatewayUrl}/__mock/fail`, { data: { path: "/api/gateway/note/cues", count: 3, status: 503 } });
+      await page.goto(`${base}#/capture`);
+      await page.goto(`${base}#/remember`);
+      const err = page.locator("#cues-h").locator("xpath=ancestor::section").locator(".nt-error");
+      await err.waitFor({ timeout: 20_000 });
+      check((await err.innerText()).includes("Retry"), "a read that failed three times shows one sentence with Retry");
+      await err.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: join(OUT, "remember-error-dark-1280.png") });
+      await err.getByRole("button", { name: "Retry" }).click();
+      await page.locator(".nt-card").first().waitFor();
+      check(true, "Retry loads the content");
+    }
   } finally {
     await browser.close();
     app.close();

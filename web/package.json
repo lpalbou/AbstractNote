@@ -5,18 +5,31 @@
   "type": "module",
   "author": "Laurent-Philippe Albou",
   "license": "MIT",
-  "keywords": ["abstractframework", "notes", "memory", "knowledge-graph", "gateway"],
+  "keywords": [
+    "abstractframework",
+    "notes",
+    "memory",
+    "knowledge-graph",
+    "gateway"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/lpalbou/AbstractNote.git",
     "directory": "web"
   },
-  "publishConfig": { "access": "public" },
-  "bin": { "abstractnote-web": "./bin/cli.js" },
-  "files": ["dist", "bin"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "abstractnote-web": "./bin/cli.js"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
   "scripts": {
-    "dev": "vite --host --port 3006",
-    "dev:mock": "vite --host --port 3006 --mode mock",
+    "dev": "node scripts/dev.mjs",
+    "dev:mock": "node scripts/dev.mjs --mock",
     "mock": "node ./mock/server.mjs",
     "build": "tsc && vite build && node scripts/check_relative_urls.mjs dist",
     "preview": "vite preview",
@@ -43,5 +56,7 @@
     "vite": "^6.4.1",
     "vitest": "^3.2.4"
   },
-  "engines": { "node": ">=18.0.0" }
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }

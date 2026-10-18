@@ -9,14 +9,9 @@ import { createGatewaySessionProxy, createGatewayUrlResolver } from "@abstractfr
 
 // Dev-server twin of bin/server.js: the SAME app-origin session proxy, so sign-in
 // and every /api/* call behave in dev exactly as in production.
-//   npm run dev -- --gateway-url http://127.0.0.1:18850   (a hermetic gateway)
+//   npm run dev -- --gateway-url http://127.0.0.1:18850   (scripts/dev.mjs sets ABSTRACTNOTE_GATEWAY_URL)
 //   npm run dev:mock                                       (mock/server.mjs in-process)
 function argGatewayUrl(): string {
-  const argv = process.argv;
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--gateway-url") return String(argv[i + 1] || "");
-    if (argv[i].startsWith("--gateway-url=")) return argv[i].slice("--gateway-url=".length);
-  }
   return String(process.env.ABSTRACTNOTE_GATEWAY_URL || "").trim();
 }
 
