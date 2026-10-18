@@ -84,6 +84,9 @@ class Notebook:
         from .queue import Queue
 
         self.queue = Queue(store)
+        from .vector_index import NoteVectorIndex
+
+        self.note_vectors = NoteVectorIndex(store)
         # Injected processing helpers (bound by abstractnote.tools.bind or by callers)
         self.extractors: Dict[str, Callable[..., Any]] = {}
 
@@ -470,6 +473,76 @@ class Notebook:
 
         return cues(self, limit)
 
+    # ------------------------------------------------------------------ recall (0006)
+
+    def search(self, query: str = "", **kwargs: Any) -> Dict[str, Any]:
+        """Quick recall: full-text plus vector over notes, entities and claims, with facets."""
+        from ..recall.search import search
+
+        return search(self, query, **kwargs)
+
+    def entity(self, entity_id: str, at: Optional[str] = None) -> Dict[str, Any]:
+        """The entity card as of ``at`` (merged ids resolve to the surviving entity)."""
+        from ..recall.expand import entity_card
+
+        return entity_card(self, entity_id, at)
+
+    def entity_timeline(self, entity_id: str, since: Optional[str] = None, until: Optional[str] = None
+                        ) -> Dict[str, Any]:
+        from ..recall.expand import entity_timeline
+
+        return entity_timeline(self, entity_id, since, until)
+
+    def then_now(self, entity_id: str) -> Dict[str, Any]:
+        from ..recall.then_now import then_now
+
+        return then_now(self, entity_id)
+
+    def relation(self, a: str, b: str, since: Optional[str] = None, until: Optional[str] = None) -> Dict[str, Any]:
+        """The relationship between two entities through time (M6)."""
+        from ..recall.expand import relation
+
+        return relation(self, a, b, since, until)
+
+    def claim(self, claim_id: str) -> Dict[str, Any]:
+        """Why do I believe this: the evidence chain of a claim."""
+        from ..recall.expand import claim_chain
+
+        return claim_chain(self, claim_id)
+
+    def expand(self, note_ids: Optional[Sequence[str]] = None, entity_ids: Optional[Sequence[str]] = None,
+               as_of: Optional[str] = None) -> Dict[str, Any]:
+        from ..recall.expand import expand
+
+        return expand(self, note_ids or [], entity_ids or [], as_of)
+
+    def write_insight(self, kind: str, title: str, body: str, evidence_note_ids: Optional[Sequence[str]] = None,
+                      entity_ids: Optional[Sequence[str]] = None, run_id: Optional[str] = None) -> Dict[str, Any]:
+        from ..recall.insights import write_insight
+
+        return write_insight(self, kind, title, body, evidence_note_ids, entity_ids, run_id)
+
+    def open_loops(self, limit: int = 20, since: Optional[str] = None, *, now: Optional[str] = None) -> Dict[str, Any]:
+        from ..recall.reflect import open_loops
+
+        return open_loops(self, limit, since, now=now)
+
+    def contradictions(self, limit: int = 20, since: Optional[str] = None) -> Dict[str, Any]:
+        from ..recall.reflect import contradictions
+
+        return contradictions(self, limit, since)
+
+    def resurface(self, limit: int = 20, since: Optional[str] = None, *, now: Optional[str] = None) -> Dict[str, Any]:
+        from ..recall.reflect import resurface
+
+        return resurface(self, limit, since, now=now)
+
+    def anniversaries(self, limit: int = 20, since: Optional[str] = None, *, now: Optional[str] = None
+                      ) -> Dict[str, Any]:
+        from ..recall.reflect import anniversaries
+
+        return anniversaries(self, limit, since, now=now)
+
     # ------------------------------------------------------------------ settings and status
 
     def settings(self) -> Dict[str, Any]:
@@ -554,6 +627,8 @@ class Notebook:
                 cache = self._make_cache(store, new_embedder, force_new_pin=reembed)
                 self.store, self.cache = store, cache
                 self.queue.store = store
+                self.note_vectors.store = store
+                self.note_vectors.reset()
                 self._reindex_notes(reembed=reembed)
                 self.kg = ClaimStore(kg_path, cache)
                 replayed = 0
@@ -578,6 +653,8 @@ class Notebook:
                 self.store = NoteStore(str(note_path))
                 self.cache = self._make_cache(self.store, new_embedder if not reembed else None)
                 self.queue.store = self.store
+                self.note_vectors.store = self.store
+                self.note_vectors.reset()
                 self.kg = ClaimStore(kg_path, self.cache)
                 raise
             _remove_db(old_note)

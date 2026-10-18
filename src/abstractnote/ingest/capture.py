@@ -16,7 +16,6 @@ from pydantic import ValidationError
 
 from .. import ids
 from ..model import FILING_KINDS, URGENCY_PRIORITY, CaptureResult, Location, Provenance
-from ..store.embeddings import top_k
 from ..store.notes import _j, note_vector_text
 from ..store.queue import PRIORITY_NORMAL
 from .blobs import BlobStore
@@ -171,10 +170,13 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
             linked.add(r["note_id"])
     similar: List[Dict[str, Any]] = []
     if vector is not None:
-        rows = nb.store.q("SELECT n.note_id, n.title, n.occurred_at, v.vector FROM notes n JOIN vectors v"
-                          " ON v.vector_key=n.vector_key WHERE n.note_id!=? AND n.insight_kind IS NULL", (note_id,))
-        info = {r["note_id"]: r for r in rows}
-        for nid, score in top_k(vector, [(r["note_id"], r["vector"]) for r in rows], 50, SIMILAR_MIN_COSINE):
+        hits = nb.note_vectors.nearest(vector, 50, SIMILAR_MIN_COSINE, exclude=[note_id], notes_only=True)
+        info = {}
+        if hits:
+            marks = ",".join("?" for _ in hits)
+            info = {r["note_id"]: r for r in nb.store.q(
+                f"SELECT note_id, title, occurred_at FROM notes WHERE note_id IN ({marks})", [h[0] for h in hits])}
+        for nid, score in hits:
             r = info[nid]
             if score >= NEAR_DUPLICATE_COSINE and nid not in linked:
                 revisits.append({"note_id": nid, "occurred_at": r["occurred_at"], "matched_by": "similar",

@@ -989,7 +989,9 @@ class _OpContext:
                        (cid, NoteStore.claim_text(subject_name, p["predicate"], obj_text, p.get("evidence"))))
         self.stats["claims_added"].append(cid)
         self.stats["touched_claims"].append(cid)
+        self.dirty_entities.add(p["subject_id"])
         if p.get("object_id"):
+            self.dirty_entities.add(p["object_id"])
             self.dirty_relations.add((p["subject_id"], p["object_id"], p["predicate"]))
 
     def _claim(self, cid: str) -> sqlite3.Row:
@@ -999,7 +1001,9 @@ class _OpContext:
         return row
 
     def _dirty_claim_relation(self, row: sqlite3.Row) -> None:
+        self.dirty_entities.add(row["subject_id"])  # its history changed (then-versus-now cache key)
         if row["object_id"]:
+            self.dirty_entities.add(row["object_id"])
             self.dirty_relations.add((row["subject_id"], row["object_id"], row["predicate"]))
 
     def op_claim_supersede(self, p: Dict[str, Any]) -> None:

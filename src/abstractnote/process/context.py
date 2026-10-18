@@ -159,10 +159,11 @@ def note_context(nb: Any, note_id: str, max_chars: Optional[int] = None) -> Dict
     vector = nb.cache.get(row["vector_key"]) if row["vector_key"] else None
     similar: List[Dict[str, Any]] = []
     if vector is not None:
-        rows = nb.store.q("SELECT n.note_id, v.vector FROM notes n JOIN vectors v ON v.vector_key=n.vector_key"
-                          " WHERE n.note_id!=? AND n.insight_kind IS NULL AND n.archived_at IS NULL", (note_id,))
-        for nid, score in top_k(vector, [(r[0], r[1]) for r in rows], SIMILAR_NOTES, 0.2):
+        for nid, score in nb.note_vectors.nearest(vector, SIMILAR_NOTES * 3, 0.2, exclude=[note_id],
+                                                  notes_only=True):
             n = nb.store.note_row(nid)
+            if n["archived_at"] or len(similar) >= SIMILAR_NOTES:
+                continue
             similar.append({"note_id": nid, "title": n["title"], "occurred_at": n["occurred_at"],
                             "summary": excerpt(n["summary"] or n["one_line"] or n["text"], 200),
                             "score": round(score, 4)})

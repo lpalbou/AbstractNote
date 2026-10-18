@@ -57,11 +57,15 @@ def note_capture(ctx: ToolContext, text: str = "", idempotency_key: Optional[str
                  source: Optional[Dict[str, Any]] = None, priority: Optional[int] = None,
                  attachments: Optional[List[Any]] = None, session_id: Optional[str] = None,
                  about: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    resolved = resolve_attachments(ctx, attachments)
+    def blank(v: Any) -> Any:  # flows pass "" / {} / [] for unset start pins
+        return None if v in ("", {}, []) else v
+
+    resolved = resolve_attachments(ctx, blank(attachments))
+    priority = blank(priority)
     result = ctx.nb.capture(
-        text, title=title, occurred_at=occurred_at, location=location, source=source,
+        text, title=blank(title), occurred_at=blank(occurred_at), location=blank(location), source=blank(source),
         priority=None if priority is None else int(priority), attachments=resolved,
-        idempotency_key=idempotency_key, session_id=session_id, account=ctx.account, about=about,
+        idempotency_key=blank(idempotency_key), session_id=blank(session_id), account=ctx.account, about=blank(about),
         default_client=ctx.default_client, vision=ctx.extractors.get("vision"), stt=ctx.extractors.get("stt"),
     )
     return result.model_dump()
@@ -70,5 +74,8 @@ def note_capture(ctx: ToolContext, text: str = "", idempotency_key: Optional[str
 def note_file(ctx: ToolContext, note_id: str, title: Optional[str] = None, kind: Optional[str] = None,
               topics: Optional[List[str]] = None, urgency: Optional[str] = None, language: Optional[str] = None,
               one_line: Optional[str] = None) -> Dict[str, Any]:
-    return ctx.nb.file_note(note_id, title=title, kind=kind, topics=topics, urgency=urgency, language=language,
-                            one_line=one_line)
+    def blank(v: Any) -> Any:
+        return None if v in ("", {}, []) else v
+
+    return ctx.nb.file_note(note_id, title=blank(title), kind=blank(kind), topics=topics or [],
+                            urgency=blank(urgency), language=blank(language), one_line=blank(one_line))
