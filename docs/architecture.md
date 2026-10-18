@@ -32,9 +32,12 @@ and the recall design in [remembering.md](remembering.md).
 6. **Append-only history.** Every change to the graph is a revision caused by a note. The graph at
    any past moment is the replay of revisions up to that moment. Facts are superseded, never
    overwritten.
-7. **AbstractMemory is the truth layer for facts.** Claims are stored as temporal triple assertions
-   in an AbstractMemory store so that the wider framework (agents, entities, memory tooling) can
-   read them with the same contracts.
+7. **Claims live in AbstractMemory's format.** Every claim is a temporal triple assertion in an
+   AbstractMemory store owned by the notebook, so memory tooling reads it with the framework's
+   contracts (`TripleQuery`, `active_at`, provenance). Agents and entities reach note knowledge
+   through the note tools and flows, which carry the effort level and the citations.
+8. **Humans can act on the graph.** Tasks can be closed, claims retracted, merges undone, by the
+   user; each such action is a revision with its own provenance, so the history stays honest.
 
 ## Components
 
@@ -112,7 +115,10 @@ AbstractNote adds three things to a gateway that has `abstractnote` installed:
 3. **A read API** under `/api/gateway/note/*` for the interactive views (graph, timeline, quick
    search, queue status). It resolves the caller's plane through the gateway's own service lookup.
    Writes that change knowledge go through flows; the read API only performs small bookkeeping
-   actions (acknowledge an insight, retry a failed note, archive).
+   actions that are themselves recorded as revisions (close a task, retract a claim, undo a merge,
+   acknowledge an insight, retry a failed note, archive). Attachments uploaded through the gateway
+   are capped by the gateway's attachment limit (25 MB by default); larger files enter through the
+   `abstractnote import files` command on the machine that holds them.
 
 The gateway side of this integration is a small, explicit change in AbstractGateway (an app
 catalog row, the tool binding, the router include). It is listed in the backlog as the
@@ -125,7 +131,7 @@ Everything for one user lives under `<plane>/abstractnote/`:
 | Path | Content |
 |---|---|
 | `note.sqlite3` | The note index: notes, attachments, queue, entities, aliases, claims index, relations, revisions, topics, tasks, insights, settings, full-text and vector indexes. Rebuildable from notes plus revisions. |
-| `kg.sqlite3` | The AbstractMemory `SQLiteTripleStore` holding every claim as a temporal `TripleAssertion` (plus a journal for supersession). The framework-wide truth layer for facts. |
+| `kg.sqlite3` | The AbstractMemory `SQLiteTripleStore` holding every claim as a temporal `TripleAssertion` (plus a journal). Readable with AbstractMemory's own contracts; private to the notebook. |
 | `blobs/<sha256[:2]>/<sha256>` | De-duplicated attachment bytes (original files, images, audio). |
 | `extracted/<sha256>.txt` | Text extracted from attachments (documents, transcripts, image descriptions). |
 
@@ -175,6 +181,8 @@ with backoff; after three failures the note is marked for the user to see.
 
 ### Remembering
 
+- **Since you last looked** (read API): the default screen for humans and agents: what changed
+  in the notebook since a cursor (new entities, superseded claims, closed loops, failed notes).
 - **Quick** (read API, under a second): full-text plus vector search over notes, entities and
   claims, grouped by entity and time.
 - **Standard** (`note-recall` flow, seconds): quick retrieval, graph expansion around the hits at

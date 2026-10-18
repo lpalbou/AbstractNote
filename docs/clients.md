@@ -29,7 +29,8 @@ API, read the note API for views, and never send user, tenant or runtime identif
   uses relative URLs and the shared shell, as the app-server contract requires.
 - Three views: **Capture**, **Graph**, **Remember** (see [remembering.md](remembering.md)), plus a
   small **Settings** drawer (filing model, answering model, inline processing, reflect schedule,
-  queue status with retry, sign-out).
+  location permission, queue status with retry, sign-out). Capture asks once for location
+  permission and attaches it to notes when granted.
 - Theming uses ui-kit tokens only; tested on default-dark, observer-night and solarized-light.
 - Registered in the gateway app catalog as `note` (port 3006, cookie prefix `abstractnote`,
   page title `AbstractNote`) and in the framework installer's app list.
@@ -52,7 +53,8 @@ http://127.0.0.1:8080` runs the production server the way the gateway launches i
 - Screens:
   - **Note**: a text field (watchOS dictation and scribble come free with it) and a Send button at
     the bottom; after sending, the filing answer ("Saved as idea 'LUT budget'. Related: Dana,
-    LUT.") with a Done button. Location is attached when the user allowed it.
+    LUT.") with a Done button. Location is attached when the user allowed it. Each send carries a
+    fresh idempotency key so a radio retry never duplicates a note.
   - **Ask**: dictate a question, see the standard-effort answer with the evidence titles; "Dig
     deeper" starts a deep recall and the result shows in Today when ready.
   - **Today**: unacknowledged insights, open loops, on-this-day notes; tap to acknowledge or to

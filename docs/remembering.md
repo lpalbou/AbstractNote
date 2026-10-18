@@ -37,36 +37,42 @@ never blocking: the run starts, the client gets a run id, and the dossier appear
 
 ## The Remember view
 
-The Remember view combines four instruments on one screen.
+The Remember view opens on what changed and lets you dig from there.
 
-1. **The ask bar** with the effort dial and cue chips: *when* (a date, a range, "around" an
+1. **Since you last looked** (the default screen): what the notebook learned since your last
+   visit: new entities, beliefs that were superseded, loops that closed, insights, notes that
+   failed to process. It is a system-time delta from a cursor, so it is the same call an agent
+   makes at the start of every session (`GET /note/changes?since=`). Each item opens its subject.
+2. **Cue cards**: a few prompts the reflect flow generated from the graph, each answerable by
+   adding a note: a person who went quiet, a decision that is a year old, a task mentioned three
+   times and never closed. Answering a cue writes a note linked to its subject; the answered
+   rate is the measure of whether the cards are worth showing.
+3. **The ask bar** with the effort dial and cue chips: *when* (a date, a range, "around" an
    entity's active period), *who/what* (entities), *kind* (idea, decision, task, ...), *topic*.
-   Typing shows quick results immediately; pressing Ask runs standard or deep.
-2. **Memory lanes**: a horizontal time river. Each lane is an entity or topic you chose or that
-   the results involve; dots are notes, thicker segments are periods of activity, vertical links
-   are revisions that connected two lanes (a relationship formed), and markers are
-   supersessions (a belief changed). Clicking a point opens the day; dragging a window sets the
-   time cue. The river is also the Graph view's time scrubber, so the two views share state.
-3. **Then versus now**: for each entity in focus, the earliest and the latest summary side by
-   side, with the turning points between them listed with their notes. This card is generated
-   once per entity revision and cached; it is the fastest way to see how your understanding of a
-   person, a project or an idea evolved.
-4. **Revisit**: what the reflect flow surfaced and what the moment suggests: open loops, unread
-   insights, "on this day" notes, entities that went silent but relate to what you added this
-   week, contradictions awaiting a decision. Each item has one action (open, acknowledge, add a
-   note about it).
+   Typing shows quick results immediately; pressing Ask runs standard or deep. Answers show the
+   text with citations; each citation opens the note with its attachments and the revision it
+   caused. "Save this answer" turns it into a note with provenance.
+4. **Then versus now**: for an entity or for a relationship between two entities, the earliest
+   and the latest summary side by side, with the turning points between them listed with their
+   notes. Cached per revision; the fastest way to see how your understanding of a person, a
+   project, an idea or a link evolved.
+5. **Why do I believe this**: every claim, and every sentence of an answer, opens its evidence
+   chain: the claim, what it superseded or was superseded by, the notes, the attachment excerpt.
+   One tap says "this is wrong" and writes a retract revision with your account as the source.
+6. **Revisit**: open loops with a close action, unread insights, "on this day" notes, entities
+   that went silent but relate to what you added this week, contradictions awaiting a decision.
 
-Answers at standard and deep effort show the answer text with citations; each citation opens the
-note in a side panel with its attachments and the revision it caused. The evidence list can be
-turned into a new note ("save this answer"), which keeps the answer with provenance.
+Each entity card carries a small activity sparkline. A multi-lane time river is a candidate for
+a later version once real notebooks show which lanes deserve a lane; the time scrubber in the
+Graph view already covers "what did this look like then".
 
 ## The Graph view
 
 - **Focus and depth**: pick one or several entities; see their neighbourhood up to depth three,
   edges labelled by predicate with first and last seen dates and counts.
-- **Time scrubber**: the same river as Remember. Moving it changes `as_of`: entities and edges
-  that did not exist yet fade out, superseded claims show as dashed; the entity card shows the
-  beliefs at that moment.
+- **Time scrubber**: moving it changes `as_of`: entities and edges that did not exist yet fade
+  out, superseded claims show as dashed; the entity card shows the beliefs at that moment. An edge
+  opens the relation timeline between its two entities.
 - **Day page**: "what happened on day X": notes captured, revisions applied with their one-line
   summaries, entities created or merged, claims superseded.
 - **Entity page**: card, aliases, summary history, claims timeline (active and superseded),
@@ -74,15 +80,17 @@ turned into a new note ("save this answer"), which keeps the answer with provena
 
 ## The Capture view
 
-A chat. You type or paste, attach files, drop images, or dictate. The answer tells you what was
-saved, how it was filed, which earlier notes and entities it relates to, and when you first said
-something similar. When the notebook is quiet the answer includes the links the processor made;
-otherwise it says the note is queued and the links appear in the thread when the processor is
-done. Nothing in the answer uses system vocabulary: no run ids, no ledger, no gateway.
+A chat. You type or paste, attach files, drop images, or dictate; with your permission the
+browser attaches your location. The answer tells you what was saved, how it was filed, which
+earlier notes and entities it relates to, and when you said the same thing before. When the
+notebook is quiet the answer includes the links the processor made; otherwise it says the note
+is queued, and the thread updates that message when the note is processed (the app re-reads the
+note until it is). Nothing in the answer uses system vocabulary: no run ids, no ledger, no gateway.
 
 ## For agents and entities
 
-- `note_search` at quick effort is cheap enough to call before every task.
+- `note_changes` (since you last looked) is the first call of a session; `note_search` at quick
+  effort is cheap enough to call before every task.
 - `note-recall` at standard effort returns the latest decision and why it changed, with
   citations, in one call; agents should quote the note ids in their own outputs so provenance
   survives.

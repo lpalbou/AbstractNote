@@ -41,10 +41,14 @@ flowchart TD
     P --> E3[on_flow_end<br/>response, note_id, status=processed, revision]
 ```
 
-- `note_capture` reads attachments from the run's artifacts, hashes bytes and text, stores the
-  note and blobs, extracts text from documents and transcripts, returns `status` (`new` or
-  `duplicate`), the similar notes (vector neighbours) and the existing topics, and enqueues the
-  note with the requested or default priority.
+- `note_capture` reads attachments from the run's artifacts (inside the gateway, only
+  `{"$artifact": id}` references resolved through the host's artifact store; local paths exist only
+  in headless use with an allowed root), hashes bytes and text, stores the note and blobs, extracts
+  text from documents and transcripts, returns `status` (`new` or `duplicate` for a retried
+  idempotency key), the revisited notes (same words earlier) and similar notes (vector neighbours),
+  the existing topics, and enqueues the note with the requested or default priority. The bound tool
+  stamps `source.account` with the plane's account at bind time; `session_id` comes from a start
+  pin; clients send an `idempotency_key`.
 - Quick filing is one small-model call with the `QuickFiling` schema (below). It sees the note,
   the similar notes' titles and the existing topic list, and returns a title, a kind, topics, an
   urgency and the language. `note_file` stores them and maps urgency to queue priority.
@@ -77,11 +81,15 @@ flowchart TD
    rest.
 3. **Resolve candidates** (`note_resolve_candidates`): for every mention, up to five existing
    entities with their kind, aliases, summary, last seen date and how they matched.
-4. **Link** (`Linking` schema): the model decides, per mention, `reuse <entity_id>`, `create`, or
-   `merge <a> into <b>`; per claim, whether it `restates` an existing claim (reinforce), `refines`
-   it (new claim, old stays active), `supersedes` it (close the old one) or `contradicts` it
-   (both stay, marked disputed); per task, open or close. It also writes the revision summary and
-   an updated one-paragraph summary for each touched entity when the note changes what is known.
+4. **Link** (`Linking` schema): the model decides, per mention, `reuse` (a candidate index),
+   `create`, or `merge` (two candidate indexes); per claim, whether it `restates` an existing claim
+   (reinforce), `refines` it (new claim, old stays active), `supersedes` it (close the old one) or
+   `contradicts` it (both stay, marked disputed), naming the existing claim by its index in the
+   packet; per task, open or close by index. The schema uses indexes and enumerations rather than
+   free-form ids so that small models cannot invent identifiers; `note_apply_revision` rejects any
+   reference outside the packet and downgrades it to `create` or `new` with a warning. The model
+   also writes the revision summary and an updated one-paragraph summary for each touched entity
+   when the note changes what is known.
 5. **Apply** (`note_apply_revision`): writes the revision ops to the index and the triple store in
    one transaction per store, updates relations, topics, tasks, embeddings, and marks the note
    `processed`. The response lists created and merged entities, claims added and superseded, and
@@ -112,10 +120,15 @@ flowchart TD
   failure increments `attempts` and schedules a retry (1 min, 10 min, 1 h); the third failure sets
   the note to `failed`, visible in the web app's queue panel with the error, and offers a retry.
 - **The processor automation.** On first use the web app (or `abstractnote processor ensure`)
-  creates an automation per user: trigger `schedule@2` every 2 minutes, flow `note-drain`,
-  `max_items = 20`, `budget_s = 90`. Automations run occurrences serially and coalesce missed
-  ticks, which gives the queue exactly the eventual, ordered consistency it needs without a
-  gateway worker. "Process now" sends the automation's manual trigger.
+  creates an automation per user: trigger `schedule@2` every `2m`, flow `note-drain`,
+  `max_items = 20`, `budget_s = 90`, and `_runtime.allowed_tools` listing the note tools.
+  Automations run occurrences serially and coalesce missed ticks, which gives the queue exactly
+  the eventual, ordered consistency it needs without a gateway worker. "Process now" sends the
+  automation's `run_now` command; a `409 automation_busy` answer means a drain is already running
+  and the queue panel says so. Steady-state throughput is at most `max_items` per interval.
+- **No approval waits.** Inside the gateway the note tools are added to the tool approval
+  auto-approve set when the runtime is built, so a capture never parks on a tool-approval wait.
+  The hermetic gateway smoke test asserts zero approval waits in a capture run.
 - **Priority**: `3` urgent and `2` high come from the quick filing step (tasks with deadlines,
   warnings, anything the user marks urgent); `1` normal is the default for interactive capture;
   `0` bulk is used by importers so that live notes always go first.
@@ -125,14 +138,18 @@ flowchart TD
 
 ### note-recall
 
+`note-recall` also serves the `abstractcode.agent.v1` chat contract: it accepts `prompt` as an
+alias of `question` and always returns the answer text on the `response` output pin next to the
+structured pins, so a chat client that polls `output.response` shows the answer.
+
 ```mermaid
 flowchart TD
-    S[on_flow_start question, effort, as_of?, since?, until?,<br/>entities?, topics?, provider?, model?] --> Q[tool note_search quick]
+    S[on_flow_start question or prompt, effort, as_of?, since?, until?,<br/>entities?, topics?, provider?, model?] --> Q[tool note_search quick]
     Q --> E{effort}
     E -- quick --> Z1[on_flow_end hits]
     E -- standard --> X[tool note_expand<br/>entity cards as_of, claims timeline,<br/>neighbours, then-vs-now pairs]
     X --> L[llm_call synthesize<br/>resp_schema Answer]
-    L --> Z2[on_flow_end answer, evidence, follow_ups]
+    L --> Z2[on_flow_end response, answer, evidence, follow_ups]
     E -- deep --> M[subflow note-mine] --> Z3[on_flow_end answer, dossier_note_id]
 ```
 
@@ -195,15 +212,16 @@ models from them and repairs invalid output. Python mirrors live in `abstractnot
  "topics": ["string"]}
 ```
 
-**Linking**
+**Linking** (indexes refer to the candidate lists in the context packet; enumerations are JSON
+Schema enums)
 
 ```json
-{"mentions": [{"ref": "m1", "decision": "reuse|create|merge", "entity_id": "existing id for reuse",
-               "merge_into": "entity id when decision is merge", "name": "preferred name", "kind": "...",
+{"mentions": [{"ref": "m1", "decision": "reuse|create|merge|unsure", "candidate": 0,
+               "merge_candidates": [0, 1], "name": "preferred name", "kind": "person|org|project|concept|place|event|artifact|software|thing",
                "aliases": ["..."], "summary": "updated one-paragraph summary or null", "reason": "short"}],
  "claims": [{"index": 0, "relation_to_existing": "new|restates|refines|supersedes|contradicts",
-             "existing_claim_id": "cl_... or null", "reason": "short"}],
- "tasks": [{"index": 0, "closes_task_id": "tk_... or null"}],
+             "existing": 0, "reason": "short"}],
+ "tasks": [{"index": 0, "closes_open_task": 0}],
  "revision_summary": "one sentence"}
 ```
 

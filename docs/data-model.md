@@ -30,7 +30,7 @@ revision points back to the note(s) that caused it.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `note_id` | `nt_<26 chars>` | Deterministic: `sha256(source_key or normalised text + attachment hashes)` encoded base32. Re-sending the same content yields the same id. |
+| `note_id` | `nt_<26 chars>` | Deterministic, base32 of a sha256. Imports: `sha256(importer, source_key)`. Live capture: `sha256(idempotency_key)` when the client sends one (clients always should; the runs API has no idempotency key of its own), otherwise `sha256(text_norm, attachment hashes, occurred_at to the minute, source.client)`. A retried request yields the same note; the same words said again on another day yield a new note that revisits the earlier one. |
 | `kind` | enum | `idea`, `task`, `decision`, `fact`, `event`, `question`, `reflection`, `reference`, `log`, `conversation`, `personal`, `synthesis`, `insight`. Assigned by the quick filing step; `synthesis` and `insight` are system-authored. |
 | `title` | text | Short title (model-written or taken from the source). |
 | `text` | text | The note body as received (Markdown allowed). Never truncated. |
@@ -45,7 +45,7 @@ revision points back to the note(s) that caused it.
 | `topics` | list | Categories assigned by filing and refined by processing (see Topics). |
 | `priority` | int 0..3 | 3 urgent, 2 high, 1 normal, 0 bulk. |
 | `status` | enum | `received`, `queued`, `processing`, `processed`, `failed`, `duplicate`, `archived`. |
-| `duplicate_of` | note id or null | Set when the exact hash matched an earlier note. |
+| `duplicate_of` | note id or null | Set only when the same idempotency key or import source key arrives again (a retry), never for the same words on another occasion. |
 | `session_id`, `run_id` | text | The gateway session and the run that captured it, when applicable. |
 | `archived_at` | ISO or null | Notes are archived, never deleted. |
 
@@ -57,7 +57,7 @@ revision points back to the note(s) that caused it.
 | `sha256`, `size`, `mime`, `filename` | the bytes' identity |
 | `artifact_ref` | the gateway artifact that carried it, when uploaded through the gateway |
 | `blob_path` | `blobs/<sha256[:2]>/<sha256>`; stored once per distinct content across the notebook |
-| `extracted_text`, `extracted_by` | text derived from the bytes (document text, transcript, image description, log excerpt) and which extractor produced it (`pdf`, `plain`, `vision:<model>`, `stt:<model>`) |
+| `extracted_text`, `extracted_by` | text derived from the bytes (document text, transcript, image description, log excerpt, media metadata) and which extractor produced it (`plain`, `markdown`, `pdf`, `vision:<model>`, `stt:<model>`, `media-metadata`, `none`). Audio and video with a speech track are transcribed when a speech model is configured; otherwise, and for music, the filing keeps the metadata (filename, duration, tags) and the capture answer says so plainly. |
 
 Two notes that attach the same file share one blob; the second attachment records the
 relation `same_bytes_as` so the graph shows that the file came back.
@@ -90,7 +90,7 @@ graph.
 
 | Field | Meaning |
 |---|---|
-| `claim_id` | `cl_<...>` deterministic from `(note_id, subject, predicate, object)` |
+| `claim_id` | `cl_<...>` deterministic from `(note_id, subject, predicate, object)`; predicate CURIEs keep their case in the index |
 | `subject_id` | entity id |
 | `predicate` | a CURIE from the AbstractSemantics registry when one fits (`schema:knowsAbout`, `schema:participant`, `skos:related`, `dcterms:references`, `cito:disagreesWith`, ...), otherwise `ex:<snake_case>` |
 | `object_id` or `object_literal` | an entity, or a literal value (text, number, date) |
@@ -108,7 +108,9 @@ graph.
 
 A relation is a derived, fast-to-read summary of all claims between two entities:
 `(subject_id, object_id, predicate) -> first_seen, last_seen, count, active_claim_ids`. The graph
-view reads relations; the claim timeline reads claims.
+view reads relations. The **relation timeline** (`/note/relations/{a}/{b}`) is first-class: all
+claims between two entities in history order, with supersessions and a then-versus-now of the
+relationship, so the evolution of a link is as visible as the evolution of a node.
 
 ## Revision
 
@@ -118,8 +120,9 @@ and tasks.
 
 | Field | Meaning |
 |---|---|
-| `revision_id` | `rv_<...>` deterministic from `(note_id, attempt)` |
-| `note_id` | the cause |
+| `revision_id` | `rv_<...>` deterministic from `(note_id, attempt)`; user actions use `(action, target, occurred_at)` |
+| `note_id` | the cause (null for a user action; then `source` names the client and account) |
+| `applied_index`, `applied_kg` | flags set after each projection commits; recovery replays revisions whose flags are not both set (idempotent thanks to deterministic ids) |
 | `at` | the note's `occurred_at` (history time) |
 | `recorded_at` | when the processor applied it (system time) |
 | `run_id` | the processing run (ledger) |
@@ -141,7 +144,11 @@ Operations:
 | `claim.reinforce` | `{claim_id, note_id}` (the same statement seen again) |
 | `topic.assign` | `{note_id, topic}` |
 | `task.open` / `task.close` / `task.drop` | `{task_id, text, due?, by_note_id?}` |
+| `entity.unmerge` | `{entity_id, from_id, reason}` (a user action; re-points the claims that came from `from_id`) |
 | `note.summary` | `{note_id, summary, kind, language}` |
+
+User actions (`close a task`, `retract a claim`, `undo a merge`) produce revisions with
+`source = {client, account}` and no note; they are the human side of an actionable graph.
 
 Reversibility: a merge keeps both records and can be undone by a later revision that re-points
 claims; a supersession keeps the old claim with its window closed.
@@ -193,8 +200,9 @@ Rules:
 | Level | Mechanism | Outcome |
 |---|---|---|
 | Bytes | `sha256` of attachment content | one blob per content; later attachments link to it |
-| Note text | `sha256` of `text_norm` + sorted attachment hashes (or the source key for imports) | same `note_id`; the capture answer says when it was first saved; status `duplicate` |
-| Near-duplicate note | vector cosine over note embeddings, threshold 0.92, same kind | kept as a distinct note, linked with `ex:revisits` to the earlier one: a revisit is a signal, not noise |
+| Retry | same idempotency key (live) or source key (import) | same `note_id`, status `duplicate`, nothing else written |
+| Same words again | exact `text_norm` hash equal to an earlier note | a new note; the earlier one is the strongest `ex:revisits` candidate; the answer says "you noted this on <date>" |
+| Near-duplicate note | vector cosine over note embeddings, threshold 0.92 | kept as a distinct note, linked with `ex:revisits` to the earlier one: a revisit is a signal, not noise |
 | Entity | candidates from alias match (case-folded), full-text on name and aliases, vector k-nearest on entity embeddings; the model decides `same`, `different`, `unsure` per mention and may propose a merge of two existing entities | `entity.create`, `entity.alias`, `entity.merge` ops |
 | Claim | same `(subject, predicate, object)` after resolution | `claim.reinforce` instead of a new claim |
 | Conflicting claim | same `(subject, predicate)` with a different object and the model marks the predicate single-valued, or the note's stance is `revise` or `retract` | `claim.supersede` or `claim.retract` with reason; history kept |
@@ -219,9 +227,19 @@ Every claim is written to the AbstractMemory store as a `TripleAssertion`:
 
 Entity names and aliases are written as `(entity_id, schema:name, "Name")` and
 `(entity_id, skos:altLabel, "Alias")`; merges as `(from_id, schema:sameAs, into_id)`. Supersession
-closes the old assertion through a journal `ClosureRecord(kind="supersede")` and sets its
-`valid_until` on the new copy, so AbstractMemory's ranked retrieval and `active_at` filters agree
-with the note index.
+closes the old assertion in place with `close_assertion(assertion_id, valid_until)`, an additive
+AbstractMemory store method introduced for this purpose (it updates `valid_until` only when it is
+still open and leaves everything else untouched), and records a journal
+`ClosureRecord(kind="supersede")` so both `TripleQuery(active_at=...)` and ranked retrieval agree
+with the note index. AbstractMemory lowercases subjects, predicates and objects that are not
+literals; the note index keeps the original case, and every AbstractMemory query from AbstractNote
+passes `owner_id="abstractnote"`.
+
+Write order for one revision: the revision row (intent) first, then the index projection, then
+the AbstractMemory projection, then the two `applied_*` flags. Embeddings are computed once in the
+note index and handed to the triple store, so a rebuild never re-embeds over the network unless
+`rebuild --reembed` is requested (for example after the embedding model changed; the pin is shown
+by `GET /note/status`).
 
 Store: `SQLiteTripleStore` at `<plane>/abstractnote/kg.sqlite3` with the gateway's embedding
 route as embedder (vectors are pinned to that embedding space) and a `SQLiteJournal` next to it.
