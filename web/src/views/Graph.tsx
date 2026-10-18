@@ -359,7 +359,7 @@ function DayPanel({ date, onClose }: { date: string; onClose: () => void }) {
           <p className="nt-meta">What happened that day</p>
         </div>
       </header>
-      <ReadView read={day} what="that day" empty={(d) => (d.notes.length || d.revisions.length || d.entities.length ? false : "Nothing was noted that day.")}>
+      <ReadView read={day} what="that day" empty={(d) => (d.notes.length || d.revisions.length || d.entities_touched.length ? false : "Nothing was noted that day.")}>
         {(d) => (
           <>
             {d.notes.length ? (
@@ -378,19 +378,19 @@ function DayPanel({ date, onClose }: { date: string; onClose: () => void }) {
                 </ul>
               </Section>
             ) : null}
-            {d.entities.length ? (
+            {d.entities_touched.length ? (
               <Section title="Touched">
                 <div className="nt-chips">
-                  {d.entities.map((e) => (
+                  {d.entities_touched.map((e) => (
                     <EntityChip key={e.entity_id} entity={e} />
                   ))}
                 </div>
               </Section>
             ) : null}
-            {d.superseded.length ? (
+            {d.claims_superseded.length ? (
               <Section title="No longer believed">
                 <ul className="nt-list">
-                  {d.superseded.map((c) => (
+                  {d.claims_superseded.map((c) => (
                     <li key={c.claim_id} className="nt-list__row">
                       <span className="nt-struck">{claimSentence(c)}</span>
                       <button type="button" className="nt-btn nt-btn--quiet" onClick={() => openClaim(c.claim_id)}>

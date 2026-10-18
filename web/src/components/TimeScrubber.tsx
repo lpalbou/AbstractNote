@@ -15,7 +15,7 @@ export function TimeScrubber({ onDay }: { onDay?: (date: string) => void }) {
   const buckets = useRead<TimelineBuckets>(() => api.get<TimelineBuckets>("note/timeline", { granularity: "week" }), [api]);
   const range = useMemo(() => {
     const to = Date.now();
-    const starts = (buckets.data?.buckets || []).map((b) => Date.parse(b.start)).filter(Number.isFinite);
+    const starts = (buckets.data?.buckets || []).map((b) => Date.parse(`${b.bucket}T00:00:00Z`)).filter(Number.isFinite);
     const from = starts.length ? Math.min(...starts) : to - 90 * 86400_000;
     return { from, to };
   }, [buckets.data]);
@@ -27,9 +27,10 @@ export function TimeScrubber({ onDay }: { onDay?: (date: string) => void }) {
     <div className="nt-scrubber">
       <div className="nt-scrubber__bars" aria-hidden="true">
         {(buckets.data?.buckets || []).map((b) => {
-          const left = isoToScrub(b.start, range.from, range.to) * 100;
-          const past = !at || Date.parse(b.start) <= Date.parse(at);
-          return <span key={b.start} className={`nt-scrubber__bar${past ? "" : " nt-scrubber__bar--future"}`} style={{ left: `${left}%`, height: `${Math.max(8, (b.notes / max) * 100)}%` }} />;
+          const start = `${b.bucket}T00:00:00Z`;
+          const left = isoToScrub(start, range.from, range.to) * 100;
+          const past = !at || Date.parse(start) <= Date.parse(at);
+          return <span key={b.bucket} className={`nt-scrubber__bar${past ? "" : " nt-scrubber__bar--future"}`} style={{ left: `${left}%`, height: `${Math.max(8, (b.notes / max) * 100)}%` }} />;
         })}
       </div>
       <input

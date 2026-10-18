@@ -20,8 +20,9 @@ export type Claim = {
   supersedes?: string | null;
   evidence?: string;
   note_id?: string;
-  subject?: EntityRef;
-  object?: EntityRef | null;
+  /** Names as the note index serves them (W1 claim_dict). */
+  subject_name?: string | null;
+  object_name?: string | null;
   note?: { note_id: string; title: string; occurred_at: string } | null;
 };
 
@@ -89,13 +90,25 @@ export type Changes = {
 /** Pinned: GET /note/overview. */
 export type Overview = { recent?: NoteRef[]; entities?: Array<EntityRef & { note_count: number; last_seen: string }>; insights?: Insight[]; resurfacing?: NoteRef[]; activity?: Array<{ day: string; notes: number; revisions: number }> };
 export type SearchResult = { notes: Array<NoteRef & { score?: number; entities?: EntityRef[] }>; entities: EntityListItem[]; claims: Claim[]; facets?: { kinds?: Record<string, number>; topics?: Record<string, number>; months?: Record<string, number> } };
-export type Day = { date: string; notes: NoteRef[]; revisions: Array<{ revision_id: string; at: string; summary: string; note_id?: string | null }>; entities: Array<EntityRef & { change?: string }>; superseded: Claim[] };
-export type TimelineBuckets = { granularity: string; buckets: Array<{ start: string; notes: number; revisions: number; new_entities: number; superseded: number }> };
+/** GET /note/day/{date} (W1 NoteStore.day). */
+export type Day = { day: string; tz: string; notes: NoteRef[]; revisions: Array<{ revision_id: string; at: string; summary: string; note_id?: string | null }>; entities_touched: EntityListItem[]; entities_created: string[]; claims_superseded: Claim[] };
+/** GET /note/timeline (W1 NoteStore.timeline); `bucket` is the day, the Monday of the week, or the month. */
+export type TimelineBuckets = { granularity: string; buckets: Array<{ bucket: string; notes: number; revisions: number; entities_created: number; claims_superseded: number }> };
 export type Topic = { topic: string; count: number; first_seen?: string; last_seen?: string };
-export type QueueInfo = { queued: number; processing: number; failed: number; oldest_enqueued_at?: string | null; failed_notes?: Array<NoteRef & { error?: string; attempts?: number }>; processor?: { automation_id?: string; every?: string; max_items?: number; running?: boolean } };
-export type ModelChoice = { provider: string; model: string };
-export type NoteSettings = { filing_model: ModelChoice; answering_model: ModelChoice; reflect_schedule: string; process_inline: boolean };
-export type NoteStatus = { counts?: Record<string, number>; queue?: QueueInfo; processor_automation_id?: string | null; reflect_automation_id?: string | null; settings?: NoteSettings };
+export type Automations = { processor_id: string | null; reflect_id: string | null };
+export type QueueStats = { queued: number; processing: number; failed: number; done?: number; by_priority?: Record<string, number>; oldest_enqueued_at?: string | null };
+/** GET /note/queue (W1 Queue.summary + W2 automations). */
+export type QueueInfo = {
+  stats: QueueStats;
+  failed: Array<{ note_id: string; title: string; occurred_at?: string; last_error: string | null; failed_at?: string; failures?: number }>;
+  waiting: Array<{ note_id: string; title: string; priority: number; state: string; attempts: number }>;
+  automations: Automations;
+};
+/** null = the default model. */
+export type ModelChoice = { provider: string | null; model: string | null };
+/** GET/PUT /note/settings (W1 DEFAULT_SETTINGS). */
+export type NoteSettings = { filing_model: ModelChoice; answering_model: ModelChoice; reflect_schedule: { every: string }; process_inline_default: boolean };
+export type NoteStatus = { counts?: Record<string, number>; queue?: QueueStats; settings?: NoteSettings; automations: Automations };
 export type ListOf<T> = { items: T[]; next_cursor?: string | null };
 
 /** Pinned: note-capture output. */

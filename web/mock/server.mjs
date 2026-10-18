@@ -87,12 +87,10 @@ export function createMockGateway(options = {}) {
   const taskView = (t) => ({ task_id: t.task_id, note_id: t.note_id, text: t.text, status: t.status, due: t.due || null, closed_at: t.closed_at || null });
   const claimView = (c) => {
     const n = db.notes.get(c.note_id);
-    return {
-      ...c,
-      subject: entRef(c.subject_id),
-      object: c.object_id ? entRef(c.object_id) : null,
-      note: n ? { note_id: n.note_id, title: n.title, occurred_at: n.occurred_at } : null,
-    };
+    // W1 claim_dict: names as subject_name / object_name.
+    const out = { ...c, subject_name: entRef(c.subject_id).name, note: n ? { note_id: n.note_id, title: n.title, occurred_at: n.occurred_at } : null };
+    if (c.object_id) out.object_name = entRef(c.object_id).name;
+    return out;
   };
   const activeAt = (c, at) => {
     if (!at) return c.status === "active";
@@ -448,7 +446,7 @@ export function createMockGateway(options = {}) {
 
     if (np === "/status") {
       const counts = { notes: db.notes.size, entities: db.entities.size, claims: db.claims.size, revisions: db.revisions.length, insights: db.insights.size };
-      return send(res, 200, { counts, queue: queueStats(), processor_automation_id: PROCESSOR_ID, reflect_automation_id: REFLECT_ID, settings: db.settings, embedding: { provider: "mock", model: "mock-embed", dims: 8 } });
+      return send(res, 200, { counts, queue: queueStats(), settings: db.settings, automations: { processor_id: PROCESSOR_ID, reflect_id: REFLECT_ID }, embedding_pin: { provider: "mock", model: "mock-embed", dims: 8 } });
     }
     if (np === "/changes") {
       const since = q.get("since") || new Date(Date.now() - 7 * 86400_000).toISOString();
@@ -524,6 +522,7 @@ export function createMockGateway(options = {}) {
       n.archived_at = nowIso();
       return send(res, 200, { note_id: n.note_id, status: n.status });
     }
+    if (np === "/search" && !(q.get("q") || "").trim()) return fail(res, 422, "q is required.");
     if (np === "/search") return send(res, 200, search(q.get("q") || "", { since: q.get("since"), until: q.get("until"), kinds: list("kinds"), entities: list("entities"), topics: list("topics"), limit: q.get("limit") }));
     if (np === "/entities") {
       const term = norm(q.get("q"));
@@ -613,15 +612,15 @@ export function createMockGateway(options = {}) {
       const add = (iso, field) => {
         if (!inRange(iso, q.get("since"), q.get("until"))) return;
         const k = bucket(iso);
-        const b = map.get(k) || { start: `${k}T00:00:00Z`, notes: 0, revisions: 0, new_entities: 0, superseded: 0 };
+        const b = map.get(k) || { bucket: gran === "month" ? k.slice(0, 7) : k, notes: 0, revisions: 0, entities_created: 0, claims_superseded: 0 };
         b[field] += 1;
         map.set(k, b);
       };
       for (const n of db.notes.values()) add(n.occurred_at, "notes");
       for (const r of db.revisions) add(r.at, "revisions");
-      for (const e of db.entities.values()) if (e.created_at) add(e.created_at, "new_entities");
-      for (const c of db.claims.values()) if (c.valid_until) add(c.valid_until, "superseded");
-      return send(res, 200, { granularity: gran, buckets: [...map.values()].sort((a, b) => ms(a.start) - ms(b.start)) });
+      for (const e of db.entities.values()) if (e.created_at) add(e.created_at, "entities_created");
+      for (const c of db.claims.values()) if (c.valid_until) add(c.valid_until, "claims_superseded");
+      return send(res, 200, { granularity: gran, since: q.get("since"), until: q.get("until"), buckets: [...map.values()].sort((a, b) => a.bucket.localeCompare(b.bucket)) });
     }
     m = np.match(/^\/day\/(\d{4}-\d{2}-\d{2})$/);
     if (m) {
@@ -632,7 +631,8 @@ export function createMockGateway(options = {}) {
       const touched = new Map();
       for (const n of db.notes.values()) if (onDay(n.occurred_at)) for (const id of n.entity_ids) touched.set(id, { ...entRef(id), change: ent(id).created_at && onDay(ent(id).created_at) ? "created" : "touched" });
       const superseded = [...db.claims.values()].filter((c) => onDay(c.valid_until) && c.status === "superseded").map(claimView);
-      return send(res, 200, { date: day, notes, revisions: revs, entities: [...touched.values()], superseded });
+      const created = [...db.entities.values()].filter((e) => onDay(e.created_at)).map((e) => e.entity_id);
+      return send(res, 200, { day, tz: q.get("tz") || "UTC", notes, revisions: revs, entities_touched: [...touched.values()].map(({ change, ...e }) => e), entities_created: created, claims_superseded: superseded });
     }
     if (np === "/revisions") return send(res, 200, { items: [...db.revisions].sort((a, b) => ms(b.recorded_at) - ms(a.recorded_at)).slice(0, Number(q.get("limit") || 50)), next_cursor: null });
     if (np === "/topics") {
@@ -660,7 +660,10 @@ export function createMockGateway(options = {}) {
       return send(res, 200, { items: items.sort((a, b) => ms(b.occurred_at) - ms(a.occurred_at)).map(insightView), next_cursor: null });
     }
     if (np === "/queue") {
-      return send(res, 200, { ...queueStats(), failed_notes: [...db.notes.values()].filter((n) => n.status === "failed").map((n) => ({ ...noteRef(n), error: n.error, attempts: db.queue.get(n.note_id)?.attempts ?? 3 })), processor: { automation_id: PROCESSOR_ID, every: "2m", max_items: 20, running: drainRunning } });
+      // W1 Queue.summary + W2 automations.
+      const failed = [...db.notes.values()].filter((n) => n.status === "failed").map((n) => ({ note_id: n.note_id, last_error: n.error, failed_at: n.received_at, failures: 3, title: n.title, occurred_at: n.occurred_at }));
+      const waiting = [...db.notes.values()].filter((n) => n.status === "queued").map((n) => ({ note_id: n.note_id, priority: 1, state: "queued", attempts: 0, next_attempt_at: null, title: n.title, occurred_at: n.occurred_at }));
+      return send(res, 200, { stats: queueStats(), failed, waiting, automations: { processor_id: PROCESSOR_ID, reflect_id: REFLECT_ID } });
     }
     m = np.match(/^\/queue\/([^/]+)\/retry$/);
     if (m && method === "POST") {
@@ -675,12 +678,14 @@ export function createMockGateway(options = {}) {
     if (np === "/settings") {
       if (method === "PUT") {
         const body = await readJson(req);
-        for (const k of ["filing_model", "answering_model", "reflect_schedule", "process_inline"]) if (k in body) db.settings[k] = body[k];
+        const unknown = Object.keys(body).filter((k) => !(k in db.settings));
+        if (unknown.length) return fail(res, 400, `Unknown setting: ${unknown.join(", ")}.`);
+        Object.assign(db.settings, body);
         return send(res, 200, db.settings);
       }
       return send(res, 200, db.settings);
     }
-    if (np === "/processor/ensure" && method === "POST") return send(res, 200, { processor_automation_id: PROCESSOR_ID, reflect_automation_id: REFLECT_ID, created: [] });
+    if (np === "/processor/ensure" && method === "POST") return send(res, 200, { processor_id: PROCESSOR_ID, reflect_id: REFLECT_ID, created: [] });
     return fail(res, 404, "Not found.");
   }
 
@@ -691,7 +696,8 @@ export function createMockGateway(options = {}) {
       queued: queued.length,
       processing: drainRunning ? Math.min(1, queued.length) : 0,
       failed: notes.filter((n) => n.status === "failed").length,
-      by_priority: { 1: queued.length },
+      done: notes.filter((n) => n.status === "processed").length,
+      by_priority: { 3: 0, 2: 0, 1: queued.length, 0: 0 },
       oldest_enqueued_at: queued.length ? queued.map((n) => n.received_at).sort()[0] : null,
     };
   }

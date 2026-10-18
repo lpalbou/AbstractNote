@@ -6,7 +6,7 @@ import { useDebounced, useRead } from "../lib/hooks";
 import { CURSOR_KEY, readLocal, writeLocal } from "../lib/local";
 import { noteAbout, useAt, type Route } from "../lib/nav";
 import { followRun, startFlow } from "../lib/runs";
-import type { Changes, Cue, EntityCard, EntityListItem, Insight, ListOf, Overview, RecallOutput, RelationTimeline, SearchResult, Task, ThenNow, Topic } from "../lib/types";
+import type { Changes, Cue, EntityCard, EntityListItem, Insight, ListOf, NoteRef, Overview, RecallOutput, RelationTimeline, SearchResult, Task, ThenNow, Topic } from "../lib/types";
 import { NOTE_KINDS, claimSentence, longDate, relative, shortDate, topicLabel } from "../lib/words";
 import { EntityChip, NoteLink, ReadView, Section, Sparkline, openClaim, openEntity, openNote, useApp } from "../components/common";
 import { ThenNowCard } from "../components/ThenNow";
@@ -192,7 +192,13 @@ function AskPanel({ initialTopic }: { initialTopic: string }) {
 
   const filters = { since: since ? `${since}T00:00:00Z` : undefined, until: until ? `${until}T23:59:59Z` : at || undefined, kinds, topics, entities: entities.map((e) => e.entity_id) };
   const hasFilter = Boolean(since || until || kinds.length || topics.length || entities.length);
-  const quick = useRead<SearchResult | null>(() => (dq || hasFilter ? api.get<SearchResult>("note/search", { q: dq, ...filters, limit: 12 }) : Promise.resolve(null)), [api, dq, since, until, at, kinds.join(), topics.join(), entities.map((e) => e.entity_id).join()]);
+  // Quick recall needs words (GET /note/search requires q); cue chips alone list the matching notes.
+  const quick = useRead<SearchResult | null>(() => (dq ? api.get<SearchResult>("note/search", { q: dq, ...filters, limit: 12 }) : hasFilter ? listNotes() : Promise.resolve(null)), [api, dq, since, until, at, kinds.join(), topics.join(), entities.map((e) => e.entity_id).join()]);
+
+  async function listNotes(): Promise<SearchResult> {
+    const page = await api.get<ListOf<NoteRef>>("note/notes", { since: filters.since, until: filters.until, kind: kinds[0], topic: topics[0], entity: filters.entities[0], limit: 12 });
+    return { notes: page.items, entities: [], claims: [] };
+  }
 
   const ask = async () => {
     const question = q.trim();

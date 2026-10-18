@@ -265,11 +265,12 @@ export function buildSeed() {
     { cue_id: makeId("nt", "cue-castor"), kind: "aged_decision", text: "Castor moved to Qwen 27B a month ago. Is it still the right model?", subject: { kind: "entity", id: eid("castor"), title: "Castor" } },
   ];
 
+  // W1 DEFAULT_SETTINGS shape.
   const settings = {
-    filing_model: { provider: "", model: "" },
-    answering_model: { provider: "", model: "" },
-    reflect_schedule: "7d",
-    process_inline: false,
+    filing_model: { provider: null, model: null },
+    answering_model: { provider: null, model: null },
+    reflect_schedule: { every: "7d" },
+    process_inline_default: false,
   };
 
   return { entities, notes, claims, revisions, tasks, queue, insights, cues, settings, entityKey: eid };

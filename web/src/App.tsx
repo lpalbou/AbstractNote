@@ -101,7 +101,7 @@ function Shell({ user, onSignOut, signingOut, onUnauthorized, onAppearance }: { 
           </div>
         </header>
         <main className="nt-main">
-          {route.view === "capture" ? <CaptureView route={route} processInline={Boolean(settings.data?.process_inline)} /> : null}
+          {route.view === "capture" ? <CaptureView route={route} processInline={Boolean(settings.data?.process_inline_default)} /> : null}
           {route.view === "graph" ? <GraphView route={route} /> : null}
           {route.view === "remember" ? <RememberView route={route} /> : null}
         </main>

@@ -10,12 +10,15 @@ export function predicateWords(predicate: string): string {
   return local.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().trim() || "related to";
 }
 
-export function claimObject(c: { object?: { name: string } | null; object_id?: string | null; object_literal?: string | null }): string {
-  return c.object?.name || c.object_literal || c.object_id || "";
+type ClaimWords = { subject_name?: string | null; subject_id: string; predicate: string; object_name?: string | null; object_id?: string | null; object_literal?: string | null };
+
+export function claimObject(c: Omit<ClaimWords, "subject_id" | "predicate" | "subject_name">): string {
+  return c.object_name || c.object_literal || "";
 }
 
-export function claimSentence(c: { subject?: { name: string }; subject_id: string; predicate: string; object?: { name: string } | null; object_id?: string | null; object_literal?: string | null }): string {
-  return `${c.subject?.name || c.subject_id} ${predicateWords(c.predicate)} ${claimObject(c)}`.trim();
+/** "Dana work location Paris". Names come with the claim; an entity without a name reads "someone". */
+export function claimSentence(c: ClaimWords): string {
+  return `${c.subject_name || "someone"} ${predicateWords(c.predicate)} ${claimObject(c) || "something"}`.trim();
 }
 
 export function shortDate(iso: string | null | undefined): string {

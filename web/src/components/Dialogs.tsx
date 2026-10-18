@@ -4,7 +4,7 @@ import { Markdown } from "@abstractframework/panel-chat";
 import { ApiError } from "../lib/api";
 import { useRead } from "../lib/hooks";
 import type { ClaimChain, Note, RelationTimeline } from "../lib/types";
-import { capitalize, claimSentence, longDate, predicateWords, shortDate, topicLabel } from "../lib/words";
+import { capitalize, claimSentence, longDate, shortDate, topicLabel } from "../lib/words";
 import { EntityChip, KindBadge, NoteLink, ReadView, openClaim, overlayStore, useApp, useOverlay } from "./common";
 import { ThenNowCard } from "./ThenNow";
 
@@ -215,7 +215,7 @@ function RelationDialog({ a, b, onClose }: { a: string; b: string; onClose: () =
                     <li key={c.claim_id} className={c.status !== "active" ? "nt-timeline__item nt-timeline__item--old" : "nt-timeline__item"}>
                       <span className="nt-timeline__date">{shortDate(c.observed_at)}</span>
                       <button type="button" className="nt-link" onClick={() => openClaim(c.claim_id)}>
-                        <span className="nt-link__title">{`${c.subject?.name || ""} ${predicateWords(c.predicate)} ${c.object?.name || c.object_literal || ""}`}</span>
+                        <span className="nt-link__title">{claimSentence(c)}</span>
                       </button>
                       {c.status !== "active" ? <span className="nt-muted"> · {c.status === "retracted" ? "withdrawn" : "replaced"}</span> : null}
                     </li>

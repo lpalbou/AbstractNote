@@ -10,8 +10,10 @@ export const REFLECT_CHOICES: Array<[string, string]> = [
   ["1d", "Every day"],
   ["7d", "Every week"],
   ["30d", "Every month"],
-  ["", "Never"],
 ];
+
+/** The processor automation's documented defaults (docs/cognition.md "note-drain and the queue"): the queue answer does not carry them. */
+export const PROCESSOR_DEFAULTS = { every: "2m", max_items: 20 };
 
 /** "2m" -> "2 minutes" (the processor's interval as words). */
 export function everyWords(every: string | undefined): string {
@@ -23,11 +25,11 @@ export function everyWords(every: string | undefined): string {
 }
 
 export function queueSentence(q: QueueInfo): string {
+  const s = q.stats;
   const parts: string[] = [];
-  parts.push(q.queued === 0 ? "Nothing is waiting." : q.queued === 1 ? "1 note is waiting." : `${q.queued} notes are waiting.`);
-  if (q.processing) parts.push(q.processing === 1 ? "1 is being processed." : `${q.processing} are being processed.`);
-  const max = q.processor?.max_items;
-  if (max) parts.push(`Up to ${max} notes are processed ${everyWords(q.processor?.every)}.`);
+  parts.push(s.queued === 0 ? "Nothing is waiting." : s.queued === 1 ? "1 note is waiting." : `${s.queued} notes are waiting.`);
+  if (s.processing) parts.push(s.processing === 1 ? "1 is being processed." : `${s.processing} are being processed.`);
+  parts.push(`Up to ${PROCESSOR_DEFAULTS.max_items} notes are processed ${everyWords(PROCESSOR_DEFAULTS.every)}.`);
   return parts.join(" ");
 }
 
@@ -63,7 +65,7 @@ export function SettingsDrawer(props: Props) {
   };
 
   return (
-    <AfDrawer open={props.open} onClose={props.onClose} label="Settings" title="Settings" width={440} backdrop>
+    <AfDrawer open={props.open} onClose={props.onClose} label="Settings" title="Settings" width={440} backdrop className="nt-drawer">
       <div className="nt-settings">
         <ReadView read={props.settings} what="your settings">
           {(s) => (
@@ -74,13 +76,13 @@ export function SettingsDrawer(props: Props) {
                 variant="row"
                 label="Instant linking"
                 description="Link each note as soon as you send it, instead of shortly after."
-                checked={Boolean(s.process_inline)}
+                checked={Boolean(s.process_inline_default)}
                 busy={saving === "inline"}
-                onChange={(next) => void save("inline", { process_inline: next }, next ? "Instant linking is on." : "Instant linking is off.")}
+                onChange={(next) => void save("inline", { process_inline_default: next }, next ? "Instant linking is on." : "Instant linking is off.")}
               />
               <label className="nt-field">
                 <span className="nt-field__label">Look back over my notes</span>
-                <select className="nt-input" value={s.reflect_schedule || ""} disabled={saving === "reflect"} onChange={(e) => void save("reflect", { reflect_schedule: e.target.value }, "The schedule is saved.")}>
+                <select className="nt-input" value={s.reflect_schedule?.every || "7d"} disabled={saving === "reflect"} onChange={(e) => void save("reflect", { reflect_schedule: { every: e.target.value } }, "The schedule is saved.")}>
                   {REFLECT_CHOICES.map(([v, l]) => (
                     <option key={v} value={v}>
                       {l}
@@ -177,7 +179,7 @@ function ModelRow({ label, hint, value, onChange, busy }: { label: string; hint:
         model={value?.model || ""}
         providers={providers}
         models={models}
-        onChange={(next) => onChange({ provider: next.provider, model: next.model })}
+        onChange={(next) => onChange({ provider: next.provider || null, model: next.model || null })}
         disabled={busy}
         allowGatewayDefault
         gatewayDefaultLabel="Default"
@@ -201,14 +203,14 @@ function QueuePanel({ open, api }: { open: boolean; api: ReturnType<typeof useAp
     setBusy("run");
     setLine("");
     try {
-      let id = queue.data?.processor?.automation_id || "";
+      let id = queue.data?.automations?.processor_id || "";
       if (!id) {
         const status = await api.get<NoteStatus>("note/status");
-        id = status.processor_automation_id || "";
+        id = status.automations?.processor_id || "";
       }
       if (!id) {
-        const ensured = await api.post<{ processor_automation_id?: string }>("note/processor/ensure");
-        id = ensured.processor_automation_id || "";
+        const ensured = await api.post<{ processor_id?: string }>("note/processor/ensure");
+        id = ensured.processor_id || "";
       }
       if (!id) throw new ApiError(500, "no processor", "no_processor");
       await api.post(`automations/${encodeURIComponent(id)}/commands`, { type: "run_now" });
@@ -240,13 +242,13 @@ function QueuePanel({ open, api }: { open: boolean; api: ReturnType<typeof useAp
         {(q) => (
           <>
             <p>{queueSentence(q)}</p>
-            {(q.failed_notes || []).length ? (
+            {q.failed.length ? (
               <ul className="nt-list">
-                {(q.failed_notes || []).map((n) => (
+                {q.failed.map((n) => (
                   <li key={n.note_id} className="nt-list__row">
                     <div>
-                      <NoteLink note={n} />
-                      {n.error ? <p className="nt-filing__error">{n.error}</p> : null}
+                      <NoteLink note={{ note_id: n.note_id, title: n.title || "A note", occurred_at: n.occurred_at }} />
+                      {n.last_error ? <p className="nt-filing__error">{n.last_error}</p> : null}
                     </div>
                     <button type="button" className="nt-btn nt-btn--quiet" disabled={busy === n.note_id} onClick={() => void retry(n.note_id)}>
                       {busy === n.note_id ? "Retrying…" : "Retry"}

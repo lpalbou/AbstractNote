@@ -313,3 +313,6 @@ p { margin: 0 0 6px; }
   .nt-btn, .nt-icon-btn, .nt-tab, .nt-effort__opt { min-height: 44px; }
   .nt-icon-btn { width: 44px; }
 }
+
+/* The kit drawer's card colour is translucent in some themes; the settings sit on a solid surface. */
+.af-drawer.nt-drawer { background: var(--bg-secondary); }
