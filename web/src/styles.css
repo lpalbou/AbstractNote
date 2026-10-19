@@ -201,7 +201,8 @@ p { margin: 0 0 6px; }
 .nt-section { padding: 18px 24px; }
 .nt-section + .nt-section { border-top: 1px solid var(--nt-line); }
 .nt-section__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
-.nt-section__sub { color: var(--text-muted); font-size: var(--font-size-md); font-weight: 400; margin-left: 8px; }
+.nt-section__sub { color: var(--text-muted); font-size: var(--font-size-md); font-weight: 400; margin-left: 8px; letter-spacing: 0; }
+.nt-section__actions .nt-btn { white-space: nowrap; }
 .nt-section .nt-section { padding: 10px 0 0; border-top: none; }
 .nt-section .nt-section h2 { font-size: var(--font-size-md); color: var(--text-secondary); }
 .nt-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -483,6 +484,7 @@ p { margin: 0 0 6px; }
 @media (max-width: 640px) {
   .nt-header { padding: 8px 12px; gap: 8px; }
   .nt-section { padding: 14px 14px; }
+  .nt-section__sub { display: block; margin-left: 0; margin-top: 2px; }
   .nt-thennow__pair { grid-template-columns: 1fr; }
   .nt-stream__inner { padding: 14px 12px 8px; }
   .nt-composer { padding: 8px 12px 10px; }

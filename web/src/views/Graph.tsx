@@ -292,6 +292,7 @@ function GraphCanvas({ graph, then, selected, focus, onSelect }: { graph: Graph;
                 }
               }}
             >
+              <title>{`${n.name} · ${n.kind}${n.note_count ? ` · ${n.note_count} ${n.note_count === 1 ? "note" : "notes"}` : ""}`}</title>
               <circle r={p.r} />
               <text y={p.r + 14} textAnchor="middle">
                 {n.name}

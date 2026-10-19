@@ -18,6 +18,8 @@ export function Dialogs() {
   return <RelationDialog a={overlay.a} b={overlay.b} onClose={close} />;
 }
 
+const generated = (kind: string) => kind === "insight" || kind === "synthesis";
+
 function NoteDialog({ id, onClose }: { id: string; onClose: () => void }) {
   const { api } = useApp();
   const read = useRead<Note>(() => api.get<Note>(`note/notes/${encodeURIComponent(id)}`), [api, id]);
@@ -31,9 +33,16 @@ function NoteDialog({ id, onClose }: { id: string; onClose: () => void }) {
               {n.location?.label ? ` · ${n.location.label}` : ""}
               {n.source?.client ? ` · from ${n.source.client === "web" ? "the web" : `the ${n.source.client}`}` : ""}
             </p>
-            <div className="nt-note-text">
-              <Markdown text={n.text || ""} images="link" />
-            </div>
+            {/* An insight or a saved answer is the notebook's own synthesis, never shown as if you wrote it. */}
+            <section className={`nt-layer nt-layer--${generated(n.kind) ? "synthesis" : "original"}`} aria-label={generated(n.kind) ? "Synthesis" : "Original"}>
+              <p className="nt-layer__label">
+                <span>{generated(n.kind) ? "Synthesis" : "Original"}</span>
+                <span>{generated(n.kind) ? "written by your notebook" : "as you wrote it"}</span>
+              </p>
+              <div className="nt-note-text">
+                <Markdown text={n.text || ""} images="link" />
+              </div>
+            </section>
             {(n.topics || []).length ? <p className="nt-muted">{(n.topics || []).map((t) => `#${topicLabel(t)}`).join("  ")}</p> : null}
             {(n.attachments || []).length ? (
               <div className="nt-block">
@@ -60,13 +69,17 @@ function NoteDialog({ id, onClose }: { id: string; onClose: () => void }) {
                 </div>
               </div>
             ) : null}
+            {n.revision || (n.claims || []).length ? (
+              <section className="nt-layer nt-layer--interpretation nt-block" aria-label="Interpretation">
+                <p className="nt-layer__label">
+                  <span>Interpretation</span>
+                  <span>what your notebook understood</span>
+                </p>
             {n.revision ? (
-              <div className="nt-block">
+              <div>
                 <h3>What it changed</h3>
                 <p>{capitalize(n.revision.summary)}</p>
               </div>
-            ) : n.status === "queued" ? (
-              <p className="nt-muted">This note is waiting to be processed.</p>
             ) : null}
             {(n.claims || []).length ? (
               <div className="nt-block">
@@ -82,6 +95,10 @@ function NoteDialog({ id, onClose }: { id: string; onClose: () => void }) {
                   ))}
                 </ul>
               </div>
+            ) : null}
+              </section>
+            ) : n.status === "queued" ? (
+              <p className="nt-muted">This note is waiting to be organized.</p>
             ) : null}
             {(n.revisits || []).length ? (
               <div className="nt-block">
