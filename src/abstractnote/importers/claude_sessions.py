@@ -2,7 +2,11 @@
 
 One note per human-typed prompt, with the final assistant text of that turn as its outcome; one per
 session title, compaction summary and away summary; one per subagent run (its brief and its last
-report); one per curated memory file. ``occurred_at`` is the record's own timestamp.
+report); one per curated memory file. ``occurred_at`` is the record's own timestamp; a memory
+file (no record of its own) takes its origin session's first record (front matter
+``originSessionId``, looked up in this project folder, then in its sibling project folders), else
+the front matter ``modified``, else the commit that first added it, else its modification time.
+``source.origin.date_basis`` says which.
 
 DIR is a project directory (``~/.claude/projects/<project>/``: ``<session>.jsonl``,
 ``<session>/subagents/agent-*.jsonl`` + ``.meta.json``, ``memory/*.md``) or a directory of them.
@@ -259,7 +263,11 @@ def _subagent_drafts(session_dir: Path, report: ImportReport, since: Optional[st
 
 
 def _front_matter(text: str) -> tuple[Dict[str, str], str]:
-    """Top-level ``key: value`` pairs of a ``---`` front matter block (nested blocks are kept as text)."""
+    """``key: value`` pairs of a ``---`` front matter block.
+
+    Top-level keys keep their name; a key indented under a parent (``metadata:`` then
+    ``  originSessionId: ...``) is kept as ``parent.key``. Deeper or list-valued blocks stay text only.
+    """
     if not text.startswith("---"):
         return {}, text
     end = text.find("\n---", 3)
@@ -267,17 +275,107 @@ def _front_matter(text: str) -> tuple[Dict[str, str], str]:
         return {}, text
     block = text[3:end]
     out: Dict[str, str] = {}
+    parent: Optional[str] = None
     for line in block.splitlines():
-        if line and not line[0].isspace() and ":" in line:
-            k, v = line.split(":", 1)
-            out[k.strip()] = v.strip().strip('"').strip("'")
+        if not line.strip() or ":" not in line:
+            continue
+        k, v = line.split(":", 1)
+        value = v.strip().strip('"').strip("'")
+        if not line[0].isspace():
+            parent = k.strip()
+            out[parent] = value
+        elif parent and not out.get(parent) and not k.strip().startswith("-"):
+            out[f"{parent}.{k.strip()}"] = value
     return out, text
+
+
+def git_first_added(path: Path) -> Optional[tuple[str, str]]:
+    """(commit, author date) of the commit that first added ``path``, following moves, or None.
+
+    ``git log --follow --diff-filter=A`` lists every add along the file's rename chain, newest
+    first; the last line is the original add.
+    """
+    import subprocess
+
+    try:
+        out = subprocess.run(["git", "-C", str(path.parent), "log", "--follow", "--diff-filter=A",
+                              "--format=%H %aI", "--", path.name], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    lines = [ln for ln in out.stdout.splitlines() if ln.strip()] if out.returncode == 0 else []
+    if not lines:
+        return None
+    commit, _, date = lines[-1].partition(" ")
+    return commit, date
+
+
+def _first_timestamp(path: Path, max_lines: int = 500) -> Optional[str]:
+    """The first record timestamp of a session transcript (reads line by line, never the whole file)."""
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for n, line in enumerate(fh):
+                if n >= max_lines:
+                    break
+                try:
+                    r = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(r, dict) and isinstance(r.get("timestamp"), str):
+                    try:
+                        return iso_utc(r["timestamp"])
+                    except ValueError:
+                        continue
+    except OSError:
+        return None
+    return None
+
+
+def _origin_session_start(project: Path, session_id: str, cache: Dict[str, Optional[str]]) -> Optional[str]:
+    """First timestamp of ``<session_id>.jsonl`` in this project folder, else in a sibling project folder."""
+    if session_id in cache:
+        return cache[session_id]
+    found: Optional[str] = None
+    name = f"{session_id}.jsonl"
+    candidates = [project / name] + sorted(p / name for p in project.parent.iterdir()
+                                           if p.is_dir() and p != project)
+    for candidate in candidates:
+        if candidate.is_file():
+            found = _first_timestamp(candidate)
+            if found:
+                break
+    cache[session_id] = found
+    return found
+
+
+def memory_date(project: Path, path: Path, fm: Dict[str, str], cache: Dict[str, Optional[str]]
+                ) -> tuple[str, str]:
+    """(occurred_at, date_basis) of a memory file: the origin session's first record, else the
+    front matter ``modified``, else the commit that first added the file, else its modification time."""
+    sid = fm.get("originSessionId") or fm.get("metadata.originSessionId")
+    if sid:
+        start = _origin_session_start(project, sid, cache)
+        if start:
+            return start, "origin_session"
+    modified = fm.get("modified") or fm.get("metadata.modified")
+    if modified:
+        try:
+            return iso_utc(modified), "front_matter_modified"
+        except ValueError:
+            pass
+    added = git_first_added(path)
+    if added:
+        try:
+            return iso_utc(added[1]), "git_added"
+        except ValueError:
+            pass
+    return iso_from_epoch(path.stat().st_mtime), "file_mtime"
 
 
 def _memory_drafts(project: Path, report: ImportReport, since: Optional[str], until: Optional[str]) -> Iterator[NoteDraft]:
     mem = project / "memory"
     if not mem.is_dir():
         return
+    cache: Dict[str, Optional[str]] = {}
     for path in sorted(mem.glob("*.md")):
         if path.name == "MEMORY.md":  # the index of the other files
             report.skip("memory_index")
@@ -287,13 +385,14 @@ def _memory_drafts(project: Path, report: ImportReport, since: Optional[str], un
             report.skip("empty")
             continue
         fm, _ = _front_matter(text)
-        ts = iso_from_epoch(path.stat().st_mtime)
+        ts, basis = memory_date(project, path, fm, cache)
         if not in_window(ts, since, until):
             report.skip("outside_window")
             continue
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
         origin = {"project": project.name, "file": str(path), "name": fm.get("name"), "sha256": digest,
-                  "origin_session_id": fm.get("originSessionId")}
+                  "origin_session_id": fm.get("originSessionId") or fm.get("metadata.originSessionId"),
+                  "date_basis": basis}
         yield NoteDraft(IMPORTER, f"memory:{project.name}:{path.name}:{digest[:16]}", text, ts, "memory",
                         fm.get("name") or path.stem, _source(origin, "claude-code"))
 

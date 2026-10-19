@@ -125,6 +125,39 @@ def test_claude_sessions_notes_time_and_provenance(claude_project):
     assert report.skipped["memory_index"] == 1 and report.skipped["attachment"] == 1
 
 
+def test_memory_files_take_the_origin_session_date_then_modified_then_git_then_mtime(tmp_path):
+    projects = tmp_path / "projects"
+    proj, other = projects / "-Users-me-repo", projects / "-Users-me-other"
+    (proj / "memory").mkdir(parents=True)
+    other.mkdir()
+    _jl(proj / "s-here.jsonl", [{"type": "mode", "mode": "normal"},
+                                {"type": "user", "uuid": "u", "timestamp": "2026-09-01T07:00:00.000Z", "message": {"content": "hi"}},
+                                {"type": "user", "uuid": "v", "timestamp": "2026-09-03T07:00:00.000Z", "message": {"content": "later"}}])
+    _jl(other / "s-there.jsonl", [{"type": "user", "uuid": "w", "timestamp": "2026-08-15T10:00:00+02:00", "message": {"content": "x"}}])
+    fm = "---\nname: {n}\nmetadata:\n  type: feedback\n{extra}---\n\nBody {n}.\n"
+    mem = proj / "memory"
+    (mem / "a.md").write_text(fm.format(n="a", extra="  originSessionId: s-here\n  modified: 2026-10-10T00:00:00.000Z\n"))
+    (mem / "b.md").write_text(fm.format(n="b", extra="  originSessionId: s-there\n"))
+    (mem / "c.md").write_text(fm.format(n="c", extra="  originSessionId: s-gone\n  modified: 2026-10-11T12:30:00.000Z\n"))
+    (mem / "d.md").write_text("No front matter, committed.\n")
+    (mem / "e.md").write_text("No front matter, not committed.\n")
+    _git(mem, "init", "-q")
+    _git(mem, "add", "d.md")
+    _git(mem, "commit", "-q", "-m", "d", env={"GIT_AUTHOR_DATE": "2026-07-04T05:06:07+00:00",
+                                               "GIT_COMMITTER_DATE": "2026-07-04T05:06:07+00:00"})
+    os.utime(mem / "e.md", (1760000000, 1760000000))
+    drafts, report = _drafts(claude_sessions.drafts, path=proj)
+    got = {d.title: (d.occurred_at, d.source["origin"]["date_basis"]) for d in drafts if d.kind == "memory"}
+    assert got == {"a": ("2026-09-01T07:00:00Z", "origin_session"),        # first record, not the later one
+                   "b": ("2026-08-15T08:00:00Z", "origin_session"),        # found in a sibling project folder
+                   "c": ("2026-10-11T12:30:00Z", "front_matter_modified"),  # origin session not on disk
+                   "d": ("2026-07-04T05:06:07Z", "git_added"),
+                   "e": (importers.iso_from_epoch(1760000000), "file_mtime")}
+    a = next(d for d in drafts if d.title == "a")
+    assert a.source["origin"]["origin_session_id"] == "s-here"
+    assert a.source_key.startswith("memory:-Users-me-repo:a.md:")  # the id still derives from the file content
+
+
 def test_claude_sessions_window(claude_project):
     drafts, report = _drafts(claude_sessions.drafts, path=claude_project, since="2026-10-01T09:00:00Z",
                              until="2026-10-01T10:30:00Z", exclude_sessions=["s-live"])
