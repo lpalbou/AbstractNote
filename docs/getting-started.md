@@ -130,8 +130,19 @@ not have the integration.
 .venv/bin/pip install -e ../abstractgateway     # on the abstractnote-seam branch
 ```
 
-With `abstractnote` importable, the gateway logs `AbstractNote is installed: note tools,
-/api/gateway/note and its workflows are enabled` at start.
+The gateway must carry the AbstractNote seam, its `abstractgateway.abstractnote_seam` module
+(the first AbstractGateway release that contains it will be named here when AbstractNote is
+released). Importing `abstractnote.gateway` into a gateway without it fails at once with one
+sentence ("This AbstractGateway does not carry the AbstractNote seam …"), never half-working.
+
+To check a running gateway, ask for the note status as a signed-in account: `200` means the note
+API is mounted, `404` means this gateway has no AbstractNote integration (without a token every
+`/api/gateway` path answers `401`, so that tells you nothing).
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18851/api/gateway/note/status \
+     -H "Authorization: Bearer <alice's token>"   # 200
+```
 
 ### Try it on a private scratch gateway
 
