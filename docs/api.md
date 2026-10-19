@@ -52,6 +52,11 @@ hits, effort}` (`hits` is the quick search the answer started from).
 `response` is the answer text, so chat clients using the `abstractcode.agent.v1` contract
 (`prompt` in, `output.response` out) work unchanged: `prompt` is accepted as an alias of `question`.
 
+Both `note-drain` and `note-process` accept a `thinking` input (`on` or `off`): a drain defaults to
+`off` (the bulk setting; the processor automation sends none, so its drains run with thinking off),
+inline processing at capture uses `on`; `{"input_data": {"max_items": 50, "budget_s": 3600, "thinking": "on"}}`
+starts a drain with reasoning on.
+
 Run the processor now: `POST /api/gateway/automations/{processor_id}/commands
 {"command_id": "<uuid>", "type": "automation.run_now"}` (the id comes from `GET /api/gateway/note/status`;
 a `409 automation_busy` answer means a drain is already running).

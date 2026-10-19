@@ -636,6 +636,11 @@ hits, effort}` (`hits` is the quick search the answer started from).
 `response` is the answer text, so chat clients using the `abstractcode.agent.v1` contract
 (`prompt` in, `output.response` out) work unchanged: `prompt` is accepted as an alias of `question`.
 
+Both `note-drain` and `note-process` accept a `thinking` input (`on` or `off`): a drain defaults to
+`off` (the bulk setting; the processor automation sends none, so its drains run with thinking off),
+inline processing at capture uses `on`; `{"input_data": {"max_items": 50, "budget_s": 3600, "thinking": "on"}}`
+starts a drain with reasoning on.
+
 Run the processor now: `POST /api/gateway/automations/{processor_id}/commands
 {"command_id": "<uuid>", "type": "automation.run_now"}` (the id comes from `GET /api/gateway/note/status`;
 a `409 automation_busy` answer means a drain is already running).
@@ -1856,10 +1861,18 @@ normally and uses the prompt cache, but with thinking on it reasons for minutes 
 | Step | Thinking | Output cap (tokens) |
 |---|---|---|
 | quick filing | off | 400 |
-| extract (and its second reading) | on | 4000 |
-| link | on | 6000 |
+| extract (and its second reading) | on (`thinking` start pin; `off` from note-drain) | 4000 |
+| link | on (`thinking` start pin; `off` from note-drain) | 6000 |
 | synthesize, dossier, reflect | the runtime default | 8192 |
 | mining plan, slice findings | the runtime default | 4096 |
+
+Thinking for extraction and linking is a per-run choice: `note-process` takes a `thinking`
+start pin (`on` or `off`, default `on`, anything else is refused) wired to the extract, second
+reading and link nodes; `note-drain` takes its own `thinking` pin, default `off` (the bulk-import
+setting: a thinking call can run to its output budget and AbstractCore then retries with a
+larger one, measured 114-352 s for one section on the live drain), and passes it to every
+`note-process` it starts; inline processing at capture keeps `on`. The table above gives the
+defaults.
 
 On MLX, Qwen3.6 has only an on/off switch (`enable_thinking`): any level ("low", "medium") is
 treated as on and there is no thinking budget, so a thinking step can run until the output cap.
