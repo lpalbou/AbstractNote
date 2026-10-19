@@ -470,3 +470,30 @@ def test_cli_capture_pins_the_embedder_and_says_so(tmp_path, capsys):
 
     with pytest.raises(ValueError, match="pinned to the embedding model"):
         Notebook.open(nb, embedder=Other())
+
+
+def test_capture_passes_a_saved_answer(runner, doubles):
+    answer = {"question": "What did Dana ask for?", "evidence_note_ids": ["nt_0"]}
+    runner.run_capture("Dana asked for the Pareto by Friday [nt_0].", context={"answer": answer})
+    (cap,) = doubles.args("note_capture")
+    assert cap["answer"] == answer
+
+
+def test_core_tools_file_a_saved_answer_as_a_linked_synthesis(tmp_path):
+    bind = _core_tools()
+    tools = bind(tmp_path / "notebook")
+    runner = NoteRunner.with_llm(ScriptedLLM(SCRIPT), tools)
+    first = runner.run_capture("Met Dana about the LUT budget.", idempotency_key="k-a", source={"client": "cli"})
+    out = runner.run_capture("Dana wants the Pareto by Friday.", idempotency_key="k-b", source={"client": "web"},
+                             context={"answer": {"question": "What does Dana want?",
+                                                 "evidence_note_ids": [first["note_id"], "nt_nowhere"]}})
+    from abstractnote.store.notebook import Notebook
+
+    with Notebook.open(tmp_path / "notebook") as nb:
+        note = nb.note(out["note_id"])
+        assert note["kind"] == "synthesis"  # the quick filing ("event") does not override it
+        assert note["source"]["client"] == "web"
+        links = [dict(r) for r in nb.store.q("SELECT dst_note_id, predicate, matched_by FROM note_links WHERE src_note_id=?",
+                                             (out["note_id"],))]
+    assert {"dst_note_id": first["note_id"], "predicate": "dcterms:references", "matched_by": "answer"} in links
+    assert all(link["dst_note_id"] != "nt_nowhere" for link in links)

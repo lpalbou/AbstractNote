@@ -119,6 +119,8 @@ Pinned response shapes (clients decode these strictly; absent lists mean empty):
 
 Linking a new note to a subject: clients may send `input_data.context.about = {kind: insight|task|cue|entity|note, id, title}` on `note-capture`; `note_capture` records it and the revision links the note to that subject (`dcterms:references`), so answering a cue or commenting an insight is traceable.
 
+Saving an answer: the web app's "Save this answer" sends `input_data.context.answer = {question, evidence_note_ids}` on `note-capture`; `note_capture` files the note as kind `synthesis` (the quick filing keeps that kind), keeps the `source` as given, and links it to each evidence note in this notebook with `dcterms:references` (the same link `context.about` makes; evidence ids outside the notebook are left out with a warning).
+
 Graph response:
 
 ```json
@@ -136,7 +138,7 @@ Flows call them through `tool_calls` nodes; agents may list them in `allowed_too
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `note_capture` | `text, idempotency_key?, title?, occurred_at?, location?, source?, priority?, attachments? ([{"$artifact": id}] inside the gateway; [{"path": ...}] only headless, inside the folder given to bind as allow_paths_under), session_id?, about?` | `{note_id, status: new|duplicate, duplicate_of?, first_saved_at?, received_at, revisits: [{note_id, occurred_at}], similar: [{note_id, title, occurred_at, score}], topics: [...], attachments: [{attachment_id, sha256, mime, size, extracted_by, extracted_chars}], warnings: [...]}` |
+| `note_capture` | `text, idempotency_key?, title?, occurred_at?, location?, source?, priority?, attachments? ([{"$artifact": id}] inside the gateway; [{"path": ...}] only headless, inside the folder given to bind as allow_paths_under), session_id?, about?, answer? ({question, evidence_note_ids})` | `{note_id, status: new|duplicate, duplicate_of?, first_saved_at?, received_at, revisits: [{note_id, occurred_at}], similar: [{note_id, title, occurred_at, score}], topics: [...], attachments: [{attachment_id, sha256, mime, size, extracted_by, extracted_chars}], warnings: [...]}` |
 | `note_file` | `note_id, title, kind, topics, urgency, language, one_line` | `{note_id, priority, status}` |
 | `note_context` | `note_id, max_chars?` | `{note: {...}, sections: [...], similar_notes: [...], candidate_entities: [{entity_id, name, kind, aliases, summary, last_seen, active_claims: [...]}], open_tasks: [...], topics: [...], vocabulary: [{predicate, gloss}]}` |
 | `note_resolve_candidates` | `note_id, mentions: [{ref, name, kind, aliases}]` | `{mentions: [{ref, candidates: [{entity_id, name, kind, aliases, summary, last_seen, score, matched_by}]}]}` |
@@ -217,13 +219,13 @@ abstractnote import claude-sessions DIR --notebook DIR [--exclude-session ID ...
 abstractnote import agora DB_PATH --notebook DIR [--channels a,b] [--include-system] [--operators a,b]
 abstractnote import markdown DIR --notebook DIR [--glob '**/*.md']
 abstractnote import files PATH ... --notebook DIR
-                    # every import also takes [--since ISO] [--until ISO] [--dry-run]
+                    # every import also takes [--since ISO] [--until ISO] [--dry-run] [--embed-base-url URL --embed-model MODEL]
 ```
 
 Every notebook command also takes `--embed-base-url URL --embed-model MODEL` (an OpenAI-compatible
 embedding server). A notebook is pinned to its embedding model when it is created, by the first
 command that opens it; later commands must give the same model, or run `rebuild --reembed` with
-the new one. Imports open the notebook with its own pin (see
+the new one; `abstractnote import` takes the same two flags (see
 [troubleshooting.md](troubleshooting.md#this-notebooks-vectors-were-made-with-the-embedding-model-)).
 
 `--gateway URL --token T` and `abstractnote processor ensure` are reserved for a gateway client

@@ -56,10 +56,11 @@ def note_capture(ctx: ToolContext, text: str = "", idempotency_key: Optional[str
                  occurred_at: Optional[str] = None, location: Optional[Dict[str, Any]] = None,
                  source: Optional[Dict[str, Any]] = None, priority: Optional[int] = None,
                  attachments: Optional[List[Any]] = None, session_id: Optional[str] = None,
-                 about: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                 about: Optional[Dict[str, Any]] = None, answer: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     def blank(v: Any) -> Any:  # flows pass "" / {} / [] for unset start pins
         return None if v in ("", {}, []) else v
 
+    saved_answer = _answer(blank(answer))
     resolved = resolve_attachments(ctx, blank(attachments))
     priority = blank(priority)
     result = ctx.nb.capture(
@@ -68,7 +69,43 @@ def note_capture(ctx: ToolContext, text: str = "", idempotency_key: Optional[str
         idempotency_key=blank(idempotency_key), session_id=blank(session_id), account=ctx.account, about=blank(about),
         default_client=ctx.default_client, vision=ctx.extractors.get("vision"), stt=ctx.extractors.get("stt"),
     )
-    return result.model_dump()
+    out = result.model_dump()
+    if saved_answer is not None and result.status == "new":
+        out["warnings"] = list(out.get("warnings") or []) + _file_answer(ctx.nb, result.note_id, saved_answer)
+    return out
+
+
+def _answer(answer: Any) -> Optional[Dict[str, Any]]:
+    """``context.answer = {question, evidence_note_ids}`` (the web app's "Save this answer"), checked."""
+    if answer is None:
+        return None
+    if not isinstance(answer, dict) or not str(answer.get("question") or "").strip():
+        raise ValueError("A saved answer needs the question it answers.")
+    evidence = answer.get("evidence_note_ids") or []
+    if not isinstance(evidence, list) or not all(isinstance(x, str) for x in evidence):
+        raise ValueError("The evidence of a saved answer must be a list of note ids.")
+    return {"question": str(answer["question"]).strip(), "evidence_note_ids": list(dict.fromkeys(evidence))}
+
+
+def _file_answer(nb: Any, note_id: str, answer: Dict[str, Any]) -> List[str]:
+    """File a saved answer as a ``synthesis`` note linked (``dcterms:references``) to each evidence
+    note, the same link ``context.about`` makes; evidence ids outside the notebook are left out."""
+    from .. import ids
+    from ..store.notes import _j
+
+    warnings: List[str] = []
+    now = ids.utc_now()
+    detail = _j({"kind": "answer", "question": answer["question"]})
+    with nb.store.tx() as c:
+        c.execute("UPDATE notes SET kind='synthesis' WHERE note_id=?", (note_id,))
+        for nid in answer["evidence_note_ids"]:
+            if nid == note_id or nb.store.note_row(nid) is None:
+                warnings.append(f"The evidence note {nid} is not in this notebook; it was left out.")
+                continue
+            c.execute("INSERT OR IGNORE INTO note_links(src_note_id, dst_note_id, predicate, score, matched_by,"
+                      " detail_json, created_at) VALUES (?,?,?,1.0,?,?,?)",
+                      (note_id, nid, "dcterms:references", "answer", detail, now))
+    return warnings
 
 
 def note_file(ctx: ToolContext, note_id: str, title: Optional[str] = None, kind: Optional[str] = None,
@@ -77,5 +114,8 @@ def note_file(ctx: ToolContext, note_id: str, title: Optional[str] = None, kind:
     def blank(v: Any) -> Any:
         return None if v in ("", {}, []) else v
 
+    row = ctx.nb.store.note_row(note_id)
+    if row is not None and row["kind"] == "synthesis":
+        kind = None  # a saved answer stays a synthesis whatever the quick filing proposes
     return ctx.nb.file_note(note_id, title=blank(title), kind=blank(kind), topics=topics or [],
                             urgency=blank(urgency), language=blank(language), one_line=blank(one_line))

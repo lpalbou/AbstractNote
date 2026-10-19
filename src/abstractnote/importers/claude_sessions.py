@@ -132,13 +132,16 @@ def _session_drafts(path: Path, report: ImportReport, author: str, since: Option
                 continue
             if kind == "attachment":
                 att = r.get("attachment") or {}
-                if att.get("type") == "queued_command" and att.get("commandMode") == "prompt" and str(att.get("prompt") or "").strip():
+                # A queued prompt is a string or, with pasted images, a content-block list like a user
+                # message: text blocks become the note, images become attachments (never a repr).
+                qtext, qimages, _qtr = _text_and_images(att.get("prompt"))
+                if att.get("type") == "queued_command" and att.get("commandMode") == "prompt" and (qtext.strip() or qimages):
                     qts = iso_utc(att["timestamp"]) if isinstance(att.get("timestamp"), str) else ts
                     origin = {"session_id": sid, "uuid": att.get("source_uuid") or r.get("uuid"), "cwd": r.get("cwd"),
                               "git_branch": r.get("gitBranch"), "file": str(path), "line": line_no, "queued": True}
                     if qts and in_window(qts, since, until):
-                        yield NoteDraft(IMPORTER, f"{sid}:{origin['uuid']}", str(att["prompt"]), qts, "prompt", None,
-                                        _source(origin, author))
+                        yield NoteDraft(IMPORTER, f"{sid}:{origin['uuid']}", qtext.strip(), qts, "prompt", None,
+                                        _source(origin, author), qimages)
                     else:
                         report.skip("outside_window")
                 else:

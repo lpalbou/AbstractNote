@@ -173,6 +173,46 @@
       }
     },
     {
+      "id": "answer",
+      "type": "get",
+      "position": {
+        "x": 0.0,
+        "y": 1142.0
+      },
+      "data": {
+        "nodeType": "get",
+        "label": "A saved answer?",
+        "inputs": [
+          {
+            "id": "object",
+            "label": "object",
+            "type": "object"
+          },
+          {
+            "id": "key",
+            "label": "key",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "key": "answer",
+          "default": null
+        }
+      }
+    },
+    {
       "id": "capture_args",
       "type": "code",
       "position": {
@@ -239,6 +279,11 @@
             "type": "object"
           },
           {
+            "id": "answer",
+            "label": "answer",
+            "type": "object"
+          },
+          {
             "id": "permissions",
             "label": "permissions",
             "type": "string"
@@ -260,7 +305,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif text is not None and text != \"\":\n    arguments[\"text\"] = text\nif title is not None and title != \"\":\n    arguments[\"title\"] = title\nif occurred_at is not None and occurred_at != \"\":\n    arguments[\"occurred_at\"] = occurred_at\nif location is not None and location != \"\":\n    arguments[\"location\"] = location\nif source is not None and source != \"\":\n    arguments[\"source\"] = source\nif idempotency_key is not None and idempotency_key != \"\":\n    arguments[\"idempotency_key\"] = idempotency_key\nif priority is not None and priority != \"\":\n    arguments[\"priority\"] = priority\nif session_id is not None and session_id != \"\":\n    arguments[\"session_id\"] = session_id\nif attachments is not None and attachments != \"\":\n    arguments[\"attachments\"] = attachments\nif about is not None and about != \"\":\n    arguments[\"about\"] = about\nreturn {\"tool_calls\": [{\"name\": \"note_capture\", \"call_id\": \"capture\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif text is not None and text != \"\":\n    arguments[\"text\"] = text\nif title is not None and title != \"\":\n    arguments[\"title\"] = title\nif occurred_at is not None and occurred_at != \"\":\n    arguments[\"occurred_at\"] = occurred_at\nif location is not None and location != \"\":\n    arguments[\"location\"] = location\nif source is not None and source != \"\":\n    arguments[\"source\"] = source\nif idempotency_key is not None and idempotency_key != \"\":\n    arguments[\"idempotency_key\"] = idempotency_key\nif priority is not None and priority != \"\":\n    arguments[\"priority\"] = priority\nif session_id is not None and session_id != \"\":\n    arguments[\"session_id\"] = session_id\nif attachments is not None and attachments != \"\":\n    arguments[\"attachments\"] = attachments\nif about is not None and about != \"\":\n    arguments[\"about\"] = about\nif answer is not None and answer != \"\":\n    arguments[\"answer\"] = answer\nreturn {\"tool_calls\": [{\"name\": \"note_capture\", \"call_id\": \"capture\", \"arguments\": arguments}]}\n"
       }
     },
     {
@@ -1643,6 +1688,13 @@
       "targetHandle": "object"
     },
     {
+      "id": "e-start-context-answer-object",
+      "source": "start",
+      "sourceHandle": "context",
+      "target": "answer",
+      "targetHandle": "object"
+    },
+    {
       "id": "e-start-text-capture_args-text",
       "source": "start",
       "sourceHandle": "text",
@@ -1711,6 +1763,13 @@
       "sourceHandle": "value",
       "target": "capture_args",
       "targetHandle": "about"
+    },
+    {
+      "id": "e-answer-value-capture_args-answer",
+      "source": "answer",
+      "sourceHandle": "value",
+      "target": "capture_args",
+      "targetHandle": "answer"
     },
     {
       "id": "e-start-exec-out-capture_args-exec-in",

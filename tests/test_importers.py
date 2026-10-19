@@ -290,3 +290,52 @@ def test_cli_dry_run_writes_nothing(tmp_path, capsys, claude_project):
                  "--exclude-session", "s-live"]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["dry_run"] is True and out["created"] == 8 and not nb_dir.exists()
+
+
+def test_a_queued_prompt_with_a_pasted_image_stores_text_and_an_attachment(tmp_path, notebook):
+    # Evaluation-lane bug: a queued prompt with images was stored as the repr of its content list.
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    blocks = [{"type": "text", "text": "what is wrong on this screen?"},
+              {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                           "data": base64.b64encode(PNG).decode()}}]
+    _jl(proj / "s-q.jsonl", [{"type": "attachment", "uuid": "a1", "sessionId": "s-q", "timestamp": "2026-10-03T10:00:00Z",
+                              "attachment": {"type": "queued_command", "prompt": blocks, "source_uuid": "q9",
+                                             "commandMode": "prompt", "timestamp": "2026-10-03T10:00:00Z"}}])
+    drafts, _ = _drafts(claude_sessions.drafts, path=proj)
+    (d,) = drafts
+    assert d.text == "what is wrong on this screen?" and "base64" not in d.text and "{'type'" not in d.text
+    assert d.attachments == [{"data": PNG, "mime": "image/png"}]
+    report = importers.run("claude-sessions", notebook, path=proj)
+    assert report.created == 1 and report.attachments == 1
+    from abstractnote import ids
+
+    note = notebook.note(ids.note_id_for_import("claude-sessions", "s-q:q9"))
+    assert note["text"] == "what is wrong on this screen?"
+    (att,) = note["attachments"]
+    assert att["mime"] == "image/png" and att["size"] == len(PNG) and len(att["sha256"]) == 64
+
+
+def test_cli_import_takes_the_notebook_embedder(tmp_path, monkeypatch, capsys):
+    from abstractnote.importers import cli
+    from abstractnote.store.notebook import Notebook
+
+    seen = {}
+    real_open = Notebook.open
+
+    def spy(path, embedder=None, **kw):
+        seen["embedder"] = embedder
+        return real_open(path, **kw)
+
+    monkeypatch.setattr(Notebook, "open", staticmethod(spy))
+    root = tmp_path / "md"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n")
+    assert cli.main(["markdown", str(root), "--notebook", str(tmp_path / "nb"), "--embed-base-url",
+                     "http://127.0.0.1:9/v1", "--embed-model", "m-1"]) == 0
+    from abstractnote.store.embeddings import embedder_model_id
+
+    assert embedder_model_id(seen["embedder"]) == "m-1"
+    capsys.readouterr()
+    assert cli.main(["markdown", str(root), "--notebook", str(tmp_path / "nb"), "--embed-model", "m-1"]) == 2
+    assert "Give both --embed-base-url and --embed-model." in capsys.readouterr().err

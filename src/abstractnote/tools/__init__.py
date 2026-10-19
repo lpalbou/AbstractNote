@@ -81,10 +81,10 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
                      occurred_at: Optional[str] = None, location: Optional[Dict[str, Any]] = None,
                      source: Optional[Dict[str, Any]] = None, priority: Optional[int] = None,
                      attachments: Optional[List[Dict[str, Any]]] = None, session_id: Optional[str] = None,
-                     about: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Save a note to the notebook now."""
+                     about: Optional[Dict[str, Any]] = None, answer: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Save a note to the notebook now (``answer`` = {question, evidence_note_ids}: a saved answer)."""
         return cap.note_capture(ctx, text, idempotency_key, title, occurred_at, location, source, priority,
-                                attachments, session_id, about)
+                                attachments, session_id, about, answer)
 
     @tool(name="note_file", description="Store the quick filing of a note: title, kind, topics, urgency, language.")
     def note_file(note_id: str, title: Optional[str] = None, kind: Optional[str] = None,

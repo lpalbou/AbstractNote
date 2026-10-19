@@ -6,7 +6,8 @@
     abstractnote import files PATH ... [--notebook DIR]
 
 Every command takes ``--dry-run`` (count what would be created; nothing is written and a missing
-notebook is not created) and prints the counts report as JSON.
+notebook is not created) and ``--embed-base-url`` / ``--embed-model`` (the notebook's embedding model,
+as for ``capture`` and ``process``), and prints the counts report as JSON.
 """
 
 from __future__ import annotations
@@ -35,6 +36,9 @@ def build_parser(prog: str = "abstractnote import") -> argparse.ArgumentParser:
         p.add_argument("--since", help="only records at or after this ISO time")
         p.add_argument("--until", help="only records before this ISO time")
         p.add_argument("--dry-run", action="store_true", help="count only; write nothing")
+        p.add_argument("--embed-base-url", help="OpenAI-compatible embeddings URL of the notebook's embedding model "
+                       "(a notebook is pinned to its model at creation; without these flags: the built-in embedder)")
+        p.add_argument("--embed-model", help="embedding model id at that URL")
 
     p = sub.add_parser("claude-sessions", help="Claude Code transcripts (a project folder or a folder of them)")
     p.add_argument("dir", type=Path)
@@ -57,12 +61,22 @@ def build_parser(prog: str = "abstractnote import") -> argparse.ArgumentParser:
     return ap
 
 
-def _open_notebook(path: Path, dry_run: bool) -> Any:
+def _embedder(args: argparse.Namespace) -> Any:
+    if args.embed_base_url or args.embed_model:
+        if not (args.embed_base_url and args.embed_model):
+            raise ValueError("Give both --embed-base-url and --embed-model.")
+        from abstractnote.store.embeddings import openai_compat_embedder  # core lane
+
+        return openai_compat_embedder(args.embed_base_url, args.embed_model)
+    return None
+
+
+def _open_notebook(path: Path, dry_run: bool, embedder: Any = None) -> Any:
     from abstractnote.store.notebook import Notebook  # core lane
 
     if dry_run and not (path / "note.sqlite3").is_file():
         return None
-    return Notebook.open(path)
+    return Notebook.open(path, embedder=embedder)
 
 
 def main(argv: Optional[List[str]] = None, *, prog: str = "abstractnote import") -> int:
@@ -78,7 +92,11 @@ def main(argv: Optional[List[str]] = None, *, prog: str = "abstractnote import")
         options.update(path=args.dir, glob=args.glob)
     else:
         options.update(paths=args.paths)
-    nb = _open_notebook(args.notebook, args.dry_run)
+    try:
+        nb = _open_notebook(args.notebook, args.dry_run, _embedder(args))
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 2
     try:
         report: ImportReport = run(args.source, nb, dry_run=args.dry_run, **options)
     except ValueError as e:

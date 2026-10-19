@@ -167,6 +167,13 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
            outputs=[{"id": "value", "label": "value", "type": "any"}],
            pin_defaults={"key": "about", "default": None})
     f.wire(S("context"), "about", "object")
+    f.node("answer", "get", "A saved answer?",
+           inputs=[{"id": "object", "label": "object", "type": "object"},
+                   {"id": "key", "label": "key", "type": "string"},
+                   {"id": "default", "label": "default", "type": "any"}],
+           outputs=[{"id": "value", "label": "value", "type": "any"}],
+           pin_defaults={"key": "answer", "default": None})
+    f.wire(S("context"), "answer", "object")
     cap = f.tool_step(
         "capture", "Store the note", "note_capture",
         {
@@ -176,6 +183,7 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
             "priority": ("number", S("priority")), "session_id": ("string", S("session_id")),
             "attachments": ("array", ("attachments", "value")),
             "about": ("object", ("about", "value")),
+            "answer": ("object", ("answer", "value")),
         },
         [("note_id", "string"), ("status", "string"), ("first_saved_at", "string"), ("similar", "array"),
          ("revisits", "array"), ("topics", "array"), ("warnings", "array")],

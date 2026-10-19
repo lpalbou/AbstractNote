@@ -38,18 +38,7 @@ This notebook's vectors were made with the embedding model 'text-embedding-qwen3
   (capture, processing, user actions, imports, rebuild) refuse with this sentence before writing
   anything.
 - **Fix**: add the two flags with the pinned model to the command.
-- **Imports**: `abstractnote import` has no embedding flags and opens the notebook with its own
-  pin only, so imports into a notebook pinned to an embedding server report this sentence under
-  `errors`. Import from Python with the embedder instead:
-
-  ```python
-  from abstractnote import Notebook
-  from abstractnote.importers import run
-  from abstractnote.store.embeddings import openai_compat_embedder
-
-  with Notebook.open("notes", embedder=openai_compat_embedder("http://127.0.0.1:1234/v1", "MODEL")) as nb:
-      print(run("markdown", nb, path="docs").as_dict())
-  ```
+- **Imports**: `abstractnote import` takes the same two flags.
 
 ### Give both --embed-base-url and --embed-model
 

@@ -24,10 +24,10 @@ Rules shared by all importers:
 - Report counts (notes created, duplicates skipped, attachments stored) and the time range covered.
 
 Every importer takes `--notebook DIR`, `--since`, `--until` and `--dry-run` (count only, write
-nothing) and prints a counts report as JSON; the full flag list is in [api.md](api.md#cli). The
-command opens the notebook with its own embedding pin, so it imports into notebooks that use the
-built-in embedder; for a notebook pinned to an embedding server, run the importer from Python with
-that embedder ([troubleshooting.md](troubleshooting.md#this-notebooks-vectors-were-made-with-the-embedding-model-)).
+nothing) and prints a counts report as JSON; the full flag list is in [api.md](api.md#cli). A
+notebook pinned to an embedding server is opened with the same `--embed-base-url` and
+`--embed-model` that `capture` and `process` take
+([troubleshooting.md](troubleshooting.md#this-notebooks-vectors-were-made-with-the-embedding-model-)).
 
 Processing an import runs through the same `note-process` flow as live notes. Expect roughly two
 model calls per note; with a small local model this is a few seconds per note, so a corpus of a
