@@ -326,6 +326,33 @@ class _Builder:
                 self.ops.append(_op("topic.assign", note_id=self.note_id, topic=tt))
 
 
+def _require_summaries(b: "_Builder", ext: schemas.Extraction, link: schemas.Linking) -> None:
+    """A reused or merged entity that this note tells something new about needs a summary sentence."""
+    changed: set = set()
+    for op in b.ops:
+        p = op["payload"]
+        if op["op"] == "claim.add":
+            changed.update(x for x in (p["subject_id"], p.get("object_id")) if x)
+        elif op["op"] in ("claim.supersede", "claim.retract"):
+            row = b.nb.store.claim_row(p["claim_id"])
+            if row is not None:
+                changed.update(x for x in (row["subject_id"], row["object_id"]) if x)
+        elif op["op"] == "entity.merge":
+            changed.add(p["into_id"])
+    by_ref = {lm.ref: lm for lm in reversed(link.mentions)}
+    missing = []
+    for m in ext.mentions:
+        lm = by_ref.get(m.ref)
+        eid = b.refmap.get(m.ref)
+        if lm is None or eid is None or lm.decision not in ("reuse", "merge") or eid in b.stats["created"]:
+            continue
+        if eid in changed and not (lm.summary or "").strip():
+            missing.append(f"{m.name} ({m.ref})")
+    if missing:
+        raise ValueError("The linking needs a one-sentence summary for each entity this note tells something new "
+                         "about: " + ", ".join(missing) + ".")
+
+
 def _validated(extraction: Any, linking: Any) -> Tuple[schemas.Extraction, schemas.Linking]:
     if isinstance(extraction, list):
         extraction, _ = merge_extractions(extraction)
@@ -347,6 +374,7 @@ def build_revision(nb: Any, note_id: str, extraction: Any, linking: Any, *, atte
         b.warnings.append("The note's context was not looked up first, so every reference was treated as new.")
     b.mentions(ext, link)
     b.claims(ext, link)
+    _require_summaries(b, ext, link)
     b.tasks(ext, link)
     b.topics(ext)
     b.ops.append(_op("note.summary", note_id=note_id, summary=ext.summary or None, kind=None, language=None))

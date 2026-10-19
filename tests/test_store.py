@@ -201,5 +201,44 @@ def test_embedding_pin_mismatch_refuses_to_open(tmp_path):
     Notebook.open(root, embedder=CountingEmbedder(64, model_id="model-a")).close()
     with pytest.raises(ValueError, match="pinned"):
         Notebook.open(root, embedder=CountingEmbedder(64, model_id="model-b"))
-    with pytest.raises(ValueError, match="model-a"):
-        Notebook.open(root)  # no embedder and the pin is not the hashing one
+
+
+
+def test_without_its_embedder_a_notebook_opens_read_only(tmp_path, capsys):
+    """Reads that need no new vector work; anything that would embed says why, plainly, and writes nothing."""
+    from abstractnote.cli import main
+    from test_store_support import CountingEmbedder
+
+    root = tmp_path / "nb"
+    with Notebook.open(root, embedder=CountingEmbedder(64, model_id="model-a")) as nb:
+        note = nb.capture("Dana wants the Pareto by Friday", occurred_at=t(1)).note_id
+        nb.apply_revision(rev("rv_1", t(1), create("ex:person-dana", "Dana", summary="A colleague."),
+                              {"op": "entity.mention", "payload": {"entity_id": "ex:person-dana", "note_id": note}},
+                              {"op": "task.open", "payload": {"task_id": "tk_1", "text": "Send the Pareto"}}))
+    nb = Notebook.open(root)  # no embedder, pin is not the hashing one
+    try:
+        assert "model-a" in nb.read_only and nb.status()["read_only"] == nb.read_only
+        before = nb.store.counts()
+        assert nb.entity("ex:person-dana")["summary"] == "A colleague."
+        assert [n["note_id"] for n in nb.day("2026-01-01")["notes"]] == [note]
+        assert [n["note_id"] for n in nb.changes()["notes"]] == [note]
+        hits = nb.search("Pareto Friday")
+        assert [n["note_id"] for n in hits["notes"]] == [note] and "words only" in hits["warnings"][0]
+        for attempt in (lambda: nb.capture("new note"),
+                        lambda: nb.apply_revision(rev("rv_2", t(2), create("ex:org-acme", "Acme"))),
+                        lambda: nb.close_task("tk_1", "user:1"),
+                        lambda: nb.write_insight("reminder", "x", "y"),
+                        lambda: nb.rebuild()):
+            with pytest.raises(ValueError, match="model-a"):
+                attempt()
+        from abstractnote.process.resolve import resolve_candidates
+
+        with pytest.raises(ValueError, match="open it with that embedder"):
+            resolve_candidates(nb, note, [{"ref": "m1", "name": "Dana"}])
+        assert nb.store.counts() == before
+    finally:
+        nb.close()
+    assert main(["status", "--notebook", str(root)]) == 0
+    assert "model-a" in capsys.readouterr().out
+    assert main(["capture", "x", "--notebook", str(root)]) == 2
+    assert "model-a" in capsys.readouterr().err

@@ -26,7 +26,13 @@ def extraction(mentions, claims=(), tasks=(), topics=(), summary="A note."):
             "time_refs": [], "topics": list(topics)}
 
 
-def ml(ref, decision, candidate=None, *, name="", kind=None, merge=(), summary=None, aliases=()):
+AUTO = object()
+
+
+def ml(ref, decision, candidate=None, *, name="", kind=None, merge=(), summary=AUTO, aliases=()):
+    """A mention decision; by default it carries a one-sentence summary, as the Linking schema asks."""
+    if summary is AUTO:
+        summary = f"{name or ref} as this note describes it."
     return {"ref": ref, "decision": decision, "candidate": candidate, "merge_candidates": list(merge), "name": name,
             "kind": kind, "aliases": list(aliases), "summary": summary, "reason": "test"}
 
@@ -323,3 +329,45 @@ def test_schemas_match_the_flow_copy_and_prompts_render():
     # pydantic mirrors accept what the JSON Schemas describe
     schemas.validate("Linking", {"mentions": [{"ref": "m1", "decision": "reuse", "candidate": 0}], "claims": [],
                                  "tasks": [], "revision_summary": "x"})
+
+
+def test_summaries_are_required_where_knowledge_changes(nb):
+    seed(nb)
+    ctx = ToolContext(nb=nb)
+    # create without a summary: refused by the Linking schema mirror
+    nid = nb.capture("Zed called.", occurred_at="2026-02-02T10:00:00Z").note_id
+    note_context(ctx, nid)
+    with pytest.raises(ValueError, match="summary"):
+        note_apply_revision(ctx, nid, extraction([mention("m1", "Zed", "person")]),
+                            {"mentions": [ml("m1", "create", name="Zed", kind="person", summary=None)]})
+    with pytest.raises(ValueError, match="summary"):
+        note_apply_revision(ctx, nid, extraction([mention("m1", "Zed", "person")]),
+                            {"mentions": [ml("m1", "create", name="Zed", kind="person", summary="  ")]})
+    # a reused entity the note tells something new about needs one too
+    ext = extraction([mention("m1", "Dana", "person"), mention("m2", "LUT", "project")],
+                     [stmt("m1", "schema:knowsAbout", "m2")])
+    nid2 = nb.capture("Dana knows LUT well.", occurred_at="2026-02-03T10:00:00Z").note_id
+    note_context(ctx, nid2)
+    _, names = merge_extractions([ext])
+    cands = note_resolve_candidates(ctx, nid2, names)
+    link = {"mentions": [ml("m1", "reuse", cand_index(cands, "m1", "ex:person-dana"), summary=None),
+                         ml("m2", "reuse", cand_index(cands, "m2", "ex:project-lut"), summary="LUT is the project.")]}
+    with pytest.raises(ValueError, match=r"Dana \(m1\)"):
+        note_apply_revision(ctx, nid2, ext, link)
+    assert nb.store.counts()["revisions"] == 1  # nothing applied
+    # an untouched reused entity may keep null
+    ext3 = extraction([mention("m1", "Dana", "person")])
+    nid3 = nb.capture("Saw Dana.", occurred_at="2026-02-04T10:00:00Z").note_id
+    note_context(ctx, nid3)
+    cands3 = note_resolve_candidates(ctx, nid3, merge_extractions([ext3])[1])
+    out = note_apply_revision(ctx, nid3, ext3, {"mentions": [ml("m1", "reuse", cand_index(cands3, "m1",
+                                                                                          "ex:person-dana"),
+                                                               summary=None)]})
+    assert out["revision_id"] and nb.store.entity_row("ex:person-dana")["summary"] == "A colleague at Acme."
+
+
+def test_extraction_prompt_steers_facts_to_literal_ex_claims():
+    text = prompts.load("extract")
+    assert "ex:budget_cap" in text and "ex:deadline" in text and "ex:decided" in text
+    assert "{{vocabulary}}" in text
+    assert "one sentence" in prompts.load("link")

@@ -190,6 +190,7 @@ class VectorCache:
         self.embedder = embedder
         self.model_id = model_id or (embedder_model_id(embedder) if embedder is not None else None) or "unknown"
         self.dimension = dimension
+        self.missing_embedder = "This notebook has no embedder, so new text cannot be embedded."
 
     def keys_for(self, texts: Sequence[str]) -> List[str]:
         return [vector_key(t, self.model_id) for t in texts]
@@ -210,7 +211,7 @@ class VectorCache:
                 missing[key] = text
         if missing:
             if self.embedder is None:
-                raise RuntimeError("This notebook has no embedder configured, so new text cannot be embedded.")
+                raise ValueError(self.missing_embedder)
             texts_missing = list(missing.values())
             vectors = self.embedder.embed_texts(texts_missing)
             if len(vectors) != len(texts_missing):

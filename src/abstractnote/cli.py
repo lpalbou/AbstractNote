@@ -176,7 +176,10 @@ def _cmd_bundle(args: argparse.Namespace) -> Any:
         from .flows.bundle import pack
     except ImportError as exc:
         raise Gap(f"The flows are not installed with this AbstractNote ({exc}).") from None
-    return {"bundle": str(pack(args.out, check_fresh=True))}
+    try:
+        return {"bundle": str(pack(args.out, check_fresh=True))}
+    except RuntimeError as exc:  # stale generated flows: the flows must be rebuilt first
+        raise Gap(str(exc)) from None
 
 
 def _cmd_import(argv: List[str]) -> int:

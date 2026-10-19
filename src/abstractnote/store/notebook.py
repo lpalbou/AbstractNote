@@ -113,7 +113,7 @@ class Notebook:
             store.close()
             raise
         nb = cls(root, store, cache, kg)
-        if recover:
+        if recover and nb.cache.embedder is not None:
             nb.recover()
         return nb
 
@@ -125,10 +125,13 @@ class Notebook:
             if embedder is None:
                 embedder = embedder_for_pin(pin)
                 if embedder is None:
-                    raise ValueError(
+                    # Read-only for meaning: everything that needs no new vector still works.
+                    cache = VectorCache(store.conn, store.lock, None, pin.get("model_id"), pin.get("dimension"))
+                    cache.missing_embedder = (
                         f"This notebook's vectors were made with the embedding model {pin.get('model_id')!r}; "
-                        "open it with that embedder, or rebuild it with reembed to change models."
-                    )
+                        "open it with that embedder to save notes, process them or search by meaning, or rebuild "
+                        "it with reembed to change models.")
+                    return cache
             known = embedder_model_id(embedder)
             if known and pin.get("model_id") and known != pin["model_id"] and pin["model_id"] != "unknown":
                 raise ValueError(
@@ -165,6 +168,16 @@ class Notebook:
     def embedder(self) -> Optional[TextEmbedder]:
         return self.cache.embedder
 
+    @property
+    def read_only(self) -> Optional[str]:
+        """Why this notebook cannot embed (opened without the embedder it is pinned to), or None."""
+        return self.cache.missing_embedder if self.cache.embedder is None else None
+
+    def require_embedder(self) -> None:
+        """Raise the plain sentence when an operation would need new vectors and there is no embedder."""
+        if self.cache.embedder is None:
+            raise ValueError(self.cache.missing_embedder)
+
     # ------------------------------------------------------------------ revisions
 
     def apply_revision(self, revision: "Revision | Dict[str, Any]", *, _fail_after_index: bool = False
@@ -172,6 +185,7 @@ class Notebook:
         """Apply a revision to both stores. Re-applying the same ``revision_id`` is a no-op
         that returns the stored result. Raises on invalid ops (nothing is applied)."""
         rev = self._rev_dict(revision)
+        self.require_embedder()
         with self._apply_lock:
             existing = self.store.revision_row(rev["revision_id"])
             if existing is not None:
@@ -586,6 +600,7 @@ class Notebook:
             "kg_embedding_pin": self.kg.embedding_pin(),
             "kg_assertions": self.kg.count(),
             "pending_revisions": pending,
+            "read_only": self.read_only,
             "settings": self.settings(),
             "automations": {"processor_id": self.store.meta_get("processor_automation_id"),
                             "reflect_id": self.store.meta_get("reflect_automation_id")},
@@ -606,7 +621,7 @@ class Notebook:
             before = self.store.counts()
             new_embedder = embedder or self.cache.embedder
             if new_embedder is None:
-                raise ValueError("Rebuilding needs an embedder.")
+                raise ValueError(self.cache.missing_embedder)
             self.kg.close()
             with self.store.lock:
                 self.store.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")

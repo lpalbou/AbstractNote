@@ -91,6 +91,7 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
         raise ValueError("The priority must be 0 (bulk), 1 (normal), 2 (high) or 3 (urgent).")
     if (importer is None) != (source_key is None):
         raise ValueError("An import needs both the importer name and the source key.")
+    nb.require_embedder()  # before anything is written
     now = now or ids.utc_now()
     occurred = ids.normalize_time(occurred_at, field="occurred_at") if occurred_at else now
     src = _source(source, "importer" if importer else default_client, account)

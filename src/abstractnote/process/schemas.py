@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 ENTITY_KINDS = ["person", "org", "project", "concept", "place", "event", "artifact", "software", "thing"]
 NOTE_KINDS = ["idea", "task", "decision", "fact", "event", "question", "reflection", "reference", "log",
@@ -101,7 +101,10 @@ LINKING: Dict[str, Any] = _o({
         "name": _s("preferred name"),
         "kind": _e(ENTITY_KINDS),
         "aliases": _a(_s()),
-        "summary": _ns("updated one-paragraph summary, or null when nothing changed"),
+        "summary": {"type": ["string", "null"], "minLength": 1,
+                    "description": "one sentence about the entity: required for create and unsure, and for a "
+                                   "reused or merged entity this note tells something new about; null only for a "
+                                   "reused entity the note adds nothing to"},
         "reason": _s("short"),
     })),
     "claims": _a(_o({
@@ -234,6 +237,10 @@ class Extraction(_M):
 
 
 class MentionLink(_M):
+    """A mention decision. ``summary`` is required (non-empty) when the entity is created
+    (``create``, ``unsure``); for reused entities the revision builder requires it when the
+    note changes what is known about them."""
+
     ref: str
     decision: Literal[tuple(MENTION_DECISIONS)]  # type: ignore[valid-type]
     candidate: Optional[int] = None
@@ -243,6 +250,13 @@ class MentionLink(_M):
     aliases: List[str] = Field(default_factory=list)
     summary: Optional[str] = None
     reason: str = ""
+
+
+    @model_validator(mode="after")
+    def _summary_for_new_entities(self) -> "MentionLink":
+        if self.decision in ("create", "unsure") and not (self.summary or "").strip():
+            raise ValueError(f"the {self.decision} decision for {self.ref} needs a one-sentence summary")
+        return self
 
 
 class ClaimLink(_M):

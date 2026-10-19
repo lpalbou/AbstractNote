@@ -48,6 +48,7 @@ def _fts(nb: Any, names: Sequence[str]) -> List[str]:
 
 
 def resolve_candidates(nb: Any, note_id: str, mentions: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    nb.require_embedder()
     if nb.store.note_row(note_id) is None:
         raise ValueError("That note is not in this notebook.")
     if not isinstance(mentions, (list, tuple)):

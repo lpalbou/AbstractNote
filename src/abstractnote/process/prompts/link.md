@@ -16,7 +16,7 @@ For each mention give a `decision`:
 - `create` when no candidate is the same thing;
 - `merge` with `merge_candidates` = two candidate indexes that are the same entity (the first one stays), when the note shows that two existing records are one;
 - `unsure` when you cannot tell; it is kept apart and marked as a close match for later consolidation.
-Give the preferred `name` (as the author writes it), its `kind`, other `aliases`, and an updated one-paragraph `summary` of the entity only when this note changes what is known (otherwise null), plus a short `reason`.
+Give the preferred `name` (as the author writes it), its `kind`, other `aliases`, a short `reason`, and a `summary`: one sentence saying what the notebook now knows about the entity. The summary is required when you `create` it (or answer `unsure`), and when this note tells something new about a reused or merged entity (rewrite the current summary into one updated sentence). Use null only for a reused entity this note adds nothing to.
 
 For each extracted claim (by `index`) give `relation_to_existing`: `new`, `restates` (the same statement seen again), `refines` (adds detail; the old one stays true), `supersedes` (the old one is no longer true) or `contradicts` (both are kept and marked disputed), with `existing` = the index of the existing claim, and a short `reason`.
 

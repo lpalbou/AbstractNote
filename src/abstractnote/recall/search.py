@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence
 
 from .. import ids
-from ..store.embeddings import top_k
+from ..store.embeddings import top_k, vector_key
 from ..store.notes import clamp_limit, fts_terms
 from . import shapes
 
@@ -84,7 +84,13 @@ def search(nb: Any, query: str = "", *, since: Optional[str] = None, until: Opti
                 [terms, *params, POOL]):
             fts_notes.append(r[0])
             snippets[r[0]] = r[1]
-    qvec = nb.cache.embed_query(query) if query else None
+    warnings: List[str] = []
+    qvec = None
+    if query:
+        if nb.cache.embedder is None and nb.cache.get(vector_key(query, nb.cache.model_id)) is None:
+            warnings.append(nb.cache.missing_embedder + " These results match the words only.")
+        else:
+            qvec = nb.cache.embed_query(query)
     vec_notes: List[str] = []
     vec_score: Dict[str, float] = {}
     if qvec is not None:
@@ -196,4 +202,4 @@ def search(nb: Any, query: str = "", *, since: Optional[str] = None, until: Opti
         "months": [{"month": k, "count": v} for k, v in sorted(facet_month.items())],
     }
     return {"query": query, "as_of": as_of_n, "notes": note_items, "entities": ent_items, "claims": claim_items,
-            "facets": facets, "considered": len(order)}
+            "facets": facets, "considered": len(order), "warnings": warnings}

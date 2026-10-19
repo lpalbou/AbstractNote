@@ -16,6 +16,7 @@ def write_insight(nb: Any, kind: str, title: str, body: str, evidence_note_ids: 
                   author: str = "abstractnote") -> Dict[str, Any]:
     """Store an insight (``dossier`` -> a ``synthesis`` note). Unknown evidence notes or entities are
     left out and named in ``warnings``. Writing the same insight twice returns the same note."""
+    nb.require_embedder()
     if kind not in INSIGHT_KINDS:
         raise ValueError(f"The insight kind must be one of {', '.join(INSIGHT_KINDS)}.")
     title = str(title or "").strip()

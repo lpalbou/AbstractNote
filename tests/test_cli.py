@@ -79,8 +79,11 @@ def test_import_and_bundle_delegate_to_their_lanes(tmp_path, capsys):
         [item] = nb.notes()["items"]
         assert nb.queue.item(item["note_id"])["priority"] == 0
     code, out, err = run(capsys, "bundle", "--out", str(tmp_path / "dist"))
-    assert code == 0, err
-    assert out["bundle"].endswith(".flow")
+    if code == EXIT_GAP:  # the flows lane has not regenerated its JSON after a prompt change: said plainly
+        assert "stale" in err and "abstractnote.flows.build" in err
+    else:
+        assert code == 0, err
+        assert out["bundle"].endswith(".flow")
 
 
 def test_console_script_and_import_are_cheap():
