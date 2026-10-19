@@ -2,7 +2,8 @@
 
 Truth tables (kept by a rebuild): ``meta``, ``notes``, ``attachments``,
 ``note_links``, ``queue``, ``revisions``, ``vectors`` (the embedding cache) and
-``context_packets``. Everything else is a projection of notes plus revisions
+``context_packets``. ``KEPT_TABLES`` (the graph communities, backlog 0030) are derived but hold the
+model's labels, so a rebuild keeps them too. Everything else is a projection of notes plus revisions
 and is recreated by ``Notebook.rebuild``.
 
 Vectors are float32 blobs; cosine search runs in Python over the filtered rows.
@@ -15,6 +16,8 @@ import sqlite3
 SCHEMA_VERSION = 2  # 2: entities.name_key/display_name/key_clash_with, entity_aliases.alias_key
 
 TRUTH_TABLES = ("meta", "notes", "attachments", "note_links", "queue", "revisions", "vectors", "context_packets")
+#: Derived tables a rebuild copies (entity ids are stable, and the community labels are the model's work).
+KEPT_TABLES = ("communities", "entity_communities")
 
 DDL = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -297,6 +300,29 @@ CREATE TABLE IF NOT EXISTS tasks (
   recorded_closed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+
+-- communities of the entity graph (abstractnote.recall.communities); kept by a rebuild
+CREATE TABLE IF NOT EXISTS communities (
+  community_id TEXT PRIMARY KEY,
+  label TEXT,
+  summary TEXT,
+  kind TEXT,
+  size INTEGER NOT NULL,
+  top_entity_ids_json TEXT NOT NULL DEFAULT '[]',
+  member_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  computed_at TEXT NOT NULL,
+  labelled_at TEXT,
+  labelled_member_ids_json TEXT,
+  stale_label INTEGER NOT NULL DEFAULT 0,
+  revision_count_at_compute INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS entity_communities (
+  entity_id TEXT PRIMARY KEY,
+  community_id TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_entity_communities_community ON entity_communities(community_id);
 
 CREATE TABLE IF NOT EXISTS then_now_cache (
   key TEXT PRIMARY KEY,

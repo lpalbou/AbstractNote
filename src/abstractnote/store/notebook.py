@@ -38,7 +38,7 @@ from .embeddings import (
 from .kg import ClaimStore, claim_assertion, kinds_from_index
 from .names import merge_ops, merge_plan, reuse_taken_names
 from .notes import NoteStore, _j, _uj, entity_text, note_vector_text
-from .schema import NAME_KEY_REPAIR_META
+from .schema import KEPT_TABLES, NAME_KEY_REPAIR_META
 
 NOTE_DB = "note.sqlite3"
 KG_DB = "kg.sqlite3"
@@ -700,6 +700,23 @@ class Notebook:
 
         return anniversaries(self, limit, since, now=now)
 
+    # ------------------------------------------------------------------ communities and statistics (0030)
+
+    def communities(self, recompute: bool = False, resolution: Optional[float] = None) -> Dict[str, Any]:
+        """The communities of the entity graph, largest first (:func:`abstractnote.recall.communities.communities`);
+        ``recompute=True`` runs detection first (a write: refused on a read-only notebook)."""
+        from ..recall import communities as cm
+
+        if recompute:
+            cm.recompute(self, resolution)
+        return cm.communities(self)
+
+    def recompute_communities(self, resolution: Optional[float] = None) -> Dict[str, Any]:
+        """Run community detection over the entity graph and store the result (no model); returns the counts."""
+        from ..recall import communities as cm
+
+        return cm.recompute(self, resolution)
+
     # ------------------------------------------------------------------ settings and status
 
     def settings(self) -> Dict[str, Any]:
@@ -839,13 +856,15 @@ class Notebook:
                 c.execute("BEGIN IMMEDIATE")
                 c.execute("DELETE FROM meta")
                 c.execute("INSERT INTO meta SELECT * FROM old.meta" + (" WHERE key!='embedding_pin'" if reembed else ""))
-                tables = ["notes", "attachments", "note_links", "queue", "context_packets", "revisions"]
+                tables = ["notes", "attachments", "note_links", "queue", "context_packets", "revisions", *KEPT_TABLES]
                 if not reembed:
                     tables.append("vectors")
                 for table in tables:
                     new_cols = [r[1] for r in c.execute(f"PRAGMA main.table_info({table})")]
                     old_cols = {r[1] for r in c.execute(f"PRAGMA old.table_info({table})")}
                     collist = ",".join(col for col in new_cols if col in old_cols)
+                    if not collist:  # a table the old notebook did not have yet
+                        continue
                     c.execute(f"INSERT INTO main.{table}({collist}) SELECT {collist} FROM old.{table}")
                 c.execute("UPDATE revisions SET applied_index=0, applied_kg=0, result_json=NULL WHERE abandoned=0")
                 c.execute("UPDATE notes SET summary=NULL")

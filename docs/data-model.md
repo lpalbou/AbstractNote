@@ -20,6 +20,7 @@ erDiagram
     NOTE ||--o{ TASK : mentions
     NOTE }o--o{ TOPIC : "filed under"
     INSIGHT }o--o{ NOTE : "evidenced by"
+    COMMUNITY ||--o{ ENTITY : groups
 ```
 
 ## Note
@@ -203,6 +204,32 @@ findings of the reflect flow (open loops, contradictions, resurfaced material, c
 They carry `evidence_note_ids`, `entity_ids`, `insight_kind` (`warning`, `reminder`,
 `connection`, `contradiction`, `evolution`, `dossier`, `cue`) and `acked_at`. Cue cards are the
 unacknowledged insights other than dossiers, newest first.
+
+## Community
+
+A community is a group of entities the notes keep bringing together (a project and its people, a set
+of tools, a theme), found by `abstractnote.recall.communities` without a model and named by one. They
+make a large graph readable: the explorer colours nodes by community, and the statistics count them.
+
+| Field | Meaning |
+|---|---|
+| `community_id` | `cm_<20 chars>`, a hash of the sorted member entity ids when the community first appeared; kept while its membership changes little (below) |
+| `label`, `summary`, `kind` | the model's name (at most 4 words), one sentence on what holds the group together, and `project`, `theme`, `people`, `tooling`, `process` or `other`; null until the reflect flow labels it |
+| `size`, `top_entities` | member count and the 5 members with the most notes |
+| `created_at`, `labelled_at` | when it first appeared, when it was last labelled |
+| `stale_label` | the label is kept but more than 20 % of the membership changed since it was labelled: the next reflect run names it again |
+| `revision_count_at_compute` | applied revisions when detection last ran; `GET /note/communities` reports `revisions_since` |
+
+Detection is Louvain (`networkx`, fixed seed, resolution 1.0 by default) over the live entities;
+the weight of a pair is the number of its statements that were not retracted (merged entries count
+for their survivor) plus a co-mention weight: each note that mentions `k` live entities adds
+`1/(k-1)` to every pair among them. Groups of fewer than 3 entities are the **loose ends** and
+belong to no community. A recomputation matches each new group to the previous community it
+overlaps most (Jaccard of the member sets, best overlaps first, each previous community used once):
+an overlap of at least 0.6 keeps the id, label, summary and kind; anything else is a new community
+with a new id and no label. Tables `communities` and `entity_communities` (one row per member) are
+derived, but because the labels are model work, `rebuild` keeps them (`schema.KEPT_TABLES`). A
+notebook opened without its embedding model reads communities and refuses to recompute or label.
 
 ## Time
 

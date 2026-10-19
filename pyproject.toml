@@ -26,6 +26,8 @@ dependencies = [
     "abstractruntime>=0.10.2",
     "abstractcore>=2.26.3",
     "pydantic>=2.0",
+    # Louvain community detection over the entity graph (backlog 0030); pure Python, no compiled parts
+    "networkx>=3.2",
 ]
 
 [project.optional-dependencies]
