@@ -106,6 +106,9 @@ def test_a_label_survives_a_small_change_and_goes_stale_after_a_larger_one(nb):
     item = {c["community_id"]: c for c in nb.communities()["items"]}[lut]
     assert (item["label"], item["stale_label"], item["size"]) == ("LUT budget work", True, 6)
     assert counts["stale_labels"] == 1
+    (waiting,) = [i for i in cm.pending(nb)["items"] if i["community_id"] == lut]
+    assert (waiting["stale_label"], waiting["previous_label"], waiting["previous_summary"]) == (
+        True, "LUT budget work", "The LUT project.")
     # labelling again clears the stale mark and measures the next change from this membership
     cm.label(nb, [{"community_id": lut, "label": "LUT team", "summary": "The LUT team.", "kind": "people"}])
     item = {c["community_id"]: c for c in nb.communities()["items"]}[lut]
@@ -212,3 +215,80 @@ def test_a_retracted_statement_links_nothing(nb):
     assert cm.entity_graph(nb).has_edge("ex:person-dana", "ex:software-gateway")
     nb.retract_claim("cl_bridge", "alice", "never true")
     assert not cm.entity_graph(nb).has_edge("ex:person-dana", "ex:software-gateway")
+
+
+# --------------------------------------------------------------------------- labelling (item 2)
+
+
+def test_pending_hands_the_model_the_top_entities_the_strongest_statements_and_notes(nb, monkeypatch):
+    monkeypatch.setattr(cm, "PENDING_CLAIMS", 100)
+    w = world(nb)
+    nb.recompute_communities()
+    got = cm.pending(nb, limit=5)
+    assert got["count"] == 2 and [i["index"] for i in got["items"]] == [0, 1]
+    by_first = {i["top_entities"][0]["entity_id"]: i for i in got["items"]}
+    item = [i for i in got["items"] if any(e["entity_id"] == "ex:project-lut" for e in i["top_entities"])][0]
+    assert set(item) == {"index", "community_id", "size", "stale_label", "previous_label", "previous_summary",
+                         "top_entities", "claims", "excerpts"}
+    assert {e["entity_id"] for e in item["top_entities"]} == set(A)
+    assert set(item["top_entities"][0]) == {"entity_id", "name", "kind", "note_count", "summary"}
+    assert len(item["claims"]) == 12 and all(c["text"] and c["claim_id"] for c in item["claims"])
+    assert "cl_bridge" not in {c["claim_id"] for c in item["claims"]}  # Dana -> gateway leaves the community
+    assert [n["note_id"] for n in item["excerpts"]] == [w["n1"]]
+    assert by_first and item["previous_label"] is None
+    cm.label(nb, [{"community_id": i["community_id"], "label": "x", "summary": "y", "kind": "theme"}
+                  for i in got["items"]])
+    assert cm.pending(nb)["items"] == []  # every community is named
+
+
+def test_label_keeps_four_words_and_refuses_what_is_not_there(nb):
+    world(nb)
+    nb.recompute_communities()
+    cid = nb.communities()["items"][0]["community_id"]
+    res = cm.label(nb, [
+        {"community_id": cid, "label": "The   framework software and its people", "summary": " Tools  of it. ",
+         "kind": "galaxy"},
+        {"community_id": "cm_nothere", "label": "x", "summary": "y", "kind": "other"},
+        {"community_id": cid, "label": "  ", "summary": "y", "kind": "other"},
+        "nonsense",
+    ])
+    assert res["labelled"] == [cid] and len(res["warnings"]) == 5
+    item = {c["community_id"]: c for c in nb.communities()["items"]}[cid]
+    assert (item["label"], item["summary"], item["kind"]) == ("The framework software and", "Tools of it.", "other")
+    assert item["labelled_at"]
+    with pytest.raises(ValueError):
+        cm.label(nb, "not a list")
+
+
+def test_graph_nodes_and_entity_cards_carry_the_community(nb):
+    world(nb)
+    nodes = {n["id"]: n for n in nb.graph()["nodes"]}
+    assert nodes["ex:project-lut"]["community_id"] is None  # never computed
+    assert nb.entity("ex:project-lut")["community"] is None
+    nb.recompute_communities()
+    (lut,) = [c for c, m in _groups(nb).items() if "ex:project-lut" in m]
+    cm.label(nb, [{"community_id": lut, "label": "LUT", "summary": "s.", "kind": "project"}])
+    nodes = {n["id"]: n for n in nb.graph()["nodes"]}
+    assert nodes["ex:project-lut"]["community_id"] == lut and nodes["ex:person-dana"]["community_id"] == lut
+    assert nodes["ex:thing-kite"]["community_id"] is None  # a loose end
+    assert nb.entity("ex:person-ben")["community"] == {"community_id": lut, "label": "LUT", "kind": "project",
+                                                       "size": 4, "stale_label": False}
+    assert nb.entity("ex:place-paris")["community"] is None
+
+
+def test_the_community_tools_are_bound(tmp_path):
+    from abstractnote.tools import TOOL_NAMES, bind, bound_notebook
+
+    tools = bind(tmp_path / "nb")
+    for name in ("note_communities_recompute", "note_communities_pending", "note_communities_label"):
+        assert name in TOOL_NAMES and tools[name]._tool_definition.name == name
+    world(bound_notebook(tools))
+    counts = tools["note_communities_recompute"]()
+    assert counts["communities"] == 2
+    pending = tools["note_communities_pending"](limit=1)
+    assert pending["count"] == 1
+    cid = pending["items"][0]["community_id"]
+    out = tools["note_communities_label"](items=[{"community_id": cid, "label": "Software", "summary": "s.",
+                                                  "kind": "tooling"}])
+    assert out == {"labelled": [cid], "warnings": []}
+    assert tools["note_communities_pending"]()["count"] == 1

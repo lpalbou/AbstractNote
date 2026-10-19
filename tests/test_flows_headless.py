@@ -120,6 +120,9 @@ class Doubles:
             "note_expand": lambda **k: {"entities": [], "claims_timeline": [], "relation_timelines": [], "neighbours": [], "then_now": []},
             "note_insight_write": lambda **k: {"note_id": "nt_insight_" + str(len(self.args("note_insight_write")))},
         }
+        tools["note_communities_recompute"] = lambda **k: {"communities": 0, "loose_ends": 0}
+        tools["note_communities_pending"] = lambda **k: {"count": 0, "items": []}
+        tools["note_communities_label"] = lambda **k: {"labelled": [], "warnings": []}
         for name in ("note_open_loops", "note_contradictions", "note_resurface", "note_anniversaries"):
             tools[name] = lambda **k: {"items": [{"rule": "open_task_older_than", "note_ids": ["nt_1"], "entity_ids": ["ex:person-dana"]}]}
         return {name: self._rec(name, fn) for name, fn in tools.items()}

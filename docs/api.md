@@ -112,7 +112,9 @@ principal; `client` is `web` when the request came through the Note web app's pr
 what it relays with `X-AbstractFramework-App-Proxy: abstractnote`) and `api` otherwise. Request
 bodies cannot set it (an unknown field such as `client` is refused with 422).
 | `GET /note/cues` | cue cards: a few reflect-generated prompts you can answer by adding a note (a person gone quiet, a decision that aged, a task mentioned often and never closed) | `limit` |
-| `GET /note/graph` | nodes and edges for the explorer | `focus (entity ids), at, as_received, depth (1..3), since, until, kinds, min_count, limit` |
+| `GET /note/graph` | nodes and edges for the explorer; each node carries `community_id` | `focus (entity ids), at, as_received, depth (1..3), since, until, kinds, min_count, limit` |
+| `GET /note/communities` | the communities of the entity graph as last computed (groups of entities the notes keep together, each named by the model), largest first | |
+| `POST /note/communities/recompute` | run community detection now (no model; the reflect flow names new and stale communities); returns the counts | `resolution` (body, optional; default 1.0, above 1 for smaller groups) |
 | `GET /note/timeline` | activity per bucket: notes, revisions, new entities, superseded claims | `since, until, granularity=day|week|month` |
 | `GET /note/day/{YYYY-MM-DD}` | what happened on a day: notes, revisions with summaries, entities touched | `tz, as_received` |
 | `GET /note/revisions` | revision feed | `since, until, entity, cursor, limit` |
@@ -163,6 +165,10 @@ Pinned response shapes (clients decode these strictly; absent lists mean empty):
 | `Automations` (`GET /note/status`, `GET /note/queue`) | `{processor_id, reflect_id, processor: AutomationHealth, reflect: AutomationHealth}` |
 | `AutomationHealth` | `{id, state, target, healthy, reason, paused}`: `state` is the automation's state (`active`, `paused`, `failed`, `completed`, `archived`) or `missing` (never created, or gone); `target` the workflow it runs (`abstractnote@<version>:note-drain`); `healthy` is true only when it is active or paused AND runs the version of the note workflows this gateway serves; `reason` one sentence when it is not (null otherwise); `paused` whether the user paused it. Unhealthy = `POST /note/processor/ensure` repairs it |
 | `POST /note/processor/ensure` | `{processor_id, reflect_id, created, processor: EnsureAction, reflect: EnsureAction}`; `EnsureAction` = `{id, action, reason, previous_id?}`: `action` `created` (there was none), `kept` (healthy) or `recreated` (the previous one, `previous_id`, was archived and replaced; `reason` is its health reason); `created` lists the flows of every new automation (`[]` when both were kept). `503` when the note workflows are not loaded: nothing is archived |
+| `GET /note/communities` | `{computed_at, resolution, revision_count_at_compute, revisions_since, loose_ends, items: [Community]}` (`computed_at` null, `items` empty before the first computation; `revisions_since` counts revisions applied after it, so a client can say the groups are being refreshed; `loose_ends` counts the live entities in no community) |
+| `Community` | `{community_id, label, summary, kind, size, top_entities: [{entity_id, name, kind, note_count}], stale_label, labelled_at, created_at}`, largest first: `label` (at most 4 words), `summary` (one sentence) and `kind` (`project`, `theme`, `people`, `tooling`, `process` or `other`) are null until the reflect flow names it; `top_entities` are its 5 members with the most notes; `stale_label` true when the label is kept but more than 20 % of the members changed since it was given (the next reflect run names it again) |
+| `POST /note/communities/recompute` | `{communities, loose_ends, entities, edges, new, labels_kept, stale_labels, unlabelled, resolution, computed_at}` (`new`: communities that matched no previous one; `labels_kept`: labelled communities that kept their id; a resolution that is not a number above 0 and at most 100 is 400; a notebook opened without its embedding model is 400) |
+| graph node `community_id`, entity card `community` | every `GET /note/graph` node carries `community_id` (null for an entity in no community, or before the first computation); `GET /note/entities/{id}` carries `community: {community_id, label, kind, size, stale_label}` or null. Both are the communities as last computed, also with `at` or `as_received` |
 | `note-capture` output | `{response, note_id, status, revision_summary?}` |
 | `note-recall` output | `{response, answer, evidence: [NoteRef], evolution, open_loops, follow_ups, dossier_note_id?, hits, effort}` |
 
@@ -174,7 +180,7 @@ Graph response:
 
 ```json
 {"as_of": "2026-10-19T00:00:00Z",
- "nodes": [{"id": "ex:person-dana", "kind": "person", "name": "Dana", "first_seen": "...", "last_seen": "...", "note_count": 12, "summary": "..."}],
+ "nodes": [{"id": "ex:person-dana", "kind": "person", "name": "Dana", "first_seen": "...", "last_seen": "...", "note_count": 12, "summary": "...", "community_id": "cm_..."}],
  "edges": [{"source": "ex:person-dana", "target": "ex:project-lut", "predicate": "schema:participant", "first_seen": "...", "last_seen": "...", "count": 5, "active": true}]}
 ```
 
@@ -202,6 +208,9 @@ Flows call them through `tool_calls` nodes; agents may list them in `allowed_too
 | `note_timeline` | `since, until, granularity` | buckets |
 | `note_open_loops`, `note_contradictions`, `note_resurface`, `note_anniversaries` | `limit, since?` | candidate lists for the reflect flow (`{items}`, each with its `rule`, `note_ids` and `entity_ids`; an open loop also carries `age_days` and `stale`, as `GET /note/tasks` does; contradictions are only the disputed pairs a note's linking marked) |
 | `note_insight_write` | `kind, title, body, evidence_note_ids, entity_ids, run_id?` | `{note_id}` |
+| `note_communities_recompute` | `resolution?` | the counts of `POST /note/communities/recompute` |
+| `note_communities_pending` | `limit=5` (at most 20) | `{count, items: [{index, community_id, size, stale_label, previous_label, previous_summary, top_entities: [{entity_id, name, kind, note_count, summary}], claims: [{claim_id, text}], excerpts: [NoteRef]}]}`: communities without a label or with a stale one, largest first; `claims` are up to 8 active statements among the members (links between members first, then the most reinforced and the most certain), `excerpts` the 3 notes that mention the most members |
+| `note_communities_label` | `items: [{community_id, label, summary, kind}]` | `{labelled, warnings}`: a label of more than 4 words keeps its first 4, an unknown kind becomes `other`, an unknown community or an empty label is left out, each with a warning; labelling clears `stale_label` |
 
 All tools are read-and-write on the caller's own notebook only and are auto-approved. Every
 tool returns JSON-serialisable dictionaries and raises a `ValueError` with a plain sentence on
@@ -221,6 +230,8 @@ hits = nb.search("LUT budget", since="2026-07-01")          # quick tier, no mod
 card = nb.entity("ex:person-dana", at="2026-09-01T00:00:00Z")
 graph = nb.graph(focus=["ex:project-lut"], at=None, depth=2)
 day = nb.day("2026-09-14")
+nb.recompute_communities()                                 # community detection, no model
+groups = nb.communities()                                  # {computed_at, items: [Community], ...}
 ```
 
 `Notebook.open(dir, embedder=...)` takes the embedding model the notebook is pinned to (none
@@ -239,7 +250,7 @@ The note tools and the flows run headlessly too:
 from abstractnote.tools import bind, TOOL_NAMES
 from abstractnote.flows.runner import NoteRunner
 
-tools = bind("notes")                                      # the 18 note tools, bound to a notebook
+tools = bind("notes")                                      # the 21 note tools, bound to a notebook
 runner = NoteRunner.local("notes", provider="mlx", model="mlx-community/Qwen3.6-35B-A3B-4bit")
 runner.run_capture("Met Dana about the LUT budget")        # the note-capture flow, quick filing included
 runner.run_drain(max_items=20)                             # note-drain: process queued notes

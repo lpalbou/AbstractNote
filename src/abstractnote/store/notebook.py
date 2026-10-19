@@ -512,9 +512,16 @@ class Notebook:
               min_count: int = 1, limit: int = 200, as_of: Optional[str] = None,
               as_received: Optional[str] = None) -> Dict[str, Any]:
         """Nodes and edges as of ``at``; ``as_received`` keeps what the archive held on that date
-        (docs/data-model.md "Time")."""
-        return self.store.graph(focus=focus, at=at or as_of, depth=depth, since=since, until=until, kinds=kinds,
-                                min_count=min_count, limit=limit, as_received=as_received)
+        (docs/data-model.md "Time"). Each node carries ``community_id`` (its community as last computed, null for a
+        loose end or before the first computation)."""
+        from ..recall.communities import community_ids
+
+        out = self.store.graph(focus=focus, at=at or as_of, depth=depth, since=since, until=until, kinds=kinds,
+                               min_count=min_count, limit=limit, as_received=as_received)
+        groups = community_ids(self)
+        for node in out["nodes"]:
+            node["community_id"] = groups.get(node["id"])
+        return out
 
     def day(self, day: str, tz: Optional[str] = None, as_received: Optional[str] = None) -> Dict[str, Any]:
         return self.store.day(day, tz, as_received)
@@ -614,9 +621,12 @@ class Notebook:
     def entity(self, entity_id: str, at: Optional[str] = None, as_received: Optional[str] = None) -> Dict[str, Any]:
         """The entity card as of ``at`` (merged ids resolve to the surviving entity); ``as_received`` builds it from
         what the archive held on that date."""
+        from ..recall.communities import community_of
         from ..recall.expand import entity_card
 
-        return entity_card(self, entity_id, at, as_received)
+        card = entity_card(self, entity_id, at, as_received)
+        card["community"] = community_of(self, card["entity_id"])
+        return card
 
     def entity_record(self, entity_id: str) -> Dict[str, Any]:
         """The entry's own record, not followed to the surviving entity of a merge (``GET /note/entities/{id}?
@@ -710,6 +720,18 @@ class Notebook:
         if recompute:
             cm.recompute(self, resolution)
         return cm.communities(self)
+
+    def communities_pending(self, limit: int = 5) -> Dict[str, Any]:
+        """Communities waiting for a label (none yet, or stale), with what the model needs to name them."""
+        from ..recall import communities as cm
+
+        return cm.pending(self, limit)
+
+    def label_communities(self, items: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+        """Store labels ``[{community_id, label, summary, kind}]`` -> ``{labelled, warnings}``."""
+        from ..recall import communities as cm
+
+        return cm.label(self, items)
 
     def recompute_communities(self, resolution: Optional[float] = None) -> Dict[str, Any]:
         """Run community detection over the entity graph and store the result (no model); returns the counts."""

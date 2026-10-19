@@ -2022,7 +2022,10 @@
           "note_contradictions",
           "note_resurface",
           "note_anniversaries",
-          "note_insight_write"
+          "note_insight_write",
+          "note_communities_recompute",
+          "note_communities_pending",
+          "note_communities_label"
         ]
       }
     }

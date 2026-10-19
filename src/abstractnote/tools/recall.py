@@ -1,11 +1,12 @@
 """Recall and reflect tools (docs/api.md): note_search, note_expand, note_changes, note_entity,
 note_timeline, note_open_loops, note_contradictions, note_resurface, note_anniversaries,
-note_insight_write."""
+note_insight_write, note_communities_recompute, note_communities_pending, note_communities_label."""
 
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from ..recall import communities as _communities
 from ..recall import expand as _expand
 from ..recall import reflect as _reflect
 from ..recall.insights import write_insight
@@ -66,3 +67,15 @@ def note_insight_write(ctx: ToolContext, kind: str, title: str, body: str,
                        evidence_note_ids: Optional[List[str]] = None, entity_ids: Optional[List[str]] = None,
                        run_id: Optional[str] = None) -> Dict[str, Any]:
     return write_insight(ctx.nb, kind, title, body, evidence_note_ids or [], entity_ids or [], _blank(run_id))
+
+
+def note_communities_recompute(ctx: ToolContext, resolution: Optional[float] = None) -> Dict[str, Any]:
+    return _communities.recompute(ctx.nb, _blank(resolution))
+
+
+def note_communities_pending(ctx: ToolContext, limit: int = _communities.PENDING_LIMIT) -> Dict[str, Any]:
+    return _communities.pending(ctx.nb, int(limit or _communities.PENDING_LIMIT))
+
+
+def note_communities_label(ctx: ToolContext, items: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    return _communities.label(ctx.nb, items or [])

@@ -12,7 +12,7 @@ STEPS = {("note-capture", "filing"): "quick_filing", ("note-process", "extract")
          ("note-process", "extract_again"): "extract", ("note-process", "link"): "link",
          ("note-recall", "synthesize"): "synthesize", ("note-mine", "plan"): "mine_plan",
          ("note-mine", "findings"): "mine_findings", ("note-mine", "dossier"): "mine_dossier",
-         ("note-reflect", "reflect"): "reflect"}
+         ("note-reflect", "reflect"): "reflect", ("note-reflect", "communities_names"): "label_communities"}
 
 
 def _llm_nodes():

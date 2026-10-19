@@ -1497,11 +1497,405 @@
       }
     },
     {
-      "id": "end",
-      "type": "on_flow_end",
+      "id": "communities_args",
+      "type": "code",
       "position": {
         "x": 8640.0,
         "y": 320.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Find groups: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nreturn {\"tool_calls\": [{\"name\": \"note_communities_recompute\", \"call_id\": \"communities\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "communities",
+      "type": "tool_calls",
+      "position": {
+        "x": 9120.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Find groups",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_communities_recompute"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_communities_recompute"
+          ]
+        }
+      }
+    },
+    {
+      "id": "communities_out",
+      "type": "code",
+      "position": {
+        "x": 9600.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Find groups: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "communities",
+            "label": "communities",
+            "type": "number"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_communities_recompute returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_communities_recompute failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_communities_recompute returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "communities_pending_args",
+      "type": "code",
+      "position": {
+        "x": 10080.0,
+        "y": 640.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Groups to name: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "limit",
+            "label": "limit",
+            "type": "number"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox",
+          "limit": 5
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif limit is not None and limit != \"\":\n    arguments[\"limit\"] = limit\nreturn {\"tool_calls\": [{\"name\": \"note_communities_pending\", \"call_id\": \"communities_pending\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "communities_pending",
+      "type": "tool_calls",
+      "position": {
+        "x": 10560.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Groups to name",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_communities_pending"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_communities_pending"
+          ]
+        }
+      }
+    },
+    {
+      "id": "communities_pending_out",
+      "type": "code",
+      "position": {
+        "x": 11040.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Groups to name: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          },
+          {
+            "id": "count",
+            "label": "count",
+            "type": "number"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_communities_pending returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_communities_pending failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_communities_pending returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "communities_view",
+      "type": "code",
+      "position": {
+        "x": 11520.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "What the model sees",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "view",
+            "label": "view",
+            "type": "array"
+          },
+          {
+            "id": "any",
+            "label": "any",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "view = []\nfor p in items or []:\n    if not isinstance(p, dict):\n        continue\n    view.append({\"index\": p.get(\"index\"), \"size\": p.get(\"size\"),\n                 \"previous_label\": p.get(\"previous_label\"), \"previous_summary\": p.get(\"previous_summary\"),\n                 \"entities\": [{\"name\": e.get(\"name\"), \"kind\": e.get(\"kind\"), \"notes\": e.get(\"note_count\"),\n                               \"summary\": e.get(\"summary\")} for e in (p.get(\"top_entities\") or []) if isinstance(e, dict)],\n                 \"statements\": [c.get(\"text\") for c in (p.get(\"claims\") or []) if isinstance(c, dict)],\n                 \"notes\": [{\"title\": n.get(\"title\"), \"date\": str(n.get(\"occurred_at\") or \"\")[:10],\n                            \"excerpt\": n.get(\"excerpt\")} for n in (p.get(\"excerpts\") or []) if isinstance(n, dict)]})\nreturn {\"view\": view, \"any\": len(view) > 0}\n"
+      }
+    },
+    {
+      "id": "communities_any",
+      "type": "if",
+      "position": {
+        "x": 12000.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Any to name?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "end",
+      "type": "on_flow_end",
+      "position": {
+        "x": 12480.0,
+        "y": 0.0
       },
       "data": {
         "nodeType": "on_flow_end",
@@ -1525,6 +1919,486 @@
           {
             "id": "considered",
             "label": "considered",
+            "type": "number"
+          },
+          {
+            "id": "communities_labelled",
+            "label": "communities_labelled",
+            "type": "number"
+          }
+        ],
+        "outputs": [],
+        "pinDefaults": {
+          "communities_labelled": 0
+        }
+      }
+    },
+    {
+      "id": "communities_prompt",
+      "type": "string_template",
+      "position": {
+        "x": 12000.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "string_template",
+        "label": "Naming prompt",
+        "inputs": [
+          {
+            "id": "template",
+            "label": "template",
+            "type": "string"
+          },
+          {
+            "id": "communities",
+            "label": "communities",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "result",
+            "label": "result",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "template": "Name these groups.\n\nGroups:\n{{communities}}"
+        }
+      }
+    },
+    {
+      "id": "communities_names",
+      "type": "llm_call",
+      "position": {
+        "x": 12480.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "llm_call",
+        "label": "Name the groups",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          },
+          {
+            "id": "system",
+            "label": "system",
+            "type": "string"
+          },
+          {
+            "id": "prompt",
+            "label": "prompt",
+            "type": "string"
+          },
+          {
+            "id": "tools",
+            "label": "tools",
+            "type": "tools"
+          },
+          {
+            "id": "temperature",
+            "label": "temperature",
+            "type": "number"
+          },
+          {
+            "id": "thinking",
+            "label": "thinking",
+            "type": "string"
+          },
+          {
+            "id": "max_output_tokens",
+            "label": "max_output_tokens",
+            "type": "number"
+          },
+          {
+            "id": "resp_schema",
+            "label": "resp_schema",
+            "type": "json_schema"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          },
+          {
+            "id": "meta",
+            "label": "meta",
+            "type": "object"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "tools": [],
+          "system": "You name groups of related things found in a person's notebook. Each group in the message has an `index`, its most mentioned entities (name, kind, how many notes mention it, what the notebook knows about it), the strongest statements that link them, and a few representative notes.\n\nFor every group, give:\n- `index`: the group's index in the message;\n- `label`: a name of at most 4 words that a person recognises at a glance (the project, theme, circle of people, tools or process the group is about), never a list of the entity names;\n- `summary`: one sentence saying what holds the group together;\n- `kind`: project, theme, people, tooling, process or other.\n\nA group with a `previous_label` was named before and has changed since; keep that name when it still fits.\n\nRules:\n- Use only what the message says; never invent people, projects or dates.\n- Name every group in the message, once.\n\nOutput JSON only, matching the schema, written compactly on one line (no indentation).\n",
+          "temperature": 0.2,
+          "resp_schema": {
+            "type": "object",
+            "properties": {
+              "communities": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "description": "index of the community in the list"
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "a name of at most 4 words"
+                    },
+                    "summary": {
+                      "type": "string",
+                      "description": "one sentence: what holds this group together"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "project",
+                        "theme",
+                        "people",
+                        "tooling",
+                        "process",
+                        "other"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "index",
+                    "label",
+                    "summary",
+                    "kind"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "communities"
+            ]
+          },
+          "thinking": "off",
+          "max_output_tokens": 2048
+        }
+      }
+    },
+    {
+      "id": "communities_labels",
+      "type": "code",
+      "position": {
+        "x": 12960.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Names by group",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "d = data if isinstance(data, dict) else {}\nby_index = {p.get(\"index\"): p for p in (items or []) if isinstance(p, dict)}\nout, seen = [], set()\nfor it in d.get(\"communities\") or []:\n    p = by_index.get(it.get(\"index\")) if isinstance(it, dict) else None\n    if p is None or p.get(\"community_id\") in seen:\n        continue\n    seen.add(p.get(\"community_id\"))\n    out.append({\"community_id\": p.get(\"community_id\"), \"label\": str(it.get(\"label\") or \"\"),\n                \"summary\": str(it.get(\"summary\") or \"\"), \"kind\": it.get(\"kind\")})\nreturn {\"items\": out}\n"
+      }
+    },
+    {
+      "id": "communities_label_args",
+      "type": "code",
+      "position": {
+        "x": 13440.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Keep the names: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif items is not None and items != \"\":\n    arguments[\"items\"] = items\nreturn {\"tool_calls\": [{\"name\": \"note_communities_label\", \"call_id\": \"communities_label\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "communities_label",
+      "type": "tool_calls",
+      "position": {
+        "x": 13920.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Keep the names",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_communities_label"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_communities_label"
+          ]
+        }
+      }
+    },
+    {
+      "id": "communities_label_out",
+      "type": "code",
+      "position": {
+        "x": 14400.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Keep the names: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "labelled",
+            "label": "labelled",
+            "type": "array"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_communities_label returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_communities_label failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_communities_label returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "communities_named",
+      "type": "code",
+      "position": {
+        "x": 14880.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Named",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "labelled",
+            "label": "labelled",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "count",
+            "label": "count",
+            "type": "number"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "return {\"count\": len(labelled or [])}\n"
+      }
+    },
+    {
+      "id": "end_named",
+      "type": "on_flow_end",
+      "position": {
+        "x": 15360.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "on_flow_end",
+        "label": "Done (groups named)",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "insight_note_ids",
+            "label": "insight_note_ids",
+            "type": "array"
+          },
+          {
+            "id": "considered",
+            "label": "considered",
+            "type": "number"
+          },
+          {
+            "id": "communities_labelled",
+            "label": "communities_labelled",
             "type": "number"
           }
         ],
@@ -1996,6 +2870,104 @@
       "targetHandle": "exec-in"
     },
     {
+      "id": "e-report-exec-out-communities_args-exec-in",
+      "source": "report",
+      "sourceHandle": "exec-out",
+      "target": "communities_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-communities_args-tool_calls-communities-tool_calls",
+      "source": "communities_args",
+      "sourceHandle": "tool_calls",
+      "target": "communities",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-communities_args-exec-out-communities-exec-in",
+      "source": "communities_args",
+      "sourceHandle": "exec-out",
+      "target": "communities",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-communities-results-communities_out-results",
+      "source": "communities",
+      "sourceHandle": "results",
+      "target": "communities_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-communities-exec-out-communities_out-exec-in",
+      "source": "communities",
+      "sourceHandle": "exec-out",
+      "target": "communities_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-communities_out-exec-out-communities_pending_args-exec-in",
+      "source": "communities_out",
+      "sourceHandle": "exec-out",
+      "target": "communities_pending_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-communities_pending_args-tool_calls-communities_pending-tool_calls",
+      "source": "communities_pending_args",
+      "sourceHandle": "tool_calls",
+      "target": "communities_pending",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-communities_pending_args-exec-out-communities_pending-exec-in",
+      "source": "communities_pending_args",
+      "sourceHandle": "exec-out",
+      "target": "communities_pending",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-communities_pending-results-communities_pending_out-results",
+      "source": "communities_pending",
+      "sourceHandle": "results",
+      "target": "communities_pending_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-communities_pending-exec-out-communities_pending_out-exec-in",
+      "source": "communities_pending",
+      "sourceHandle": "exec-out",
+      "target": "communities_pending_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-communities_pending_out-items-communities_view-items",
+      "source": "communities_pending_out",
+      "sourceHandle": "items",
+      "target": "communities_view",
+      "targetHandle": "items"
+    },
+    {
+      "id": "e-communities_pending_out-exec-out-communities_view-exec-in",
+      "source": "communities_pending_out",
+      "sourceHandle": "exec-out",
+      "target": "communities_view",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-communities_view-any-communities_any-condition",
+      "source": "communities_view",
+      "sourceHandle": "any",
+      "target": "communities_any",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-communities_view-exec-out-communities_any-exec-in",
+      "source": "communities_view",
+      "sourceHandle": "exec-out",
+      "target": "communities_any",
+      "targetHandle": "exec-in"
+    },
+    {
       "id": "e-report-message-end-response",
       "source": "report",
       "sourceHandle": "message",
@@ -2017,10 +2989,157 @@
       "targetHandle": "considered"
     },
     {
-      "id": "e-report-exec-out-end-exec-in",
-      "source": "report",
-      "sourceHandle": "exec-out",
+      "id": "e-communities_any-false-end-exec-in",
+      "source": "communities_any",
+      "sourceHandle": "false",
       "target": "end",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-communities_view-view-communities_prompt-communities",
+      "source": "communities_view",
+      "sourceHandle": "view",
+      "target": "communities_prompt",
+      "targetHandle": "communities"
+    },
+    {
+      "id": "e-communities_prompt-result-communities_names-prompt",
+      "source": "communities_prompt",
+      "sourceHandle": "result",
+      "target": "communities_names",
+      "targetHandle": "prompt"
+    },
+    {
+      "id": "e-start-provider-communities_names-provider",
+      "source": "start",
+      "sourceHandle": "provider",
+      "target": "communities_names",
+      "targetHandle": "provider"
+    },
+    {
+      "id": "e-start-model-communities_names-model",
+      "source": "start",
+      "sourceHandle": "model",
+      "target": "communities_names",
+      "targetHandle": "model"
+    },
+    {
+      "id": "e-communities_any-true-communities_names-exec-in",
+      "source": "communities_any",
+      "sourceHandle": "true",
+      "target": "communities_names",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-communities_names-data-communities_labels-data",
+      "source": "communities_names",
+      "sourceHandle": "data",
+      "target": "communities_labels",
+      "targetHandle": "data"
+    },
+    {
+      "id": "e-communities_pending_out-items-communities_labels-items",
+      "source": "communities_pending_out",
+      "sourceHandle": "items",
+      "target": "communities_labels",
+      "targetHandle": "items"
+    },
+    {
+      "id": "e-communities_names-exec-out-communities_labels-exec-in",
+      "source": "communities_names",
+      "sourceHandle": "exec-out",
+      "target": "communities_labels",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-communities_labels-items-communities_label_args-items",
+      "source": "communities_labels",
+      "sourceHandle": "items",
+      "target": "communities_label_args",
+      "targetHandle": "items"
+    },
+    {
+      "id": "e-communities_labels-exec-out-communities_label_args-exec-in",
+      "source": "communities_labels",
+      "sourceHandle": "exec-out",
+      "target": "communities_label_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-communities_label_args-tool_calls-communities_label-tool_calls",
+      "source": "communities_label_args",
+      "sourceHandle": "tool_calls",
+      "target": "communities_label",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-communities_label_args-exec-out-communities_label-exec-in",
+      "source": "communities_label_args",
+      "sourceHandle": "exec-out",
+      "target": "communities_label",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-communities_label-results-communities_label_out-results",
+      "source": "communities_label",
+      "sourceHandle": "results",
+      "target": "communities_label_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-communities_label-exec-out-communities_label_out-exec-in",
+      "source": "communities_label",
+      "sourceHandle": "exec-out",
+      "target": "communities_label_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-communities_label_out-labelled-communities_named-labelled",
+      "source": "communities_label_out",
+      "sourceHandle": "labelled",
+      "target": "communities_named",
+      "targetHandle": "labelled"
+    },
+    {
+      "id": "e-communities_label_out-exec-out-communities_named-exec-in",
+      "source": "communities_label_out",
+      "sourceHandle": "exec-out",
+      "target": "communities_named",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-report-message-end_named-response",
+      "source": "report",
+      "sourceHandle": "message",
+      "target": "end_named",
+      "targetHandle": "response"
+    },
+    {
+      "id": "e-report-insight_note_ids-end_named-insight_note_ids",
+      "source": "report",
+      "sourceHandle": "insight_note_ids",
+      "target": "end_named",
+      "targetHandle": "insight_note_ids"
+    },
+    {
+      "id": "e-report-considered-end_named-considered",
+      "source": "report",
+      "sourceHandle": "considered",
+      "target": "end_named",
+      "targetHandle": "considered"
+    },
+    {
+      "id": "e-communities_named-count-end_named-communities_labelled",
+      "source": "communities_named",
+      "sourceHandle": "count",
+      "target": "end_named",
+      "targetHandle": "communities_labelled"
+    },
+    {
+      "id": "e-communities_named-exec-out-end_named-exec-in",
+      "source": "communities_named",
+      "sourceHandle": "exec-out",
+      "target": "end_named",
       "targetHandle": "exec-in"
     }
   ],
@@ -2060,7 +3179,10 @@
           "note_contradictions",
           "note_resurface",
           "note_anniversaries",
-          "note_insight_write"
+          "note_insight_write",
+          "note_communities_recompute",
+          "note_communities_pending",
+          "note_communities_label"
         ]
       }
     }

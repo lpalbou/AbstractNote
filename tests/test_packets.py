@@ -140,6 +140,11 @@ def test_model_nodes_carry_static_system_prompts_thinking_and_caps():
              ("note-process", "link"): "link", ("note-recall", "synthesize"): "synthesize",
              ("note-mine", "plan"): "mine_plan", ("note-mine", "findings"): "mine_findings",
              ("note-mine", "dossier"): "mine_dossier", ("note-reflect", "reflect"): "reflect"}
+    # the community naming step carries its own static system prompt (abstractnote.recall.communities, 0030)
+    from abstractnote.recall.communities import LABEL_SYSTEM_PROMPT
+
+    names = llm.pop(("note-reflect", "communities_names"))["data"]["pinDefaults"]
+    assert names["system"] == LABEL_SYSTEM_PROMPT and names["max_output_tokens"] == 2048
     assert set(llm) == set(steps)
     for key, step in steps.items():
         d = llm[key]["data"]["pinDefaults"]

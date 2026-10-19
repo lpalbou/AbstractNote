@@ -43,7 +43,8 @@ NOTE_TOOLS = [
     "note_capture", "note_file", "note_context", "note_resolve_candidates", "note_apply_revision",
     "note_queue_lease", "note_queue_ack", "note_queue_stats", "note_search", "note_expand",
     "note_changes", "note_entity", "note_timeline", "note_open_loops", "note_contradictions",
-    "note_resurface", "note_anniversaries", "note_insight_write",
+    "note_resurface", "note_anniversaries", "note_insight_write", "note_communities_recompute",
+    "note_communities_pending", "note_communities_label",
 ]
 
 DRAIN_DEFAULTS = {"max_items": 20, "budget_s": 90}
@@ -77,6 +78,7 @@ STEP_SETTINGS: Dict[str, Dict[str, Any]] = {
     "mine_findings": {"thinking": None, "max_output_tokens": 4096},
     "mine_dossier": {"thinking": None, "max_output_tokens": 8192},
     "reflect": {"thinking": None, "max_output_tokens": 8192},
+    "label_communities": {"thinking": "off", "max_output_tokens": 2048},
 }
 
 
@@ -133,8 +135,26 @@ def _skeleton(schema: Any) -> Any:
     return out
 
 
+def flow_schemas() -> Dict[str, Dict[str, Any]]:
+    """Schemas owned next to the deterministic step they feed rather than in ``abstractnote.process.schemas``
+    (``CommunityLabels``: :mod:`abstractnote.recall.communities`, backlog 0030)."""
+    from ..recall.communities import COMMUNITY_LABELS_SCHEMA
+
+    return {"CommunityLabels": COMMUNITY_LABELS_SCHEMA}
+
+
 def load_schemas() -> Dict[str, Dict[str, Any]]:
-    """The structured-output schemas: the core lane's when importable, checked against ours."""
+    """The structured-output schemas: the core lane's when importable, checked against ours, plus
+    :func:`flow_schemas` (refused when the core lane defines one of them differently)."""
+    out = _core_schemas()
+    for name, schema in flow_schemas().items():
+        if name in out and _skeleton(out[name]) != _skeleton(schema):
+            raise RuntimeError(f"{name} differs between abstractnote.process.schemas and its flow-side definition")
+        out[name] = schema
+    return out
+
+
+def _core_schemas() -> Dict[str, Dict[str, Any]]:
     import importlib
     import importlib.util
 
@@ -1032,12 +1052,79 @@ def build_reflect(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
         outputs=[("message", "string"), ("insight_note_ids", "array"), ("considered", "number")],
     )
     f.then("each_insight", "report", "done")
-    f.end("end", "Done", {
-        "response": ("string", ("report", "message")), "insight_note_ids": ("array", ("report", "insight_note_ids")),
-        "considered": ("number", ("report", "considered")),
-    })
-    f.then("report", "end")
+    _label_communities(f, schemas, prompts, after=("report", "exec-out"))
     return f.finish(automation_defaults=AUTOMATION_DEFAULTS["note-reflect"])
+
+
+def _label_communities(f: Flow, schemas: Dict[str, Any], prompts: Dict[str, str], after: tuple) -> None:
+    """The reflect flow's last part (backlog 0030): find the communities again (no model), and when some have
+    no name or a stale one, name them in ONE structured call and store the names. Communities are referred to by
+    index; an index the list does not have is dropped. Nothing waiting: no model call."""
+    from ..recall import communities as cm
+
+    S = lambda p: ("start", p)  # noqa: E731
+    recomputed = f.tool_step("communities", "Find groups", "note_communities_recompute", {},
+                             [("communities", "number")], after=after)
+    waiting = f.tool_step("communities_pending", "Groups to name", "note_communities_pending",
+                          {"limit": ("number", cm.PENDING_LIMIT)}, [("items", "array"), ("count", "number")],
+                          after=(recomputed, "exec-out"))
+    f.code(
+        "communities_view", "What the model sees",
+        "view = []\n"
+        "for p in items or []:\n"
+        "    if not isinstance(p, dict):\n"
+        "        continue\n"
+        "    view.append({\"index\": p.get(\"index\"), \"size\": p.get(\"size\"),\n"
+        "                 \"previous_label\": p.get(\"previous_label\"), \"previous_summary\": p.get(\"previous_summary\"),\n"
+        "                 \"entities\": [{\"name\": e.get(\"name\"), \"kind\": e.get(\"kind\"), \"notes\": e.get(\"note_count\"),\n"
+        "                               \"summary\": e.get(\"summary\")} for e in (p.get(\"top_entities\") or []) if isinstance(e, dict)],\n"
+        "                 \"statements\": [c.get(\"text\") for c in (p.get(\"claims\") or []) if isinstance(c, dict)],\n"
+        "                 \"notes\": [{\"title\": n.get(\"title\"), \"date\": str(n.get(\"occurred_at\") or \"\")[:10],\n"
+        "                            \"excerpt\": n.get(\"excerpt\")} for n in (p.get(\"excerpts\") or []) if isinstance(n, dict)]})\n"
+        "return {\"view\": view, \"any\": len(view) > 0}",
+        inputs={"items": ("array", (waiting, "items"))},
+        outputs=[("view", "array"), ("any", "boolean")],
+    )
+    f.then(waiting, "communities_view")
+    f.if_("communities_any", "Any to name?", ("communities_view", "any"))
+    f.then("communities_view", "communities_any")
+    report = {"response": ("string", ("report", "message")),
+              "insight_note_ids": ("array", ("report", "insight_note_ids")),
+              "considered": ("number", ("report", "considered"))}
+    f.end("end", "Done", {**report, "communities_labelled": ("number", 0)})
+    f.then("communities_any", "end", "false")
+    f.template("communities_prompt", "Naming prompt", cm.LABEL_TEMPLATE,
+               {"communities": ("communities_view", "view")})
+    cfg = STEP_SETTINGS["label_communities"]
+    f.llm("communities_names", "Name the groups", schema=schemas["CommunityLabels"],
+          prompt=("communities_prompt", "result"), provider=S("provider"), model=S("model"),
+          system=cm.LABEL_SYSTEM_PROMPT, thinking=cfg["thinking"], max_output_tokens=cfg["max_output_tokens"])
+    f.then("communities_any", "communities_names", "true")
+    f.code(
+        "communities_labels", "Names by group",
+        "d = data if isinstance(data, dict) else {}\n"
+        "by_index = {p.get(\"index\"): p for p in (items or []) if isinstance(p, dict)}\n"
+        "out, seen = [], set()\n"
+        "for it in d.get(\"communities\") or []:\n"
+        "    p = by_index.get(it.get(\"index\")) if isinstance(it, dict) else None\n"
+        "    if p is None or p.get(\"community_id\") in seen:\n"
+        "        continue\n"
+        "    seen.add(p.get(\"community_id\"))\n"
+        "    out.append({\"community_id\": p.get(\"community_id\"), \"label\": str(it.get(\"label\") or \"\"),\n"
+        "                \"summary\": str(it.get(\"summary\") or \"\"), \"kind\": it.get(\"kind\")})\n"
+        "return {\"items\": out}",
+        inputs={"data": ("object", ("communities_names", "data")), "items": ("array", (waiting, "items"))},
+        outputs=[("items", "array")],
+    )
+    f.then("communities_names", "communities_labels")
+    stored = f.tool_step("communities_label", "Keep the names", "note_communities_label",
+                         {"items": ("array", ("communities_labels", "items"))}, [("labelled", "array")],
+                         after=("communities_labels", "exec-out"))
+    f.code("communities_named", "Named", "return {\"count\": len(labelled or [])}",
+           inputs={"labelled": ("array", (stored, "labelled"))}, outputs=[("count", "number")])
+    f.then(stored, "communities_named")
+    f.end("end_named", "Done (groups named)", {**report, "communities_labelled": ("number", ("communities_named", "count"))})
+    f.then("communities_named", "end_named")
 
 
 BUILDERS = {

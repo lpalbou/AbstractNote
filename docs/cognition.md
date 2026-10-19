@@ -229,6 +229,17 @@ candidates; the model judges and writes:
 as an `insight` note (`warning`, `reminder`, `connection`, `contradiction`, `evolution`). The
 web app's Remember view and the watch's Today screen show unacknowledged insights.
 
+Then the flow refreshes the communities of the graph and names them (backlog 0030):
+`note_communities_recompute` runs Louvain over the entity graph without a model (data-model.md
+"Community"); `note_communities_pending` lists up to 5 communities without a label or with a stale
+one, each with its top entities, its strongest statements and 3 representative notes; when the list
+is empty the run ends there (no model call); otherwise ONE `llm_call` (`CommunityLabels` schema,
+thinking off, at most 2048 output tokens) names them all by index, a code node maps each index back to
+its community (an index the list does not have is dropped), and `note_communities_label` stores the
+names. The run's output adds `communities_labelled` (the number of communities named). The step's
+static system prompt and template live in `abstractnote.recall.communities` (`LABEL_SYSTEM_PROMPT`,
+`LABEL_TEMPLATE`), next to the schema. `POST /note/communities/recompute` runs detection alone.
+
 ## Structured output schemas
 
 All schemas are JSON Schema objects attached as `resp_schema`; the runtime builds pydantic
@@ -278,6 +289,14 @@ Schema enums)
 
 **Answer**, **MiningPlan**, **SliceFindings**, **Dossier**, **Reflections**: see
 `abstractnote.process.schemas`; each is documented inline with the fields listed above.
+
+**CommunityLabels** (the reflect flow's naming step; defined in `abstractnote.recall.communities`
+and merged into the flow schemas by `flows.build.load_schemas`)
+
+```json
+{"communities": [{"index": 0, "label": "at most 4 words", "summary": "one sentence",
+                  "kind": "project|theme|people|tooling|process|other"}]}
+```
 
 ## Prompts and bounds
 
@@ -390,6 +409,7 @@ normally and uses the prompt cache, but with thinking on it reasons for minutes 
 | link | on (`thinking` start pin; `off` from note-drain) | 6000 |
 | synthesize, dossier, reflect | the runtime default | 8192 |
 | mining plan, slice findings | the runtime default | 4096 |
+| naming communities (reflect) | off | 2048 |
 
 Thinking for extraction and linking is a per-run choice: `note-process` takes a `thinking`
 start pin (`on` or `off`, default `on`, anything else is refused) wired to the extract, second

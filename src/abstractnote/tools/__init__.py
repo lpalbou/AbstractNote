@@ -23,7 +23,8 @@ TOOL_NAMES: List[str] = [
     "note_capture", "note_file", "note_context", "note_resolve_candidates", "note_apply_revision",
     "note_queue_lease", "note_queue_ack", "note_queue_stats", "note_search", "note_expand",
     "note_changes", "note_entity", "note_timeline", "note_open_loops", "note_contradictions",
-    "note_resurface", "note_anniversaries", "note_insight_write",
+    "note_resurface", "note_anniversaries", "note_insight_write", "note_communities_recompute",
+    "note_communities_pending", "note_communities_label",
 ]
 
 
@@ -186,6 +187,22 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
         """Store an insight or a dossier with its evidence."""
         return rec.note_insight_write(ctx, kind, title, body, evidence_note_ids, entity_ids, run_id)
 
+    @tool(name="note_communities_recompute",
+          description="Find the groups of entities the notes keep together (no model); returns counts.")
+    def note_communities_recompute(resolution: Optional[float] = None) -> Dict[str, Any]:
+        """Run community detection over the entity graph and store it (resolution: above 1 for smaller groups)."""
+        return rec.note_communities_recompute(ctx, resolution)
+
+    @tool(name="note_communities_pending", description="Groups of entities that still need a name, with evidence.")
+    def note_communities_pending(limit: int = 5) -> Dict[str, Any]:
+        """Unnamed or stale communities: top entities, strongest statements, representative notes."""
+        return rec.note_communities_pending(ctx, limit)
+
+    @tool(name="note_communities_label", description="Store the names of groups of entities.")
+    def note_communities_label(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Store [{community_id, label (at most 4 words), summary (one sentence), kind}]."""
+        return rec.note_communities_label(ctx, items)
+
     tools = {
         "note_capture": note_capture, "note_file": note_file, "note_context": note_context,
         "note_resolve_candidates": note_resolve_candidates, "note_apply_revision": note_apply_revision,
@@ -194,6 +211,8 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
         "note_entity": note_entity, "note_timeline": note_timeline, "note_open_loops": note_open_loops,
         "note_contradictions": note_contradictions, "note_resurface": note_resurface,
         "note_anniversaries": note_anniversaries, "note_insight_write": note_insight_write,
+        "note_communities_recompute": note_communities_recompute,
+        "note_communities_pending": note_communities_pending, "note_communities_label": note_communities_label,
     }
     assert list(tools) == TOOL_NAMES
     return tools

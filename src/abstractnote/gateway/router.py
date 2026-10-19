@@ -438,6 +438,28 @@ async def note_graph(
         limit=limit, as_received=as_received or None)))
 
 
+# --------------------------------------------------------------------------- communities and statistics (0030)
+
+
+class RecomputeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resolution: Optional[float] = None
+
+
+@router.get("/communities")
+async def note_communities(request: Request) -> Dict[str, Any]:
+    """The communities of the entity graph as last computed, largest first (docs/api.md)."""
+    return await _run(request, lambda nb, svc, p: _call(nb, "communities"))
+
+
+@router.post("/communities/recompute")
+async def note_communities_recompute(request: Request, body: Optional[RecomputeBody] = None) -> Dict[str, Any]:
+    """Run community detection now (no model; labels come from the reflect flow); returns the counts."""
+    resolution = body.resolution if body else None
+    return await _run(request, lambda nb, svc, p: _call(nb, "recompute_communities", resolution))
+
+
 @router.get("/timeline")
 async def note_timeline(request: Request, since: Optional[str] = None, until: Optional[str] = None,
                         granularity: str = Query("day", pattern="^(day|week|month)$")) -> Dict[str, Any]:
