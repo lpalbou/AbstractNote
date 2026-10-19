@@ -644,6 +644,12 @@ function HoverCard({ node, at, edges, names, community, slot, avoidIds }: { node
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    // Test hook (scripts/screens_v3.mjs): a fixed position, to check the card is drawn on top where it overlaps.
+    const forced = (window as unknown as { __ntHoverCardAt?: { x: number; y: number } }).__ntHoverCardAt;
+    if (forced) {
+      setPos({ x: forced.x, y: forced.y });
+      return;
+    }
     const r = el.getBoundingClientRect();
     // Never over the hovered node or its neighbours: their circles (with their names) are what it avoids.
     const rects = [node.id, ...avoidIds.filter((id) => id !== node.id)]

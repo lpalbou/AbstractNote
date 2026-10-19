@@ -4,6 +4,7 @@
  * the Overview, and an entity's progression line, in three themes at 1280 and 400 px.
  *
  *   PLAYWRIGHT_BROWSERS_PATH=<path> node scripts/screens_v3.mjs [--out DIR] [--themes a,b] [--widths 1280,400]
+ *     [--only hover,...] [--ports MOCK,APP]
  */
 
 import * as http from "node:http";
@@ -33,6 +34,8 @@ function check(cond, what) {
   console.log(`${cond ? "ok  " : "FAIL"} ${what}`);
   if (!cond) failures.push(what);
 }
+// --ports MOCK,APP: fixed ports (default: any free one).
+const PORTS = String(args.ports || "0,0").split(",").map(Number);
 const listen = (server, port) => new Promise((ok, fail) => {
   server.once("error", fail);
   server.listen(port, "127.0.0.1", () => ok(server.address().port));
@@ -42,9 +45,9 @@ async function main() {
   mkdirSync(OUT, { recursive: true });
   const mock = createMockGateway({ processDelayMs: 500 });
   const mockServer = http.createServer(mock.handler);
-  const gatewayUrl = `http://127.0.0.1:${await listen(mockServer, 0)}`;
+  const gatewayUrl = `http://127.0.0.1:${await listen(mockServer, PORTS[0])}`;
   const app = createNoteServer({ distDir: join(HERE, "..", "dist"), gatewayUrl });
-  const base = `http://127.0.0.1:${await listen(app, 0)}/`;
+  const base = `http://127.0.0.1:${await listen(app, PORTS[1] || 0)}/`;
   // PW_CHROMIUM: a chromium executable when the installed Playwright's own build is not downloaded.
   const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
   try {
@@ -101,6 +104,51 @@ async function main() {
             return Boolean(hit && c.contains(hit));
           });
           check(onTop, `${theme} ${width}: the card is drawn on top of the picture`);
+          // What keeps it on top (gate 04 m1). A test hook (window.__ntHoverCardAt) places the card; it opens on
+          // keyboard focus, the pointer parked away. (1) Over the zoom buttons, which have a z-index of their own:
+          // the card's z-index must win there.
+          const forceCard = async (at, layered) => {
+            await page.mouse.move(2, 2);
+            await page.evaluate(([a, l]) => {
+              window.__ntHoverCardAt = a;
+              document.querySelector(".nt-canvas").style.transform = l ? "translateZ(0)" : "";
+            }, [at, layered]);
+            await page.evaluate(() => document.activeElement?.blur?.());
+            await page.waitForTimeout(150);
+            await page.locator('[data-node="ex:project-lut"]').focus();
+            await page.locator(".nt-hovercard").waitFor({ timeout: 2000 });
+            await page.waitForTimeout(100);
+          };
+          const topmostAt = (x, y) => page.evaluate(([px, py]) => {
+            const c = document.querySelector(".nt-hovercard");
+            const hit = document.elementFromPoint(px, py);
+            const r = c.getBoundingClientRect();
+            return { inCard: Boolean(hit && c.contains(hit)), hit: hit ? `${hit.tagName.toLowerCase()}.${String(hit.className?.baseVal ?? hit.className)}` : "none", x: r.left, y: r.top };
+          }, [x, y]);
+          const tools = await page.locator(".nt-canvas__tools").boundingBox();
+          const toolsAt = { x: tools.x + tools.width / 2, y: tools.y + tools.height / 2 };
+          await forceCard({ x: tools.x - 40, y: tools.y - 4 }, false);
+          const overTools = await topmostAt(toolsAt.x, toolsAt.y);
+          check(overTools.inCard, `${theme} ${width}: where the card overlaps the zoom buttons it is on top (${overTools.hit})`);
+          // (2) Over the hovered node while the picture is drawn as its own layer (a transform: its own stacking
+          // context and the containing block of anything fixed inside it): the card, outside the picture, stays
+          // where it is placed and on top.
+          const canvas = await page.locator(".nt-canvas").boundingBox();
+          const lutDot = await page.locator('[data-node="ex:project-lut"] .nt-node__dot').boundingBox();
+          const dotAt = { x: lutDot.x + lutDot.width / 2, y: lutDot.y + lutDot.height / 2 };
+          const want = { x: Math.round(dotAt.x - 10), y: Math.round(dotAt.y - 10) };
+          await forceCard(want, true);
+          const overNode = await topmostAt(dotAt.x, dotAt.y);
+          check(Math.max(canvas.x, canvas.y) >= 16, `${theme} ${width}: the picture is offset in the window (${Math.round(canvas.x)},${Math.round(canvas.y)}), so a card trapped in it would move`);
+          check(overNode.inCard && Math.abs(overNode.x - want.x) <= 1 && Math.abs(overNode.y - want.y) <= 1, `${theme} ${width}: over the node of a picture drawn as its own layer the card stays put and on top (${overNode.hit} at ${Math.round(overNode.x)},${Math.round(overNode.y)}, placed at ${want.x},${want.y})`);
+          await page.evaluate(() => {
+            delete window.__ntHoverCardAt;
+            document.querySelector(".nt-canvas").style.transform = "";
+          });
+          await page.evaluate(() => document.activeElement?.blur?.());
+          await page.mouse.move(dot2.x + dot2.width / 2, dot2.y + dot2.height / 2);
+          await page.locator(".nt-hovercard").waitFor({ timeout: 2000 });
+          await page.waitForTimeout(250);
           const covered = await page.evaluate(() => {
             const c = document.querySelector(".nt-hovercard").getBoundingClientRect();
             const hit = (b) => b.left < c.right && b.right > c.left && b.top < c.bottom && b.bottom > c.top;
