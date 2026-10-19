@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "abstractnote"
-version = "0.1.0"
+version = "0.1.1"
 description = "AbstractNote: one endpoint for your notes; a temporal semantic knowledge graph of your life, built on AbstractGateway, AbstractRuntime and AbstractMemory"
 readme = "README.md"
 requires-python = ">=3.10"

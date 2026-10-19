@@ -1,6 +1,6 @@
 {
   "name": "@abstractframework/note",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "AbstractNote web app: capture notes, explore what they connect, and remember how your understanding changed.",
   "type": "module",
   "author": "Laurent-Philippe Albou",

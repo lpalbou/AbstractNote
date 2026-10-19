@@ -4,7 +4,7 @@
 returns the note tools for flows and agents.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 def __getattr__(name: str):  # lazy: importing abstractnote stays cheap

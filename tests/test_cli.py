@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 from abstractnote import ids
 from abstractnote.cli import EXIT_GAP, EXIT_INPUT, main
@@ -89,7 +90,9 @@ def test_import_and_bundle_delegate_to_their_lanes(tmp_path, capsys):
 def test_console_script_and_import_are_cheap():
     proc = subprocess.run([sys.executable, "-c", "import abstractnote, sys; print(abstractnote.__version__);"
                            " print('abstractnote.store' in sys.modules)"], capture_output=True, text=True, check=True)
-    assert proc.stdout.split() == ["0.1.0", "False"]
+    pyproject = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+    declared = next(line.split('"')[1] for line in pyproject.splitlines() if line.startswith("version = "))
+    assert proc.stdout.split() == [declared, "False"]  # __init__ says the version pyproject.toml releases
     proc = subprocess.run([sys.executable, "-m", "abstractnote.cli", "--help"], capture_output=True, text=True)
     assert proc.returncode == 0 and "capture" in proc.stdout
     assert ids.note_id_for_key("x").startswith("nt_")

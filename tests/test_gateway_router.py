@@ -166,11 +166,12 @@ def _executor_chain(runtime):
 def test_a_plane_runtime_loads_the_workflows_binds_and_auto_approves_the_note_tools(gw):
     from abstractgateway.service import get_gateway_service_for_principal
 
+    import abstractnote
     from abstractnote.flows.build import ALL_FLOWS, NOTE_TOOLS
 
     principal = gw["registry"].authenticate(gw["alice"]["Authorization"].split(" ", 1)[1])
     host = get_gateway_service_for_principal(principal).host
-    assert {f"abstractnote@0.1.0:{fid}" for fid in ALL_FLOWS} <= set(host.specs)
+    assert {f"abstractnote@{abstractnote.__version__}:{fid}" for fid in ALL_FLOWS} <= set(host.specs)
     chain = _executor_chain(host.runtime)
     policy = chain[0]._policy
     assert not policy.requires_approval([{"name": n} for n in NOTE_TOOLS])  # S2: no approval wait for note tools
