@@ -340,7 +340,7 @@ function Filing({ item, onRetry }: { item: CaptureItem; onRetry: () => void }) {
       ) : null}
       {summary && item.state === "processed" ? <p className="nt-muted">{capitalize(summary)}</p> : null}
       {line ? (
-        <p className={item.state === "failed" ? "nt-filing__error" : "nt-filing__state"} role={item.state === "failed" ? "alert" : "status"}>
+        <p className={item.state === "failed" ? "nt-error-text" : "nt-filing__state"} role={item.state === "failed" ? "alert" : "status"}>
           {item.state === "queued" ? <Icon name="clock" size={14} /> : null}
           <span>{line}</span>
           {item.state === "failed" && !item.noteId ? (

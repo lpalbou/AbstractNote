@@ -16,7 +16,8 @@ import { GraphView } from "./views/Graph";
 import { RememberView } from "./views/Remember";
 import { SettingsDrawer } from "./views/Settings";
 
-const LABELS: Record<View, string> = { capture: "Capture", graph: "Graph", remember: "Remember" };
+/** The deck's vocabulary: Capture, Remember (recall), Explore (the graph). The routes keep their names. */
+const LABELS: Record<View, string> = { capture: "Capture", graph: "Explore", remember: "Remember" };
 const ICONS: Record<View, "compose" | "branch" | "history"> = { capture: "compose", graph: "branch", remember: "history" };
 
 export function App() {
@@ -84,7 +85,7 @@ function Shell({ user, onSignOut, signingOut, onUnauthorized, onAppearance }: { 
   }, [api]);
 
   const tabs = (
-    <nav className={narrow ? "nt-tabbar" : "nt-tabs"} aria-label="Views">
+    <nav className={narrow ? "nt-tabbar" : "nt-tabs"} aria-label="Sections">
       {VIEWS.map((v) => (
         <button key={v} type="button" className="nt-tab" aria-current={route.view === v ? "page" : undefined} onClick={() => navigate(v)}>
           <Icon name={ICONS[v]} size={narrow ? 20 : 16} />
@@ -107,7 +108,7 @@ function Shell({ user, onSignOut, signingOut, onUnauthorized, onAppearance }: { 
       <div className={`nt-app${narrow ? " nt-app--narrow" : ""}`}>
         <header className="nt-header">
           <div className="nt-brand">
-            <img src="icon.svg" alt="" width={22} height={22} />
+            <img src="icon.svg" alt="" width={20} height={20} />
             <span>AbstractNote</span>
           </div>
           {narrow ? null : tabs}

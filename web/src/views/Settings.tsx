@@ -248,7 +248,7 @@ function QueuePanel({ open, api }: { open: boolean; api: ReturnType<typeof useAp
                   <li key={n.note_id} className="nt-list__row">
                     <div>
                       <NoteLink note={{ note_id: n.note_id, title: n.title || "A note", occurred_at: n.occurred_at }} />
-                      {n.last_error ? <p className="nt-filing__error">{n.last_error}</p> : null}
+                      {n.last_error ? <p className="nt-error-text">{n.last_error}</p> : null}
                     </div>
                     <button type="button" className="nt-btn nt-btn--quiet" disabled={busy === n.note_id} onClick={() => void retry(n.note_id)}>
                       {busy === n.note_id ? "Retrying…" : "Retry"}

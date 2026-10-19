@@ -105,7 +105,7 @@ function SinceLastLooked() {
                 {c.failed_notes.map((n) => (
                   <div key={n.note_id}>
                     <NoteLink note={n} showDate={false} />
-                    {n.error ? <p className="nt-filing__error">{n.error}</p> : null}
+                    {n.error ? <p className="nt-error-text">{n.error}</p> : null}
                   </div>
                 ))}
                 <p className="nt-muted">Retry them from Settings.</p>
@@ -424,7 +424,7 @@ function AnswerCard({ asked, onSave, saved, onFollowUp }: { asked: Asked; onSave
   if (asked.state === "failed") {
     return (
       <div className="nt-answer-card" role="alert">
-        <p className="nt-filing__error">{asked.error}</p>
+        <p className="nt-error-text">{asked.error}</p>
       </div>
     );
   }

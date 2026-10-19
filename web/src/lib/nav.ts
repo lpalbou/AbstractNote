@@ -11,7 +11,8 @@ import { useEffect, useState } from "react";
 import { createStore, useStore } from "./hooks";
 
 export type View = "capture" | "graph" | "remember";
-export const VIEWS: View[] = ["capture", "graph", "remember"];
+/** In the order the tabs show them (deck: Capture, Recall, Explore). */
+export const VIEWS: View[] = ["capture", "remember", "graph"];
 export type Route = { view: View; params: URLSearchParams };
 
 export function parseHash(hash: string): Route {

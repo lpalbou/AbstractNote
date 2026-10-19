@@ -57,7 +57,7 @@ export function ReadView<T>({ read, what, children, empty }: { read: ReadState<T
 
 export function EntityChip({ entity, size = "sm" }: { entity: EntityRef; size?: "sm" | "md" }) {
   return (
-    <AfChipButton size={size} tone="accent" title={`${capitalize(entity.kind)} · open`} onClick={() => openEntity(entity.entity_id)}>
+    <AfChipButton size={size} tone="info" title={`${capitalize(entity.kind)} · open`} onClick={() => openEntity(entity.entity_id)}>
       {entity.name}
     </AfChipButton>
   );
@@ -76,15 +76,28 @@ export function KindBadge({ kind }: { kind: string }) {
   return <span className={`nt-kind nt-kind--${kind}`}>{kind}</span>;
 }
 
-export function Section({ title, children, actions, id }: { title: string; children: React.ReactNode; actions?: React.ReactNode; id?: string }) {
+export function Section({ title, sub, children, actions, id, className }: { title: string; sub?: string; children: React.ReactNode; actions?: React.ReactNode; id?: string; className?: string }) {
   return (
-    <section className="nt-section" aria-labelledby={id ? `${id}-h` : undefined}>
+    <section className={`nt-section${className ? ` ${className}` : ""}`} aria-labelledby={id ? `${id}-h` : undefined}>
       <header className="nt-section__head">
-        <h2 id={id ? `${id}-h` : undefined}>{title}</h2>
+        <h2 id={id ? `${id}-h` : undefined}>
+          {title}
+          {sub ? <span className="nt-section__sub">{sub}</span> : null}
+        </h2>
         {actions ? <div className="nt-section__actions">{actions}</div> : null}
       </header>
       {children}
     </section>
+  );
+}
+
+/** A disclosure line ("Why this surfaced"): a button with a turning chevron; the panel is the caller's. */
+export function Disclose({ open, onToggle, controls, children }: { open: boolean; onToggle: () => void; controls: string; children: React.ReactNode }) {
+  return (
+    <button type="button" className="nt-disclose" aria-expanded={open} aria-controls={controls} onClick={onToggle}>
+      <Icon name="chevronRight" size={12} />
+      <span>{children}</span>
+    </button>
   );
 }
 

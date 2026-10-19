@@ -36,7 +36,7 @@ export function SignIn({ onSignIn, busy }: { onSignIn: (user: string, token: str
         </label>
         <AfSwitch label="Keep me signed in" checked={persist} onChange={setPersist} variant="row" />
         {error ? (
-          <p className="nt-filing__error" role="alert">
+          <p className="nt-error-text" role="alert">
             {error}
           </p>
         ) : null}
