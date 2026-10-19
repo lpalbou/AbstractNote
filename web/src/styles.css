@@ -26,15 +26,20 @@
   --nt-focus: color-mix(in oklab, var(--info) 70%, var(--text-primary));
   --nt-soft: color-mix(in oklab, var(--info) 10%, var(--nt-bg));
   --nt-shadow: 0 1px 0 color-mix(in oklab, var(--text-primary) 4%, transparent) inset;
-  /* Community colours (categorical, fixed order, six slots; slot 0 = other): kit tokens where relative
-   * colour is missing, else six hues turned from the theme's info hue at its lightness (below). */
+  /* Community colours: a categorical palette, fixed order, six slots, slot 0 = other (muted). The kit has no
+   * categorical tokens, so these are the dataviz reference steps for dark surfaces (blue, orange, aqua,
+   * yellow, magenta, violet), one set for every theme: they pass the validator's lightness band, chroma, CVD
+   * (adjacent 8.4) and normal-vision (19.3) checks on default-dark, observer-night and solarized-light; on
+   * light surfaces yellow and violet sit just under 3:1, relieved by the labels every node and legend
+   * entry carries (W16 report). Colour never carries meaning alone: the theme is named in the legend, the
+   * hover card and each node's label for assistive technology. */
   --nt-c0: var(--text-muted);
-  --nt-c1: var(--nt-indigo);
-  --nt-c2: var(--entity-identity, var(--accent));
-  --nt-c3: var(--nt-mint);
-  --nt-c4: var(--warning);
-  --nt-c5: var(--entity-standing, var(--accent));
-  --nt-c6: var(--nt-cyan);
+  --nt-c1: #3987e5;
+  --nt-c2: #d95926;
+  --nt-c3: #199e70;
+  --nt-c4: #c98500;
+  --nt-c5: #d55181;
+  --nt-c6: #9085e9;
 }
 
 /* Near-black: a dark theme's page colour at about three quarters of its lightness; a light theme
@@ -42,14 +47,6 @@
 @supports (color: oklch(from red l c h)) {
   :root {
     --nt-bg: oklch(from var(--bg-primary) max(calc(l * 0.74), min(l, calc((l - 0.6) * 100))) calc(c * 0.85) h);
-    /* Blue, orange, aqua, yellow, magenta, violet: the order keeps neighbours apart for colour-blind readers
-     * (dataviz reference order); lightness and chroma follow the theme's info colour, bounded. */
-    --nt-c1: oklch(from var(--info) clamp(0.52, l, 0.74) clamp(0.11, c, 0.16) h);
-    --nt-c2: oklch(from var(--info) clamp(0.56, calc(l + 0.02), 0.76) clamp(0.12, c, 0.16) calc(h + 155));
-    --nt-c3: oklch(from var(--info) clamp(0.56, calc(l + 0.03), 0.78) clamp(0.1, c, 0.14) calc(h - 80));
-    --nt-c4: oklch(from var(--info) clamp(0.62, calc(l + 0.1), 0.84) clamp(0.11, c, 0.15) calc(h + 205));
-    --nt-c5: oklch(from var(--info) clamp(0.54, l, 0.74) clamp(0.12, c, 0.17) calc(h + 105));
-    --nt-c6: oklch(from var(--info) clamp(0.5, calc(l - 0.04), 0.7) clamp(0.11, c, 0.17) calc(h + 50));
   }
 }
 

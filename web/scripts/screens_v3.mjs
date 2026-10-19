@@ -87,7 +87,8 @@ async function main() {
           const card = await page.locator(".nt-hovercard").boundingBox();
           const vp = page.viewportSize();
           check(faded > 0 && (await page.locator('[data-node="ex:project-lut"].nt-fade').count()) === 0, `${theme} ${width}: hovering LUT fades the others (${faded} faded)`);
-          check(litLabels > 0, `${theme} ${width}: the hovered node's links show their words (${litLabels})`);
+          // On a phone the fitted edges are too short for words (the card says them).
+          if (!narrow) check(litLabels > 0, `${theme} ${width}: the hovered node's links show their words (${litLabels})`);
           check(card && card.x >= 0 && card.y >= 0 && card.x + card.width <= vp.width && card.y + card.height <= vp.height, `${theme} ${width}: the card is inside the window (${Math.round(card?.x)},${Math.round(card?.y)} ${Math.round(card?.width)}x${Math.round(card?.height)})`);
           const text = await page.locator(".nt-hovercard").innerText();
           check(/LUT/.test(text) && /notes/.test(text) && /LUT prefill/.test(text) && (await page.locator(".nt-hovercard__links li").count()) >= 2, `${theme} ${width}: the card names the theme, the notes and the strongest links`);

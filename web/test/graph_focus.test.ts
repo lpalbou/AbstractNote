@@ -130,3 +130,17 @@ describe("theme names", () => {
     expect(themeName(null)).toBe("A theme not named yet");
   });
 });
+
+describe("the community palette in styles.css", () => {
+  it("defines one colour per slot and a class for each slot and for 'other'", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { COMMUNITY_SLOTS } = await import("../src/lib/graph_focus");
+    const css = readFileSync(join(__dirname, "..", "src", "styles.css"), "utf8");
+    for (let i = 0; i <= COMMUNITY_SLOTS; i++) {
+      expect(css).toMatch(new RegExp(`--nt-c${i}:`));
+      expect(css).toMatch(new RegExp(`\\.nt-c${i} \\{ --nt-cc: var\\(--nt-c${i}\\); \\}`));
+    }
+    expect(css).not.toMatch(new RegExp(`--nt-c${COMMUNITY_SLOTS + 1}:`));
+  });
+});

@@ -2,7 +2,8 @@
 
 The AbstractNote web app: capture notes and files, remember what changed since you last looked,
 ask by effort (quick, standard, deep), and explore how people, projects and ideas connect through
-time. Tabs: Capture, Remember and Explore, with a Settings panel.
+time. Tabs: Capture, Remember and Explore, with a Settings panel. Explore opens on an Overview of what
+the notebook holds (numbers, the activity line, themes, what went quiet) and shows it as a Picture or a List.
 
 It talks to an AbstractGateway that has the AbstractNote integration: install
 `pip install "abstractnote[gateway]"` (AbstractGateway 0.15.11 or later) in the gateway's
