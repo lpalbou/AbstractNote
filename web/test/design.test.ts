@@ -167,3 +167,28 @@ describe("mock gateway shapes the design pass reads", () => {
     }
   });
 });
+
+import { ApiError, NOT_INSTALLED, errorSentence, noteMount } from "../src/lib/api";
+
+describe("a gateway without AbstractNote", () => {
+  const apiAnswering = (status: number) => {
+    const calls: string[] = [];
+    const fetch = async (url: RequestInfo | URL) => {
+      calls.push(String(url));
+      return new Response(JSON.stringify({ detail: status === 404 ? "Not Found" : "x" }), { status });
+    };
+    return { calls, api: createApi({ fetch: fetch as unknown as typeof globalThis.fetch, sleep: async () => undefined, csrf: () => "c" }) };
+  };
+  it("note/status 404 means not installed, decided on the first answer (no retry loop)", async () => {
+    const missing = apiAnswering(404);
+    expect(await noteMount(missing.api)).toBe("missing");
+    expect(missing.calls).toEqual(["api/gateway/note/status"]);
+    expect(await noteMount(apiAnswering(200).api)).toBe("mounted");
+    expect(await noteMount(apiAnswering(503).api)).toBe("unknown");
+  });
+  it("is one sentence, distinct from a note that is really missing", () => {
+    expect(NOT_INSTALLED).toBe("AbstractNote is not installed on this gateway.");
+    expect(errorSentence(new ApiError(404, "Not found."), "this note")).toBe("This note is not in your notebook.");
+    expect(errorSentence(new ApiError(404, "Not found."), "this note")).not.toBe(NOT_INSTALLED);
+  });
+});

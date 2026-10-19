@@ -165,6 +165,29 @@ export function createApi(options: ApiOptions = {}) {
   return { get, post, put, upload, url: (path: string, params?: Record<string, unknown>) => `${API_PREFIX}${path}${queryString(params)}` };
 }
 
+/**
+ * The one sentence for a gateway without AbstractNote (no seam, or abstractnote not installed there): its
+ * `GET /note/status` answers 404. Worded by the gateway maintainer's review; the one place the app names the
+ * gateway, because the fix is on the gateway (install abstractnote there).
+ */
+export const NOT_INSTALLED = "AbstractNote is not installed on this gateway.";
+
+export type Mount = "mounted" | "missing" | "unknown";
+
+/**
+ * Whether this gateway serves the note API: `GET /note/status` answered (mounted), answered 404 (missing:
+ * every note read would 404, which is not "a note is missing"), or could not be read (unknown: the views
+ * load and report their own errors). A 404 is final at once (never retried).
+ */
+export async function noteMount(api: Pick<Api, "get">): Promise<Mount> {
+  try {
+    await api.get("note/status");
+    return "mounted";
+  } catch (e) {
+    return e instanceof ApiError && e.status === 404 ? "missing" : "unknown";
+  }
+}
+
 /** The one sentence a person reads for a failed call (no codes, no system words). */
 export function errorSentence(err: unknown, what = "this"): string {
   const e = err instanceof ApiError ? err : null;

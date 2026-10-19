@@ -151,6 +151,7 @@ p { margin: 0 0 6px; }
 }
 .nt-error { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--text-primary); padding: 8px 0; }
 .nt-error-text { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--error); font-size: var(--font-size-md); margin: 0; }
+.nt-notinstalled { font-size: var(--font-size-lg); color: var(--text-primary); text-align: center; max-width: 36ch; margin: 0; }
 .nt-notice { color: var(--warning); margin: 0 0 6px; font-size: var(--font-size-md); }
 
 /* ---- states: one word and one symbol; the colour only reinforces them */

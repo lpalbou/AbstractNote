@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { findVerbToggleLabels } from "@abstractframework/ui-kit";
 import { deltaVocabulary } from "./delta_words";
 import { ACK_WORDS } from "../src/lib/ack";
+import { NOT_INSTALLED } from "../src/lib/api";
 
 const SRC = join(__dirname, "..", "src");
 const FORBIDDEN = /\b(ledger|gateway|workflow|run ids?|records?|runs?|artifacts?|automations?|entity id|note id|claim id|revision id|http \d{3})\b/i;
@@ -88,6 +89,13 @@ describe("copy rules", () => {
     const capture = readFileSync(join(SRC, "views", "Capture.tsx"), "utf8");
     expect(capture).toContain("ACK_WORDS[state]");
     for (const w of words) expect(capture.includes(`"${w}"`), `Capture.tsx spells "${w}" itself`).toBe(false);
+  });
+
+  it("the one sentence that names the gateway is the not-installed one (the fix is on the gateway)", () => {
+    expect(FORBIDDEN.test(NOT_INSTALLED)).toBe(true); // a real exception, not a scanner blind spot
+    expect(NOT_INSTALLED).toBe("AbstractNote is not installed on this gateway.");
+    const app = readFileSync(join(SRC, "App.tsx"), "utf8");
+    expect(app).toContain("{NOT_INSTALLED}");
   });
 
   it("no on/off setting is labelled with a verb", () => {

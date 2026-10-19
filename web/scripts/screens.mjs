@@ -305,6 +305,14 @@ async function main() {
       await err.getByRole("button", { name: "Retry" }).click();
       await page.locator(".nt-cue").first().waitFor();
       check(true, "Retry loads the content");
+      // A gateway without AbstractNote: note/status answers 404 once; every view shows one sentence, no retry.
+      await page.request.post(`${gatewayUrl}/__mock/fail`, { data: { path: "/api/gateway/note/status", count: 1, status: 404 } });
+      await page.goto(`${base}#/remember`);
+      await page.reload();
+      const sentence = page.locator(".nt-main .nt-notinstalled");
+      await sentence.waitFor({ timeout: 10_000 });
+      check((await sentence.innerText()).trim() === "AbstractNote is not installed on this gateway." && (await page.getByRole("button", { name: "Retry" }).count()) === 0 && (await page.locator(".nt-section").count()) === 0, "a gateway without AbstractNote shows one sentence and no view, no Retry");
+      await page.screenshot({ path: join(OUT, "not-installed-dark-1280.png") });
     }
   } finally {
     await browser.close();

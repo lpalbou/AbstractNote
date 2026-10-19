@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AfAppearanceDialog, Icon, randomId, useAppearanceSettings } from "@abstractframework/ui-kit";
-import { createApi } from "./lib/api";
+import { NOT_INSTALLED, createApi, noteMount, type Mount } from "./lib/api";
 import { useConnection } from "./lib/connection";
 import { useNarrow, useRead } from "./lib/hooks";
 import { captureSessionId } from "./lib/local";
@@ -78,10 +78,21 @@ function Shell({ user, onSignOut, signingOut, onUnauthorized, onAppearance }: { 
     document.title = `${LABELS[route.view]} · AbstractNote`;
   }, [route.view]);
 
-  // On first use the app creates the notebook's processor and reflect automations (docs/cognition.md,
-  // "The processor automation"): without them queued notes are never processed.
+  // First, is AbstractNote on this gateway at all? A 404 from note/status means no view can work: one
+  // sentence instead of every view saying "not in your notebook" (and no retry loop).
+  const [mount, setMount] = useState<Mount | null>(null);
   useEffect(() => {
-    void ensureProcessor(api);
+    let live = true;
+    void noteMount(api).then((m) => {
+      if (!live) return;
+      setMount(m);
+      // On first use the app creates the notebook's processor and reflect automations (docs/cognition.md,
+      // "The processor automation"): without them queued notes are never processed.
+      if (m !== "missing") void ensureProcessor(api);
+    });
+    return () => {
+      live = false;
+    };
   }, [api]);
 
   const tabs = (
@@ -122,14 +133,26 @@ function Shell({ user, onSignOut, signingOut, onUnauthorized, onAppearance }: { 
           </div>
         </header>
         <main className="nt-main">
+          {mount === "missing" ? (
+            <div className="nt-center">
+              <p className="nt-notinstalled" role="alert">
+                {NOT_INSTALLED}
+              </p>
+            </div>
+          ) : mount === null ? (
+            <div className="nt-center">
+              <Spinner label="Opening your notebook…" />
+            </div>
+          ) : (
           <ViewBoundary key={route.view} name={route.view}>
             {route.view === "capture" ? <CaptureView route={route} processInline={Boolean(settings.data?.process_inline_default)} /> : null}
             {route.view === "graph" ? <GraphView route={route} /> : null}
             {route.view === "remember" ? <RememberView route={route} /> : null}
           </ViewBoundary>
+          )}
         </main>
         {narrow ? tabs : null}
-        <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} settings={settings} onSave={saveSettings} user={user} onSignOut={onSignOut} signingOut={signingOut} onAppearance={onAppearance} />
+        <SettingsDrawer notInstalled={mount === "missing"} open={settingsOpen} onClose={() => setSettingsOpen(false)} settings={settings} onSave={saveSettings} user={user} onSignOut={onSignOut} signingOut={signingOut} onAppearance={onAppearance} />
         <ViewBoundary name="dialog">
           <Dialogs />
         </ViewBoundary>

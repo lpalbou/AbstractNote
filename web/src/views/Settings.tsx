@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AfDrawer, AfSwitch, ProviderModelSelect, randomId, type ProviderOption } from "@abstractframework/ui-kit";
-import { ApiError, errorSentence } from "../lib/api";
+import { ApiError, NOT_INSTALLED, errorSentence } from "../lib/api";
 import { useRead, type ReadState } from "../lib/hooks";
 import { locationEnabled, setLocationEnabled } from "../lib/location";
 import type { ModelChoice, NoteSettings, NoteStatus, QueueInfo } from "../lib/types";
@@ -42,6 +42,8 @@ type Props = {
   onSignOut: () => Promise<void>;
   signingOut: boolean;
   onAppearance: () => void;
+  /** The gateway has no AbstractNote: the notebook settings and the queue cannot be read. */
+  notInstalled?: boolean;
 };
 
 export function SettingsDrawer(props: Props) {
@@ -67,6 +69,11 @@ export function SettingsDrawer(props: Props) {
   return (
     <AfDrawer open={props.open} onClose={props.onClose} label="Settings" title="Settings" width={440} backdrop className="nt-drawer">
       <div className="nt-settings">
+        {props.notInstalled ? (
+          <p className="nt-notinstalled" role="alert">
+            {NOT_INSTALLED}
+          </p>
+        ) : (
         <ReadView read={props.settings} what="your settings">
           {(s) => (
             <>
@@ -94,6 +101,7 @@ export function SettingsDrawer(props: Props) {
             </>
           )}
         </ReadView>
+        )}
         <AfSwitch
           variant="row"
           label="Location"
@@ -111,7 +119,7 @@ export function SettingsDrawer(props: Props) {
             {saved}
           </p>
         ) : null}
-        <QueuePanel open={props.open} api={api} />
+        {props.notInstalled ? null : <QueuePanel open={props.open} api={api} />}
         <div className="nt-actions nt-actions--split">
           <button type="button" className="nt-btn" onClick={props.onAppearance}>
             Appearance
