@@ -28,3 +28,41 @@ describe("capture acknowledgement", () => {
     expect(pendingLine({ state: "uploading", files: [{ name: "a", size: 1, type: "" }, { name: "b", size: 1, type: "" }] })).toBe("Adding your files");
   });
 });
+
+import { milestones } from "../src/lib/milestones";
+import { localDay } from "../src/components/TimeScrubber";
+
+describe("How it evolved", () => {
+  const card = {
+    summary_history: [
+      { at: "2026-07-23T14:30:00Z", summary: "Led from Lyon.", note_id: "nt_a" },
+      { at: "2026-09-02T09:05:00Z", summary: "Moved to Paris.", note_id: "nt_b" },
+    ],
+  };
+  const tn = { earliest: null, latest: null, turning: [{ at: "2026-09-02T09:05:00Z", text: "Dana work location: Lyon → Paris", note_id: "nt_b", claim_id: "cl_1" }] };
+  const timeline = [
+    { type: "note" as const, at: "2026-07-21T09:00:00Z", note: { note_id: "nt_0", title: "First mention", kind: "idea", occurred_at: "2026-07-21T09:00:00Z" } },
+    { type: "note" as const, at: "2026-07-23T14:30:00Z", note: { note_id: "nt_a", title: "Kickoff", kind: "event", occurred_at: "2026-07-23T14:30:00Z" } },
+  ];
+
+  it("lists the first note, the dated views and the changes, oldest first, each with its note", () => {
+    const ms = milestones(card, tn, timeline);
+    expect(ms.map((m) => [m.kind, m.label, m.note_id])).toEqual([
+      ["first", "First noted", "nt_0"],
+      ["earlier", "Earlier view", "nt_a"],
+      ["changed", "Changed", "nt_b"],
+      ["latest", "Latest expressed view", "nt_b"],
+    ]);
+    expect(ms[2].claim_id).toBe("cl_1");
+  });
+
+  it("a single dated view is the latest; nothing known gives nothing", () => {
+    expect(milestones({ summary_history: [card.summary_history[0]] }, null, []).map((m) => m.kind)).toEqual(["latest"]);
+    expect(milestones(null, null, null)).toEqual([]);
+  });
+
+  it("the date field works in local days", () => {
+    const end = new Date("2026-08-20T23:59:59").toISOString();
+    expect(localDay(end)).toBe("2026-08-20");
+  });
+});

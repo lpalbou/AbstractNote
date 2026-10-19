@@ -242,12 +242,16 @@ export function buildSeed() {
   pareto.mentions = 3;
 
   // Summary history for the entities whose understanding changed.
+  // W1 expand.entity_card: each dated summary carries the note (and revision) that changed it.
   const hist = (key, rows) => {
-    entities.get(eid(key)).summary_history = rows.map(([at, summary]) => ({ at: iso(at), summary }));
+    entities.get(eid(key)).summary_history = rows.map(([at, summary, i]) => {
+      const note = notes.get(makeId("nt", `seed-${i}`));
+      return { at: iso(at), summary, note_id: note.note_id, revision_id: note.revision_id };
+    });
   };
-  hist("dana", [["2026-07-23T14:30", "Leads the LUT prefill project from the Lyon office."], ["2026-09-02T09:05", "Leads the LUT prefill project; moved from the Lyon office to Paris in September."]]);
-  hist("lut", [["2026-07-23T14:30", "Prefill acceleration project led by Dana; 40k budget for the quarter, still exploring."], ["2026-09-14T10:00", "Budget cut to 25k; the rest moved to the watch app."], ["2026-10-02T11:00", "Prefill acceleration project on the M5 Max; stopped on 2 October after three NO-GO phases."]]);
-  hist("castor", [["2026-07-28T18:20", "The persistent entity; runs on Qwen 9B, recall feels thin."], ["2026-09-18T09:00", "The persistent entity; now runs on Qwen 27B."]]);
+  hist("dana", [["2026-07-23T14:30", "Leads the LUT prefill project from the Lyon office.", 1], ["2026-09-02T09:05", "Leads the LUT prefill project; moved from the Lyon office to Paris in September.", 11]]);
+  hist("lut", [["2026-07-23T14:30", "Prefill acceleration project led by Dana; 40k budget for the quarter, still exploring.", 1], ["2026-09-14T10:00", "Budget cut to 25k; the rest moved to the watch app.", 14], ["2026-10-02T11:00", "Prefill acceleration project on the M5 Max; stopped on 2 October after three NO-GO phases.", 21]]);
+  hist("castor", [["2026-07-28T18:20", "The persistent entity; runs on Qwen 9B, recall feels thin.", 3], ["2026-09-18T09:00", "The persistent entity; now runs on Qwen 27B.", 16]]);
 
   const insights = new Map();
   const noteIdx = (i) => makeId("nt", `seed-${i}`);

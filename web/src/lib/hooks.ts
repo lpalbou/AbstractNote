@@ -5,7 +5,8 @@ export type ReadState<T> = { data: T | null; error: unknown; loading: boolean; r
 /**
  * A read a person waits on (ADR-0039): `loading` until the first answer, the
  * error only after the api's tries are exhausted. A reload while data is on
- * screen keeps the data if it fails (quiet background refresh).
+ * screen keeps the data if it fails (quiet background refresh); a read with new
+ * deps that fails clears the old data (it answered another question).
  */
 export function useRead<T>(fn: () => Promise<T>, deps: unknown[]): ReadState<T> {
   const [data, setData] = useState<T | null>(null);
@@ -13,9 +14,15 @@ export function useRead<T>(fn: () => Promise<T>, deps: unknown[]): ReadState<T> 
   const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
   const dataRef = useRef<T | null>(null);
+  const lastTick = useRef(0);
   dataRef.current = data;
   useEffect(() => {
     let live = true;
+    // A reload keeps what is on screen if it fails; a different question (new deps) never shows the old
+    // answer as if it were the new one: its failure replaces the data (e.g. an entity asked for a date
+    // before it existed).
+    const isReload = tick !== lastTick.current;
+    lastTick.current = tick;
     if (dataRef.current === null) setLoading(true);
     setError(null);
     fn().then(
@@ -26,7 +33,10 @@ export function useRead<T>(fn: () => Promise<T>, deps: unknown[]): ReadState<T> 
       },
       (e) => {
         if (!live) return;
-        if (dataRef.current === null) setError(e);
+        if (dataRef.current === null || !isReload) {
+          setData(null);
+          setError(e);
+        }
         setLoading(false);
       },
     );

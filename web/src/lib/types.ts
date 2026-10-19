@@ -50,7 +50,8 @@ export type Relation = { other_id: string; other_name: string; predicate: string
 export type EntityCard = EntityRef & {
   aliases?: string[];
   summary?: string;
-  summary_history?: Array<{ at: string; summary: string }>;
+  /** Each dated summary with the note that changed it (W1 expand.entity_card). */
+  summary_history?: Array<{ at: string; summary: string; note_id?: string | null; revision_id?: string | null }>;
   first_seen?: string;
   last_seen?: string;
   note_count?: number;
@@ -58,8 +59,13 @@ export type EntityCard = EntityRef & {
   relations?: Relation[];
   notes?: NoteRef[];
   open_tasks?: Task[];
+  /** Ids of the entries merged into this one (W1 expand.entity_card). */
+  merged_from?: string[];
 };
 export type EntityListItem = EntityRef & { aliases?: string[]; summary?: string; first_seen?: string; last_seen?: string; note_count?: number };
+
+/** GET /note/revisions items (W1 revision_dict); `ops` are the revision's operations ({op, ...}). */
+export type Revision = { revision_id: string; note_id: string | null; at: string; recorded_at?: string; summary: string; ops: Array<Record<string, unknown>>; source?: Record<string, unknown> | null };
 
 /** Raw then-versus-now answers: see lib/shapes.ts (entity, relation and recall forms). */
 export type ThenNowRaw = Record<string, unknown>;

@@ -8,7 +8,17 @@ import { useApp } from "./common";
 
 const STEPS = 1000;
 
-/** The time slider shared by Graph and Remember: the notebook as it was at a moment (right end = now). */
+/** The calendar day of a moment in this browser's time zone ("2026-08-20"). */
+export function localDay(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/**
+ * The time slider shared by Explore and Remember: the notebook as it was at a moment (right end = now).
+ * A date field beside it reaches any day without dragging (keyboard and assistive technology).
+ */
 export function TimeScrubber({ onDay }: { onDay?: (date: string) => void }) {
   const { api } = useApp();
   const [at, setAt] = useAt();
@@ -22,7 +32,8 @@ export function TimeScrubber({ onDay }: { onDay?: (date: string) => void }) {
   const max = Math.max(1, ...(buckets.data?.buckets || []).map((b) => b.notes));
   const value = Math.round(isoToScrub(at, range.from, range.to) * STEPS);
   const label = at ? longDate(at) : "Now";
-  const dayOf = (at || new Date().toISOString()).slice(0, 10);
+  const today = localDay(new Date().toISOString());
+  const dayOf = localDay(at || new Date().toISOString());
   return (
     <div className="nt-scrubber">
       <div className="nt-scrubber__bars" aria-hidden="true">
@@ -43,8 +54,24 @@ export function TimeScrubber({ onDay }: { onDay?: (date: string) => void }) {
         onChange={(e) => setAt(scrubToIso(Number(e.target.value) / STEPS, range.from, range.to))}
       />
       <div className="nt-scrubber__row">
-        <span className="nt-scrubber__label">{at ? `As it was on ${label}` : "As it is now"}</span>
+        <span className="nt-scrubber__label" aria-live="polite">
+          {at ? `As it was on ${label}` : "As it is now"}
+        </span>
         <span className="nt-scrubber__actions">
+          <label className="nt-field nt-field--inline">
+            <span className="nt-sr">Show the notebook as it was on the date</span>
+            <input
+              className="nt-input nt-scrubber__date"
+              type="date"
+              value={at ? localDay(at) : ""}
+              max={today}
+              onChange={(e) => {
+                const v = e.target.value;
+                // The end of the chosen day: everything noted that day is included.
+                setAt(/^\d{4}-\d{2}-\d{2}$/.test(v) ? (v >= today ? null : new Date(`${v}T23:59:59`).toISOString()) : null);
+              }}
+            />
+          </label>
           {onDay ? (
             <button type="button" className="nt-btn nt-btn--quiet" onClick={() => onDay(dayOf)}>
               That day
