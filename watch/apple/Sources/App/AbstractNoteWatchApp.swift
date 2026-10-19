@@ -13,7 +13,7 @@ struct AbstractNoteWatchApp: App {
         let model = options.makeModel()
         switch options.screen ?? "" {
         case let s where s.hasPrefix("ask"): model.tab = .ask
-        case let s where s.hasPrefix("today") || ["insight", "loop", "cue", "cue-why", "note-detail"].contains(s): model.tab = .today
+        case let s where s.hasPrefix("today") || ["theme", "loop", "cue", "cue-why", "note-detail"].contains(s): model.tab = .today
         case "settings", "about", "server", "account": model.tab = .settings
         default: model.tab = .note
         }
@@ -22,6 +22,7 @@ struct AbstractNoteWatchApp: App {
             case "about": model.settingsPath = [.about]
             case "server": model.settingsPath = [.server]
             case "account": model.settingsPath = [.signIn]
+            case "entity": model.tab = .today; model.todayPath = [.entity(id: "ex:person-dana", name: "dana")]
             default: break
             }
         }
@@ -37,8 +38,10 @@ struct AbstractNoteWatchApp: App {
                     NoteSignIn()
                 } else {
                     TabView(selection: $model.tab) {
-                        NavigationStack { NoteScreen() }
-                            .tag(Tab.note)
+                        NavigationStack(path: $model.notePath) {
+                            NoteScreen().navigationDestination(for: Route.self) { RouteView(route: $0) }
+                        }
+                        .tag(Tab.note)
                         NavigationStack(path: $model.askPath) {
                             AskScreen().navigationDestination(for: Route.self) { RouteView(route: $0) }
                         }
@@ -68,12 +71,13 @@ struct RouteView: View {
     let route: Route
     var body: some View {
         switch route {
-        case .insight(let i): InsightView(insight: i)
         case .loop(let l): LoopView(loop: l)
         case .cue(let c): CueView(cue: c)
         case .note(let id, let title): NoteDetailView(noteId: id, title: title)
         case .why(let title, let ids): WhyView(title: title, noteIds: ids)
         case .about: AboutView()
+        case .entity(let id, let name): EntityView(entityId: id, name: name)
+        case .theme(let c): ThemeView(community: c)
         case .server: NoteServerView()
         case .signIn: NoteSignIn()
         }

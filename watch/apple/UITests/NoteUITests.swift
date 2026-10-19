@@ -29,13 +29,20 @@ final class NoteUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Can't reach notes.example.org."].waitForExistence(timeout: 5))
     }
 
-    /// Acknowledging an insight takes a tap and removes it from Today.
-    @MainActor func testGotItRemovesTheInsightFromToday() {
-        let app = launch("insight")
-        let ack = app.buttons["insight.ack"]
-        XCTAssertTrue(ack.waitForExistence(timeout: 10))
-        ack.tap()
-        XCTAssertTrue(app.staticTexts["Open loops"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.staticTexts["The LUT budget changed twice this month"].exists)
+    /// Closing an open loop takes a tap and removes it from Today.
+    @MainActor func testCloseRemovesTheLoopFromToday() {
+        let app = launch("today")
+        let close = app.buttons["loop.close.t-7"]
+        XCTAssertTrue(close.waitForExistence(timeout: 10))
+        close.tap()
+        XCTAssertTrue(app.buttons["loop.close.t-8"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["loop.close.t-7"].exists)
+    }
+
+    /// Quick is the watch's default: the matching notes, at once.
+    @MainActor func testQuickAskListsTheMatchingNotes() {
+        let app = launch("ask-quick")
+        let answer = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH 'notes match.'")).firstMatch
+        XCTAssertTrue(answer.waitForExistence(timeout: 10))
     }
 }

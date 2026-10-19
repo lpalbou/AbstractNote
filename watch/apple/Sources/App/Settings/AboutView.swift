@@ -15,7 +15,7 @@ struct AboutView: View {
                 Text("AbstractNote").font(.rounded(.headline, weight: .bold)).foregroundStyle(Theme.text)
                 Text("for Apple Watch").font(.rounded(.caption2)).foregroundStyle(Theme.muted)
                 Text("Version \(AppIdentity.version) (\(AppIdentity.build))")
-                    .font(.rounded(.footnote, weight: .semibold)).foregroundStyle(Theme.cyan).padding(.bottom, 6)
+                    .font(.rounded(.footnote, weight: .semibold)).foregroundStyle(Theme.indigo).padding(.bottom, 6)
                 if let id = identity {
                     VStack(alignment: .leading, spacing: 8) {
                         row("Part of", id.framework.name)
@@ -66,7 +66,7 @@ struct NoteMark: View {
     var size: CGFloat = 44
     var body: some View {
         ZStack {
-            Circle().fill(LinearGradient(colors: [Theme.indigo, Theme.cyan], startPoint: .topLeading, endPoint: .bottomTrailing))
+            Circle().fill(LinearGradient(colors: [Theme.indigo, Theme.indigo], startPoint: .topLeading, endPoint: .bottomTrailing))
             Image(systemName: "note.text").font(.system(size: size * 0.48, weight: .semibold)).foregroundStyle(Theme.ground)
         }
         .frame(width: size, height: size)

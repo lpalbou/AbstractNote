@@ -7,13 +7,16 @@ enum Tab: Hashable { case note, ask, today, settings }
 
 /// Pages opened from a screen.
 enum Route: Hashable {
-    case insight(Insight)
     case loop(OpenLoop)
     case cue(Cue)
     case note(id: String, title: String?)
     /// The notes behind a cue or an insight.
     case why(title: String, noteIds: [String])
     case about
+    /// An entity's page: card, how it evolved, notes.
+    case entity(id: String, name: String)
+    /// A theme (community) and its main entities.
+    case theme(Community)
     /// Settings → Server: the editable address.
     case server
     /// Settings → Account: sign in (as someone else).
@@ -24,10 +27,9 @@ enum Route: Hashable {
 /// successful read, so a second read would show only what came after it).
 struct TodayData: Equatable {
     var changes: NoteChanges
-    var insights: [Insight]
-    var loops: [OpenLoop]
     var cues: [Cue]
-    var onThisDay: [NoteRef]
+    var themes: [Community]
+    var loops: [OpenLoop]
 }
 
 /// The app's state: who is signed in where, the client, the open tab, what Today read last.
@@ -43,6 +45,7 @@ final class AppModel: ObservableObject {
     /// Why the sign-in page is back, when it is not the first launch.
     @Published var signInNotice: String?
     @Published var tab: Tab = .note
+    @Published var notePath: [Route] = []
     @Published var todayPath: [Route] = []
     @Published var settingsPath: [Route] = []
     @Published var askPath: [Route] = []
@@ -78,7 +81,7 @@ final class AppModel: ObservableObject {
         SignInDefaults.remember(s)
         signIn = s
         client = LiveGatewayClient(baseURL: s.gateway, credential: s.credential)
-        today = nil; subject = nil; todayPath = []; settingsPath = []; askPath = []
+        today = nil; subject = nil; notePath = []; todayPath = []; settingsPath = []; askPath = []
         needsSignIn = false; signInNotice = nil; tab = .note
         ensureProcessor()
         Task { await ensureAccount() }
@@ -113,7 +116,7 @@ final class AppModel: ObservableObject {
         do { try file?.delete() } catch { signInNotice = "The saved sign-in could not be removed." }
         signIn = nil
         client = MockGatewayClient(failure: .unauthorized)
-        today = nil; subject = nil; todayPath = []; settingsPath = []; askPath = []
+        today = nil; subject = nil; notePath = []; todayPath = []; settingsPath = []; askPath = []
         signInNotice = notice; needsSignIn = true
     }
 
@@ -141,6 +144,7 @@ final class AppModel: ObservableObject {
     /// "Add a note about this": opens the Note screen about `subject`.
     func addNote(about subject: NoteSubject) {
         self.subject = subject
+        notePath = []
         tab = .note
     }
 
@@ -167,10 +171,11 @@ final class AppModel: ObservableObject {
 /// screenshots), `--gateway URL --token T [--user U]` (provision a sign-in from the Mac with
 /// devicectl), `--forget-gateway` (sign out). With none, the first screen is the sign-in. See BUILD.md.
 struct LaunchOptions {
-    static let screens = ["signin", "note", "note-listening", "note-recording", "note-no-stt", "note-sending", "note-saved", "note-error",
-                          "ask", "ask-thinking", "ask-answer", "ask-deeper",
+    static let screens = ["signin", "note", "note-typed", "note-listening", "note-recording", "note-no-stt", "note-sending", "note-organizing",
+                          "note-saved", "note-error", "entity",
+                          "ask", "ask-quick", "ask-thinking", "ask-answer", "ask-deeper",
                           "today", "today-quiet", "today-signin", "today-notsetup", "today-offline",
-                          "insight", "loop", "cue", "cue-why", "note-detail", "settings", "server", "account", "about"]
+                          "theme", "loop", "cue", "cue-why", "note-detail", "settings", "server", "account", "about"]
 
     var mock: Bool
     var screen: String?
@@ -202,7 +207,8 @@ struct LaunchOptions {
             default: nil
             }
             let client = MockGatewayClient(answerDelay: ["note-sending", "ask-thinking"].contains(s) ? .seconds(3600) : .milliseconds(600),
-                                           failure: failure, quiet: s == "today-quiet", canTranscribe: s != "note-no-stt")
+                                           failure: failure, quiet: s == "today-quiet", canTranscribe: s != "note-no-stt",
+                                           organizeAfter: s == "note-organizing" ? .seconds(3600) : .milliseconds(1800))
             let model = AppModel(client: client, signIn: nil, file: nil, needsSignIn: s == "signin", location: location)
             model.demo = s
             return model

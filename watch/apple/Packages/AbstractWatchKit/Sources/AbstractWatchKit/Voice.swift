@@ -11,7 +11,7 @@ public struct MicButton: View {
             Image(systemName: "mic.fill")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Theme.text)
-                .frame(width: 40, height: 40)
+                .frame(width: 44, height: 44)
                 .background(Theme.indigoButton, in: Circle())
         }
         .buttonStyle(.plain)
@@ -35,34 +35,39 @@ public struct ListeningView: View {
     }
 
     public var body: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 6) {
-                Circle().fill(Theme.red).frame(width: 8, height: 8).accessibilityHidden(true)
-                Text("Recording").font(.rounded(.footnote, weight: .semibold)).foregroundStyle(Theme.text)
-                Spacer(minLength: 2)
-                Text(Self.clock(elapsed)).font(.rounded(.footnote).monospacedDigit()).foregroundStyle(Theme.text2)
-                    .accessibilityLabel("\(Int(elapsed)) seconds")
-            }
+        VStack(spacing: Space.s) {
+            Text("Recording").font(.rounded(.footnote, weight: .medium)).foregroundStyle(Theme.indigo)
+            Text(Self.clock(elapsed)).font(.system(.title2, design: .rounded, weight: .semibold).monospacedDigit())
+                .foregroundStyle(Theme.text)
+                .accessibilityLabel("\(Int(elapsed)) seconds")
+            // The waveform: recent loudness, mirrored around its centre line.
             HStack(alignment: .center, spacing: 3) {
                 ForEach(levels.indices, id: \.self) { i in
-                    Capsule().fill(Theme.cyan.opacity(0.35 + 0.65 * levels[i]))
-                        .frame(width: 4, height: max(4, 44 * levels[i]))
+                    Capsule().fill(Theme.indigo.opacity(0.45 + 0.55 * levels[i]))
+                        .frame(width: 3, height: max(3, 40 * levels[i]))
                 }
             }
-            .frame(height: 48)
+            .frame(height: 44)
             .animation(.linear(duration: 0.05), value: levels)
             .accessibilityHidden(true)
-            Text(heardSpeech ? "Stops after 3 seconds of silence." : "Speak now.")
-                .font(.rounded(.caption2)).foregroundStyle(Theme.muted)
-            Spacer(minLength: 4)
-            Button("Stop", action: stop)
-                .buttonStyle(FilledButtonStyle(fill: Theme.indigoButton))
-                .accessibilityHint("Keeps what you said")
-                .accessibilityIdentifier("listen.stop")
+            Button(action: stop) {
+                ZStack {
+                    Circle().strokeBorder(Theme.indigo, lineWidth: 3).frame(width: 52, height: 52)
+                    RoundedRectangle(cornerRadius: 4).fill(Theme.text).frame(width: 18, height: 18)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Stop")
+            .accessibilityHint("Keeps what you said")
+            .accessibilityIdentifier("listen.stop")
+            Text(heardSpeech ? "Tap to finish, or pause 3 seconds" : "Speak now")
+                .font(.rounded(.caption2)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
             Button("Cancel", action: cancel)
-                .buttonStyle(FilledButtonStyle(fill: Theme.neutralButton))
+                .font(.rounded(.footnote)).foregroundStyle(Theme.text2).buttonStyle(.plain)
+                .padding(.top, Space.xs)
                 .accessibilityHint("Drops the recording")
         }
+        .frame(maxWidth: .infinity)
         .accessibilityElement(children: .contain)
     }
 

@@ -12,9 +12,10 @@ Swipe up and down (or turn the Digital Crown) between four pages:
 
 | Page | What it does |
 |---|---|
-| **Note** | Dictate, scribble or type a note, or tap the microphone and speak (a waveform and the time show while it records; 3 seconds of silence or Stop ends it). Your words fill the field, where you can correct them. **Send** sends the words; **Send as recording** also keeps the recording with the note. The answer says how it was filed ("Saved as idea 'LUT budget'. Related: Dana, LUT."). Where you were is added when you allowed it. |
-| **Ask** | Ask a question about your notes. The answer comes with the notes it rests on; tap one to read it. **Dig deeper** starts a longer search whose answer shows in Today. |
-| **Today** | What changed since you last looked (new notes, new people and things, beliefs that changed, loops closed), what the notebook noticed for you, your open loops, a few prompts worth a note, and what you wrote on this day. Tap an item to acknowledge it, close it, or add a note about it. |
+| **Note** | Dictate, scribble or type a note, or tap the microphone and speak (a waveform and the time show while it records; 3 seconds of silence or Stop ends it). Your words fill the field, where you can correct them. **Send** sends the words; **Send as recording** also keeps the recording with the note. Then one state at a time: Sending, Received (a tap on the wrist), Organizing, Organized; the result card shows the note's kind, its title and the people and things it was linked to (tap one for its page). Where you were is added when you allowed it. |
+| **Ask** | **Quick** (the default) lists the notes that match, at once; **Standard** gives one answer in sentences with its sources. Sources are short rows (title · date) that open the note. **Dig deeper** starts a longer search whose answer shows in Today. |
+| **Today** | **Since you last looked** (counts, one line each), **Worth a thought** (one prompt at a time: Answer writes a note about it, Skip shows the next; tap it for why), **Themes** (the five largest groups your notes keep together; tap one for its main people and things), and your **Open loops** with Close. |
+| **A person or thing** | Its name, kind and theme, a summary, when it was first and last noted, **How it evolved** (what was noted, learned, and no longer held, in order) and its notes. |
 | **Settings** | **Server** (tap to change the address), **Account** (tap to sign in as someone else), the Place switch, About, and **Sign out** at the bottom (the server is kept for the next sign-in). |
 
 Screenshots of every screen, made with the built-in sample notebook, come from `scripts/build.sh`

@@ -3,21 +3,35 @@ import AbstractWatchKit
 import SwiftUI
 import WatchKit
 
-/// Write a note: dictate, scribble or type it in the field, or tap the microphone and speak. A
-/// recording is uploaded and written down by the server's speech to text; the words fill the field
-/// (editable). **Send** sends the words; **Send as recording** sends them with the recording kept
-/// as the note's attachment (the original audio stays with the note). The answer says how it was
-/// filed. Each note gets its idempotency key when Send is tapped; "Try again" resends the SAME
-/// note with the same key, so a radio retry never saves it twice.
+/// Write a note: one large field (dictate, scribble or type), or the microphone. A recording is
+/// uploaded and written down by the server; the words fill the field. **Send** sends the words;
+/// **Send as recording** keeps the recording with the note. Then the deck's states, one at a time
+/// (slide 09): Sending → Received → Organizing → Organized, and the result card: the note's kind,
+/// its title and the entities it was linked to. Each note gets its idempotency key when Send is
+/// tapped; "Try again" resends the SAME note with the same key, so a retry never saves it twice.
 struct NoteScreen: View {
+    /// Where a sent note stands (docs/design.md "Sending states").
+    enum Stage: Equatable {
+        case sending
+        /// The server accepted it (the capture answered).
+        case received
+        /// Filed; the processor is linking it (the note is not `processed` yet).
+        case organizing
+        /// Understood: its entities and links are in.
+        case organized
+        /// Still organizing a minute after it was sent: the server carries on.
+        case later
+        /// The processor gave up on it for now (the queue retries).
+        case attention
+    }
+
     enum Phase: Equatable {
         case compose
         case listening
         /// The recording is uploaded and written down.
         case transcribing
-        case sending
-        case saved(String)
-        /// Sent, but its answer is late.
+        case sent(Stage)
+        /// Sent, but the capture's answer is late.
         case late
         /// Stopped on an approval the watch cannot give.
         case needsPerson
@@ -30,6 +44,9 @@ struct NoteScreen: View {
         var duration: TimeInterval
     }
 
+    /// How long after Received the watch follows the note's organizing.
+    static let organizeWatch: Duration = .seconds(60)
+
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var location: Location
     @StateObject private var listener = Listener()
@@ -40,25 +57,36 @@ struct NoteScreen: View {
     /// The note being sent: kept for "Try again" (same key, same time, same place).
     @State private var pending: Capture?
     @State private var runId: String?
+    @State private var answer: CaptureAnswer?
+    @State private var detail: NoteDetail?
+    @State private var follow: Task<Void, Never>?
     @State private var demoPlayed = false
     /// Screenshot scene only: the recording state drawn without opening the microphone.
     @State private var demoListening = false
 
     var body: some View {
         FitScroll {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: Space.s) {
                 switch phase {
                 case .compose: compose
                 case .listening: listening
-                case .transcribing: waiting("Writing it down")
-                case .sending: sending
-                case .saved(let answer): result(answer, symbol: "checkmark.circle.fill", color: Theme.green)
-                case .late: result("Sent. Its answer is taking a while; the note will show in Today.", symbol: "clock", color: Theme.amber)
-                case .needsPerson: result("This note waits for your OK in AbstractNote on another device.", symbol: "hand.raised", color: Theme.amber)
+                case .transcribing:
+                    StatusHero(symbol: "waveform", color: Theme.indigo, title: "Writing it down", subtitle: "Your recording is on the server.", working: true)
+                        .padding(.top, Space.s)
+                case .sent(let stage): sent(stage)
+                case .late:
+                    StatusHero(symbol: "clock", color: Theme.amber, title: "Sent", subtitle: "The answer is taking a while; the note will show in Today.")
+                    Spacer(minLength: Space.s)
+                    doneButton
+                case .needsPerson:
+                    StatusHero(symbol: "hand.raised", color: Theme.amber, title: "Waiting for you",
+                               subtitle: "This note waits for your OK in AbstractNote on another device.")
+                    Spacer(minLength: Space.s)
+                    doneButton
                 case .failed(let problem): failed(problem)
                 }
             }
-            .padding(.horizontal, 2)
+            .padding(.horizontal, Space.xs)
         }
         .screen("Note")
         .onAppear { location.prepare() }
@@ -66,33 +94,27 @@ struct NoteScreen: View {
         .task { await playDemo() }
     }
 
-    // MARK: - Phases
+    // MARK: - Compose
 
     private var compose: some View {
         Group {
             if let subject = model.subject {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text("About: \(subject.title)").font(.rounded(.caption2)).foregroundStyle(Theme.cyan).lineLimit(2)
-                    Spacer(minLength: 2)
+                HStack(alignment: .firstTextBaseline, spacing: Space.xs) {
+                    Text("About \(subject.title)").font(.rounded(.caption2)).foregroundStyle(Theme.indigo).lineLimit(2)
+                    Spacer(minLength: Space.xs)
                     Button { model.subject = nil } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted) }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Not about \(subject.title)")
                 }
             }
-            HStack(alignment: .center, spacing: 6) {
-                TextField("What's on your mind?", text: $text, axis: .vertical)
-                    .lineLimit(1...6)
-                    .font(.rounded(.body))
-                    .accessibilityLabel("Note")
-                    .accessibilityHint("Dictate, scribble or type your note")
-                    .accessibilityIdentifier("note.text")
-                MicButton { startListening() }
-            }
+            TextArea(prompt: "What's on your mind?", text: $text)
+                .accessibilityLabel("Note")
+                .accessibilityHint("Dictate, scribble or type your note")
+                .accessibilityIdentifier("note.text")
             if let recording {
-                HStack(spacing: 4) {
-                    Label("Recording \(ListeningView.clock(recording.duration))", systemImage: "waveform")
-                        .font(.rounded(.caption2)).foregroundStyle(Theme.cyan)
-                    Spacer(minLength: 2)
+                HStack(spacing: Space.xs) {
+                    StateLine(symbol: "waveform", text: "Recording \(ListeningView.clock(recording.duration))", color: Theme.indigo)
+                    Spacer(minLength: Space.xs)
                     Button { self.recording = nil } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted) }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Drop the recording")
@@ -106,15 +128,17 @@ struct NoteScreen: View {
                 }
             }
             if location.enabled && location.allowed {
-                Label("With your place", systemImage: "location.fill")
-                    .font(.rounded(.caption2)).foregroundStyle(Theme.muted)
+                StateLine(symbol: "location.fill", text: "With your place", color: Theme.muted)
             }
-            Spacer(minLength: 6)
-            Button("Send") { send(withRecording: false) }
-                .buttonStyle(FilledButtonStyle(fill: Theme.indigoButton))
-                .disabled(empty)
-                .accessibilityIdentifier("note.send")
-                .accessibilityHint("Saves this note to your notebook")
+            Spacer(minLength: Space.s)
+            HStack(spacing: Space.s) {
+                MicButton { startListening() }
+                Button("Send") { send(withRecording: false) }
+                    .buttonStyle(FilledButtonStyle(fill: Theme.indigoButton))
+                    .disabled(empty)
+                    .accessibilityIdentifier("note.send")
+                    .accessibilityHint("Saves this note to your notebook")
+            }
             if recording != nil {
                 Button("Send as recording") { send(withRecording: true) }
                     .buttonStyle(FilledButtonStyle(fill: Theme.neutralButton))
@@ -128,56 +152,77 @@ struct NoteScreen: View {
 
     @ViewBuilder private var listening: some View {
         if demoListening {
-            ListeningView(levels: (0..<Listener.bars).map { i in 0.25 + 0.6 * abs(sin(Double(i) * 0.7)) * (i > 16 ? 0.4 : 1) },
-                          elapsed: 7, heardSpeech: true, stop: {}, cancel: { phase = .compose })
+            ListeningView(levels: (0..<Listener.bars).map { i in 0.2 + 0.7 * abs(sin(Double(i) * 0.55)) * (i > 17 ? 0.35 : 1) },
+                          elapsed: 12, heardSpeech: true, stop: {}, cancel: { phase = .compose })
         } else {
             ListeningView(levels: listener.levels, elapsed: listener.elapsed, heardSpeech: listener.heardSpeech,
                           stop: { listener.send() }, cancel: { listener.cancel(); phase = .compose })
         }
     }
 
-    private func waiting(_ words: String) -> some View {
-        VStack(spacing: 10) {
-            Spacer(minLength: 4)
-            ProgressView()
-            LoadingText(text: words).font(.rounded(.footnote)).foregroundStyle(Theme.muted)
+    // MARK: - Sent
+
+    @ViewBuilder private func sent(_ stage: Stage) -> some View {
+        switch stage {
+        case .sending:
+            StatusHero(symbol: "arrow.up", color: Theme.indigo, title: "Sending", subtitle: pending?.text, working: true)
+                .padding(.top, Space.s)
+        case .received:
+            StatusHero(symbol: "checkmark", color: Theme.mint, title: "Received", subtitle: "Your note is on your server.")
+            StateLine(symbol: "square.stack.3d.up", text: "Organizing", color: Theme.indigo)
+                .frame(maxWidth: .infinity)
+        default:
+            resultCard(stage)
         }
-        .frame(maxWidth: .infinity)
+        if stage != .sending {
+            Spacer(minLength: Space.s)
+            doneButton
+        }
     }
 
-    private var sending: some View {
-        VStack(spacing: 10) {
-            Text(pending?.text ?? text).font(.rounded(.footnote)).foregroundStyle(Theme.text2).lineLimit(4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if pending?.attachments.isEmpty == false {
-                Label("With its recording", systemImage: "waveform").font(.rounded(.caption2)).foregroundStyle(Theme.muted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+    /// The note as filed: its state in one line, the kind, the title, the entities it is linked to.
+    private func resultCard(_ stage: Stage) -> some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            switch stage {
+            case .organized: StateLine(symbol: "checkmark.seal.fill", text: "Organized", color: Theme.mint)
+            case .attention: StateLine(symbol: "exclamationmark.triangle", text: "Needs attention: it will be tried again", color: Theme.amber)
+            case .later: StateLine(symbol: "clock", text: "Organizing continues on your server", color: Theme.indigo)
+            default: StateLine(symbol: "square.stack.3d.up", text: "Organizing", color: Theme.indigo)
             }
-            Spacer(minLength: 4)
-            ProgressView()
-            LoadingText(text: "Saving").font(.rounded(.footnote)).foregroundStyle(Theme.muted)
+            Card {
+                VStack(alignment: .leading, spacing: Space.s) {
+                    if let kind = detail?.kind.shown { Pill(kind) }
+                    Text(detail?.title.shown ?? answer?.response ?? "Your note")
+                        .font(.rounded(.headline)).foregroundStyle(Theme.text)
+                        .accessibilityIdentifier("note.answer")
+                    if let entities = detail?.entities, !entities.isEmpty {
+                        FlowRow(entities) { e in
+                            NavigationLink(value: Route.entity(id: e.entityId, name: e.name)) { Chip(readableName(e.name)) }
+                                .buttonStyle(.plain)
+                                .accessibilityHint("Opens \(readableName(e.name))")
+                        }
+                    } else if stage == .organizing {
+                        Text("Links appear when it is organized.").font(.rounded(.caption2)).foregroundStyle(Theme.muted)
+                    }
+                }
+            }
+            if let response = answer?.response, detail?.title.shown != nil {
+                Text(response).font(.rounded(.caption2)).foregroundStyle(Theme.muted)
+            }
         }
-        .accessibilityElement(children: .combine)
     }
 
-    private func result(_ sentence: String, symbol: String, color: Color) -> some View {
-        Group {
-            Label { Text(sentence).font(.rounded(.body)).foregroundStyle(Theme.text) } icon: {
-                Image(systemName: symbol).foregroundStyle(color)
-            }
-            .accessibilityIdentifier("note.answer")
-            Spacer(minLength: 6)
-            Button("Done") { reset() }
-                .buttonStyle(FilledButtonStyle(fill: Theme.neutralButton))
-                .accessibilityIdentifier("note.done")
-                .accessibilityHint("Starts a new note")
-        }
+    private var doneButton: some View {
+        Button("Done") { reset() }
+            .buttonStyle(FilledButtonStyle(fill: Theme.neutralButton))
+            .accessibilityIdentifier("note.done")
+            .accessibilityHint("Starts a new note")
     }
 
     private func failed(_ problem: Problem) -> some View {
         Group {
             Text(pending?.text ?? text).font(.rounded(.footnote)).foregroundStyle(Theme.text2).lineLimit(3)
-            Spacer(minLength: 6)
+            Spacer(minLength: Space.s)
             ProblemView(problem: problem, signIn: model.signInAgain, retry: { Task { await deliver() } })
                 .accessibilityIdentifier("note.error")
             Button("Edit") { phase = .compose; pending = nil; runId = nil }
@@ -241,10 +286,12 @@ struct NoteScreen: View {
         Task { await deliver() }
     }
 
-    /// Starts the capture (or follows the one already started) until its answer is in.
+    /// Starts the capture (or follows the one already started) until the server has it, then
+    /// follows the note's organizing.
     private func deliver() async {
         guard let capture = pending else { return }
-        phase = .sending
+        phase = .sent(.sending)
+        answer = nil; detail = nil
         RuntimeKeeper.shared.hold("note")
         defer { RuntimeKeeper.shared.release("note") }
         let client = model.client
@@ -256,7 +303,11 @@ struct NoteScreen: View {
             }
             let p = try await client.follow({ try await client.captureProgress(runId: id) }, every: .seconds(1), timeout: .seconds(60))
             switch p {
-            case .done(let answer): phase = .saved(answer.response); WKInterfaceDevice.current().play(.success)
+            case .done(let a):
+                answer = a
+                phase = .sent(.received)
+                WKInterfaceDevice.current().play(.success)            // the deck's haptic on Received
+                if let noteId = a.noteId { followOrganizing(noteId) }
             case .working: phase = .late
             case .needsPerson: phase = .needsPerson
             case .failed(let why):
@@ -272,8 +323,33 @@ struct NoteScreen: View {
         }
     }
 
+    /// Reads the note every 2 s for a minute: Organizing until it is processed (then its kind,
+    /// title and entities), Needs attention when the processor gave up for now. A failed read
+    /// keeps the last state; after a minute the watch stops asking and says the server carries on.
+    private func followOrganizing(_ noteId: String) {
+        follow?.cancel()
+        let client = model.client
+        follow = Task {
+            let clock = ContinuousClock()
+            let deadline = clock.now + Self.organizeWatch
+            try? await Task.sleep(for: .milliseconds(800))
+            while !Task.isCancelled {
+                if let n = try? await client.note(id: noteId) {
+                    detail = n
+                    if n.isOrganized { phase = .sent(.organized); WKInterfaceDevice.current().play(.click); return }
+                    if n.needsAttention { phase = .sent(.attention); return }
+                    phase = .sent(.organizing)
+                }
+                guard clock.now < deadline else { phase = .sent(.later); return }
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
+
     private func reset() {
-        text = ""; pending = nil; runId = nil; recording = nil; voiceError = nil; model.subject = nil; phase = .compose
+        follow?.cancel(); follow = nil
+        text = ""; pending = nil; runId = nil; recording = nil; voiceError = nil; answer = nil; detail = nil
+        model.subject = nil; phase = .compose
     }
 
     /// Screenshot scenes (`--mock --screen note-…`).
@@ -282,11 +358,46 @@ struct NoteScreen: View {
         demoPlayed = true
         switch demo {
         case "note": return
+        case "note-typed": text = "Met Dana about the LUT budget; she wants the Pareto by Friday."
         case "note-listening": demoListening = true; phase = .listening
         case "note-recording", "note-no-stt": await writeDown(Data("RIFF-sample".utf8), duration: 12)
         default:
             text = "Met Dana about the LUT budget; she wants the Pareto by Friday."
             send(withRecording: false)
+        }
+    }
+}
+
+/// Chips that wrap onto as many lines as they need.
+struct FlowRow<Item: Identifiable, Content: View>: View {
+    let items: [Item]
+    let content: (Item) -> Content
+    init(_ items: [Item], @ViewBuilder content: @escaping (Item) -> Content) { self.items = items; self.content = content }
+    var body: some View {
+        WrapLayout(spacing: Space.xs + 2) { ForEach(items) { content($0) } }
+    }
+}
+
+/// Left-to-right wrapping layout.
+struct WrapLayout: Layout {
+    var spacing: CGFloat
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 180
+        var x: CGFloat = 0, y: CGFloat = 0, line: CGFloat = 0
+        for v in subviews {
+            let s = v.sizeThatFits(.unspecified)
+            if x > 0 && x + s.width > width { x = 0; y += line + spacing; line = 0 }
+            x += s.width + spacing; line = max(line, s.height)
+        }
+        return CGSize(width: width, height: y + line)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, line: CGFloat = 0
+        for v in subviews {
+            let s = v.sizeThatFits(.unspecified)
+            if x > bounds.minX && x + s.width > bounds.maxX { x = bounds.minX; y += line + spacing; line = 0 }
+            v.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(s))
+            x += s.width + spacing; line = max(line, s.height)
         }
     }
 }

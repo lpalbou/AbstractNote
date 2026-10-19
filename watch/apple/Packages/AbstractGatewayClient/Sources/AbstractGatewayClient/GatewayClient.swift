@@ -33,6 +33,14 @@ public protocol GatewayClient: Sendable {
     func close(taskId: String) async throws
     /// `GET /api/gateway/note/notes/{id}`
     func note(id: String) async throws -> NoteDetail
+    /// `GET /api/gateway/note/search?q=&limit=`: the quick tier, no model, instant.
+    func quickSearch(_ query: String, limit: Int) async throws -> QuickSearch
+    /// `GET /api/gateway/note/communities`: the themes, largest first.
+    func communities() async throws -> Communities
+    /// `GET /api/gateway/note/entities/{id}`: the entity card.
+    func entity(id: String) async throws -> EntityCard
+    /// `GET /api/gateway/note/entities/{id}/timeline`: what was noted and learned about it, in order.
+    func entityTimeline(id: String) async throws -> EntityTimeline
     /// `POST /api/gateway/note/processor/ensure`: creates or repairs the user's processor and reflect
     /// automations (after a release they run a workflow version the server no longer serves); 503
     /// when the note workflows are not loaded. Sent once.
@@ -170,6 +178,23 @@ public actor LiveGatewayClient: GatewayClient {
 
     public func note(id: String) async throws -> NoteDetail {
         try await transport.get("api/gateway/note/notes/\(try Self.segment(id))", as: NoteDetail.self)
+    }
+
+    public func quickSearch(_ query: String, limit: Int) async throws -> QuickSearch {
+        try await transport.get("api/gateway/note/search", query: [.init(name: "q", value: query), .init(name: "limit", value: String(limit))],
+                                as: QuickSearch.self)
+    }
+
+    public func communities() async throws -> Communities {
+        try await transport.get("api/gateway/note/communities", as: Communities.self)
+    }
+
+    public func entity(id: String) async throws -> EntityCard {
+        try await transport.get("api/gateway/note/entities/\(try Self.segment(id))", as: EntityCard.self)
+    }
+
+    public func entityTimeline(id: String) async throws -> EntityTimeline {
+        try await transport.get("api/gateway/note/entities/\(try Self.segment(id))/timeline", as: EntityTimeline.self)
     }
 
     public func ensureProcessor() async throws -> ProcessorEnsure {

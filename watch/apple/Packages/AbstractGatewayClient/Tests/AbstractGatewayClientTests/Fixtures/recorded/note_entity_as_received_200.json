@@ -1,0 +1,66 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/gateway/note/entities/ex:person-dana?as_received=2026-10-18T15%3A24%3A43Z",
+    "body": null
+  },
+  "status": 200,
+  "body": {
+    "entity_id": "ex:person-dana",
+    "resolved_from": null,
+    "as_of": null,
+    "as_received": "2026-10-18T15:24:43Z",
+    "kind": "person",
+    "name": "Dana",
+    "aliases": [
+      "D. Ng"
+    ],
+    "summary": "Dana as this note describes it.",
+    "summary_history": [
+      {
+        "at": "2026-01-02T10:00:00Z",
+        "summary": "D. Ng as this note describes it.",
+        "note_id": "nt_h2dlmuogyqetrekp6xfgu2eh5c",
+        "revision_id": "rv_raxwjzjxxbyydfqiq56wu6hji6"
+      },
+      {
+        "at": "2026-01-07T10:00:00Z",
+        "summary": "Dana as this note describes it.",
+        "note_id": "nt_nlsmt6ctjllw6anpccs4zecrey",
+        "revision_id": "rv_cqkx65uzhto45lzfnkjxm4l5oz"
+      }
+    ],
+    "first_seen": "2026-01-02T10:00:00Z",
+    "last_seen": "2026-01-07T10:00:00Z",
+    "note_count": 2,
+    "merged_from": [
+      "ex:person-d-ng"
+    ],
+    "merged_into": null,
+    "beliefs": [],
+    "relations": [],
+    "notes": [
+      {
+        "note_id": "nt_nlsmt6ctjllw6anpccs4zecrey",
+        "title": "",
+        "kind": null,
+        "occurred_at": "2026-01-07T10:00:00Z",
+        "excerpt": "A note."
+      },
+      {
+        "note_id": "nt_h2dlmuogyqetrekp6xfgu2eh5c",
+        "title": "",
+        "kind": null,
+        "occurred_at": "2026-01-02T10:00:00Z",
+        "excerpt": "A note."
+      }
+    ],
+    "open_tasks": [],
+    "sparkline": [
+      {
+        "month": "2026-01",
+        "notes": 2
+      }
+    ]
+  }
+}

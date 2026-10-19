@@ -46,6 +46,12 @@ enum RecordedFixtures {
             return
         }
         guard (200..<300).contains(f.status) else { Issue.record("\(path): status \(f.status) has no expectation in the watch client"); return }
+        let d0 = JSONDecoder()
+        // The watch reads one entity's card and timeline (not the entity lists).
+        if path.hasPrefix("/api/gateway/note/entities/") {
+            if path.hasSuffix("/timeline") { _ = try d0.decode(EntityTimeline.self, from: f.body) } else { _ = try d0.decode(EntityCard.self, from: f.body) }
+            return
+        }
         if notCalledByWatch.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) { return }
         let d = JSONDecoder()
         switch path {
@@ -58,6 +64,8 @@ enum RecordedFixtures {
         case "/api/gateway/note/insights": _ = try d.decode(ListPage<Insight>.self, from: f.body)
         case "/api/gateway/session/logout": break
         case "/api/gateway/note/processor/ensure": _ = try d.decode(ProcessorEnsure.self, from: f.body)
+        case "/api/gateway/note/communities": _ = try d.decode(Communities.self, from: f.body)
+        case "/api/gateway/note/search": _ = try d.decode(QuickSearch.self, from: f.body)
         case "/api/gateway/attachments/upload": _ = try GatewayTransport.uploaded(f.body, sessionId: "s")
         case let p where p.hasPrefix("/api/gateway/note/insights/") && p.hasSuffix("/ack"): break
         case let p where p.hasPrefix("/api/gateway/note/tasks/") && p.hasSuffix("/close"): break
@@ -183,6 +191,14 @@ extension ReplayGroup {
             let body = #"{"processor_id":"p2","reflect_id":"r1","created":["note-drain"],"processor":{"id":"p2","action":"recreated","reason":"It runs abstractnote@0.1.0, not 0.1.1.","previous_id":"p1"},"reflect":{"id":"r1","action":"kept","reason":null}}"#
             let e = try JSONDecoder().decode(ProcessorEnsure.self, from: Data(body.utf8))
             #expect(e.processor.action == "recreated" && e.processor.previousId == "p1" && e.processor.reason != nil)
+        }
+
+        /// A recorded entity card (before communities were computed: no `community`) reads, with its notes.
+        @Test func aRecordedEntityCardReads() async throws {
+            try serve("note_entity_as_received_200")
+            let card = try await ReplayStub.client().entity(id: "ex:person-dana")
+            #expect(card.name == "Dana" && card.kind == "person" && card.community == nil && card.notes.count == 2)
+            #expect(ReplayStub.seen.first?.path == "/api/gateway/note/entities/ex:person-dana")
         }
 
         @Test func recordedRefusalsMapToTheirSentences() async throws {

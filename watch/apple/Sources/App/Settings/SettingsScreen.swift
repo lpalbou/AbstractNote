@@ -9,7 +9,7 @@ struct SettingsScreen: View {
 
     var body: some View {
         FitScroll {
-            VStack(spacing: 6) {
+            VStack(spacing: Space.s) {
                 row("Server", model.gatewayHost, route: .server, hint: "Change the server", id: "settings.server")
                 row("Account", model.account ?? (model.checkingAccount ? "Checking…" : "Not known"), route: .signIn,
                     hint: "Sign in as someone else", id: "settings.account")

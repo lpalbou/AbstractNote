@@ -15,6 +15,10 @@ public actor MockGatewayClient: GatewayClient {
 
     private var started: [String: (kind: String, at: ContinuousClock.Instant, text: String)] = [:]
     private var counter = 0
+    /// Notes captured here: when, so `note(id:)` answers "processing" for a while, then "processed".
+    private var capturedAt: [String: ContinuousClock.Instant] = [:]
+    /// How long a captured note takes to be organized.
+    private let organizeAfter: Duration
     private var ackedInsights: Set<String> = []
     private var closedLoops: Set<String> = []
     public private(set) var captures: [Capture] = []
@@ -22,8 +26,10 @@ public actor MockGatewayClient: GatewayClient {
     /// False: the server has no speech to text (its transcription answers a server error).
     private let canTranscribe: Bool
 
-    public init(answerDelay: Duration = .milliseconds(800), failure: Failure? = nil, quiet: Bool = false, canTranscribe: Bool = true) {
+    public init(answerDelay: Duration = .milliseconds(800), failure: Failure? = nil, quiet: Bool = false, canTranscribe: Bool = true,
+                organizeAfter: Duration = .milliseconds(2500)) {
         self.answerDelay = answerDelay; self.failure = failure; self.quiet = quiet; self.canTranscribe = canTranscribe
+        self.organizeAfter = organizeAfter
     }
 
     private func check() throws {
@@ -43,7 +49,7 @@ public actor MockGatewayClient: GatewayClient {
         captures.append(capture)
         counter += 1
         let id = "mock-capture-\(counter)"
-        started[id] = ("capture", .now, capture.text)
+        started[id] = ("capture", .now, "n-cap-\(counter)")
         return id
     }
 
@@ -61,7 +67,8 @@ public actor MockGatewayClient: GatewayClient {
         guard ContinuousClock.now - s.at >= answerDelay else { return RunSummary(runId: id, status: "running") }
         let output: JSONValue
         if s.kind == "capture" {
-            output = .object(["response": .string(Self.filingAnswer), "note_id": .string("n-\(counter)"), "status": .string("new")])
+            capturedAt[s.text] = capturedAt[s.text] ?? .now
+            output = .object(["response": .string(Self.filingAnswer), "note_id": .string(s.text), "status": .string("queued")])
         } else {
             output = .object([
                 "response": .string(Self.recallAnswer),
@@ -92,7 +99,10 @@ public actor MockGatewayClient: GatewayClient {
         try check()
         return quiet ? [] : [Cue(cueId: "cue-1", text: "You have not mentioned Marc in five weeks. Anything new?", kind: "quiet_person",
                                      subject: NoteSubject(kind: "entity", id: "ex:person-marc", title: "Marc"),
-                                     evidenceNoteIds: ["n-30", "n-31"], entityIds: ["ex:person-marc"])]
+                                     evidenceNoteIds: ["n-30", "n-31"], entityIds: ["ex:person-marc"]),
+                                 Cue(cueId: "cue-2", text: "You chose the reading list a year ago. Still the plan?", kind: "aged_decision",
+                                     subject: NoteSubject(kind: "note", id: "n-2025-10-19", title: "Reading list"),
+                                     evidenceNoteIds: ["n-2025-10-19"], entityIds: [])]
     }
 
     public func openLoops(limit: Int) async throws -> [OpenLoop] {
@@ -115,12 +125,70 @@ public actor MockGatewayClient: GatewayClient {
 
     public func note(id: String) async throws -> NoteDetail {
         try check()
+        if let at = capturedAt[id] {
+            let done = ContinuousClock.now - at >= organizeAfter
+            return NoteDetail(noteId: id, title: done ? "LUT budget" : nil, text: "Met Dana about the LUT budget; she wants the Pareto by Friday.",
+                              kind: done ? "idea" : nil, occurredAt: ISO8601.string(.now), status: done ? "processed" : "processing",
+                              entities: done ? [Self.dana, EntityBrief(entityId: "ex:project-lut", name: "lut", kind: "project")] : [])
+        }
         if let m = Self.marcNotes[id] {
             return NoteDetail(noteId: id, title: m.title, text: m.text, kind: "event", occurredAt: m.at)
         }
         let e = Self.evidence.first { $0.noteId == id }
         return NoteDetail(noteId: id, title: e?.title ?? "A note", text: "Met Dana about the LUT budget; she wants the Pareto by Friday.",
-                          kind: "decision", occurredAt: e?.occurredAt ?? "2026-10-12T09:12:00Z")
+                          kind: "decision", occurredAt: e?.occurredAt ?? "2026-10-12T09:12:00Z",
+                          entities: [Self.dana, EntityBrief(entityId: "ex:project-lut", name: "lut", kind: "project")])
+    }
+
+    static let dana = EntityBrief(entityId: "ex:person-dana", name: "dana", kind: "person")
+
+    public func quickSearch(_ query: String, limit: Int) async throws -> QuickSearch {
+        try check()
+        let notes = Self.evidence.map { NoteRef(noteId: $0.noteId, title: $0.title, kind: "decision", occurredAt: $0.occurredAt) }
+            + [NoteRef(noteId: "n-30", title: "Slides for Marc", kind: "task", occurredAt: "2026-09-08T10:00:00Z")]
+        return QuickSearch(notes: quiet ? [] : Array(notes.prefix(limit)))
+    }
+
+    public func communities() async throws -> Communities {
+        try check()
+        if quiet { return Communities(computedAt: nil, items: []) }
+        func m(_ id: String, _ name: String, _ kind: String, _ n: Int) -> CommunityMember { CommunityMember(entityId: id, name: name, kind: kind, noteCount: n) }
+        return Communities(computedAt: "2026-10-19T06:00:00Z", items: [
+            Community(communityId: "cm_lut", label: "LUT budget", summary: "The LUT project, its budget and the people deciding it.", kind: "project",
+                      size: 9, topEntities: [m("ex:person-dana", "dana", "person", 12), m("ex:project-lut", "lut", "project", 10),
+                                             m("ex:doc-pareto", "pareto", "document", 4), m("ex:person-marc", "marc", "person", 3)]),
+            Community(communityId: "cm_read", label: "Reading group", summary: "Books and the people reading them.", kind: "theme",
+                      size: 6, topEntities: [m("ex:person-marc", "marc", "person", 3)]),
+            Community(communityId: "cm_family", label: "Family", kind: "people", size: 5, topEntities: []),
+            Community(communityId: "cm_watch", label: "Watch app", kind: "tooling", size: 4, topEntities: []),
+            Community(communityId: "cm_new", label: nil, kind: nil, size: 3, topEntities: []),
+            Community(communityId: "cm_small", label: "Garden", kind: "theme", size: 2, topEntities: []),
+        ])
+    }
+
+    public func entity(id: String) async throws -> EntityCard {
+        try check()
+        return EntityCard(entityId: id, name: id == "ex:project-lut" ? "lut" : "dana", kind: id == "ex:project-lut" ? "project" : "person",
+                          summary: "Dana owns the LUT budget decisions and wants the Pareto by Friday.",
+                          firstSeen: "2026-09-02T09:00:00Z", lastSeen: "2026-10-17T16:40:00Z", noteCount: 12,
+                          community: CommunityRef(communityId: "cm_lut", label: "LUT budget", kind: "project", size: 9),
+                          notes: Self.evidence.map { NoteRef(noteId: $0.noteId, title: $0.title, kind: "decision", occurredAt: $0.occurredAt) })
+    }
+
+    public func entityTimeline(id: String) async throws -> EntityTimeline {
+        try check()
+        let json = #"""
+        {"entity_id": "ex:person-dana", "items": [
+          {"type": "note", "at": "2026-09-02T09:00:00Z", "note": {"note_id": "n-2", "title": "Kick-off with Dana", "kind": "event", "occurred_at": "2026-09-02T09:00:00Z", "excerpt": null}},
+          {"type": "claim", "at": "2026-09-02T09:00:00Z", "claim": {"claim_id": "c1", "evidence": "The LUT budget is 40k.", "note_id": "n-2"}},
+          {"type": "claim", "at": "2026-10-12T09:12:00Z", "claim": {"claim_id": "c2", "evidence": "Dana asked for 55k.", "note_id": "n-12"}},
+          {"type": "supersede", "at": "2026-10-12T09:12:00Z", "claim_id": "c1", "note_id": "n-12"},
+          {"type": "merge", "at": "2026-10-13T09:00:00Z", "from_id": "ex:person-dana-2", "into_id": "ex:person-dana"},
+          {"type": "claim", "at": "2026-10-17T16:40:00Z", "claim": {"claim_id": "c3", "evidence": "We settled on 50k.", "note_id": "n-17"}},
+          {"type": "note", "at": "2026-10-17T16:40:00Z", "note": {"note_id": "n-17", "title": "Budget settled at 50k", "kind": "decision", "occurred_at": "2026-10-17T16:40:00Z", "excerpt": null}}
+        ]}
+        """#
+        return try JSONDecoder().decode(EntityTimeline.self, from: Data(json.utf8))
     }
 
     public func signOut() async {}

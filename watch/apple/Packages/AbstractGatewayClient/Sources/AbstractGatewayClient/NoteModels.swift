@@ -284,20 +284,192 @@ public struct InsightFacts: Codable, Hashable, Sendable {
     }
 }
 
-/// `GET /note/notes/{id}`: the watch shows a note's text, when it was written, and for an insight
-/// the notes behind it. Every other key the gateway adds is ignored.
+/// `GET /note/notes/{id}`: the watch shows a note's text, when it was written, its kind, the entities
+/// it is linked to and whether it has been understood (`status`: `queued`, `processing`,
+/// `processed`, `failed`, …), and for an insight the notes behind it. Every other key is ignored.
 public struct NoteDetail: Decodable, Hashable, Sendable, Identifiable {
     public var noteId: String
     public var title: String?
     public var text: String
     public var kind: String?
     public var occurredAt: String?
+    public var status: String
+    public var entities: [EntityBrief]
     public var insight: InsightFacts?
     public var id: String { noteId }
-    enum CodingKeys: String, CodingKey { case noteId = "note_id", title, text, kind, occurredAt = "occurred_at", insight }
-    public init(noteId: String, title: String?, text: String, kind: String? = nil, occurredAt: String? = nil, insight: InsightFacts? = nil) {
-        self.noteId = noteId; self.title = title; self.text = text; self.kind = kind; self.occurredAt = occurredAt; self.insight = insight
+    enum CodingKeys: String, CodingKey { case noteId = "note_id", title, text, kind, occurredAt = "occurred_at", status, entities, insight }
+    public init(noteId: String, title: String?, text: String, kind: String? = nil, occurredAt: String? = nil, status: String = "processed",
+                entities: [EntityBrief] = [], insight: InsightFacts? = nil) {
+        self.noteId = noteId; self.title = title; self.text = text; self.kind = kind; self.occurredAt = occurredAt
+        self.status = status; self.entities = entities; self.insight = insight
     }
+    /// Understood by the processor: its entities and links are in.
+    public var isOrganized: Bool { status == "processed" }
+    /// The processor gave up on it (the queue keeps it for a retry).
+    public var needsAttention: Bool { status == "failed" }
+}
+
+/// An entity as a note or a list carries it. `name` is the canonical name the API says clients show.
+public struct EntityBrief: Codable, Hashable, Sendable, Identifiable {
+    public var entityId: String
+    public var name: String
+    public var kind: String?
+    public var id: String { entityId }
+    enum CodingKeys: String, CodingKey { case entityId = "entity_id", name, kind }
+    public init(entityId: String, name: String, kind: String? = nil) { self.entityId = entityId; self.name = name; self.kind = kind }
+}
+
+/// The community an entity card carries: `{community_id, label, kind, size, stale_label}`.
+public struct CommunityRef: Decodable, Hashable, Sendable {
+    public var communityId: String
+    public var label: String?
+    public var kind: String?
+    public var size: Int
+    enum CodingKeys: String, CodingKey { case communityId = "community_id", label, kind, size }
+    public init(communityId: String, label: String?, kind: String? = nil, size: Int) {
+        self.communityId = communityId; self.label = label; self.kind = kind; self.size = size
+    }
+}
+
+/// A community member listed on the community (its 5 with the most notes).
+public struct CommunityMember: Decodable, Hashable, Sendable, Identifiable {
+    public var entityId: String
+    public var name: String
+    public var kind: String?
+    public var noteCount: Int?
+    public var id: String { entityId }
+    enum CodingKeys: String, CodingKey { case entityId = "entity_id", name, kind, noteCount = "note_count" }
+    public init(entityId: String, name: String, kind: String? = nil, noteCount: Int? = nil) {
+        self.entityId = entityId; self.name = name; self.kind = kind; self.noteCount = noteCount
+    }
+}
+
+/// A theme: a group of entities the notes keep together, named by the reflect flow (`label` and
+/// `summary` are null until it is named).
+public struct Community: Decodable, Hashable, Sendable, Identifiable {
+    public var communityId: String
+    public var label: String?
+    public var summary: String?
+    public var kind: String?
+    public var size: Int
+    public var topEntities: [CommunityMember]
+    public var id: String { communityId }
+    enum CodingKeys: String, CodingKey { case communityId = "community_id", label, summary, kind, size, topEntities = "top_entities" }
+    public init(communityId: String, label: String?, summary: String? = nil, kind: String? = nil, size: Int, topEntities: [CommunityMember]) {
+        self.communityId = communityId; self.label = label; self.summary = summary; self.kind = kind; self.size = size; self.topEntities = topEntities
+    }
+}
+
+/// `GET /note/communities`: largest first; `computed_at` null and no items before the first computation.
+public struct Communities: Decodable, Hashable, Sendable {
+    public var computedAt: String?
+    public var items: [Community]
+    enum CodingKeys: String, CodingKey { case computedAt = "computed_at", items }
+    public init(computedAt: String?, items: [Community]) { self.computedAt = computedAt; self.items = items }
+}
+
+/// `GET /note/entities/{id}`: the card the watch shows.
+public struct EntityCard: Decodable, Hashable, Sendable, Identifiable {
+    public var entityId: String
+    public var name: String
+    public var kind: String?
+    public var summary: String?
+    public var firstSeen: String?
+    public var lastSeen: String?
+    public var noteCount: Int?
+    public var community: CommunityRef?
+    public var notes: [NoteRef]
+    public var id: String { entityId }
+    enum CodingKeys: String, CodingKey {
+        case entityId = "entity_id", name, kind, summary, firstSeen = "first_seen", lastSeen = "last_seen", noteCount = "note_count", community, notes
+    }
+    public init(entityId: String, name: String, kind: String?, summary: String?, firstSeen: String?, lastSeen: String?,
+                noteCount: Int?, community: CommunityRef?, notes: [NoteRef]) {
+        self.entityId = entityId; self.name = name; self.kind = kind; self.summary = summary; self.firstSeen = firstSeen
+        self.lastSeen = lastSeen; self.noteCount = noteCount; self.community = community; self.notes = notes
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        entityId = try c.decode(String.self, forKey: .entityId)
+        name = try c.decode(String.self, forKey: .name)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind)
+        summary = try c.decodeIfPresent(String.self, forKey: .summary)
+        firstSeen = try c.decodeIfPresent(String.self, forKey: .firstSeen)
+        lastSeen = try c.decodeIfPresent(String.self, forKey: .lastSeen)
+        noteCount = try c.decodeIfPresent(Int.self, forKey: .noteCount)
+        community = try c.decodeIfPresent(CommunityRef.self, forKey: .community)   // null before the first computation
+        notes = try c.decode([NoteRef].self, forKey: .notes)
+    }
+}
+
+/// A statement in an entity's timeline (the fields the watch reads).
+public struct TimelineClaim: Decodable, Hashable, Sendable {
+    public var claimId: String
+    /// Plain words when the server gives them; else the note's words that support it (`evidence`).
+    public var text: String?
+    public var evidence: String?
+    public var noteId: String?
+    enum CodingKeys: String, CodingKey { case claimId = "claim_id", text, evidence, noteId = "note_id" }
+    public var words: String? { text.shown ?? evidence.shown }
+}
+
+/// One step of `GET /note/entities/{id}/timeline`: `type` `note`, `claim`, `supersede`, `retract` or `merge`.
+public struct TimelineItem: Decodable, Hashable, Sendable {
+    public var type: String
+    public var at: String?
+    public var note: NoteRef?
+    public var claim: TimelineClaim?
+    public var claimId: String?
+    public var noteId: String?
+    enum CodingKeys: String, CodingKey { case type, at, note, claim, claimId = "claim_id", noteId = "note_id" }
+}
+
+/// `GET /note/entities/{id}/timeline`: claims and notes in history order.
+public struct EntityTimeline: Decodable, Hashable, Sendable {
+    public var entityId: String
+    public var items: [TimelineItem]
+    enum CodingKeys: String, CodingKey { case entityId = "entity_id", items }
+
+    /// A milestone of "How it evolved": when, what kind of step, its words, the note to open.
+    public struct Milestone: Hashable, Sendable, Identifiable {
+        public enum Kind: String, Sendable { case noted, learned, changed }
+        public var at: String?
+        public var kind: Kind
+        public var text: String
+        public var noteId: String?
+        public var id: String { "\(at ?? "")|\(kind.rawValue)|\(text)" }
+    }
+
+    /// The steps worth showing on a watch, oldest first: notes, statements learned, statements that
+    /// changed (superseded or retracted); merges are bookkeeping and left out. Beyond `limit`, the
+    /// first two and the latest ones are kept (where it started, where it is now).
+    public func milestones(limit: Int = 6) -> [Milestone] {
+        var said: [String: String] = [:]
+        var out: [Milestone] = []
+        for i in items {
+            switch i.type {
+            case "note":
+                guard let n = i.note else { continue }
+                out.append(Milestone(at: i.at, kind: .noted, text: n.title.shown ?? n.excerpt.shown ?? "A note", noteId: n.noteId))
+            case "claim":
+                guard let c = i.claim, let w = c.words else { continue }
+                said[c.claimId] = w
+                out.append(Milestone(at: i.at, kind: .learned, text: w, noteId: c.noteId))
+            case "supersede", "retract":
+                guard let id = i.claimId, let w = said[id] else { continue }
+                out.append(Milestone(at: i.at, kind: .changed, text: w, noteId: i.noteId))
+            default: continue
+            }
+        }
+        guard out.count > limit, limit >= 3 else { return out }
+        return Array(out.prefix(2)) + Array(out.suffix(limit - 2))
+    }
+}
+
+/// `GET /note/search?q=`: the quick tier (no model). The watch reads the notes, best first.
+public struct QuickSearch: Decodable, Hashable, Sendable {
+    public var notes: [NoteRef]
+    enum CodingKeys: String, CodingKey { case notes }
 }
 
 extension Optional where Wrapped == String {
@@ -326,4 +498,18 @@ public struct ProcessorEnsure: Decodable, Hashable, Sendable {
     public var processor: EnsureAction
     public var reflect: EnsureAction
     enum CodingKeys: String, CodingKey { case processorId = "processor_id", reflectId = "reflect_id", created, processor, reflect }
+}
+
+/// An entity's canonical name for reading: the API's `name` (what clients show) with its `_`
+/// separators as spaces ("laurent_philippe_albou" → "laurent philippe albou").
+public func readableName(_ name: String) -> String { name.replacingOccurrences(of: "_", with: " ") }
+
+/// Answers cite their notes inline as `[nt_…]` (cognition.md); a watch shows the sources as rows
+/// under the answer, so the markers are taken out of the text.
+public enum Citations {
+    nonisolated(unsafe) private static let marker = try! NSRegularExpression(pattern: #"\s*\[nt_[A-Za-z0-9_]+\]"#)
+    public static func strip(_ text: String) -> String {
+        let r = NSRange(text.startIndex..., in: text)
+        return marker.stringByReplacingMatches(in: text, range: r, withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }

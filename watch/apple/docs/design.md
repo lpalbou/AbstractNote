@@ -5,7 +5,7 @@ the gateway is [docs/clients.md](../../../docs/clients.md) and [docs/api.md](../
 
 ## Copy rules
 
-- Plain verbs: Send, Ask, Dig deeper, Got it, Close, Add a note, Try again, Done, Sign out.
+- Plain verbs: Send, Ask, Dig deeper, Answer, Skip, Close, Add a note, Try again, Done, Sign out.
 - One sentence per error, said by `AppModel.say`: "No connection.", "Can't reach your notebook.",
   "Please sign in again.", "Already done on another device.", "This is too long to send from the
   watch.", "Your note could not be saved. Try again."
@@ -17,6 +17,25 @@ the gateway is [docs/clients.md](../../../docs/clients.md) and [docs/api.md](../
   saying what it does now).
 - VoiceOver: every control has a label, and a hint when the outcome is not obvious; rows read as
   one element.
+
+## Visual language
+
+Dark cards (`Theme.card`, 16 pt corners) on near-black, the rounded system type at the watch's
+own text size (Dynamic Type), one accent (indigo) for primary actions, mint and cyan only as state
+colours and always beside a word, spacing on the 8 pt grid (`Space`), and no screen denser than the
+deck's slides 09 and 10 (`untracked/design/deck`). The kit's components carry it: `StatusHero` (the
+state of the moment: a ring, its word, one line), `StateLine` (a state as one line), `Pill` (a kind),
+`Chip` (a tappable name), `TextArea` (the large text field), `ListeningView` (timer, waveform, round
+Stop), `FilledButtonStyle` (44 pt capsules).
+
+## Sending states
+
+After Send the Note screen shows one state at a time (the deck's slide 09): **Sending** (the
+capture is on its way), **Received** (the capture answered: the server has it; a haptic),
+**Organizing** (the note is filed, the processor has not linked it yet), **Organized** (status
+`processed`: the kind, title and linked entities appear as chips). The watch reads
+`GET /note/notes/{id}` every 2 s for a minute after Received, then stops and says "Organizing
+continues on your server"; a `failed` note says "Needs attention: it will be tried again".
 
 ## Layout rules
 
@@ -35,11 +54,13 @@ the gateway is [docs/clients.md](../../../docs/clients.md) and [docs/api.md](../
 |---|---|
 | Send | `POST /api/gateway/runs/start` `{bundle_id: "abstractnote", flow_id: "note-capture", session_id, input_data: {text, occurred_at, location?, source: {client: "watch"}, idempotency_key, process_inline: false, session_id, context?: {about}}}` (`input_data.session_id` repeats the request's: the gateway does not hand it to the flow), then `GET /runs/{id}` every second until `output.response` (60 s at most; later than that the screen says the answer is late) |
 | Try again after a failed send | the same body with the same `idempotency_key` (made when Send was tapped), or, when the run had started, the same run read again |
-| Ask | `runs/start` with `note-recall` `{question, effort: "standard", session_id}`, then `output.response` and `output.evidence` (90 s at most) |
+| Ask, Quick (the watch's default) | `GET /note/search?q=&limit=8`: the notes that match, no model, at once |
+| Ask, Standard | `runs/start` with `note-recall` `{question, effort: "standard", session_id}`, then `output.response` (its `[nt_…]` citation markers taken out: the sources show as rows) and `output.evidence` (90 s at most) |
 | Dig deeper | `runs/start` with `note-recall` `{question, effort: "deep"}`; not followed: the answer arrives as an insight in Today |
 | Launch (signed in) and every sign-in | `POST /note/processor/ensure` once, not waited for by the screens; the first capture waits for it. It repairs the processor and reflect automations after a release (`{processor_id, reflect_id, created, processor: {id, action: created|kept|recreated, reason, previous_id?}, reflect: …}`). Every failure is ignored (503 when the note workflows are not loaded) except a 401, which shows the sign-in |
-| Today | `GET /note/changes?since=<cursor>`, `/note/insights?acked=false`, `/note/tasks?status=open`, `/note/cues`, `/note/overview` (its `resurfacing` is "On this day"), read together; the cursor in the answer is kept for the next visit |
-| Got it / Close | `POST /note/insights/{id}/ack` / `POST /note/tasks/{id}/close`; a 409 means it was already done elsewhere and counts as done |
+| Today | `GET /note/changes?since=<cursor>` (counted), `/note/cues?limit=5` (one at a time), `/note/communities` (the five largest as Themes), `/note/tasks?status=open&limit=5`, read together; the cursor in the answer is kept for the next visit |
+| A person or thing | `GET /note/entities/{id}` (name, kind, `community`, summary, first and last seen, notes) and `GET /note/entities/{id}/timeline` (milestones: notes, statements learned, statements superseded or retracted; merges left out; the first two and the latest kept beyond six) |
+| Close (an open loop) | `POST /note/tasks/{id}/close`; a 409 means it was already done elsewhere and counts as done (the client keeps `POST /note/insights/{id}/ack`, unused since Today shows cues rather than an insight list) |
 | Add a note about this | a capture whose `input_data.context.about` is `{kind: insight|task|cue, id, title}` |
 | A note's page | `GET /note/notes/{id}`; for an insight, its `insight.evidence_note_ids` give a **Why** link |
 | Why (on a cue whose `subject` is set, or an insight) | `GET /note/notes/{id}` for each of the `evidence_note_ids` (at most 8, read together) |
