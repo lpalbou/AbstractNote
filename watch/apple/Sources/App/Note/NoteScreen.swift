@@ -250,7 +250,10 @@ struct NoteScreen: View {
         let client = model.client
         do {
             let id: String
-            if let runId { id = runId } else { id = try await client.startCapture(capture); runId = id }
+            if let runId { id = runId } else {
+                await model.processorReady()
+                id = try await client.startCapture(capture); runId = id
+            }
             let p = try await client.follow({ try await client.captureProgress(runId: id) }, every: .seconds(1), timeout: .seconds(60))
             switch p {
             case .done(let answer): phase = .saved(answer.response); WKInterfaceDevice.current().play(.success)

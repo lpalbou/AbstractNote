@@ -25,6 +25,8 @@ struct AbstractNoteWatchApp: App {
             default: break
             }
         }
+        // Once per launch, signed in: repair the processor and reflect automations (AppModel.ensureProcessor).
+        if !model.needsSignIn { model.ensureProcessor() }
         _model = StateObject(wrappedValue: model)
     }
 

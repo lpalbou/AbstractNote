@@ -37,6 +37,7 @@ the gateway is [docs/clients.md](../../../docs/clients.md) and [docs/api.md](../
 | Try again after a failed send | the same body with the same `idempotency_key` (made when Send was tapped), or, when the run had started, the same run read again |
 | Ask | `runs/start` with `note-recall` `{question, effort: "standard", session_id}`, then `output.response` and `output.evidence` (90 s at most) |
 | Dig deeper | `runs/start` with `note-recall` `{question, effort: "deep"}`; not followed: the answer arrives as an insight in Today |
+| Launch (signed in) and every sign-in | `POST /note/processor/ensure` once, not waited for by the screens; the first capture waits for it. It repairs the processor and reflect automations after a release (`{processor_id, reflect_id, created, processor: {id, action: created|kept|recreated, reason, previous_id?}, reflect: …}`). Every failure is ignored (503 when the note workflows are not loaded) except a 401, which shows the sign-in |
 | Today | `GET /note/changes?since=<cursor>`, `/note/insights?acked=false`, `/note/tasks?status=open`, `/note/cues`, `/note/overview` (its `resurfacing` is "On this day"), read together; the cursor in the answer is kept for the next visit |
 | Got it / Close | `POST /note/insights/{id}/ack` / `POST /note/tasks/{id}/close`; a 409 means it was already done elsewhere and counts as done |
 | Add a note about this | a capture whose `input_data.context.about` is `{kind: insight|task|cue, id, title}` |

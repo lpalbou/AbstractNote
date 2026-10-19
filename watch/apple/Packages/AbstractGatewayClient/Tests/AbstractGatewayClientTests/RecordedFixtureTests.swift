@@ -34,7 +34,7 @@ enum RecordedFixtures {
     /// Paths the gateway answers that the watch never calls (the web app and the CLI do); each one
     /// covers itself and everything below it.
     static let notCalledByWatch = ["/api/gateway/note/status", "/api/gateway/note/entities", "/api/gateway/note/graph",
-                                   "/api/gateway/note/queue", "/api/gateway/note/settings", "/api/gateway/note/processor/ensure",
+                                   "/api/gateway/note/queue", "/api/gateway/note/settings",
                                    "/api/gateway/note/review", "/api/gateway/note/claims", "/api/gateway/note/day",
                                    "/api/gateway/automations"]
 
@@ -57,6 +57,7 @@ enum RecordedFixtures {
         case "/api/gateway/note/tasks": _ = try d.decode(ListPage<OpenLoop>.self, from: f.body)
         case "/api/gateway/note/insights": _ = try d.decode(ListPage<Insight>.self, from: f.body)
         case "/api/gateway/session/logout": break
+        case "/api/gateway/note/processor/ensure": _ = try d.decode(ProcessorEnsure.self, from: f.body)
         case "/api/gateway/attachments/upload": _ = try GatewayTransport.uploaded(f.body, sessionId: "s")
         case let p where p.hasPrefix("/api/gateway/note/insights/") && p.hasSuffix("/ack"): break
         case let p where p.hasPrefix("/api/gateway/note/tasks/") && p.hasSuffix("/close"): break
@@ -162,6 +163,26 @@ extension ReplayGroup {
             try serve("note_get_insight_200")
             let n = try await ReplayStub.client().note(id: "i")
             #expect(n.kind == "insight" && n.insight?.kind == "reminder" && n.insight?.evidenceNoteIds.count == 1)
+        }
+
+        /// After a release the user's automations run a workflow version the server no longer serves:
+        /// the watch asks the server to repair them (once per launch and after sign-in).
+        @Test func theRecordedProcessorEnsureAnswersRead() async throws {
+            try serve("note_processor_ensure_200", "note_processor_ensure_kept_200")
+            let c = ReplayStub.client()
+            let first = try await c.ensureProcessor()
+            #expect(first.processor.action == "created" && first.reflect.action == "created" && first.created == ["note-drain", "note-reflect"])
+            #expect(first.processorId == first.processor.id)
+            let again = try await c.ensureProcessor()
+            #expect(again.processor.action == "kept" && again.created.isEmpty && again.processor.previousId == nil)
+            #expect(ReplayStub.seen.map(\.method) == ["POST", "POST"])
+            #expect(ReplayStub.seen.map(\.path) == ["/api/gateway/note/processor/ensure", "/api/gateway/note/processor/ensure"])
+        }
+
+        @Test func aRecreatedAutomationSaysWhatItReplaced() throws {
+            let body = #"{"processor_id":"p2","reflect_id":"r1","created":["note-drain"],"processor":{"id":"p2","action":"recreated","reason":"It runs abstractnote@0.1.0, not 0.1.1.","previous_id":"p1"},"reflect":{"id":"r1","action":"kept","reason":null}}"#
+            let e = try JSONDecoder().decode(ProcessorEnsure.self, from: Data(body.utf8))
+            #expect(e.processor.action == "recreated" && e.processor.previousId == "p1" && e.processor.reason != nil)
         }
 
         @Test func recordedRefusalsMapToTheirSentences() async throws {

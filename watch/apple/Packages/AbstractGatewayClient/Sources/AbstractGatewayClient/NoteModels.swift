@@ -307,3 +307,23 @@ extension Optional where Wrapped == String {
         return s
     }
 }
+
+/// What `POST /note/processor/ensure` did to one automation: `created` (there was none), `kept`
+/// (healthy) or `recreated` (the previous one, `previous_id`, was archived and replaced: `reason`).
+public struct EnsureAction: Decodable, Hashable, Sendable {
+    public var id: String
+    public var action: String
+    public var reason: String?
+    public var previousId: String?
+    enum CodingKeys: String, CodingKey { case id, action, reason, previousId = "previous_id" }
+}
+
+/// `POST /note/processor/ensure`: the processor (note-drain) and reflect automations, made healthy.
+public struct ProcessorEnsure: Decodable, Hashable, Sendable {
+    public var processorId: String
+    public var reflectId: String
+    public var created: [String]
+    public var processor: EnsureAction
+    public var reflect: EnsureAction
+    enum CodingKeys: String, CodingKey { case processorId = "processor_id", reflectId = "reflect_id", created, processor, reflect }
+}

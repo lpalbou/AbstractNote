@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/gateway/note/processor/ensure",
+    "body": null
+  },
+  "status": 200,
+  "body": {
+    "processor": {
+      "id": "921d325f-7496-5039-b9bc-cc0833cb0ad4",
+      "action": "kept",
+      "reason": null
+    },
+    "processor_id": "921d325f-7496-5039-b9bc-cc0833cb0ad4",
+    "reflect": {
+      "id": "16d2fe7d-8130-552d-a214-9262ad016e0b",
+      "action": "kept",
+      "reason": null
+    },
+    "reflect_id": "16d2fe7d-8130-552d-a214-9262ad016e0b",
+    "created": []
+  }
+}

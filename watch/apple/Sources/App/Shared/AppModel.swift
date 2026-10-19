@@ -80,8 +80,29 @@ final class AppModel: ObservableObject {
         client = LiveGatewayClient(baseURL: s.gateway, credential: s.credential)
         today = nil; subject = nil; todayPath = []; settingsPath = []; askPath = []
         needsSignIn = false; signInNotice = nil; tab = .note
+        ensureProcessor()
         Task { await ensureAccount() }
     }
+
+    /// The repair of the user's processor and reflect automations, started once per launch and
+    /// after each sign-in (`POST /note/processor/ensure`): after a release they run a workflow
+    /// version the server no longer serves, and a watch-only user has no other way to repair them.
+    /// Fire-and-forget: every failure is ignored (503 when the note workflows are not loaded, no
+    /// connection: the next launch tries again) except a 401, which shows the sign-in.
+    private var ensureTask: Task<Void, Never>?
+
+    func ensureProcessor() {
+        let client = self.client
+        ensureTask = Task { [weak self] in
+            do { _ = try await client.ensureProcessor() }
+            catch GatewayError.unauthorized { self?.signOut(notice: "Sign in to your notebook.") }
+            catch { /* ignored, see above */ }
+        }
+    }
+
+    /// A capture waits for the repair started at launch or sign-in, so the first note is not
+    /// queued behind a stopped processor.
+    func processorReady() async { await ensureTask?.value }
 
     /// Forgets the credential (the file is deleted; ADR 0006), keeps the server as the next
     /// sign-in's default, and shows the sign-in page.

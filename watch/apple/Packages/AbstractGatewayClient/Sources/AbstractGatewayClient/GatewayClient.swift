@@ -33,6 +33,10 @@ public protocol GatewayClient: Sendable {
     func close(taskId: String) async throws
     /// `GET /api/gateway/note/notes/{id}`
     func note(id: String) async throws -> NoteDetail
+    /// `POST /api/gateway/note/processor/ensure`: creates or repairs the user's processor and reflect
+    /// automations (after a release they run a workflow version the server no longer serves); 503
+    /// when the note workflows are not loaded. Sent once.
+    func ensureProcessor() async throws -> ProcessorEnsure
     /// `GET /api/gateway/note/status`: answers 404 when AbstractNote is not set up on the server.
     func noteStatus() async throws
     /// `POST /api/gateway/attachments/upload` of a recording (WAV), in the watch's session.
@@ -166,6 +170,12 @@ public actor LiveGatewayClient: GatewayClient {
 
     public func note(id: String) async throws -> NoteDetail {
         try await transport.get("api/gateway/note/notes/\(try Self.segment(id))", as: NoteDetail.self)
+    }
+
+    public func ensureProcessor() async throws -> ProcessorEnsure {
+        let data = try await transport.request("POST", "api/gateway/note/processor/ensure", body: Empty(), timeout: 60)
+        do { return try JSONDecoder().decode(ProcessorEnsure.self, from: data) }
+        catch { throw GatewayError.unexpectedAnswer("processor/ensure: \(error)") }
     }
 
     public func noteStatus() async throws {

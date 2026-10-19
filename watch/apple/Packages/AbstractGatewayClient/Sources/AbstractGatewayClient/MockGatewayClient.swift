@@ -127,6 +127,15 @@ public actor MockGatewayClient: GatewayClient {
 
     public func noteStatus() async throws { try check() }
 
+    public private(set) var ensures = 0
+
+    public func ensureProcessor() async throws -> ProcessorEnsure {
+        try check()
+        ensures += 1
+        let body = #"{"processor_id":"p-1","reflect_id":"r-1","created":[],"processor":{"id":"p-1","action":"kept","reason":null},"reflect":{"id":"r-1","action":"kept","reason":null}}"#
+        return try JSONDecoder().decode(ProcessorEnsure.self, from: Data(body.utf8))
+    }
+
     public func upload(wav: Data, sessionId: String) async throws -> UploadedAttachment {
         try check()
         counter += 1
