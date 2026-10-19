@@ -70,18 +70,40 @@ generic thing.
 
 | Field | Meaning |
 |---|---|
-| `entity_id` | `ex:<kind>-<slug>` following AbstractFramework ADR 0025. A collision with a different entity of the same kind appends `-2`, `-3`. Ids are never reused. |
+| `entity_id` | `ex:<kind>-<slug>` following AbstractFramework ADR 0025, the slug being the canonical name written in kebab-case ASCII (`ex:person-laurent-philippe-albou`). A collision with a different entity of the same kind appends `-2`, `-3`. Ids are never reused. |
 | `kind` | `person`, `org`, `project`, `concept`, `place`, `event`, `artifact`, `software`, `thing` |
-| `name` | preferred display name (case preserved) |
-| `aliases` | other names seen in notes, case preserved; matching is case-folded |
+| `name` | the one canonical name, shown everywhere: Unicode NFKC, trimmed, case-folded, every run of whitespace, punctuation or underscores collapsed to one `_` (snake_case for several words), none at either end (`ids.canonical_name`: `Laurent-Philippe Albou` is `laurent_philippe_albou`; `Memory`, `memory` and `MEMORY.` are `memory`) |
+| `name_key` | the lookup key of the name (`ids.name_key`, equal to the canonical name); unique among live entities, so a person never sees two entities that differ only by case, spacing or punctuation |
+| `display_name` | the first surface form a note wrote (`Laurent-Philippe Albou`), kept for clients that want it; a rename replaces it |
+| `aliases` | other names seen in notes, each stored with its surface form and its key (`alias_key`); shown once per canonical name and never the entity's own; exact matching is by key |
 | `summary` | one model-written sentence saying what the notebook knows about it, rewritten when a note tells something new (each revision kept) |
 | `first_seen`, `last_seen` | `occurred_at` of the first and latest note mentioning it |
 | `note_count` | number of notes that mention it |
 | `merged_into` | set when the model decided this entity is the same as another; the record stays so old links still resolve |
 | `embedding` | vector of `name + aliases + summary`, refreshed when the summary changes |
 
-Entities are created only by revisions. The id is minted from the name chosen by the model at
-creation time; later renames add aliases and may change `name`, never the id.
+Entities are created only by revisions. The id is minted from the canonical name of the name chosen
+by the model at creation time; later renames add aliases and may change `name`, never the id.
+
+One canonical name per entity is a deterministic guarantee, applied when a revision is applied
+(`Notebook.apply_revision`, `abstractnote.store.names`): an `entity.create` whose canonical name a
+live entity already has becomes a reuse of that entity, whatever the model decided. The surface forms
+become its aliases, later ops of the revision follow it (an identical statement reinforces the
+existing one, a statement linking the entity to itself is left out), the revision records a warning
+(with `kind_conflict` when the kinds differ: the existing kind is kept, never a second entity), and
+the stored revision is the rewritten one, so a replay agrees. A rename onto a canonical name another
+live entity has is refused (that is a merge). Aliases never force a reuse: an alias is the model's
+word for an entity, and only produces candidates.
+
+Notebooks written before canonical names (schema 1) are upgraded on open: `name_key`, `display_name`
+and `alias_key` are filled in, a later live entity whose canonical name an earlier one holds is marked
+(`key_clash_with`), and the next processed note runs the repair, `Notebook.normalize_entities`
+(`abstractnote normalize`, `POST /note/entities/normalize`): each group of live entities sharing a
+canonical name is merged into its earliest entity, one `entity.merge` revision per merged entry with
+source `{client, account}` (`migration` for the automatic run), the merged entry's names kept as
+aliases. Reads follow merges, so its statements, relations, notes and tasks come with it; an unmerge
+undoes it, and the separated entry takes the first free `<name>_2`, `<name>_3` so two live entities
+never share a canonical name. A pair a person separated is never joined again by the repair.
 
 ## Claim
 
@@ -229,12 +251,13 @@ Rules:
 | Retry | same idempotency key (live) or source key (import) | same `note_id`, status `duplicate`, nothing else written |
 | Same words again | exact `text_norm` hash equal to an earlier note | a new note; the earlier one is the strongest `ex:revisits` candidate; the answer says "you noted this on <date>" |
 | Near-duplicate note | vector cosine over note embeddings, threshold 0.92 | kept as a distinct note, linked with `ex:revisits` to the earlier one: a revisit is a signal, not noise |
-| Entity | candidates from alias match (case-folded), full-text on name and aliases, vector k-nearest on entity embeddings; the model decides `same`, `different`, `unsure` per mention and may propose a merge of two existing entities | `entity.create`, `entity.alias`, `entity.merge` ops |
+| Same canonical name | `name_key` of the mention's name equal to a live entity's: deterministic normalisation (case, spacing, punctuation, NFKC), not an identity judgement | always the first candidate; a create of that name is filed under the existing entity at apply time (warning, `kind_conflict` when the kinds differ); older notebooks repaired by `normalize_entities` |
+| Entity | candidates from exact key match on names and aliases (`name_key`, `alias_key`), full-text on name and aliases, vector k-nearest on entity embeddings; the model decides `same`, `different`, `unsure` per mention and may propose a merge of two existing entities (`Gateway` versus `abstractgateway` is this level) | `entity.create`, `entity.alias`, `entity.merge` ops |
 | Claim | same `(subject, predicate, object)` after resolution | `claim.reinforce` instead of a new claim |
 | Conflicting claim | same `(subject, predicate)` with a different object and the model marks the predicate single-valued, or the note's stance is `revise` or `retract` | `claim.supersede` or `claim.retract` with reason; history kept |
 
 No regular-expression or keyword heuristics decide identity. Deterministic steps only produce
-candidates and exact-hash matches.
+candidates, exact-hash matches and the canonical name key (ADR 0004, amended).
 
 ## AbstractMemory projection
 

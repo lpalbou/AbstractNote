@@ -13,3 +13,6 @@ Entity kinds are `person, org, project, concept, place, event, artifact, softwar
 
 ## Consequences
 Quality depends on prompt and schema design, which are versioned files; consolidation is eventual (a later reflect pass can merge what an earlier pass left as `closeMatch`); every decision carries a reason stored in the revision.
+
+## Amendment (2026-10-19): the canonical name key
+The canonical name key is deterministic normalisation, not identity judgement. Every entity has one canonical name (`ids.canonical_name`: Unicode NFKC, trimmed, case-folded, runs of whitespace and punctuation collapsed to one `_`), unique among live entities, and two names with the same key are one entity: a create of a taken key is filed under the existing entity at apply time whatever the model decided, and older notebooks are repaired by reversible merges (`normalize_entities`). Nothing else is decided this way: two different keys (`Gateway` and `abstractgateway`, `observer` and `AbstractObserver`) and a name that is only another entity's alias stay the model's decision and the review inbox's, and alias keys only produce candidates.

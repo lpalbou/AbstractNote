@@ -11,6 +11,14 @@ AbstractNote integration); the web app is `@abstractframework/note` on npm.
 
 ### Changed
 
+- **Entities**: every entity has one canonical name, shown everywhere: lower case, with spaces and
+  punctuation as one underscore (`Laurent-Philippe Albou` is `laurent_philippe_albou`), so `Memory`
+  and `memory` are one entity, never two; the first way a note wrote it stays available as
+  `display_name`. A new mention with a name the notebook already has is filed under that entity,
+  whatever the model decided. An older notebook joins its same-name entities when it next processes a
+  note, or on request with `abstractnote normalize` or `POST /note/entities/normalize` (`--dry-run`
+  lists them first); each join can be undone. Different names for one thing (`Gateway` and
+  `abstractgateway`) stay a matter for the model and your review.
 - **Capture**: reading a notebook never changes it. Capture, quick filing, your own actions and
   archiving first finish any change a stopped process left half applied; `abstractnote recover`
   does it on request.
