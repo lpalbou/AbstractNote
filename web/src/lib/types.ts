@@ -67,6 +67,8 @@ export type EntityCard = EntityRef & {
   merged_from?: string[];
   /** Echoed when the card was built from what the archive held on a date (`as_received`). */
   as_received?: string;
+  /** The community the entity belongs to (W17); null when it is in none. */
+  community?: { community_id: string; label: string } | null;
 };
 export type EntityListItem = EntityRef & { aliases?: string[]; summary?: string; first_seen?: string; last_seen?: string; note_count?: number; merged_into?: string | null };
 /** Pinned: GET /note/entities/{id}?as_merged=true, the entry's own record (not followed to the survivor of a merge). */
@@ -99,7 +101,8 @@ export type ClaimChain = {
   revision?: { summary?: string } | null;
 };
 
-export type GraphNode = { id: string; kind: string; name: string; display_name?: string; first_seen?: string; last_seen?: string; note_count?: number; summary?: string };
+/** `community_id` (W17): the community the entity belongs to; null when it is in none. */
+export type GraphNode = { id: string; kind: string; name: string; display_name?: string; first_seen?: string; last_seen?: string; note_count?: number; summary?: string; community_id?: string | null };
 export type GraphEdge = { source: string; target: string; predicate: string; first_seen?: string; last_seen?: string; count: number; active: boolean };
 /** `as_received` is echoed when the graph was asked for what the archive held on a date (docs/api.md "Three dates"). */
 export type Graph = { as_of: string; as_received?: string; nodes: GraphNode[]; edges: GraphEdge[] };
@@ -180,4 +183,24 @@ export type RecallOutput = {
   open_loops?: Task[];
   follow_ups?: string[];
   dossier_note_id?: string;
+};
+
+/** GET /note/communities items (W17): groups of entities the notebook found together, each with a label. */
+export type CommunityEntity = { entity_id: string; name: string; kind: string; note_count: number };
+export type Community = { community_id: string; label: string; summary: string; kind: string; size: number; top_entities: CommunityEntity[]; stale_label: boolean; labelled_at: string };
+export type Communities = { items: Community[] };
+/** GET /note/stats (W17): what the notebook has accumulated. `week` is the Monday (YYYY-MM-DD); `month` YYYY-MM. */
+export type WeekActivity = { week: string; notes: number; revisions: number; new_entities: number; claims_added: number; claims_superseded: number };
+export type NoteStats = {
+  totals: { notes_by_kind: Record<string, number>; notes_by_source: Record<string, number>; attachments_by_mime: Record<string, number> };
+  activity_weekly: WeekActivity[];
+  entities_by_kind: Record<string, number>;
+  top_entities: Array<{ entity_id: string; name: string; kind: string; note_count: number; first_seen: string; last_seen: string }>;
+  claims_by_predicate: Array<{ predicate: string; count: number }>;
+  tasks: { open: number; closed: number };
+  insights_by_kind: Record<string, number>;
+  communities: number;
+  processing: { understood: number; queued: number; failed: number };
+  growth_monthly: Array<{ month: string; entities: number; claims: number }>;
+  quiet_entities: Array<{ entity_id: string; name: string; last_seen: string }>;
 };

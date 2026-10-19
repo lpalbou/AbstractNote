@@ -41,6 +41,12 @@ export function drift(mock: unknown, rec: unknown, at = ""): string[] {
   return [];
 }
 
+/**
+ * Keys the mock serves ahead of the recordings: W17 adds communities (graph nodes' community_id) after the
+ * recordings were made. Re-record, then empty this list (the check above goes red when a listed key is gone).
+ */
+const AHEAD: Record<string, string[]> = { note_graph_as_received_200: [".nodes[0].community_id extra"] };
+
 let server: http.Server;
 let base = "";
 const H = { Authorization: `Bearer ${MOCK_TOKEN}`, "Content-Type": "application/json" };
@@ -86,7 +92,11 @@ describe("mock follows the recorded gateway", () => {
         }
         return;
       }
-      expect(drift(body, rec.body)).toEqual([]);
+      const ahead = AHEAD[name] || [];
+      const d = drift(body, rec.body);
+      // Each key the mock serves ahead of the recording must still be there (and only those are excused).
+      for (const k of ahead) expect(d, `${name}: ${k} is listed as served ahead of the recording`).toContain(k);
+      expect(d.filter((k) => !ahead.includes(k))).toEqual([]);
     });
   }
 

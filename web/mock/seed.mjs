@@ -51,6 +51,21 @@ const E = {
 };
 
 /*
+ * Communities (W16, the shapes W17 serves: GET /note/communities, graph nodes' community_id, the entity
+ * card's community): [key, label, summary, kind, members, labelled_at, stale_label]. Six groups over the
+ * sixteen live entities (Dana R. is merged into Dana and follows her). "Dana at the Lyon office" was named
+ * in July and the group changed since (Dana moved to Paris): its label is stale.
+ */
+const C = [
+  ["lut", "LUT prefill", "The prefill acceleration project, its budget and the Pareto analysis Dana asked for.", "project", ["lut", "pareto", "report"], "2026-10-03T06:00"],
+  ["kernels", "Benchmarks and MLX kernels", "Priya's benchmarks and the MLX kernels behind the prefill numbers.", "concept", ["priya", "mlx", "priyaS"], "2026-10-03T06:00"],
+  ["watch", "Watch app and releases", "Marc's two-tap watch capture and the release train he now leads.", "project", ["watch", "marc", "release"], "2026-10-17T06:00"],
+  ["offices", "Dana at the Lyon office", "Dana and where she works: the Lyon office first, Paris since September.", "person", ["dana", "paris", "lyon"], "2026-08-01T06:00", true],
+  ["note", "The note app", "AbstractNote itself: remembering how understanding changed, and the effort dial.", "software", ["note", "effort"], "2026-10-17T06:00"],
+  ["castor", "Castor", "The persistent entity, its model and the design team Sophie is joining.", "project", ["castor", "sophie"], "2026-10-17T06:00"],
+];
+
+/*
  * Notes: [when (UTC), kind, title, text, topics, entity keys, claims, extra]
  * claims: [ref, subject, predicate, object (entity key or literal), {supersedes?, certainty?}]
  * extra: {tasks_open, tasks_close, status, error}
@@ -160,7 +175,7 @@ export function buildSeed() {
   for (const [key, [id, kind, name, aliases, summary]] of Object.entries(E)) {
     entities.set(id, {
       key, entity_id: id, kind, name, aliases: [...aliases], summary, summary_history: [],
-      first_seen: null, last_seen: null, note_count: 0, merged_into: null, created_revision: null, created_at: null,
+      first_seen: null, last_seen: null, note_count: 0, merged_into: null, created_revision: null, created_at: null, community_id: null,
     });
   }
   const eid = (key) => E[key][0];
@@ -286,6 +301,15 @@ export function buildSeed() {
   addInsight("priya", "2026-10-17T06:00", "cue", "Priya has gone quiet", "Priya has not come up since 26 September. What is she working on now?", [8, 19], ["priya"]);
   addInsight("castor", "2026-10-16T06:00", "reminder", "Castor's model is a month old", "Castor moved to Qwen 27B a month ago. Is it still the right model?", [16], ["castor"]);
 
+  // Communities: each live entity in exactly one; the merged entry follows the one it joined.
+  const communities = new Map();
+  for (const [key, label, summary, kind, members, labelled, stale = false] of C) {
+    const community_id = makeId("cm", key);
+    communities.set(community_id, { community_id, label, summary, kind, members: members.map(eid), stale_label: stale, labelled_at: iso(labelled) });
+    for (const m of members) entities.get(eid(m)).community_id = community_id;
+  }
+  for (const e of entities.values()) if (e.merged_into) e.community_id = entities.get(e.merged_into).community_id;
+
   // W1 DEFAULT_SETTINGS shape.
   const settings = {
     filing_model: { provider: null, model: null },
@@ -295,5 +319,5 @@ export function buildSeed() {
     process_inline_default: false,
   };
 
-  return { entities, notes, claims, revisions, tasks, queue, insights, settings, entityKey: eid };
+  return { entities, notes, claims, revisions, tasks, queue, insights, settings, communities, entityKey: eid };
 }

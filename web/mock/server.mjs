@@ -156,8 +156,72 @@ export function createMockGateway(options = {}) {
       summary_history: history, first_seen: e.first_seen, last_seen: notes.length ? notes[notes.length - 1].occurred_at : e.last_seen,
       note_count: notes.length, beliefs, relations: rels, notes: notes.map(noteRef).reverse(),
       open_tasks: [...db.tasks.values()].filter((t) => t.status === "open" && t.entity_ids.includes(id)).map(taskView),
+      community: communityRef(e.community_id),
       as_of: at || null, ...(rcv ? { as_received: rcv } : {}), resolved_from: id !== asked ? asked : null, merged_from: [...db.entities.values()].filter((m) => m.merged_into === id).map((m) => m.entity_id), merged_into: null,
       sparkline: [...notes.reduce((m, n) => m.set(n.occurred_at.slice(0, 7), (m.get(n.occurred_at.slice(0, 7)) || 0) + 1), new Map())].map(([month, n]) => ({ month, notes: n })),
+    };
+  }
+
+  // ------------------------------------------------------------ communities and stats (W16 mock of W17's routes)
+  const communityRef = (cid) => {
+    const c = cid ? db.communities.get(cid) : null;
+    return c ? { community_id: c.community_id, label: c.label } : null;
+  };
+  /** GET /note/communities items, largest first (ties by label). */
+  function communityItems() {
+    return [...db.communities.values()]
+      .map((c) => {
+        const live = c.members.map(ent).filter((e) => e && !e.merged_into);
+        const top = [...live].sort((a, b) => b.note_count - a.note_count || a.name.localeCompare(b.name)).slice(0, 3);
+        return { community_id: c.community_id, label: c.label, summary: c.summary, kind: c.kind, size: live.length, top_entities: top.map((e) => ({ entity_id: e.entity_id, name: e.name, kind: e.kind, note_count: e.note_count })), stale_label: c.stale_label, labelled_at: c.labelled_at };
+      })
+      .sort((a, b) => b.size - a.size || a.label.localeCompare(b.label));
+  }
+  const countBy = (rows, key) => rows.reduce((m, r) => {
+    const k = key(r);
+    if (k !== null && k !== undefined) m[k] = (m[k] || 0) + 1;
+    return m;
+  }, {});
+  const mondayOf = (isoString) => {
+    const d = new Date(isoString);
+    const day = (d.getUTCDay() + 6) % 7;
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day)).toISOString().slice(0, 10);
+  };
+  /** GET /note/stats: what the notebook has accumulated (16 weeks of activity ending with the latest note's week). */
+  function stats() {
+    const notes = [...db.notes.values()];
+    const live = [...db.entities.values()].filter((e) => !e.merged_into && e.first_seen);
+    const claims = [...db.claims.values()];
+    const latest = notes.reduce((m, n) => Math.max(m, ms(n.occurred_at)), 0);
+    const lastWeek = Date.parse(`${mondayOf(new Date(latest).toISOString())}T00:00:00Z`);
+    const weeks = Array.from({ length: 16 }, (_, i) => new Date(lastWeek - (15 - i) * 7 * 86400_000).toISOString().slice(0, 10));
+    const inWeek = (isoString, w) => Boolean(isoString) && mondayOf(isoString) === w;
+    const activity_weekly = weeks.map((week) => ({
+      week,
+      notes: notes.filter((n) => inWeek(n.occurred_at, week)).length,
+      revisions: db.revisions.filter((r) => inWeek(r.at, week)).length,
+      new_entities: live.filter((e) => inWeek(e.created_at, week)).length,
+      claims_added: claims.filter((c) => inWeek(c.observed_at, week)).length,
+      claims_superseded: claims.filter((c) => c.status === "superseded" && inWeek(c.valid_until, week)).length,
+    }));
+    const months = [...new Set([...live.map((e) => e.first_seen.slice(0, 7)), ...claims.map((c) => c.observed_at.slice(0, 7))])].sort();
+    const quietCut = latest - 21 * 86400_000;
+    return {
+      totals: {
+        notes_by_kind: countBy(notes, (n) => n.kind),
+        notes_by_source: countBy(notes, (n) => n.source?.client || "web"),
+        attachments_by_mime: countBy(notes.flatMap((n) => n.attachments || []), (a) => a.mime || "application/octet-stream"),
+      },
+      activity_weekly,
+      entities_by_kind: countBy(live, (e) => e.kind),
+      top_entities: [...live].sort((a, b) => b.note_count - a.note_count || a.name.localeCompare(b.name)).slice(0, 8).map((e) => ({ entity_id: e.entity_id, name: e.name, kind: e.kind, note_count: e.note_count, first_seen: e.first_seen, last_seen: e.last_seen })),
+      claims_by_predicate: Object.entries(countBy(claims, (c) => c.predicate)).map(([predicate, count]) => ({ predicate, count })).sort((a, b) => b.count - a.count || a.predicate.localeCompare(b.predicate)),
+      tasks: { open: [...db.tasks.values()].filter((t) => t.status === "open").length, closed: [...db.tasks.values()].filter((t) => t.status !== "open").length },
+      insights_by_kind: countBy([...db.insights.values()], (i) => i.insight_kind),
+      communities: db.communities.size,
+      processing: { understood: notes.filter((n) => n.status === "processed").length, queued: notes.filter((n) => n.status === "queued").length, failed: notes.filter((n) => n.status === "failed").length },
+      growth_monthly: months.map((month) => ({ month, entities: live.filter((e) => e.first_seen.slice(0, 7) <= month).length, claims: claims.filter((c) => c.observed_at.slice(0, 7) <= month).length })),
+      quiet_entities: live.filter((e) => ms(e.last_seen) < quietCut).sort((a, b) => ms(a.last_seen) - ms(b.last_seen)).map((e) => ({ entity_id: e.entity_id, name: e.name, last_seen: e.last_seen })),
     };
   }
 
@@ -714,6 +778,8 @@ export function createMockGateway(options = {}) {
       // The recorded answer's keys (untracked/fixtures/gateway/note_review_confirm_200.json, pinned in web/test/fixtures).
       return send(res, 200, { revision_id, summary, entities_created: [], entities_merged, claims_added: [], claims_reinforced: [], claims_superseded: it.kind === "close_match" ? [it._target.claim_id] : [], claims_retracted: [], tasks_opened: [], tasks_closed: [], warnings: [], review_id: it.review_id });
     }
+    if (np === "/communities") return send(res, 200, { items: communityItems() });
+    if (np === "/stats") return send(res, 200, stats());
     if (np === "/graph") return send(res, 200, graph(list("focus"), at, Number(q.get("depth") || 1), Number(q.get("limit") || 60), q.get("as_received") || null));
     if (np === "/timeline") {
       const gran = q.get("granularity") || "week";
@@ -891,7 +957,7 @@ export function createMockGateway(options = {}) {
     const nodes = [...ids].slice(0, limit).map((id) => {
       const e = ent(id);
       const notes = notesOf(id).filter((n) => (!at || ms(n.occurred_at) <= ms(at)) && heldNote(n, rcv));
-      return { id, kind: e.kind, name: e.name, first_seen: e.first_seen, last_seen: notes.length ? notes[notes.length - 1].occurred_at : e.first_seen, note_count: notes.length, summary: e.summary };
+      return { id, kind: e.kind, name: e.name, first_seen: e.first_seen, last_seen: notes.length ? notes[notes.length - 1].occurred_at : e.first_seen, note_count: notes.length, summary: e.summary, community_id: e.community_id || null };
     });
     const nodeIds = new Set(nodes.map((n) => n.id));
     const edges = rels.filter((r) => nodeIds.has(r.source) && nodeIds.has(r.target)).map((r) => {
