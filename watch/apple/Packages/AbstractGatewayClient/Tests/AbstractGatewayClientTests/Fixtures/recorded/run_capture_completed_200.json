@@ -1,0 +1,52 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/gateway/runs/ea970aa1-7e90-49a4-8c4e-7c9a59f19908",
+    "body": null
+  },
+  "status": 200,
+  "body": {
+    "run_id": "ea970aa1-7e90-49a4-8c4e-7c9a59f19908",
+    "workflow_id": "abstractnote@0.1.0:note-capture",
+    "status": "completed",
+    "current_node": "end_queued",
+    "created_at": "2026-10-19T00:03:43.115224+00:00",
+    "updated_at": "2026-10-19T00:03:44.213268+00:00",
+    "actor_id": "gateway",
+    "session_id": "s-smoke-c7cbd584",
+    "parent_run_id": null,
+    "error": null,
+    "flow_warnings": null,
+    "paused": false,
+    "pause_reason": null,
+    "paused_at": null,
+    "resumed_at": null,
+    "waiting": null,
+    "is_scheduled": false,
+    "schedule": null,
+    "limits": {
+      "tokens": {
+        "estimated_used": 0,
+        "max_tokens": 16384,
+        "max_input_tokens": null,
+        "pct": 0.0,
+        "warn_tokens_pct": 80
+      }
+    },
+    "run_lifecycle": null,
+    "is_draft": false,
+    "output": {
+      "response": "Saved as event “Dana and the LUT budget”.",
+      "note_id": "nt_gembktcb2st5aqddwa2jvqw36j",
+      "status": "queued",
+      "success": true
+    },
+    "session_history": null,
+    "automation_id": null,
+    "role": null,
+    "occurrence_index": null,
+    "session_kind": "chat",
+    "legacy": false,
+    "workspace_root": "<scratch>/data/users/default/alice/runtime/workspaces/session-s-smoke-c7cbd584-f77d84c22ed8"
+  }
+}

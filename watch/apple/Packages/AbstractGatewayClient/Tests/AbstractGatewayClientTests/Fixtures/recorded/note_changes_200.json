@@ -1,0 +1,57 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/gateway/note/changes",
+    "body": null
+  },
+  "status": 200,
+  "body": {
+    "cursor": "WyJjaGciLCIyMDI2LTEwLTE5VDAwOjAzOjU0WiIsWyJlbnRpdHk6ZXg6cGVyc29uLWRhbmEtMiIsImVudGl0eTpleDpwcm9qZWN0LWx1dC0yIl1d",
+    "notes": [
+      {
+        "note_id": "nt_gembktcb2st5aqddwa2jvqw36j",
+        "title": "Dana and the LUT budget",
+        "kind": "event",
+        "occurred_at": "2026-10-19T09:12:00Z",
+        "excerpt": "Met Dana about the LUT budget; she wants the Pareto by Friday. Met Dana about the LUT budget; she wants the Pareto by Friday."
+      },
+      {
+        "note_id": "nt_ga4vfs5wkkkhjv5cdpbbvhqx7c",
+        "title": "Dana and the LUT budget",
+        "kind": "event",
+        "occurred_at": "2026-10-19T00:03:50Z",
+        "excerpt": "Met Dana about the LUT budget; she wants the Pareto by Friday."
+      }
+    ],
+    "entities": [
+      {
+        "entity_id": "ex:person-dana",
+        "name": "Dana",
+        "kind": "person",
+        "first_seen": "2026-10-19T09:12:00Z"
+      },
+      {
+        "entity_id": "ex:project-lut",
+        "name": "LUT",
+        "kind": "project",
+        "first_seen": "2026-10-19T09:12:00Z"
+      },
+      {
+        "entity_id": "ex:person-dana-2",
+        "name": "Dana",
+        "kind": "person",
+        "first_seen": "2026-10-19T00:03:50Z"
+      },
+      {
+        "entity_id": "ex:project-lut-2",
+        "name": "LUT",
+        "kind": "project",
+        "first_seen": "2026-10-19T00:03:50Z"
+      }
+    ],
+    "superseded_claims": [],
+    "closed_loops": [],
+    "failed_notes": [],
+    "insights": []
+  }
+}

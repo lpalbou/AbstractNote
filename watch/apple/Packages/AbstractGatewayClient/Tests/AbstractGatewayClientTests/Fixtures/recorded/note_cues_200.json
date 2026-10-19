@@ -1,0 +1,11 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/gateway/note/cues",
+    "body": null
+  },
+  "status": 200,
+  "body": {
+    "items": []
+  }
+}

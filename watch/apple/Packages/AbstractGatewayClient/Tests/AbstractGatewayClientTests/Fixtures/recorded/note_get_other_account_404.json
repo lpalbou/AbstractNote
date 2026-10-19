@@ -1,0 +1,11 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/gateway/note/notes/nt_gembktcb2st5aqddwa2jvqw36j",
+    "body": null
+  },
+  "status": 404,
+  "body": {
+    "detail": "That note is not in your notebook."
+  }
+}

@@ -33,15 +33,21 @@ the gateway is [docs/clients.md](../../../docs/clients.md) and [docs/api.md](../
 
 | When | Request |
 |---|---|
-| Send | `POST /api/gateway/runs/start` `{bundle_id: "abstractnote", flow_id: "note-capture", session_id, input_data: {text, occurred_at, location?, source: {client: "watch"}, idempotency_key, process_inline: false, context?: {about}}}`, then `GET /runs/{id}` every second until `output.response` (60 s at most; later than that the screen says the answer is late) |
+| Send | `POST /api/gateway/runs/start` `{bundle_id: "abstractnote", flow_id: "note-capture", session_id, input_data: {text, occurred_at, location?, source: {client: "watch"}, idempotency_key, process_inline: false, session_id, context?: {about}}}` (`input_data.session_id` repeats the request's: the gateway does not hand it to the flow), then `GET /runs/{id}` every second until `output.response` (60 s at most; later than that the screen says the answer is late) |
 | Try again after a failed send | the same body with the same `idempotency_key` (made when Send was tapped), or, when the run had started, the same run read again |
-| Ask | `runs/start` with `note-recall` `{question, effort: "standard"}`, then `output.response` and `output.evidence` (90 s at most) |
+| Ask | `runs/start` with `note-recall` `{question, effort: "standard", session_id}`, then `output.response` and `output.evidence` (90 s at most) |
 | Dig deeper | `runs/start` with `note-recall` `{question, effort: "deep"}`; not followed: the answer arrives as an insight in Today |
 | Today | `GET /note/changes?since=<cursor>`, `/note/insights?acked=false`, `/note/tasks?status=open`, `/note/cues`, `/note/overview` (its `resurfacing` is "On this day"), read together; the cursor in the answer is kept for the next visit |
 | Got it / Close | `POST /note/insights/{id}/ack` / `POST /note/tasks/{id}/close`; a 409 means it was already done elsewhere and counts as done |
 | Add a note about this | a capture whose `input_data.context.about` is `{kind: insight|task|cue, id, title}` |
 | A note's page | `GET /note/notes/{id}` |
 | Sign out of an emailed-code session | `POST /session/logout` |
+
+A run that fails, or a flow that refuses its input (it completes with `output.success: false`
+and `output.error`), shows the flow's own sentence without the runtime's "Runtime error: " prefix;
+with no sentence, the screen's own one. The watch never starts the processor ("Process now"); a
+client that does sends `POST /automations/{id}/commands {"command_id": "<uuid>", "type":
+"automation.run_now"}` and reads a 409 `automation_busy` as "already running" (docs/api.md).
 
 The watch never sends a user, tenant or runtime id: the gateway picks the notebook from the
 credential. Reads are retried after 1 s and 3 s; writes are sent once. A 401 stops every request

@@ -78,9 +78,14 @@ extension GatewayClient {
         switch run.status {
         case "completed":
             guard let output = run.output else { throw GatewayError.unexpectedAnswer("completed run \(run.runId) has no output") }
+            // A flow that refused its input completes with `{success: false, error}` (recorded:
+            // run_capture_path_refused): a failure with its sentence, not an unreadable answer.
+            if case .bool(false)? = output["success"] {
+                return .failed(RunProgress<A>.cleanError(output["error"]?.stringValue ?? run.error))
+            }
             do { return .done(try output.decode(A.self)) }
             catch { throw GatewayError.unexpectedAnswer("run \(run.runId) output: \(error)") }
-        case "failed", "cancelled": return .failed
+        case "failed", "cancelled": return .failed(RunProgress<A>.cleanError(run.error))
         default: return run.waitsOnPerson ? .needsPerson : .working
         }
     }
@@ -204,7 +209,7 @@ public actor LiveGatewayClient: GatewayClient {
     }
 
     public func startRecall(question: String, effort: RecallEffort, sessionId: String) async throws -> String {
-        let body = RecallStart(session_id: sessionId, input_data: .init(question: question, effort: effort.rawValue))
+        let body = RecallStart(session_id: sessionId, input_data: .init(question: question, effort: effort.rawValue, session_id: sessionId))
         return try decodeRunId(try await request("POST", "api/gateway/runs/start", body: body, timeout: 30))
     }
 

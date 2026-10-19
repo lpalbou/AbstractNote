@@ -1,0 +1,215 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/gateway/note/overview",
+    "body": null
+  },
+  "status": 200,
+  "body": {
+    "recent": [
+      {
+        "note_id": "nt_gembktcb2st5aqddwa2jvqw36j",
+        "title": "Dana and the LUT budget",
+        "kind": "event",
+        "occurred_at": "2026-10-19T09:12:00Z",
+        "excerpt": "Met Dana about the LUT budget; she wants the Pareto by Friday. Met Dana about the LUT budget; she wants the Pareto by Friday."
+      },
+      {
+        "note_id": "nt_ga4vfs5wkkkhjv5cdpbbvhqx7c",
+        "title": "Dana and the LUT budget",
+        "kind": "event",
+        "occurred_at": "2026-10-19T00:03:50Z",
+        "excerpt": "Met Dana about the LUT budget; she wants the Pareto by Friday."
+      }
+    ],
+    "entities": [
+      {
+        "entity_id": "ex:person-dana",
+        "name": "Dana",
+        "kind": "person",
+        "note_count": 1,
+        "last_seen": "2026-10-19T09:12:00Z"
+      },
+      {
+        "entity_id": "ex:project-lut",
+        "name": "LUT",
+        "kind": "project",
+        "note_count": 1,
+        "last_seen": "2026-10-19T09:12:00Z"
+      },
+      {
+        "entity_id": "ex:person-dana-2",
+        "name": "Dana",
+        "kind": "person",
+        "note_count": 1,
+        "last_seen": "2026-10-19T00:03:50Z"
+      },
+      {
+        "entity_id": "ex:project-lut-2",
+        "name": "LUT",
+        "kind": "project",
+        "note_count": 1,
+        "last_seen": "2026-10-19T00:03:50Z"
+      }
+    ],
+    "insights": [],
+    "resurfacing": [],
+    "activity": [
+      {
+        "day": "2026-09-19",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-09-20",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-09-21",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-09-22",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-09-23",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-09-24",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-09-25",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-09-26",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-09-27",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-09-28",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-09-29",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-09-30",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-10-01",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-10-02",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-10-03",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-10-04",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-10-05",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-10-06",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-10-07",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-10-08",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-10-09",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-10-10",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-10-11",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-10-12",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-10-13",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-10-14",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-10-15",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-10-16",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-10-17",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-10-18",
+        "notes": 0,
+        "revisions": 0
+      },
+      {
+        "day": "2026-10-19",
+        "notes": 2,
+        "revisions": 2
+      }
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/gateway/note/tasks",
+    "body": null
+  },
+  "status": 200,
+  "body": {
+    "items": [
+      {
+        "task_id": "tk_2ulbrbtcbohsnxl3anctupktpd",
+        "note_id": "nt_ga4vfs5wkkkhjv5cdpbbvhqx7c",
+        "text": "Send Dana the Pareto by Friday",
+        "status": "open",
+        "due": null,
+        "closed_at": null
+      },
+      {
+        "task_id": "tk_oymy5lvok4m7oiex6dderddwca",
+        "note_id": "nt_gembktcb2st5aqddwa2jvqw36j",
+        "text": "Send Dana the Pareto by Friday",
+        "status": "open",
+        "due": null,
+        "closed_at": null
+      }
+    ]
+  }
+}

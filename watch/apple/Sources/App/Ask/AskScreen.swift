@@ -129,7 +129,9 @@ struct AskScreen: View {
             switch p {
             case .done(let a): phase = .answer(a); WKInterfaceDevice.current().play(.success)
             case .working: phase = .late
-            case .needsPerson, .failed: phase = .failed("No answer this time. Try again.")
+            case .needsPerson: phase = .failed("No answer this time. Try again.")
+            // The flow's own sentence when it gave one (without the runtime's prefix).
+            case .failed(let why): phase = .failed(why ?? "No answer this time. Try again.")
             }
         } catch {
             phase = .failed(model.say(error))

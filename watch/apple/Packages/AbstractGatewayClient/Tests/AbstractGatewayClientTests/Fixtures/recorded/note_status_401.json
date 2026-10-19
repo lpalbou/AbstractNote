@@ -1,0 +1,11 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/gateway/note/status",
+    "body": null
+  },
+  "status": 401,
+  "body": {
+    "detail": "Unauthorized"
+  }
+}

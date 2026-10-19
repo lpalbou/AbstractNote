@@ -47,11 +47,14 @@ The Xcode project is generated from `project.yml` and is not committed.
   capture body (idempotency key reused on retry, session id, `process_inline: false`, no
   identity fields); the sealed sign-in file (Data Protection option, owner-only, excluded from
   backup, gone on sign-out, never in UserDefaults); sign-in; read retries.
-- **Recorded fixtures (review 01 check S5)**: `recordedGatewayAnswersDecode` decodes every answer
-  recorded from a hermetic gateway in `../../untracked/fixtures/gateway/*.json` (or
-  `$ABSTRACTNOTE_GATEWAY_FIXTURES`) and requires recorded 401, 409 and 413 answers. With no
-  recordings it is reported as skipped, never as passed. The hand-written fixtures follow the
-  documented shapes and are to be replaced by the recordings.
+- **Recorded fixtures (review 01 check S5)**: `Fixtures/recorded/` holds answers recorded from the
+  hermetic gateway (status codes included: 401, 404, 409, 413), replayed through the live client
+  (`RecordedGatewayTests`): request shape, capture and recall outputs, a refused capture, Today's
+  reads, the refusals. When the repository's recordings folder (`../../untracked/fixtures/gateway/`,
+  or `$ABSTRACTNOTE_GATEWAY_FIXTURES`) exists, the bundled copies must match it (drift fails) and
+  every recording must be readable or on the explicit not-called-by-the-watch list; without it
+  (CI) that one test is reported as skipped. The hand-written fixtures at the top level cover only
+  what is not recorded yet.
 - **UI tests**: the `AbstractNoteWatchUITests` scheme taps through the sample notebook:
 
 ```sh

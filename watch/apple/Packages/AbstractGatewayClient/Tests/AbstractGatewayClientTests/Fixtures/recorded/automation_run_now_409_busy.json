@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/gateway/automations/921d325f-7496-5039-b9bc-cc0833cb0ad4/commands",
+    "body": {
+      "command_id": "<uuid>",
+      "type": "automation.run_now"
+    }
+  },
+  "status": 409,
+  "body": {
+    "detail": {
+      "reason_code": "automation_busy",
+      "message": "An occurrence is already running or waiting to run.",
+      "command_id": "34c25879-9d9d-449b-aaa0-a47b1f28cebc"
+    }
+  }
+}

@@ -1,4 +1,5 @@
 import Foundation
+import Testing
 @testable import AbstractGatewayClient
 
 /// One recorded exchange: `{"request": {"method", "path"}, "status", "body"}`.
@@ -15,7 +16,7 @@ struct Fixture {
             throw FixtureError.malformed(name)
         }
         self.method = method; self.path = path; self.status = status
-        self.body = try JSONSerialization.data(withJSONObject: body, options: [.fragmentsAllowed])
+        self.body = try JSONSerialization.data(withJSONObject: body, options: [.fragmentsAllowed, .sortedKeys])
     }
 
     /// A fixture shipped with the tests (Fixtures/<name>.json).
@@ -28,6 +29,10 @@ struct Fixture {
 }
 
 enum FixtureError: Error { case missing(String), malformed(String) }
+
+/// Every suite that uses `ReplayStub` is nested here: the stub's queue is shared, so they run one
+/// test at a time, never two suites side by side.
+@Suite(.serialized) enum ReplayGroup {}
 
 /// Every request is answered by the next queued fixture; the requests are kept for inspection.
 final class ReplayStub: URLProtocol, @unchecked Sendable {

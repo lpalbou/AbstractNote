@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/gateway/attachments/upload",
+    "body": {
+      "multipart": {
+        "session_id": "s-smoke-c7cbd584",
+        "file": "big.bin (1048577 bytes)"
+      }
+    }
+  },
+  "status": 413,
+  "body": {
+    "detail": "Attachment too large (1048577 bytes > 1048576 bytes)"
+  }
+}

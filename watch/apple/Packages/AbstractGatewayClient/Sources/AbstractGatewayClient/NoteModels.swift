@@ -55,6 +55,8 @@ struct CaptureStart: Encodable {
         var source = Source()
         var idempotency_key: String
         var process_inline = false
+        /// The gateway does not hand the request's `session_id` to the flow: it goes here too.
+        var session_id: String
         var context: About?
     }
     var bundle_id = NoteFlows.bundleId
@@ -65,13 +67,14 @@ struct CaptureStart: Encodable {
     init(_ c: Capture) {
         session_id = c.sessionId
         input_data = Input(text: c.text, occurred_at: ISO8601.string(c.occurredAt), location: c.location,
-                           idempotency_key: c.idempotencyKey, context: c.about.map { About(about: $0) })
+                           idempotency_key: c.idempotencyKey, session_id: c.sessionId, context: c.about.map { About(about: $0) })
     }
 }
 
 /// `POST /api/gateway/runs/start` for `note-recall`.
 struct RecallStart: Encodable {
-    struct Input: Encodable { var question: String; var effort: String }
+    /// `session_id` repeats the request's: the gateway does not hand it to the flow.
+    struct Input: Encodable { var question: String; var effort: String; var session_id: String }
     var bundle_id = NoteFlows.bundleId
     var flow_id = NoteFlows.recall
     var session_id: String
@@ -120,7 +123,17 @@ public enum RunProgress<Answer: Sendable & Hashable>: Sendable, Hashable {
     /// Stopped on a person: an approval or a question the watch cannot answer.
     case needsPerson
     case done(Answer)
-    case failed
+    /// The run failed or the flow refused the input; the sentence to show when the run gave one
+    /// (`output.error` or the run's `error`, without the runtime's "Runtime error: " prefix).
+    case failed(String?)
+
+    /// "Runtime error: Local file paths are not accepted here." → "Local file paths are not accepted here."
+    public static func cleanError(_ text: String?) -> String? {
+        guard var t = text?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+        let prefix = "Runtime error: "
+        if t.hasPrefix(prefix) { t = String(t.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces) }
+        return t.isEmpty ? nil : t
+    }
 }
 
 /// `{items, next_cursor}`: every note API list.

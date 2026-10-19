@@ -141,10 +141,11 @@ struct NoteScreen: View {
             case .done(let answer): phase = .saved(answer.response); WKInterfaceDevice.current().play(.success)
             case .working: phase = .late
             case .needsPerson: phase = .needsPerson
-            case .failed:
-                // The run failed: a new try starts a new run with the same key.
+            case .failed(let why):
+                // The run failed: a new try starts a new run with the same key. The flow's own
+                // sentence is shown when it gave one (without the runtime's prefix).
                 runId = nil
-                phase = .failed("Your note could not be saved. Try again.")
+                phase = .failed(why ?? "Your note could not be saved. Try again.")
                 WKInterfaceDevice.current().play(.failure)
             }
         } catch {

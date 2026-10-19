@@ -1,0 +1,29 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/gateway/runs/start",
+    "body": {
+      "bundle_id": "abstractnote",
+      "flow_id": "note-recall",
+      "session_id": "s-smoke-c7cbd584",
+      "input_data": {
+        "prompt": "What did Dana ask for?"
+      }
+    }
+  },
+  "status": 200,
+  "body": {
+    "run_id": "69078d9d-220c-4d75-accd-1937df5de39a",
+    "runner_warning": null,
+    "resolved_workflow": {
+      "source": "client",
+      "workflow_id": "abstractnote@0.1.0:note-recall",
+      "bundle_id": "abstractnote",
+      "bundle_version": "0.1.0",
+      "flow_id": "note-recall",
+      "registry_scope": "private",
+      "name": "Ask your notes",
+      "interface": null
+    }
+  }
+}
