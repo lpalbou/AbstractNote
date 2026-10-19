@@ -232,7 +232,7 @@ Detection is Louvain (`networkx`, fixed seed, resolution 1.0 by default) over th
 deterministic for a given networkx version: the same graph under the same networkx release gives the
 same communities, but another release may split it differently, so `meta.communities` records the
 `networkx` version of each computation (`GET /note/communities` reports it) and the dependency is
-capped at the releases that were tested (`networkx>=3.2,<3.7`);
+capped below the first release that changes the partition (`networkx>=3.2,<3.7`; 3.4 and 3.6 were tested, 3.7 differs);
 the weight of a pair is the number of its statements that were not retracted (merged entries count
 for their survivor) plus a co-mention weight: each note that mentions `k >= 2` live entities adds
 `1/((k-1)·log2 k)` to every pair among them, so a long note weighs `k/(2·log2 k)` in all rather than

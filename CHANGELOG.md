@@ -10,13 +10,19 @@ Install with `pip install "abstractnote[gateway]"` (AbstractGateway 0.15.11 or l
 AbstractNote integration); the web app is `@abstractframework/note` on npm.
 
 ### Added
+- **Watch**: a redesigned app on the wrist: one large field with a round mic and a Send capsule,
+  the state line Sending → Received → Organizing → Organized with a haptic on Received, a result card
+  with the kind, the title and tappable linked entities; Ask answers instantly by default (Quick) with
+  Standard one tap away and sources as rows; Today shows what changed since you last looked, one cue
+  at a time, the largest themes and open loops; entity and theme pages with "How it evolved".
 
 - **Themes**: the notebook finds the groups of things your notes keep bringing together (a project
   and its people, a set of tools, a recurring subject) without a model, and the weekly reflection
   names each one in a few words with one sentence on what holds it together. A theme keeps its name
   while it changes little and is named again when it has changed a lot. `GET /note/communities`
   lists them, `POST /note/communities/recompute` finds them again on request, and every entity
-  card says which theme it belongs to. A single long note no longer makes a theme of its own.
+  card says which theme it belongs to. Notes that mention many things count for less, so one long
+  note rarely forms a theme by itself (a theme held together by that note's own statements still can).
 - **Numbers**: `GET /note/stats` counts what the notebook has gathered: notes by kind and by where
   they came from, attachments, weekly activity over its whole span, people, projects and ideas,
   statements and how many were replaced, open and closed actions, insights, themes, processing, and

@@ -739,6 +739,9 @@ Pinned response shapes (clients decode these strictly; absent lists mean empty):
 | `GET /note/overview` | `{recent: [NoteRef], entities: [{entity_id, name, display_name, kind, note_count, last_seen}], insights: [Insight], resurfacing: [NoteRef], activity: [{day, notes, revisions}]}` |
 | `GET /note/cues` | `{items: [{cue_id, text, kind, subject: {kind, id, title}, evidence_note_ids, entity_ids}]}` (cues are insight notes; `cue_id` is the note id; `evidence_note_ids` and `entity_ids` are the insight's own: the notes it rests on and the entities it is about) |
 | `GET /note/tasks` | `{items: [{task_id, note_id, text, status, due, closed_at, age_days, stale}]}` (`age_days`: whole days since the task opened, until it closed for a closed one; `stale`: still open after 60 days, `STALE_DAYS` in `abstractnote.recall.reflect`) |
+| `GET /note/search` | `{query, order, as_of, considered, notes: [{note_id, title, kind, occurred_at, excerpt, score, relevance, matched_by, matched_entities, matched_claims, entity_ids, topics, insight_kind}], entities: [{entity_id, name, display_name, kind, aliases, summary, note_count, first_seen, last_seen, first_at, latest_at, note_ids, score, matched_by, merged_into}], claims: [{claim_id, subject_id, subject_name, predicate, object_id, object_name, object_literal, certainty, stance, status, observed_at, valid_from, valid_until, evidence, note_id, note_ids, superseded_by, disputed_with, reinforced_count, score}], facets, warnings}` |
+| `GET /note/entities/{id}` | `{entity_id, name, display_name, kind, aliases, summary, summary_history, first_seen, last_seen, note_count, as_of, beliefs: [claim], relations: [{predicate, direction, other_id, other_name, count, first_seen, last_seen, active}], notes: [NoteRef], open_tasks, sparkline, community: {community_id, label, kind, size, stale_label} or null, merged_into, merged_from, resolved_from}` |
+| `GET /note/entities/{id}/timeline` | `{entity_id, since, until, items: [{type: note|claim|superseded|retracted, at, note?: NoteRef, claim?: claim}]}` (claims carry `evidence`, not a rendered sentence) |
 | `GET /note/notes/{id}` | `{note_id, title, text, kind, occurred_at, received_at, status, topics, summary, source, location, attachments: [...], revision: {...} or null, entities: [...], claims: [...], revisits: [NoteRef], insight: {kind, evidence_note_ids, entity_ids, acked_at} or null}` (`insight` is set on an insight note, `kind` being its `insight_kind`, and null on every other note) |
 | `GET /note/review` | `{items: [{review_id, kind, why, reason, at, sides: [ReviewSide], evidence_note_ids, actions: [{action, method, path, body}]}], next_cursor}` (newest first; `kind` `close_match`, `merge` or `contradiction`; `why` the rule; `reason` the processor's stated reason for a merge, else null; `at` when the notebook recorded it; `evidence_note_ids` starts with the note that raised it; `next_cursor` is always null) |
 | `ReviewSide` | `{type, id, name, kind, note_ids}` (`type` `entity`: `name` its canonical name, `kind` its entity kind, `note_ids` its newest notes; `type` `claim`: `name` the statement in plain words, `kind` null, `note_ids` the note it came from) |
@@ -1470,7 +1473,7 @@ Detection is Louvain (`networkx`, fixed seed, resolution 1.0 by default) over th
 deterministic for a given networkx version: the same graph under the same networkx release gives the
 same communities, but another release may split it differently, so `meta.communities` records the
 `networkx` version of each computation (`GET /note/communities` reports it) and the dependency is
-capped at the releases that were tested (`networkx>=3.2,<3.7`);
+capped below the first release that changes the partition (`networkx>=3.2,<3.7`; 3.4 and 3.6 were tested, 3.7 differs);
 the weight of a pair is the number of its statements that were not retracted (merged entries count
 for their survivor) plus a co-mention weight: each note that mentions `k >= 2` live entities adds
 `1/((k-1)·log2 k)` to every pair among them, so a long note weighs `k/(2·log2 k)` in all rather than
@@ -2571,13 +2574,19 @@ Install with `pip install "abstractnote[gateway]"` (AbstractGateway 0.15.11 or l
 AbstractNote integration); the web app is `@abstractframework/note` on npm.
 
 ### Added
+- **Watch**: a redesigned app on the wrist: one large field with a round mic and a Send capsule,
+  the state line Sending → Received → Organizing → Organized with a haptic on Received, a result card
+  with the kind, the title and tappable linked entities; Ask answers instantly by default (Quick) with
+  Standard one tap away and sources as rows; Today shows what changed since you last looked, one cue
+  at a time, the largest themes and open loops; entity and theme pages with "How it evolved".
 
 - **Themes**: the notebook finds the groups of things your notes keep bringing together (a project
   and its people, a set of tools, a recurring subject) without a model, and the weekly reflection
   names each one in a few words with one sentence on what holds it together. A theme keeps its name
   while it changes little and is named again when it has changed a lot. `GET /note/communities`
   lists them, `POST /note/communities/recompute` finds them again on request, and every entity
-  card says which theme it belongs to. A single long note no longer makes a theme of its own.
+  card says which theme it belongs to. Notes that mention many things count for less, so one long
+  note rarely forms a theme by itself (a theme held together by that note's own statements still can).
 - **Numbers**: `GET /note/stats` counts what the notebook has gathered: notes by kind and by where
   they came from, attachments, weekly activity over its whole span, people, projects and ideas,
   statements and how many were replaced, open and closed actions, insights, themes, processing, and
