@@ -7,9 +7,14 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, with or without the leading v (example: 0.1.0)"
+        description: "Release version, with or without the leading v (example: 0.1.1)"
         required: true
         type: string
+      dry_run:
+        description: "Rehearse only: build, check and install the wheel, npm publish --dry-run (trusted-publisher token exchange included); no tag, no upload, no GitHub release"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -64,7 +69,8 @@ jobs:
       - name: Install (Python)
         run: |
           python -m pip install -U pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -e ".[dev,gateway]"
+          python -c "import abstractgateway.abstractnote_seam, abstractnote.gateway"
       - name: Pytest
         run: python -m pytest -q tests
       - uses: actions/setup-node@v4
@@ -99,6 +105,13 @@ jobs:
           python -m pip install -U pip build twine
           python -m build
           python -m twine check dist/*
+      - name: Install the built wheel in a clean environment
+        run: |
+          python -m venv /tmp/wheel-check
+          /tmp/wheel-check/bin/python -m pip install -U pip
+          /tmp/wheel-check/bin/python -m pip install dist/*.whl
+          /tmp/wheel-check/bin/abstractnote --help
+          /tmp/wheel-check/bin/python -c "import abstractnote; assert abstractnote.__version__ == '${{ needs.validate.outputs.version }}', abstractnote.__version__"
       - uses: actions/upload-artifact@v4
         with:
           name: python-dist
@@ -115,7 +128,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Create annotated tag for manual releases
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && !inputs.dry_run
         run: |
           tag="${{ needs.validate.outputs.tag }}"
           if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
@@ -134,6 +147,9 @@ jobs:
       - name: Tag already supplied by push trigger
         if: github.event_name != 'workflow_dispatch'
         run: echo "Using existing tag ${{ needs.validate.outputs.tag }}"
+      - name: Dry run creates no tag
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+        run: echo "Dry run, so no tag ${{ needs.validate.outputs.tag }} is created."
 
   publish-npm:
     name: Publish @abstractframework/note to npm
@@ -158,7 +174,23 @@ jobs:
         run: |
           npm ci
           npm run build
+      - name: npm supports trusted publishing
+        run: |
+          npm --version
+          node -e "const [a,b,c]=process.argv[1].split('.').map(Number); if (a<11||(a===11&&(b<5||(b===5&&c<1)))) { console.error('npm '+process.argv[1]+' is older than 11.5.1, the first with trusted publishing'); process.exit(1) }" "$(npm --version)"
+      - name: Rehearse the publish (dry run)
+        if: inputs.dry_run
+        working-directory: web
+        run: |
+          set -o pipefail
+          npm publish --dry-run --access public --provenance --loglevel verbose 2>&1 | tee publish-dry-run.log
+          if ! grep -q "Successfully retrieved and set token" publish-dry-run.log; then
+            echo "The npm trusted-publisher token exchange did not succeed for this repository and workflow; a real publish would fail."
+            exit 1
+          fi
+          echo "Trusted publisher accepted this workflow; npm publish --dry-run passed."
       - name: Publish
+        if: ${{ !inputs.dry_run }}
         working-directory: web
         run: |
           PKG_NAME="$(node -p "require('./package.json').name")"
@@ -173,6 +205,7 @@ jobs:
     name: Publish abstractnote to PyPI
     runs-on: ubuntu-latest
     needs: [validate, build-python, ensure-tag]
+    if: ${{ !inputs.dry_run }}
     environment:
       name: pypi
       url: https://pypi.org/project/abstractnote/
@@ -187,11 +220,14 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
+          skip-existing: true
 
   github-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
     needs: [validate, ensure-tag, publish-npm, publish-pypi]
+    # Only once BOTH registries hold the version; never on a dry run.
+    if: ${{ !inputs.dry_run && needs.publish-npm.result == 'success' && needs.publish-pypi.result == 'success' }}
     permissions:
       contents: write
     steps:

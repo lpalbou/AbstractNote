@@ -35,7 +35,8 @@ the parts fit; the topic pages go deeper into one area each and link back to it.
 
 [CONTRIBUTING.md](../CONTRIBUTING.md), [SECURITY.md](../SECURITY.md),
 [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md), [CHANGELOG.md](../CHANGELOG.md),
-[ACKNOWLEDGEMENTS.md](../ACKNOWLEDGEMENTS.md), [LICENSE](../LICENSE).
+[ACKNOWLEDGEMENTS.md](../ACKNOWLEDGEMENTS.md), [LICENSE](../LICENSE). Maintainers:
+[release.md](release.md) (rehearsing and publishing a release).
 
 The app folders have their own guides: [watch/apple/README.md](../watch/apple/README.md),
 [watch/apple/BUILD.md](../watch/apple/BUILD.md) and [phone/iphone/README.md](../phone/iphone/README.md).
