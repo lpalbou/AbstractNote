@@ -40,8 +40,8 @@ never blocking: the run starts, the client gets a run id, and the dossier appear
 The Remember view opens on what changed and lets you dig from there.
 
 1. **Since you last looked** (the default screen): what the notebook learned since your last
-   visit: new entities, beliefs that were superseded, loops that closed, insights, notes that
-   failed to process. It is a system-time delta from a cursor, so it is the same call an agent
+   visit: new entities, beliefs that were replaced ("Replaced") or withdrawn ("Withdrawn"), loops
+   that closed, insights, notes that failed to process. It is a system-time delta from a cursor, so it is the same call an agent
    makes at the start of every session (`GET /note/changes?since=`). Each item opens its subject.
 2. **Cue cards**: a few prompts the reflect flow generated from the graph, each answerable by
    adding a note: a person who went quiet, a decision that is a year old, a task mentioned three
