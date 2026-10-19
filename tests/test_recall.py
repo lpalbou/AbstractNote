@@ -66,6 +66,61 @@ def test_quick_search_fuses_fulltext_and_vectors_with_filters_and_facets(nb):
     assert note_search(ToolContext(nb=nb), "Dana", since="", until="", entities=[], topics=[])["notes"]
 
 
+def test_quick_search_entity_and_statement_hits_need_the_floor_and_a_returned_note(nb):
+    """Eval REPORT 4.3 item 4: entity and claim hits had no relevance floor (irrelevant in all 15 questions)."""
+    from abstractnote.recall.search import HIT_MIN_SCORE
+
+    h = history(nb)
+    out = note_search(ToolContext(nb=nb), "Acme")
+    by_id = {n["note_id"]: n for n in out["notes"]}
+    assert set(by_id) == {h["n1"], h["n2"]}
+    # Acme is named and carried by n1; Dana and LUT are carried by n1 too but do not match the words
+    assert [e["entity_id"] for e in out["entities"]] == ["ex:org-acme"]
+    acme = out["entities"][0]
+    assert acme["note_ids"] == [h["n1"]] and acme["score"] >= HIT_MIN_SCORE
+    assert acme["first_at"] == acme["latest_at"] == "2025-01-05T10:00:00Z"
+    assert by_id[h["n1"]]["matched_entities"] == ["ex:org-acme"] and by_id[h["n2"]]["matched_entities"] == []
+    assert all(0 <= n["relevance"] <= 1 for n in out["notes"])
+    # a statement hit is grouped under the note that made it
+    beta = note_search(ToolContext(nb=nb), "Beta")
+    assert [c["claim_id"] for c in beta["claims"]] == [h["beta"]]
+    assert beta["claims"][0]["note_ids"] == [h["n2"]]
+    assert {n["note_id"]: n["matched_claims"] for n in beta["notes"]}[h["n2"]] == [h["beta"]]
+    # first and latest date over the matching notes that carry the entity
+    dana = {e["entity_id"]: e for e in note_search(ToolContext(nb=nb), "Dana")["entities"]}["ex:person-dana"]
+    assert (dana["first_at"], dana["latest_at"]) == ("2025-01-05T10:00:00Z", "2025-03-01T10:00:00Z")
+    # an entity none of the returned notes carries is not a hit (Beta only appears after `until`)
+    early = note_search(ToolContext(nb=nb), "Beta Dana", until="2025-02-01")
+    assert [n["note_id"] for n in early["notes"]] == [h["n1"]]
+    assert "ex:org-beta" not in {e["entity_id"] for e in early["entities"]}
+    assert all(set(c["note_ids"]) <= {h["n1"]} for c in early["claims"])
+
+
+def test_quick_search_earliest_first(nb, capsys):
+    """Eval REPORT section 2: "when did we first mention X" had no answer."""
+    h = history(nb)
+    may = nb.capture("Kiwi launch planned with the board.", occurred_at="2025-05-01T10:00:00Z").note_id
+    april = nb.capture("Kiwi prototype shown to Dana.", occurred_at="2025-04-01T10:00:00Z").note_id
+    nb.capture("Quarterly numbers.", occurred_at="2024-12-01T10:00:00Z")
+    out = note_search(ToolContext(nb=nb), "Kiwi", order="earliest")
+    assert out["order"] == "earliest" and [n["note_id"] for n in out["notes"]] == [april, may]
+    assert [n["note_id"] for n in note_search(ToolContext(nb=nb), "Kiwi launch", order="earliest")["notes"]] == [may]
+    assert note_search(ToolContext(nb=nb), "Kiwi", order="")["order"] == "relevance"
+    assert [n["note_id"] for n in nb.search("Dana", order="earliest")["notes"]] == [h["n1"], h["n2"], april]
+    listed = [n["occurred_at"] for n in nb.search("", order="earliest")["notes"]]
+    assert listed == sorted(listed) and listed[0].startswith("2024-12-01")
+    with pytest.raises(ValueError):
+        nb.search("Kiwi", order="newest")
+    from abstractnote.cli import main
+
+    root = str(nb.root)
+    nb.close()
+    assert main(["search", "Kiwi", "--order", "earliest", "--notebook", root]) == 0
+    import json
+
+    assert [n["note_id"] for n in json.loads(capsys.readouterr().out)["notes"]] == [april, may]
+
+
 def test_quick_search_over_5k_notes_is_fast(nb):
     for i in range(5000):
         nb.capture(f"Note {i} about project {i % 37} and the release train {i % 11}", importer="bench",

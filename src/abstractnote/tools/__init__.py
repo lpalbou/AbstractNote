@@ -129,10 +129,11 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
           when_to_use="Before a task or to answer a question cheaply; filters by time, kind, entity and topic.")
     def note_search(query: str = "", since: Optional[str] = None, until: Optional[str] = None,
                     kinds: Optional[List[str]] = None, entities: Optional[List[str]] = None,
-                    topics: Optional[List[str]] = None, limit: int = 20, as_of: Optional[str] = None
-                    ) -> Dict[str, Any]:
-        """Quick search of the notes, entities and statements."""
-        return rec.note_search(ctx, query, since, until, kinds, entities, topics, limit, as_of)
+                    topics: Optional[List[str]] = None, limit: int = 20, as_of: Optional[str] = None,
+                    order: Optional[str] = None) -> Dict[str, Any]:
+        """Quick search of the notes, entities and statements; order "earliest" lists the matching notes oldest
+        first (to find when something was first mentioned)."""
+        return rec.note_search(ctx, query, since, until, kinds, entities, topics, limit, as_of, order)
 
     @tool(name="note_expand", description="Entity cards, timelines, relations and then-versus-now around notes or entities.")
     def note_expand(note_ids: Optional[List[str]] = None, entity_ids: Optional[List[str]] = None,

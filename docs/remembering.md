@@ -11,7 +11,8 @@ to spend. This page explains the design that the **Remember** view, the recall t
 |---|---|---|---|
 | Time | "around the release in September", "last winter" | what was going on then | the day and period views: notes, revisions, entities touched, what you believed then |
 | Person or thing | "Dana", "the LUT project" | everything you know, and how it changed | the entity card as of a moment, the claims timeline, then-versus-now |
-| Fragment | three words you are sure were in the note | the note | quick recall: full-text plus vector, grouped by entity and date |
+| Fragment | three words you are sure were in the note | the note | quick recall: full-text plus vector, the entities and statements grouped under the notes that carry them, each entity with its first and latest date |
+| First mention | "when did we first talk about X?" | the oldest note | quick recall in earliest order: the notes that match X, oldest first |
 | Feeling or shape | "that idea I was excited about", "a warning I wrote myself" | the note or the insight | kinds and topics as filters, insights as first-class notes |
 | Association | "it came up together with X" | the neighbours | graph expansion from the hits, relations with first and last seen |
 | Absence | "did I ever decide this?" "what have I dropped?" | the gap | open loops, contradictions, resurfacing, the reflect insights |
@@ -27,13 +28,27 @@ citations, and the web app renders that JSON.
 
 | Level | Budget | What runs | Returns |
 |---|---|---|---|
-| **quick** | under a second, no model | full-text (FTS5, BM25) plus vector search over notes, entities and claims; grouping by entity and month; facets | hits with excerpts, matched entities, matched claims, facets |
+| **quick** | under a second, no model | full-text (FTS5, BM25) plus vector search over notes, entities and claims, with a relevance floor; entities and statements grouped under the notes that carry them; relevance or earliest order; facets | hits with excerpts, matched entities with their first and latest date, matched claims, facets |
 | **standard** | seconds, one model call | quick retrieval, then graph expansion (entity cards as of the requested moment, claim timelines, neighbours, then-versus-now pairs), then one synthesis | an answer with citations, the evidence, the evolution summary, open loops, follow-ups |
 | **deep** | minutes, several model calls, runs in the background | a mining plan (sub-questions, time slices, entities, contradictions), several retrieval rounds with findings per slice, a dossier | the dossier as an answer and as a stored `synthesis` note; the web app and the watch show it when it is ready |
 
 The level is a parameter everywhere: the Remember view has an effort dial, the watch asks at
 standard by default, agents pass it explicitly, and the CLI takes `--effort`. A deep search is
 never blocking: the run starts, the client gets a run id, and the dossier appears as an insight.
+
+### Quick relevance
+
+Ranking fuses full-text and vector ranks, which orders hits but cannot tell a good hit from the best
+of a bad lot. So every hit also gets a relevance from 0 to 1: the share of the question's words it
+contains, each word weighted by how rare it is among your notes (the square of its inverse document
+frequency, so "Tailscale" counts far more than "when" or "first"; a word no note contains counts for
+nothing), raised but never lowered by the vector similarity. An entity or a statement is shown only
+when its relevance reaches 0.5 and one of the returned notes carries it (the note mentions the
+entity, or made or repeated the statement); it is shown under those notes, and an entity with the
+first and the latest date among the matching notes that carry it. Earliest order (`order=earliest`)
+lists the notes whose relevance reaches 0.75 oldest first: search for the subject ("Tailscale
+HTTPS") to answer "when did we first mention it". The thresholds are `HIT_MIN_SCORE` and
+`EARLIEST_MIN_SCORE` in `abstractnote.recall.search`.
 
 ## The Remember view
 

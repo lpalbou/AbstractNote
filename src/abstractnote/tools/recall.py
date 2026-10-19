@@ -19,9 +19,11 @@ def _blank(v: Any) -> Any:
 
 def note_search(ctx: ToolContext, query: str = "", since: Optional[str] = None, until: Optional[str] = None,
                 kinds: Optional[List[str]] = None, entities: Optional[List[str]] = None,
-                topics: Optional[List[str]] = None, limit: int = 20, as_of: Optional[str] = None) -> Dict[str, Any]:
+                topics: Optional[List[str]] = None, limit: int = 20, as_of: Optional[str] = None,
+                order: Optional[str] = None) -> Dict[str, Any]:
     return search(ctx.nb, query or "", since=_blank(since), until=_blank(until), kinds=_blank(kinds),
-                  entities=_blank(entities), topics=_blank(topics), limit=int(limit or 20), as_of=_blank(as_of))
+                  entities=_blank(entities), topics=_blank(topics), limit=int(limit or 20), as_of=_blank(as_of),
+                  order=_blank(order))
 
 
 def note_expand(ctx: ToolContext, note_ids: Optional[List[str]] = None, entity_ids: Optional[List[str]] = None,

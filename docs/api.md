@@ -183,7 +183,7 @@ Flows call them through `tool_calls` nodes; agents may list them in `allowed_too
 | `note_queue_lease` | `worker_id, max_items=1` | `{items: [{note_id, priority, attempts}]}` |
 | `note_queue_ack` | `note_id, outcome: ok|error, error?, revision_id?` | `{note_id, status, next_attempt_at?}` |
 | `note_queue_stats` | | `{queued, processing, failed, by_priority, oldest_enqueued_at}` |
-| `note_search` | `query, since?, until?, kinds?, entities?, topics?, limit=20, as_of?` | `{notes: [...], entities: [...], claims: [...], facets: {...}}` |
+| `note_search` | `query, since?, until?, kinds?, entities?, topics?, limit=20, as_of?, order? (relevance or earliest)` | `{query, order, notes: [...], entities: [...], claims: [...], facets: {...}, considered, warnings}`: each note carries `score` (rank fusion), `relevance` (0 to 1), `matched_entities` and `matched_claims`; an entity or statement is a hit only when its relevance reaches 0.5 (`HIT_MIN_SCORE`) and a returned note carries it, and lists those `note_ids` (an entity also `first_at` and `latest_at`: the first and latest date among the matching notes that carry it); `order=earliest` lists the notes whose relevance reaches 0.75 (`EARLIEST_MIN_SCORE`) oldest first ([remembering.md](remembering.md#quick-relevance)) |
 | `note_expand` | `note_ids, entity_ids, as_of?` | `{entities: [card...], claims_timeline: [...], relation_timelines: [...], neighbours: [...], then_now: [...]}` |
 | `note_changes` | `since, limit` | the since-you-last-looked delta (same shape as `GET /note/changes`) |
 | `note_entity` | `entity_id, at?` | the entity card |
@@ -249,7 +249,8 @@ failed; they are listed under `errors`).
 ```
 abstractnote capture ["text"] --notebook DIR [--file PATH ...] [--at ISO] [--title T] [--priority 0-3] [--key KEY]
 abstractnote search "query" --notebook DIR [--effort quick|standard|deep] [--since ISO] [--until ISO] [--as-of ISO]
-                    [--limit N] [--provider P --model M]          # a model for standard and deep
+                    [--limit N] [--order relevance|earliest]      # earliest: matching notes oldest first (quick)
+                    [--provider P --model M]                      # a model for standard and deep
 abstractnote entity ID --notebook DIR [--at ISO]
 abstractnote day YYYY-MM-DD --notebook DIR [--tz ZONE]
 abstractnote status --notebook DIR

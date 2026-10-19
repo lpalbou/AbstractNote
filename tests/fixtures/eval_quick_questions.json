@@ -1,0 +1,167 @@
+{
+ "about": "The 15 quick questions of the corpus evaluation (untracked/eval/questions.json, REPORT section 2) on a copy of untracked/eval/notebook, full text only (no query embedder here). The report found every entity and statement row irrelevant; none of the expected notes was processed, so the right answer is no entity and no statement row. expect_note_id is the note the report names (by its memory-file title), within = its rank bound on full text alone. probes: questions about processed notes, where the right entity or statement must be returned under its note.",
+ "questions": [
+  {
+   "q": "what did we decide about the OS keychain for secrets",
+   "report_expect": "feedback-no-os-keychain (2026-10-10): never the macOS keychain, file-sealed secrets",
+   "expect_note_id": "nt_5blqji5vohzysuqfa6spt73cdu",
+   "expect_title": "feedback-no-os-keychain",
+   "within": 1,
+   "entities": [],
+   "claims": []
+  },
+  {
+   "q": "when did we first mention Tailscale HTTPS",
+   "report_expect": "tailscale-https-auto-2026-10-10 memory / Oct prompts",
+   "expect_note_id": "nt_rhxpynu2xume223a44yxijjo6b",
+   "expect_title": "tailscale-https-auto-2026-10-10",
+   "within": 5,
+   "entities": [],
+   "claims": []
+  },
+  {
+   "q": "who is Castor",
+   "report_expect": "castor-persistent-entity memory: persistent entity on OVH/Qwen",
+   "expect_note_id": "nt_uvaqv36ig3nalhb764jh5zij3v",
+   "expect_title": "castor-persistent-entity",
+   "within": 50,
+   "entities": [],
+   "claims": []
+  },
+  {
+   "q": "regex or keyword heuristics to decide meaning",
+   "report_expect": "feedback-no-regex-nlp-heuristics (2026-09-27), ADR 0004 abstractnote",
+   "expect_note_id": "nt_uclggw3oognfcu4vsgoeryduqf",
+   "expect_title": "feedback-no-regex-nlp-heuristics",
+   "within": 1,
+   "entities": [],
+   "claims": []
+  },
+  {
+   "q": "GPU lock one model at a time",
+   "report_expect": "gpu-lock-one-model-at-a-time memory (2026-09-29 crash)",
+   "expect_note_id": "nt_jeg7eqqa7r7p2sj6o6hmkxep5j",
+   "expect_title": "gpu-lock-one-model-at-a-time",
+   "within": 1,
+   "entities": [],
+   "claims": []
+  },
+  {
+   "q": "gateway v0.4.0 tag unpublished",
+   "report_expect": "abstractframework-release-2026-09-24 memory",
+   "expect_note_id": "nt_io3wkhtkiay43kk2sfasuaiu7f",
+   "expect_title": "abstractframework-release-2026-09-24",
+   "within": 1,
+   "entities": [],
+   "claims": []
+  },
+  {
+   "q": "LUT prefill outcome NO-GO",
+   "report_expect": "lut-prefill-outcome memory; LUT fable5 seat mechanics",
+   "expect_note_id": "nt_agmgup6uhxutqj76zfwy3ytgl7",
+   "expect_title": "lut-prefill-outcome",
+   "within": 1,
+   "entities": [],
+   "claims": []
+  },
+  {
+   "q": "three install profiles apple gpu",
+   "report_expect": "feedback-three-settings-only-in-hints; install mission",
+   "expect_note_id": "nt_3xzxj6bmik2ey36dttikr36g7k",
+   "expect_title": "feedback-three-settings-only-in-hints",
+   "within": 50,
+   "entities": [],
+   "claims": []
+  },
+  {
+   "q": "MLX eject leak Metal memory",
+   "report_expect": "mlx-eject-leak-2026-09-25 memory",
+   "expect_note_id": "nt_eowemp6n6qws7lhj5imj3dfgrz",
+   "expect_title": "mlx-eject-leak-2026-09-25",
+   "within": 1,
+   "entities": [],
+   "claims": []
+  },
+  {
+   "q": "history replay 50k tokens no truncation",
+   "report_expect": "feedback-no-truncation-history-50k-tokens; ADR-0026",
+   "expect_note_id": "nt_co2ybv4itdqqgqzemp3dzixvpd",
+   "expect_title": "feedback-no-truncation-history-50k-tokens",
+   "within": 1,
+   "entities": [],
+   "claims": []
+  },
+  {
+   "q": "who is dl-owner",
+   "report_expect": "agora operator/delegation owner account (dm:dl-owner--*)",
+   "expect_note_id": null,
+   "entities": [],
+   "claims": []
+  },
+  {
+   "q": "release without explicit go from the operator",
+   "report_expect": "feedback-no-release-without-explicit-go (2026-09-25)",
+   "expect_note_id": "nt_mkwh7wjtuax2pquxicz4sujbro",
+   "expect_title": "feedback-no-release-without-explicit-go",
+   "within": 1,
+   "entities": [],
+   "claims": []
+  },
+  {
+   "q": "Apple Watch assistant first deployed on the watch",
+   "report_expect": "apple-watch-assistant-2026-10-16 memory, Oct prompts",
+   "expect_note_id": "nt_voiceeyjzos7lrpyv5ruya2mf7",
+   "expect_title": "apple-watch-assistant-2026-10-16",
+   "within": 1,
+   "entities": [],
+   "claims": []
+  },
+  {
+   "q": "commons storm repair retracted messages",
+   "report_expect": "agora operator storm repair (commons) — retracted, so absent",
+   "expect_note_id": null,
+   "entities": [],
+   "claims": []
+  },
+  {
+   "q": "gateway port discovery pointer file",
+   "report_expect": "gateway-port-discovery-2026-09-27; backlog 0943",
+   "expect_note_id": "nt_ub2mjgrlyvlhyosbt72rkzqajg",
+   "expect_title": "gateway-port-discovery-2026-09-27",
+   "within": 1,
+   "entities": [],
+   "claims": []
+  }
+ ],
+ "probes": [
+  {
+   "q": "tool grant semantics",
+   "note_id": "nt_7zik7porupusy5a67pnikkj2wf",
+   "entities": [
+    "ex:software-resolve-tool-grant"
+   ]
+  },
+  {
+   "q": "SmartNote gateway-first thin client",
+   "note_id": "nt_ibtiii3vzhbbxzy26cu2af53vf",
+   "entities": [
+    "ex:software-smartnote"
+   ]
+  }
+ ],
+ "earliest": [
+  {
+   "q": "Tailscale HTTPS",
+   "all_words": [
+    "tailscale",
+    "https"
+   ]
+  },
+  {
+   "q": "Castor",
+   "all_words": [
+    "castor"
+   ]
+  }
+ ]
+}

@@ -63,6 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--until")
     p.add_argument("--as-of")
     p.add_argument("--limit", type=int, default=20)
+    p.add_argument("--order", choices=["relevance", "earliest"], default="relevance",
+                   help="quick effort: best matches first, or the matching notes oldest first")
     p.add_argument("--provider", help="model provider for standard and deep effort")
     p.add_argument("--model", help="model for standard and deep effort")
 
@@ -160,7 +162,8 @@ def _runner(args: argparse.Namespace) -> Any:
 def _cmd_search(args: argparse.Namespace) -> Any:
     if args.effort == "quick":
         with _open(args) as nb:
-            return nb.search(args.query, since=args.since, until=args.until, as_of=args.as_of, limit=args.limit)
+            return nb.search(args.query, since=args.since, until=args.until, as_of=args.as_of, limit=args.limit,
+                             order=args.order)
     _client_mode(args)
     if not args.notebook:
         raise ValueError("Say which notebook with --notebook DIR.")
