@@ -303,7 +303,7 @@ class Flow:
 
     def llm(self, node_id: str, label: str, *, schema: Dict[str, Any], prompt: Src, provider: Src, model: Src,
             system: str, temperature: float = 0.2, thinking: Optional[str] = None,
-            max_output_tokens: Optional[int] = None) -> str:
+            max_output_tokens: Optional[int] = None, thinking_from: Optional[Src] = None) -> str:
         """One structured model call. ``system`` is the step's STATIC system prompt (same bytes for
         every note, so a local model's prompt cache reuses it); ``thinking`` ("on"/"off") and
         ``max_output_tokens`` are pinned per step (backlog 0024)."""
@@ -330,6 +330,8 @@ class Flow:
         self.wire(prompt, nid, "prompt")
         self.wire(provider, nid, "provider")
         self.wire(model, nid, "model")
+        if thinking_from is not None:  # a per-run choice wins over the pinned default
+            self.wire(thinking_from, nid, "thinking")
         return nid
 
     def break_object(self, node_id: str, label: str, obj: Src, fields: Sequence[Pin]) -> str:

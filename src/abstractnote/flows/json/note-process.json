@@ -27,6 +27,11 @@
             "type": "string"
           },
           {
+            "id": "thinking",
+            "label": "thinking",
+            "type": "string"
+          },
+          {
             "id": "provider",
             "label": "provider",
             "type": "provider_text"
@@ -39,16 +44,63 @@
         ],
         "pinDefaults": {
           "note_id": "",
+          "thinking": "on",
           "provider": "",
           "model": ""
         }
       }
     },
     {
-      "id": "context_args",
+      "id": "thinking",
       "type": "code",
       "position": {
         "x": 480.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Thinking for this note",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "thinking",
+            "label": "thinking",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "value",
+            "label": "value",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "t = str(thinking or \"on\").strip().lower()\nif t not in (\"on\", \"off\"):\n    raise ValueError(\"Thinking must be on or off.\")\nreturn {\"value\": t}\n"
+      }
+    },
+    {
+      "id": "context_args",
+      "type": "code",
+      "position": {
+        "x": 960.0,
         "y": 0.0
       },
       "data": {
@@ -100,7 +152,7 @@
       "id": "context",
       "type": "tool_calls",
       "position": {
-        "x": 960.0,
+        "x": 1440.0,
         "y": 0.0
       },
       "data": {
@@ -156,7 +208,7 @@
       "id": "context_out",
       "type": "code",
       "position": {
-        "x": 1440.0,
+        "x": 1920.0,
         "y": 0.0
       },
       "data": {
@@ -237,7 +289,7 @@
       "id": "sections",
       "type": "code",
       "position": {
-        "x": 1920.0,
+        "x": 2400.0,
         "y": 0.0
       },
       "data": {
@@ -288,7 +340,7 @@
       "id": "each_section",
       "type": "loop",
       "position": {
-        "x": 2400.0,
+        "x": 2880.0,
         "y": 0.0
       },
       "data": {
@@ -334,7 +386,7 @@
       "id": "extract_packet",
       "type": "code",
       "position": {
-        "x": 2880.0,
+        "x": 3360.0,
         "y": 0.0
       },
       "data": {
@@ -410,7 +462,7 @@
       "id": "extract_prompt",
       "type": "string_template",
       "position": {
-        "x": 2880.0,
+        "x": 3360.0,
         "y": 398.0
       },
       "data": {
@@ -444,7 +496,7 @@
       "id": "extract",
       "type": "llm_call",
       "position": {
-        "x": 3360.0,
+        "x": 3840.0,
         "y": 0.0
       },
       "data": {
@@ -740,7 +792,7 @@
       "id": "nothing_named",
       "type": "code",
       "position": {
-        "x": 3840.0,
+        "x": 4320.0,
         "y": 0.0
       },
       "data": {
@@ -791,7 +843,7 @@
       "id": "read_again",
       "type": "if",
       "position": {
-        "x": 4320.0,
+        "x": 4800.0,
         "y": 0.0
       },
       "data": {
@@ -827,7 +879,7 @@
       "id": "keep_extraction",
       "type": "add_to_list",
       "position": {
-        "x": 4800.0,
+        "x": 5280.0,
         "y": 0.0
       },
       "data": {
@@ -876,7 +928,7 @@
       "id": "extract_again",
       "type": "llm_call",
       "position": {
-        "x": 4800.0,
+        "x": 5280.0,
         "y": 320.0
       },
       "data": {
@@ -1172,7 +1224,7 @@
       "id": "flag_empty",
       "type": "code",
       "position": {
-        "x": 5280.0,
+        "x": 5760.0,
         "y": 0.0
       },
       "data": {
@@ -1218,7 +1270,7 @@
       "id": "keep_retry",
       "type": "add_to_list",
       "position": {
-        "x": 5760.0,
+        "x": 6240.0,
         "y": 0.0
       },
       "data": {
@@ -1267,7 +1319,7 @@
       "id": "extractions",
       "type": "get_var",
       "position": {
-        "x": 2400.0,
+        "x": 2880.0,
         "y": 320.0
       },
       "data": {
@@ -1302,7 +1354,7 @@
       "id": "merge",
       "type": "code",
       "position": {
-        "x": 2880.0,
+        "x": 3360.0,
         "y": 718.0
       },
       "data": {
@@ -1353,7 +1405,7 @@
       "id": "resolve_args",
       "type": "code",
       "position": {
-        "x": 3360.0,
+        "x": 3840.0,
         "y": 424.0
       },
       "data": {
@@ -1404,7 +1456,7 @@
       "id": "resolve",
       "type": "tool_calls",
       "position": {
-        "x": 3840.0,
+        "x": 4320.0,
         "y": 320.0
       },
       "data": {
@@ -1460,7 +1512,7 @@
       "id": "resolve_out",
       "type": "code",
       "position": {
-        "x": 4320.0,
+        "x": 4800.0,
         "y": 320.0
       },
       "data": {
@@ -1511,7 +1563,7 @@
       "id": "link_parts",
       "type": "code",
       "position": {
-        "x": 4800.0,
+        "x": 5280.0,
         "y": 744.0
       },
       "data": {
@@ -1572,7 +1624,7 @@
       "id": "each_link",
       "type": "loop",
       "position": {
-        "x": 5280.0,
+        "x": 5760.0,
         "y": 320.0
       },
       "data": {
@@ -1618,7 +1670,7 @@
       "id": "link_prompt",
       "type": "string_template",
       "position": {
-        "x": 5280.0,
+        "x": 5760.0,
         "y": 640.0
       },
       "data": {
@@ -1652,7 +1704,7 @@
       "id": "link",
       "type": "llm_call",
       "position": {
-        "x": 5760.0,
+        "x": 6240.0,
         "y": 320.0
       },
       "data": {
@@ -1914,7 +1966,7 @@
       "id": "keep_linking",
       "type": "add_to_list",
       "position": {
-        "x": 6240.0,
+        "x": 6720.0,
         "y": 0.0
       },
       "data": {
@@ -1963,7 +2015,7 @@
       "id": "linkings",
       "type": "get_var",
       "position": {
-        "x": 5280.0,
+        "x": 5760.0,
         "y": 960.0
       },
       "data": {
@@ -1998,7 +2050,7 @@
       "id": "merge_links",
       "type": "code",
       "position": {
-        "x": 5760.0,
+        "x": 6240.0,
         "y": 744.0
       },
       "data": {
@@ -2044,7 +2096,7 @@
       "id": "apply_args",
       "type": "code",
       "position": {
-        "x": 6240.0,
+        "x": 6720.0,
         "y": 320.0
       },
       "data": {
@@ -2100,7 +2152,7 @@
       "id": "apply",
       "type": "tool_calls",
       "position": {
-        "x": 6720.0,
+        "x": 7200.0,
         "y": 0.0
       },
       "data": {
@@ -2156,7 +2208,7 @@
       "id": "apply_out",
       "type": "code",
       "position": {
-        "x": 7200.0,
+        "x": 7680.0,
         "y": 0.0
       },
       "data": {
@@ -2212,7 +2264,7 @@
       "id": "end",
       "type": "on_flow_end",
       "position": {
-        "x": 7680.0,
+        "x": 8160.0,
         "y": 0.0
       },
       "data": {
@@ -2259,6 +2311,20 @@
   ],
   "edges": [
     {
+      "id": "e-start-thinking-thinking-thinking",
+      "source": "start",
+      "sourceHandle": "thinking",
+      "target": "thinking",
+      "targetHandle": "thinking"
+    },
+    {
+      "id": "e-start-exec-out-thinking-exec-in",
+      "source": "start",
+      "sourceHandle": "exec-out",
+      "target": "thinking",
+      "targetHandle": "exec-in"
+    },
+    {
       "id": "e-start-note_id-context_args-note_id",
       "source": "start",
       "sourceHandle": "note_id",
@@ -2266,8 +2332,8 @@
       "targetHandle": "note_id"
     },
     {
-      "id": "e-start-exec-out-context_args-exec-in",
-      "source": "start",
+      "id": "e-thinking-exec-out-context_args-exec-in",
+      "source": "thinking",
       "sourceHandle": "exec-out",
       "target": "context_args",
       "targetHandle": "exec-in"
@@ -2413,6 +2479,13 @@
       "targetHandle": "model"
     },
     {
+      "id": "e-thinking-value-extract-thinking",
+      "source": "thinking",
+      "sourceHandle": "value",
+      "target": "extract",
+      "targetHandle": "thinking"
+    },
+    {
       "id": "e-extract_packet-exec-out-extract-exec-in",
       "source": "extract_packet",
       "sourceHandle": "exec-out",
@@ -2488,6 +2561,13 @@
       "sourceHandle": "model",
       "target": "extract_again",
       "targetHandle": "model"
+    },
+    {
+      "id": "e-thinking-value-extract_again-thinking",
+      "source": "thinking",
+      "sourceHandle": "value",
+      "target": "extract_again",
+      "targetHandle": "thinking"
     },
     {
       "id": "e-read_again-true-extract_again-exec-in",
@@ -2663,6 +2743,13 @@
       "sourceHandle": "model",
       "target": "link",
       "targetHandle": "model"
+    },
+    {
+      "id": "e-thinking-value-link-thinking",
+      "source": "thinking",
+      "sourceHandle": "value",
+      "target": "link",
+      "targetHandle": "thinking"
     },
     {
       "id": "e-each_link-loop-link-exec-in",

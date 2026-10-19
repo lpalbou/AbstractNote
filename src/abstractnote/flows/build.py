@@ -420,15 +420,28 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
         "Read one note against what the notebook knows, extract, link and revise the graph.",
         interfaces=INTERFACES["note-process"],
     )
-    f.start([("note_id", "string"), *_model_pins()], {"note_id": "", "provider": "", "model": ""})
+    f.start([("note_id", "string"), ("thinking", "string"), *_model_pins()],
+            {"note_id": "", "thinking": "on", "provider": "", "model": ""})
     S = lambda p: ("start", p)  # noqa: E731
+    # Thinking for extraction and linking is a per-run choice (on by default; note-drain passes its own,
+    # off by default for bulk imports): a thinking call can run to its output budget and retry.
+    f.code(
+        "thinking", "Thinking for this note",
+        "t = str(thinking or \"on\").strip().lower()\n"
+        "if t not in (\"on\", \"off\"):\n"
+        "    raise ValueError(\"Thinking must be on or off.\")\n"
+        "return {\"value\": t}",
+        inputs={"thinking": ("string", S("thinking"))}, outputs=[("value", "string")],
+    )
+    f.then("start", "thinking")
+    TH = ("thinking", "value")
     ctx = f.tool_step(
         "context", "Look at what is known", "note_context",
         {"note_id": ("string", S("note_id")), "max_chars": ("number", SECTION_CHARS)},
         [("note", "object"), ("sections", "array"), ("similar_notes", "array"),
          ("candidate_entities", "array"), ("open_tasks", "array"), ("topics", "array"),
          ("vocabulary", "array")],
-        after=("start", "exec-out"),
+        after=("thinking", "exec-out"),
     )
     f.code(
         "sections", "Sections to read",
@@ -454,7 +467,7 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
     f.then("each_section", "extract_packet", "loop")
     f.template("extract_prompt", "Extraction prompt", prompts["extract"], {"packet": ("extract_packet", "packet")})
     f.llm("extract", "Extract", schema=schemas["Extraction"], prompt=("extract_prompt", "result"),
-          provider=S("provider"), model=S("model"), **_step("extract", prompts))
+          provider=S("provider"), model=S("model"), thinking_from=TH, **_step("extract", prompts))
     f.then("extract_packet", "extract")
     # A section with text that names nothing is read once more (the model sometimes answers valid
     # empty lists); a second empty answer is kept and flagged in the revision's warnings.
@@ -472,7 +485,7 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
     f.add_to_list("keep_extraction", "Keep the extraction", "extractions", ("extract", "data"))
     f.then("read_again", "keep_extraction", "false")
     f.llm("extract_again", "Extract again", schema=schemas["Extraction"], prompt=("extract_prompt", "result"),
-          provider=S("provider"), model=S("model"), **_step("extract", prompts))
+          provider=S("provider"), model=S("model"), thinking_from=TH, **_step("extract", prompts))
     f.then("read_again", "extract_again", "true")
     f.code(
         "flag_empty", "Flag a part that names nothing",
@@ -510,7 +523,7 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
     f.then("link_parts", "each_link")
     f.template("link_prompt", "Linking prompt", prompts["link"], {"batch": ("each_link", "item")})
     f.llm("link", "Link", schema=schemas["Linking"], prompt=("link_prompt", "result"),
-          provider=S("provider"), model=S("model"), **_step("link", prompts))
+          provider=S("provider"), model=S("model"), thinking_from=TH, **_step("link", prompts))
     f.then("each_link", "link", "loop")
     f.add_to_list("keep_linking", "Keep the linking", "linkings", ("link", "data"))
     f.then("link", "keep_linking")
@@ -541,8 +554,8 @@ def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, A
         "Take queued notes by priority and understand them one at a time, within a count and time budget.",
         interfaces=INTERFACES["note-drain"],
     )
-    f.start([("max_items", "number"), ("budget_s", "number"), *_model_pins()],
-            {**DRAIN_DEFAULTS, "provider": "", "model": ""})
+    f.start([("max_items", "number"), ("budget_s", "number"), ("thinking", "string"), *_model_pins()],
+            {**DRAIN_DEFAULTS, "thinking": "off", "provider": "", "model": ""})
     S = lambda p: ("start", p)  # noqa: E731
     f.code(
         "init", "Budget",
@@ -584,7 +597,7 @@ def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, A
     f.then("has_item", "stop", "false")
     f.subflow("process", "Understand the note", "note-process", {
         "note_id": ("string", ("pick", "note_id")), "provider": ("provider_text", S("provider")),
-        "model": ("model", S("model")),
+        "model": ("model", S("model")), "thinking": ("string", S("thinking")),
     }, [("revision_id", "string")])
     f.then("has_item", "process", "true")
     f.code(

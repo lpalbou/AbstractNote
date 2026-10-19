@@ -159,7 +159,8 @@ def test_notes_share_one_prompt_cache_key_per_step():
     flows, nodes = _process_prompt_flows()
     for fid in ("note-drain", "note-capture"):
         pins = {p["id"] for p in nodes[(fid, "process")]["data"]["inputs"]}
-        assert pins == {"exec-in", "inherit_context", "note_id", "provider", "model"}, (fid, pins)
+        assert "_runtime" not in pins and pins <= {"exec-in", "inherit_context", "note_id", "provider", "model",
+                                                     "thinking"}, (fid, pins)
 
 
 def _seeded_runner(tmp_path):

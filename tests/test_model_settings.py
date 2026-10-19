@@ -92,6 +92,49 @@ def test_the_node_thinking_holds_whatever_the_run_asks(tmp_path):
         return real(**kw)
 
     llm.generate = spy
-    runner.run_capture("Met Dana.", _runtime={"thinking": False})
-    runner.run_drain(max_items=5, budget_s=60, _runtime={"thinking": False})
-    assert seen == [("off", 400), ("on", 4000), ("on", 6000)]
+    runner.run_capture("Met Dana.", _runtime={"thinking": True})
+    runner.run_drain(max_items=5, budget_s=60, _runtime={"thinking": True})
+    # the drain's own thinking choice (off by default, the bulk-import setting) wins over the run's _runtime
+    assert seen == [("off", 400), ("off", 4000), ("off", 6000)]
+
+
+@pytest.mark.parametrize("asked, expected", [("on", "on"), ("off", "off"), ("", "on"), (" ON ", "on")])
+def test_thinking_is_a_per_run_choice_of_the_drain_and_the_process_flow(tmp_path, asked, expected):
+    runner, llm = _runner(tmp_path, [FULL])
+    seen = []
+    real = llm.generate
+
+    def spy(**kw):
+        seen.append((kw.get("params") or {}).get("thinking"))
+        return real(**kw)
+
+    llm.generate = spy
+    note_id = runner.run_capture("Met Dana.")["note_id"]
+    if asked == " ON ":
+        runner.run("note-process", {"note_id": note_id, "thinking": asked})  # note-process itself defaults to on
+    else:
+        runner.run_drain(max_items=5, budget_s=60, thinking=asked if asked else "on")
+    assert seen[1:] == [expected, expected]
+
+
+def test_inline_processing_at_capture_keeps_thinking_on(tmp_path):
+    runner, llm = _runner(tmp_path, [FULL])
+    seen = []
+    real = llm.generate
+
+    def spy(**kw):
+        seen.append((kw.get("params") or {}).get("thinking"))
+        return real(**kw)
+
+    llm.generate = spy
+    runner.run_capture("Met Dana.", process_inline=True)
+    assert seen == ["off", "on", "on"]
+
+
+def test_an_unknown_thinking_value_is_refused(tmp_path):
+    from abstractnote.flows.runner import FlowRunError
+
+    runner, _ = _runner(tmp_path, [FULL])
+    note_id = runner.run_capture("Met Dana.")["note_id"]
+    with pytest.raises(FlowRunError, match="Thinking must be on or off"):
+        runner.run("note-process", {"note_id": note_id, "thinking": "low"})

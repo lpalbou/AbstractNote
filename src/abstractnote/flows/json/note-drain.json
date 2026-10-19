@@ -34,6 +34,11 @@
             "type": "number"
           },
           {
+            "id": "thinking",
+            "label": "thinking",
+            "type": "string"
+          },
+          {
             "id": "provider",
             "label": "provider",
             "type": "provider_text"
@@ -47,6 +52,7 @@
         "pinDefaults": {
           "max_items": 20,
           "budget_s": 90,
+          "thinking": "off",
           "provider": "",
           "model": ""
         }
@@ -665,6 +671,11 @@
             "id": "model",
             "label": "model",
             "type": "model"
+          },
+          {
+            "id": "thinking",
+            "label": "thinking",
+            "type": "string"
           }
         ],
         "outputs": [
@@ -1699,6 +1710,13 @@
       "sourceHandle": "model",
       "target": "process",
       "targetHandle": "model"
+    },
+    {
+      "id": "e-start-thinking-process-thinking",
+      "source": "start",
+      "sourceHandle": "thinking",
+      "target": "process",
+      "targetHandle": "thinking"
     },
     {
       "id": "e-has_item-true-process-exec-in",

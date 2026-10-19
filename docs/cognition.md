@@ -367,10 +367,18 @@ normally and uses the prompt cache, but with thinking on it reasons for minutes 
 | Step | Thinking | Output cap (tokens) |
 |---|---|---|
 | quick filing | off | 400 |
-| extract (and its second reading) | on | 4000 |
-| link | on | 6000 |
+| extract (and its second reading) | on (`thinking` start pin; `off` from note-drain) | 4000 |
+| link | on (`thinking` start pin; `off` from note-drain) | 6000 |
 | synthesize, dossier, reflect | the runtime default | 8192 |
 | mining plan, slice findings | the runtime default | 4096 |
+
+Thinking for extraction and linking is a per-run choice: `note-process` takes a `thinking`
+start pin (`on` or `off`, default `on`, anything else is refused) wired to the extract, second
+reading and link nodes; `note-drain` takes its own `thinking` pin, default `off` (the bulk-import
+setting: a thinking call can run to its output budget and AbstractCore then retries with a
+larger one, measured 114-352 s for one section on the live drain), and passes it to every
+`note-process` it starts; inline processing at capture keeps `on`. The table above gives the
+defaults.
 
 On MLX, Qwen3.6 has only an on/off switch (`enable_thinking`): any level ("low", "medium") is
 treated as on and there is no thinking budget, so a thinking step can run until the output cap.
