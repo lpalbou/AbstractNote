@@ -26,5 +26,13 @@ Repository bootstrapped on 2026-10-19 with only the skeleton. AbstractMemory off
 
 ## Metadata
 - Created: 2026-10-19
-- Status: planned
+- Status: completed
+- Completed: 2026-10-19
 - Area: core
+
+## Completion report
+- Date: 2026-10-19
+- Landed: `abstractnote.model`, `ids`, `store/{schema,notes,kg,queue,embeddings,notebook}` (commit d925852 and follow-ups); AbstractMemory gains an additive `close_assertion` on worktree branch `close-assertion` (109e194).
+- Validation: tests/test_store*.py, test_kg_projection.py, test_rebuild.py (property test graph(as_of), active_at vs beliefs_at agreement, S6 recovery); rebuild of 1,003 revisions with zero embedder calls.
+- Notes and residual risks: ADR 0003 amended (close_assertion, write order, applied flags). Residual: the abstractmemory branch must be released before AbstractNote; the notebook's triple store is private to the notebook (not the plane KG).
+- Reviews: untracked/reviews/01-design-review.md (design), untracked/reviews/02-gate-review.md (integrated head; fixes in W7 commits up to d5e894d).

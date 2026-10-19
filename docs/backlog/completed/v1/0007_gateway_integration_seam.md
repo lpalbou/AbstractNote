@@ -26,5 +26,13 @@ Gateway tests for the router (auth, isolation), tool binding test, `abstractgate
 
 ## Metadata
 - Created: 2026-10-19
-- Status: planned
+- Status: completed
+- Completed: 2026-10-19
 - Area: gateway
+
+## Completion report
+- Date: 2026-10-19
+- Landed: abstractgateway worktree branch `abstractnote-seam` (777e03e5): `abstractnote_seam.py`, bundle_host tool binding next to read_skill, approval auto-set extension, `/api/gateway/note` router include, `note` app row (port 3006) in catalog/tray/console/TUI, docs/apps.md; `abstractnote.gateway/{router,tools,appspec}`; hermetic gateway scripts (f596c82, cd6c3f6).
+- Validation: gateway worktree tests 165 passed; router tests incl. as_of over HTTP (1c66b67), 401/404 isolation; hermetic E2E by gate 02.
+- Notes and residual risks: ADR 0001. Residual: the gateway release carrying the seam must be named before publication; the bundle loads into each plane's private registry (catalog bundles cannot be started by id).
+- Reviews: untracked/reviews/01-design-review.md (design), untracked/reviews/02-gate-review.md (integrated head; fixes in W7 commits up to d5e894d).

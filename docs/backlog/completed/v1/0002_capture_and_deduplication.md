@@ -26,5 +26,13 @@ Nothing yet. Prior art: the old `smartnote/` package chunked text and extracted 
 
 ## Metadata
 - Created: 2026-10-19
-- Status: planned
+- Status: completed
+- Completed: 2026-10-19
 - Area: core
+
+## Completion report
+- Date: 2026-10-19
+- Landed: `ingest/`, `tools/capture.py` (`note_capture`, `note_file`), idempotent ids (idempotency key, import source key), blobs by sha256, extractors with explicit `extracted_by`, revisits by same words and by cosine (fb3ca74, 5e53fcb, 23e15e8 for `about`/`answer`).
+- Validation: tests/test_capture.py; B3 path refusal through the runtime executor; hermetic smoke (attachment capture, `/etc/hosts` refused, 413).
+- Notes and residual risks: Residual: image description and speech extractors need a configured vision/STT model (none by default); notes captured by CLI/importers stay untitled until processed.
+- Reviews: untracked/reviews/01-design-review.md (design), untracked/reviews/02-gate-review.md (integrated head; fixes in W7 commits up to d5e894d).

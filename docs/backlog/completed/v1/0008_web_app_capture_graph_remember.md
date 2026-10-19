@@ -26,5 +26,13 @@ abstractobserver is the template for the npm/app-server layout; ui-kit 0.8.7 and
 
 ## Metadata
 - Created: 2026-10-19
-- Status: planned
+- Status: completed
+- Completed: 2026-10-19
 - Area: web
+
+## Completion report
+- Date: 2026-10-19
+- Landed: `web/` `@abstractframework/note` (b6abb77…d822da7, W7 fixes): Capture, Graph, Remember (since you last looked, cue cards, ask bar, then-now for entities and relations, evidence chains with retract, revisit), Settings; mock gateway; Playwright screenshots.
+- Validation: vitest 51 tests; build green; Playwright S3 and M8 checks against the hermetic gateway; copy-rule scan test.
+- Notes and residual risks: Residual: About button hidden until ui-kit knows the app id; sign-in form is custom (kit labels say Gateway).
+- Reviews: untracked/reviews/01-design-review.md (design), untracked/reviews/02-gate-review.md (integrated head; fixes in W7 commits up to d5e894d).

@@ -26,5 +26,13 @@ Nothing yet. The runtime's `MEMORY_KG_RESOLVE` label resolver and ADR 0025 (fram
 
 ## Metadata
 - Created: 2026-10-19
-- Status: planned
+- Status: completed
+- Completed: 2026-10-19
 - Area: core
+
+## Completion report
+- Date: 2026-10-19
+- Landed: `process/{schemas,prompts,vocabulary,context,resolve,merge,revise}`, `tools/process.py` (f2e043a, 5e53fcb): candidate generation (alias, FTS, vector, RRF), Linking by indexes and enums, out-of-packet references rejected, required entity summaries, literal-fact steering.
+- Validation: tests/test_process*.py fixtures (new, alias reuse, merge, restate, supersede, contradict, task close, oversized note); real-model smoke (untracked/eval/smoke3.log) with a correct supersession.
+- Notes and residual risks: ADR 0004 (kinds divergence recorded). Residual: extraction quality on the corpus is measured in 0011; prompt tuning is expected.
+- Reviews: untracked/reviews/01-design-review.md (design), untracked/reviews/02-gate-review.md (integrated head; fixes in W7 commits up to d5e894d).

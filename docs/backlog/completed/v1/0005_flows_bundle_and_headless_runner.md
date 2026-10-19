@@ -25,5 +25,13 @@ Example flows to model on: `ltm-ai-kg-ingest-turn`, `ltm-ai-kg-extract-triples`,
 
 ## Metadata
 - Created: 2026-10-19
-- Status: planned
+- Status: completed
+- Completed: 2026-10-19
 - Area: flows
+
+## Completion report
+- Date: 2026-10-19
+- Landed: `flows/{graph,build,bundle,runner}.py`, six VisualFlow JSON flows, `drive_until_done`, ScriptedLLM, real-model path (4437f86, 864bca6, 48a8bbf: tool failures inside loops end the run).
+- Validation: tests/test_flows_compile.py (strict graph audit), test_flows_contract.py (S1 wiring vs ToolDefinitions), test_flows_headless.py incl. loop-failure tests; real-model drain (3 notes, 22 s/note).
+- Notes and residual risks: ADR 0002. Residual: a node exception inside a while body is 'branch done' in the runtime — every loop uses explicit failure routing.
+- Reviews: untracked/reviews/01-design-review.md (design), untracked/reviews/02-gate-review.md (integrated head; fixes in W7 commits up to d5e894d).

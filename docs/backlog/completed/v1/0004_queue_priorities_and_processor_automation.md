@@ -25,5 +25,13 @@ Gateway automations: `schedule@2`, `manual@1`, serial/coalesce (abstractgateway 
 
 ## Metadata
 - Created: 2026-10-19
-- Status: planned
+- Status: completed
+- Completed: 2026-10-19
 - Area: core
+
+## Completion report
+- Date: 2026-10-19
+- Landed: `store/queue.py`, `tools/queue.py` (8be997b); processor and reflect automations created by `POST /note/processor/ensure` (W2, W7: reflect first fires one interval after creation).
+- Validation: tests/test_queue.py (priority/time/size order, concurrent leasers), hermetic smoke (run_now 200 then 409, drain, no failed runs).
+- Notes and residual risks: ADR 0005. Residual: throughput is max_items per interval; a gateway worker remains proposed (0020).
+- Reviews: untracked/reviews/01-design-review.md (design), untracked/reviews/02-gate-review.md (integrated head; fixes in W7 commits up to d5e894d).

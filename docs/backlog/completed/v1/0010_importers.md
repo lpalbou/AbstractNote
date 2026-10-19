@@ -25,5 +25,13 @@ Record shapes and counts are documented in untracked/recon/data-sources.md.
 
 ## Metadata
 - Created: 2026-10-19
-- Status: planned
+- Status: completed
+- Completed: 2026-10-19
 - Area: importers
+
+## Completion report
+- Date: 2026-10-19
+- Landed: `importers/{claude_sessions,agora,markdown,files}.py` and `abstractnote import` (51b1501, 23e15e8: image prompts as attachments, embed flags).
+- Validation: tests/test_importers.py; real import of 3,987 notes in the evaluation notebook (untracked/eval/import_*.json).
+- Notes and residual risks: Residual: 14 earlier notes stored with repr text exist only in the evaluation notebook.
+- Reviews: untracked/reviews/01-design-review.md (design), untracked/reviews/02-gate-review.md (integrated head; fixes in W7 commits up to d5e894d).

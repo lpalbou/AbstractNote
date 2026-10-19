@@ -24,5 +24,13 @@ Precedent: abstractassistant/watch/apple (project.yml, build/deploy scripts, CI,
 
 ## Metadata
 - Created: 2026-10-19
-- Status: planned
+- Status: completed
+- Completed: 2026-10-19
 - Area: watch
+
+## Completion report
+- Date: 2026-10-19
+- Landed: `watch/apple/` (2ee84ab, 08cdabb, e885c63, 3093205, e428896; W7 TodayScreen): Note, Ask, Today, Settings, sign-in; client package snapshot with note endpoints; file-sealed credential; build/deploy scripts; CI workflow at `.github/workflows/watch.yml`.
+- Validation: swift test 43 passed (recorded gateway fixtures, 401/409/413); simulator build and 17 screenshots; mutation checks red.
+- Notes and residual risks: ADR 0006 proposed (operator ruling 0017). Residual: not run against a live gateway from the device; no attachment upload on the watch.
+- Reviews: untracked/reviews/01-design-review.md (design), untracked/reviews/02-gate-review.md (integrated head; fixes in W7 commits up to d5e894d).

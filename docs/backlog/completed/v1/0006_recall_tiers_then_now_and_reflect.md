@@ -26,5 +26,13 @@ Nothing yet; AbstractMemory's FTS5 and vector query exist on `SQLiteTripleStore`
 
 ## Metadata
 - Created: 2026-10-19
-- Status: planned
+- Status: completed
+- Completed: 2026-10-19
 - Area: core
+
+## Completion report
+- Date: 2026-10-19
+- Landed: `recall/{search,expand,then_now,reflect,insights}`, `tools/recall.py`, `Notebook.changes/cues/claim/relation` (99312ed, 4882bfc).
+- Validation: tests/test_recall.py, test_reflect_candidates; 5k-note quick search under 300 ms; hermetic recall via `prompt`.
+- Notes and residual risks: Residual: then-now text depends on entity summaries (now required); cue cards are unacknowledged insights.
+- Reviews: untracked/reviews/01-design-review.md (design), untracked/reviews/02-gate-review.md (integrated head; fixes in W7 commits up to d5e894d).

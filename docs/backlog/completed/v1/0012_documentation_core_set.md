@@ -23,5 +23,13 @@ Link check script; manual read of getting-started on a clean machine.
 
 ## Metadata
 - Created: 2026-10-19
-- Status: planned
+- Status: completed
+- Completed: 2026-10-19
 - Area: docs
+
+## Completion report
+- Date: 2026-10-19
+- Landed: README, CHANGELOG, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, ACKNOWLEDGEMENTS, docs/README, getting-started, faq, troubleshooting, llms.txt, llms-full.txt; design pages repaired to the code (6c04b2f, W7 docs commits).
+- Validation: Link check 131 links 0 broken; every headless command verified in a venv; gate 02 doc claims re-checked (two false claims fixed by W7).
+- Notes and residual risks: Residual: release names (gateway version with the seam, abstractmemory version) are placeholders until the release.
+- Reviews: untracked/reviews/01-design-review.md (design), untracked/reviews/02-gate-review.md (integrated head; fixes in W7 commits up to d5e894d).
