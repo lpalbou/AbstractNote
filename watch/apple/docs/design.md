@@ -40,7 +40,8 @@ the gateway is [docs/clients.md](../../../docs/clients.md) and [docs/api.md](../
 | Today | `GET /note/changes?since=<cursor>`, `/note/insights?acked=false`, `/note/tasks?status=open`, `/note/cues`, `/note/overview` (its `resurfacing` is "On this day"), read together; the cursor in the answer is kept for the next visit |
 | Got it / Close | `POST /note/insights/{id}/ack` / `POST /note/tasks/{id}/close`; a 409 means it was already done elsewhere and counts as done |
 | Add a note about this | a capture whose `input_data.context.about` is `{kind: insight|task|cue, id, title}` |
-| A note's page | `GET /note/notes/{id}` |
+| A note's page | `GET /note/notes/{id}`; for an insight, its `insight.evidence_note_ids` give a **Why** link |
+| Why (on a cue whose `subject` is set, or an insight) | `GET /note/notes/{id}` for each of the `evidence_note_ids` (at most 8, read together) |
 | Sign out of an emailed-code session | `POST /session/logout` |
 
 A run that fails, or a flow that refuses its input (it completes with `output.success: false`
@@ -48,6 +49,10 @@ and `output.error`), shows the flow's own sentence without the runtime's "Runtim
 with no sentence, the screen's own one. The watch never starts the processor ("Process now"); a
 client that does sends `POST /automations/{id}/commands {"command_id": "<uuid>", "type":
 "automation.run_now"}` and reads a 409 `automation_busy` as "already running" (docs/api.md).
+
+Decoding is strict on the fields the watch uses (a missing one says "This answer could not be
+read. Update the app.") and ignores every key it does not use, so the gateway can add fields
+freely. The processor's throughput (`GET /note/queue` `processor`) is not shown on the watch.
 
 The watch never sends a user, tenant or runtime id: the gateway picks the notebook from the
 credential. Reads are retried after 1 s and 3 s; writes are sent once. A 401 stops every request

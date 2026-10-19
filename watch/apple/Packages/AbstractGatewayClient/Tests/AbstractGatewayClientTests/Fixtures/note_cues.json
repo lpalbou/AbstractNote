@@ -1,2 +1,3 @@
 {"request": {"method": "GET", "path": "/api/gateway/note/cues"}, "status": 200,
- "body": {"items": [{"cue_id": "cue-1", "text": "You have not mentioned Marc in five weeks. Anything new?", "kind": "quiet_person"}], "next_cursor": null}}
+ "body": {"items": [{"cue_id": "cue-1", "text": "You have not mentioned Marc in five weeks. Anything new?", "kind": "quiet_person",
+                     "subject": {"kind": "entity", "id": "ex:person-marc", "title": "Marc"}, "evidence_note_ids": ["n-30"], "entity_ids": ["ex:person-marc"]}], "next_cursor": null}}

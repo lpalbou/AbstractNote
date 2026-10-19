@@ -37,11 +37,11 @@ struct TodayScreen: View {
         if c.isEmpty {
             Text("Nothing new since your last look.").font(.rounded(.footnote)).foregroundStyle(Theme.text2)
         } else {
-            ForEach(c.notes) { n in row(n.title ?? "A new note", detail: "New note", symbol: "square.and.pencil", route: .note(id: n.noteId, title: n.title)) }
+            ForEach(c.notes) { n in row(n.title.shown ?? "A new note", detail: "New note", symbol: "square.and.pencil", route: .note(id: n.noteId, title: n.title)) }
             ForEach(c.entities) { e in row(e.name, detail: "New in your notes", symbol: "person.crop.circle.badge.plus", route: nil) }
             ForEach(c.supersededClaims) { cl in row(cl.text ?? "A belief", detail: cl.isRetraction ? "Withdrawn" : "No longer true", symbol: cl.isRetraction ? "xmark.circle" : "arrow.triangle.2.circlepath", route: nil) }
             ForEach(c.closedLoops) { l in row(l.text, detail: "Done", symbol: "checkmark.circle", route: nil) }
-            ForEach(c.failedNotes) { n in row(n.title ?? "A note", detail: "Could not be filed yet", symbol: "exclamationmark.triangle", route: .note(id: n.noteId, title: n.title)) }
+            ForEach(c.failedNotes) { n in row(n.title.shown ?? "A note", detail: "Could not be filed yet", symbol: "exclamationmark.triangle", route: .note(id: n.noteId, title: n.title)) }
         }
         let insights = d.insights + c.insights.filter { i in !d.insights.contains { $0.noteId == i.noteId } }
         if !insights.isEmpty {
@@ -58,7 +58,7 @@ struct TodayScreen: View {
         }
         if !d.onThisDay.isEmpty {
             SectionTitle(text: "On this day")
-            ForEach(d.onThisDay) { n in row(n.title ?? "A note", detail: When.short(n.occurredAt), symbol: "calendar", route: .note(id: n.noteId, title: n.title)) }
+            ForEach(d.onThisDay) { n in row(n.title.shown ?? "A note", detail: When.short(n.occurredAt), symbol: "calendar", route: .note(id: n.noteId, title: n.title)) }
         }
         if let error { ErrorLine(text: error).padding(.top, 6) }
         Button { Task { await load() } } label: {
@@ -118,6 +118,8 @@ struct TodayScreen: View {
         case "insight": if let i = d.insights.first { model.todayPath = [.insight(i)] }
         case "loop": if let l = d.loops.first { model.todayPath = [.loop(l)] }
         case "cue": if let c = d.cues.first { model.todayPath = [.cue(c)] }
+        case "cue-why":
+            if let c = d.cues.first, let s = c.subject { model.todayPath = [.cue(c), .why(title: s.title, noteIds: c.evidenceNoteIds)] }
         case "note-detail": model.todayPath = [.note(id: MockGatewayClient.evidence[0].noteId, title: nil)]
         default: break
         }

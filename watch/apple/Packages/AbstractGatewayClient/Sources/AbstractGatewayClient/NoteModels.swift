@@ -214,14 +214,22 @@ public struct OpenLoop: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
-/// A cue card: a prompt answered by adding a note.
+/// A cue card: a prompt answered by adding a note. `subject` is what it is about (an entity, a
+/// loop, …) when the reflect flow named one; `evidence_note_ids` are the notes behind it (the "Why").
 public struct Cue: Codable, Hashable, Sendable, Identifiable {
     public var cueId: String
     public var text: String
     public var kind: String?
+    public var subject: NoteSubject?
+    public var evidenceNoteIds: [String]
+    public var entityIds: [String]
     public var id: String { cueId }
-    enum CodingKeys: String, CodingKey { case cueId = "cue_id", text, kind }
-    public init(cueId: String, text: String, kind: String? = nil) { self.cueId = cueId; self.text = text; self.kind = kind }
+    enum CodingKeys: String, CodingKey {
+        case cueId = "cue_id", text, kind, subject, evidenceNoteIds = "evidence_note_ids", entityIds = "entity_ids"
+    }
+    public init(cueId: String, text: String, kind: String? = nil, subject: NoteSubject? = nil, evidenceNoteIds: [String] = [], entityIds: [String] = []) {
+        self.cueId = cueId; self.text = text; self.kind = kind; self.subject = subject; self.evidenceNoteIds = evidenceNoteIds; self.entityIds = entityIds
+    }
 }
 
 /// `GET /note/changes?since=`: what the notebook learned since the cursor, and the cursor to keep
@@ -264,16 +272,38 @@ public struct NoteOverview: Decodable, Hashable, Sendable {
     public init(resurfacing: [NoteRef]) { self.resurfacing = resurfacing }
 }
 
-/// `GET /note/notes/{id}`: the watch shows a note's text and when it was written.
+/// `GET /note/notes/{id}` `insight`: what makes a note an insight (null on other notes).
+public struct InsightFacts: Codable, Hashable, Sendable {
+    public var kind: String?
+    public var evidenceNoteIds: [String]
+    public var entityIds: [String]
+    public var ackedAt: String?
+    enum CodingKeys: String, CodingKey { case kind, evidenceNoteIds = "evidence_note_ids", entityIds = "entity_ids", ackedAt = "acked_at" }
+    public init(kind: String?, evidenceNoteIds: [String], entityIds: [String] = [], ackedAt: String? = nil) {
+        self.kind = kind; self.evidenceNoteIds = evidenceNoteIds; self.entityIds = entityIds; self.ackedAt = ackedAt
+    }
+}
+
+/// `GET /note/notes/{id}`: the watch shows a note's text, when it was written, and for an insight
+/// the notes behind it. Every other key the gateway adds is ignored.
 public struct NoteDetail: Decodable, Hashable, Sendable, Identifiable {
     public var noteId: String
     public var title: String?
     public var text: String
     public var kind: String?
     public var occurredAt: String?
+    public var insight: InsightFacts?
     public var id: String { noteId }
-    enum CodingKeys: String, CodingKey { case noteId = "note_id", title, text, kind, occurredAt = "occurred_at" }
-    public init(noteId: String, title: String?, text: String, kind: String? = nil, occurredAt: String? = nil) {
-        self.noteId = noteId; self.title = title; self.text = text; self.kind = kind; self.occurredAt = occurredAt
+    enum CodingKeys: String, CodingKey { case noteId = "note_id", title, text, kind, occurredAt = "occurred_at", insight }
+    public init(noteId: String, title: String?, text: String, kind: String? = nil, occurredAt: String? = nil, insight: InsightFacts? = nil) {
+        self.noteId = noteId; self.title = title; self.text = text; self.kind = kind; self.occurredAt = occurredAt; self.insight = insight
+    }
+}
+
+extension Optional where Wrapped == String {
+    /// A title to show: nil when absent or blank (the gateway sends "" for an untitled note).
+    public var shown: String? {
+        guard let s = self?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+        return s
     }
 }

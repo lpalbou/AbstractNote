@@ -10,6 +10,8 @@ enum Route: Hashable {
     case loop(OpenLoop)
     case cue(Cue)
     case note(id: String, title: String?)
+    /// The notes behind a cue or an insight.
+    case why(title: String, noteIds: [String])
     case about
 }
 
@@ -126,7 +128,7 @@ enum SignInDefaults {
 /// devicectl), `--forget-gateway` (sign out). See BUILD.md.
 struct LaunchOptions {
     static let screens = ["signin", "note", "note-sending", "note-saved", "note-error", "ask", "ask-thinking", "ask-answer",
-                          "ask-deeper", "today", "today-quiet", "insight", "loop", "cue", "note-detail", "settings", "about"]
+                          "ask-deeper", "today", "today-quiet", "insight", "loop", "cue", "cue-why", "note-detail", "settings", "about"]
 
     var mock: Bool
     var screen: String?

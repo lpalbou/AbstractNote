@@ -12,7 +12,7 @@ struct AbstractNoteWatchApp: App {
         let model = options.makeModel()
         switch options.screen ?? "" {
         case let s where s.hasPrefix("ask"): model.tab = .ask
-        case let s where s.hasPrefix("today") || ["insight", "loop", "cue", "note-detail"].contains(s): model.tab = .today
+        case let s where s.hasPrefix("today") || ["insight", "loop", "cue", "cue-why", "note-detail"].contains(s): model.tab = .today
         case "settings", "about": model.tab = .settings
         default: model.tab = .note
         }
@@ -61,6 +61,7 @@ struct RouteView: View {
         case .loop(let l): LoopView(loop: l)
         case .cue(let c): CueView(cue: c)
         case .note(let id, let title): NoteDetailView(noteId: id, title: title)
+        case .why(let title, let ids): WhyView(title: title, noteIds: ids)
         case .about: AboutView()
         }
     }

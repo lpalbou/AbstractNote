@@ -14,7 +14,7 @@
     "Sources/AbstractGatewayClient/Auth.swift": "0e33b58b627eccee82d0133bd9400ac5992d279ac969147cd0c28cec357cad35",
     "Sources/AbstractGatewayClient/GatewayClient.swift": "ed634a6a04145ba439163bdae531aeda91a04e80065e6bd86dc20c95ed662b06",
     "Sources/AbstractGatewayClient/Models.swift": "2be0c70910c8fc5ed19f631de3d948f0cf8c7da5aea1d7d831d33d1a17c19228",
-    "Sources/AbstractGatewayClient/MockGatewayClient.swift": "37e0dba830e3677fa7447f2ee146b671c7f19ef373645519a4df443462556f68",
+    "Sources/AbstractGatewayClient/MockGatewayClient.swift": "7798fca3297ec4ac3b647712ade3c01d2f6ac9f65db7649fb1036cacea830c13",
     "Tests/AbstractGatewayClientTests/SignInTests.swift": "9c897ee948234a03c9236e0ab668e0eb0c74245bf0a4f0247c3ef28d6b52ba7a",
     "Tests/AbstractGatewayClientTests/RetryTests.swift": "12ceace121bcaa89191c6ca8e892ddeac20edb171c1e09d1b547b3c6f6810f7f"
   },
@@ -40,5 +40,5 @@
   ],
   "notes": "Candidates for one shared Swift client once both APIs settle (docs/clients.md). Re-check sha256 against the source before porting a fix either way.",
   "source_state": "working tree on 2026-10-19 01:30 CEST: GatewayClient.swift, Models.swift, MockGatewayClient.swift and RetryTests.swift had staged, uncommitted changes on top of source_commit; the sha256 values are of those working-tree files",
-  "local_updated": "2026-10-19: input_data.session_id, refused/failed run sentences (lead follow-up after the recorded fixtures)"
+  "local_updated": "2026-10-19: input_data.session_id, refused/failed run sentences; cue subject/evidence in the sample notebook (W10 re-recording)"
 }

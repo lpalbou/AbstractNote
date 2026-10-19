@@ -5,7 +5,7 @@
     "body": {
       "bundle_id": "abstractnote",
       "flow_id": "note-recall",
-      "session_id": "s-smoke-0326864d",
+      "session_id": "s-smoke-edfde0d3",
       "input_data": {
         "prompt": "What did Dana ask for?"
       }
@@ -13,7 +13,7 @@
   },
   "status": 200,
   "body": {
-    "run_id": "7178a655-6e35-40a7-8157-8fb027dcecd0",
+    "run_id": "453294fe-cd51-4c14-b869-0c2ba77970a8",
     "runner_warning": null,
     "resolved_workflow": {
       "source": "client",

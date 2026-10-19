@@ -1,19 +1,19 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/gateway/runs/7178a655-6e35-40a7-8157-8fb027dcecd0",
+    "path": "/api/gateway/runs/453294fe-cd51-4c14-b869-0c2ba77970a8",
     "body": null
   },
   "status": 200,
   "body": {
-    "run_id": "7178a655-6e35-40a7-8157-8fb027dcecd0",
+    "run_id": "453294fe-cd51-4c14-b869-0c2ba77970a8",
     "workflow_id": "abstractnote@0.1.0:note-recall",
     "status": "completed",
     "current_node": "end_standard",
-    "created_at": "2026-10-19T01:23:20.598998+00:00",
-    "updated_at": "2026-10-19T01:23:21.709267+00:00",
+    "created_at": "2026-10-19T03:23:33.789976+00:00",
+    "updated_at": "2026-10-19T03:23:34.929853+00:00",
     "actor_id": "gateway",
-    "session_id": "s-smoke-0326864d",
+    "session_id": "s-smoke-edfde0d3",
     "parent_run_id": null,
     "error": null,
     "flow_warnings": null,
@@ -52,10 +52,10 @@
         "as_of": null,
         "notes": [
           {
-            "note_id": "nt_pqyk3mbyyvglxptg3asbfawefx",
+            "note_id": "nt_d4d455ob2zj64bzz6uunu4whhe",
             "title": "Dana and the LUT budget",
             "kind": "event",
-            "occurred_at": "2026-10-19T01:23:15Z",
+            "occurred_at": "2026-10-19T03:23:28Z",
             "excerpt": "Dana moved the Pareto deadline to next week.",
             "score": 0.016393,
             "matched_by": [
@@ -71,7 +71,7 @@
             "insight_kind": null
           },
           {
-            "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
+            "note_id": "nt_mdqipeq6eohrepie467ards362",
             "title": "Dana and the LUT budget",
             "kind": "event",
             "occurred_at": "2026-10-19T09:12:00Z",
@@ -113,8 +113,8 @@
             "name": "Dana",
             "aliases": [],
             "summary": "Dana owns the LUT budget decisions.",
-            "first_seen": "2026-10-19T01:23:15Z",
-            "last_seen": "2026-10-19T01:23:15Z",
+            "first_seen": "2026-10-19T03:23:28Z",
+            "last_seen": "2026-10-19T03:23:28Z",
             "note_count": 1,
             "merged_into": null,
             "score": 0.032522,
@@ -126,7 +126,7 @@
         ],
         "claims": [
           {
-            "claim_id": "cl_tcugdgiq6udgqtcpe57fn2nv7l",
+            "claim_id": "cl_s47wdrmah437huktbu2ts653e4",
             "subject_id": "ex:person-dana",
             "predicate": "schema:participant",
             "object_id": "ex:project-lut",
@@ -139,9 +139,9 @@
             "status": "retracted",
             "superseded_by": null,
             "evidence": "Met Dana about the LUT budget",
-            "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
-            "revision_id": "rv_oyh5cvpbfta4r7hpje4nxavtb7",
-            "assertion_id": "cl_tcugdgiq6udgqtcpe57fn2nv7l",
+            "note_id": "nt_mdqipeq6eohrepie467ards362",
+            "revision_id": "rv_y5hiivnw24ix53vzd76yew2uur",
+            "assertion_id": "cl_s47wdrmah437huktbu2ts653e4",
             "disputed_with": [],
             "reinforced_count": 0,
             "subject_name": "Dana",
@@ -149,22 +149,22 @@
             "score": 0.016393
           },
           {
-            "claim_id": "cl_2qp5b2geh2y4oqcv2o3j6ojkbf",
+            "claim_id": "cl_5f4sxpakknjb4ijna6h2w4crzp",
             "subject_id": "ex:person-dana-2",
             "predicate": "schema:participant",
             "object_id": "ex:project-lut-2",
             "object_literal": null,
             "certainty": "stated",
             "stance": "assert",
-            "observed_at": "2026-10-19T01:23:15Z",
-            "valid_from": "2026-10-19T01:23:15Z",
+            "observed_at": "2026-10-19T03:23:28Z",
+            "valid_from": "2026-10-19T03:23:28Z",
             "valid_until": null,
             "status": "active",
             "superseded_by": null,
             "evidence": "Met Dana about the LUT budget",
-            "note_id": "nt_pqyk3mbyyvglxptg3asbfawefx",
-            "revision_id": "rv_azybk2fyntka74wrjqjyfvspfx",
-            "assertion_id": "cl_2qp5b2geh2y4oqcv2o3j6ojkbf",
+            "note_id": "nt_d4d455ob2zj64bzz6uunu4whhe",
+            "revision_id": "rv_5tmqizw7h5kxjtdg5yelc5wugu",
+            "assertion_id": "cl_5f4sxpakknjb4ijna6h2w4crzp",
             "disputed_with": [],
             "reinforced_count": 0,
             "subject_name": "Dana",
@@ -226,6 +226,6 @@
     "occurrence_index": null,
     "session_kind": "chat",
     "legacy": false,
-    "workspace_root": "<scratch>/hermetic/data/users/default/alice/runtime/workspaces/session-s-smoke-0326864d-5783c31ef60c"
+    "workspace_root": "/private/tmp/claude-501/-Users-albou-tmp-abstractframework/1659d8af-3ab8-4457-8835-4d5ddd3e9ff0/scratchpad/W10/hermetic/data/users/default/alice/runtime/workspaces/session-s-smoke-edfde0d3-552db59058c8"
   }
 }

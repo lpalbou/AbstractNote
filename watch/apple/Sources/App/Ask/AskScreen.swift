@@ -84,7 +84,7 @@ struct AskScreen: View {
                     NavigationLink(value: Route.note(id: e.noteId, title: e.title)) {
                         Card {
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(e.title ?? "A note").font(.rounded(.footnote, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(2)
+                                Text(e.title.shown ?? "A note").font(.rounded(.footnote, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(2)
                                 if let d = When.short(e.occurredAt) { Text(d).font(.rounded(.caption2)).foregroundStyle(Theme.muted) }
                             }
                         }

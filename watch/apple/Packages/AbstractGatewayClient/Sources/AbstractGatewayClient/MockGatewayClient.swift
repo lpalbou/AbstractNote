@@ -79,7 +79,9 @@ public actor MockGatewayClient: GatewayClient {
 
     public func cues(limit: Int) async throws -> [Cue] {
         try check()
-        return quiet ? [] : [Cue(cueId: "cue-1", text: "You have not mentioned Marc in five weeks. Anything new?", kind: "quiet_person")]
+        return quiet ? [] : [Cue(cueId: "cue-1", text: "You have not mentioned Marc in five weeks. Anything new?", kind: "quiet_person",
+                                     subject: NoteSubject(kind: "entity", id: "ex:person-marc", title: "Marc"),
+                                     evidenceNoteIds: ["n-30", "n-31"], entityIds: ["ex:person-marc"])]
     }
 
     public func openLoops(limit: Int) async throws -> [OpenLoop] {
@@ -102,6 +104,9 @@ public actor MockGatewayClient: GatewayClient {
 
     public func note(id: String) async throws -> NoteDetail {
         try check()
+        if let m = Self.marcNotes[id] {
+            return NoteDetail(noteId: id, title: m.title, text: m.text, kind: "event", occurredAt: m.at)
+        }
         let e = Self.evidence.first { $0.noteId == id }
         return NoteDetail(noteId: id, title: e?.title ?? "A note", text: "Met Dana about the LUT budget; she wants the Pareto by Friday.",
                           kind: "decision", occurredAt: e?.occurredAt ?? "2026-10-12T09:12:00Z")
@@ -111,6 +116,11 @@ public actor MockGatewayClient: GatewayClient {
 
     public static let filingAnswer = "Saved as idea \u{2018}LUT budget\u{2019}. Related: Dana, LUT."
     public static let recallAnswer = "You settled on 50k on 17 October, after Dana asked for 55k; in September the plan was 40k."
+    static let marcNotes: [String: (title: String, text: String, at: String)] = [
+        "n-30": ("Slides for Marc", "Send the slides to Marc before the review.", "2026-09-08T10:00:00Z"),
+        "n-31": ("Lunch with Marc", "Marc wants to restart the reading group in October.", "2026-09-14T12:30:00Z"),
+    ]
+
     public static let evidence = [
         Evidence(noteId: "n-12", title: "LUT budget with Dana", occurredAt: "2026-10-12T09:12:00Z"),
         Evidence(noteId: "n-17", title: "Budget settled at 50k", occurredAt: "2026-10-17T16:40:00Z"),

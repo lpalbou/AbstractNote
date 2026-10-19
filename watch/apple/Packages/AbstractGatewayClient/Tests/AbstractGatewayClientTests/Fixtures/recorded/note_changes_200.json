@@ -6,20 +6,20 @@
   },
   "status": 200,
   "body": {
-    "cursor": "WyJjaGciLCIyMDI2LTEwLTE5VDAxOjIzOjIwWiIsWyJjbGFpbTpjbF90Y3VnZGdpcTZ1ZGdxdGNwZTU3Zm4ybnY3bCJdXQ",
+    "cursor": "WyJjaGciLCIyMDI2LTEwLTE5VDAzOjIzOjMzWiIsWyJjbGFpbTpjbF9zNDd3ZHJtYWg0MzdodWt0YnUydHM2NTNlNCJdXQ",
     "notes": [
       {
-        "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
+        "note_id": "nt_mdqipeq6eohrepie467ards362",
         "title": "Dana and the LUT budget",
         "kind": "event",
         "occurred_at": "2026-10-19T09:12:00Z",
         "excerpt": "Met Dana about the LUT budget; she wants the Pareto by Friday. Met Dana about the LUT budget; she wants the Pareto by Friday."
       },
       {
-        "note_id": "nt_pqyk3mbyyvglxptg3asbfawefx",
+        "note_id": "nt_d4d455ob2zj64bzz6uunu4whhe",
         "title": "Dana and the LUT budget",
         "kind": "event",
-        "occurred_at": "2026-10-19T01:23:15Z",
+        "occurred_at": "2026-10-19T03:23:28Z",
         "excerpt": "Met Dana about the LUT budget; she wants the Pareto by Friday."
       }
     ],
@@ -40,22 +40,22 @@
         "entity_id": "ex:person-dana-2",
         "name": "Dana",
         "kind": "person",
-        "first_seen": "2026-10-19T01:23:15Z"
+        "first_seen": "2026-10-19T03:23:28Z"
       },
       {
         "entity_id": "ex:project-lut-2",
         "name": "LUT",
         "kind": "project",
-        "first_seen": "2026-10-19T01:23:15Z"
+        "first_seen": "2026-10-19T03:23:28Z"
       }
     ],
     "superseded_claims": [
       {
-        "claim_id": "cl_tcugdgiq6udgqtcpe57fn2nv7l",
+        "claim_id": "cl_s47wdrmah437huktbu2ts653e4",
         "kind": "retracted",
         "text": "Dana participant LUT",
         "superseded_by": null,
-        "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz"
+        "note_id": "nt_mdqipeq6eohrepie467ards362"
       }
     ],
     "closed_loops": [],

@@ -16,7 +16,7 @@ BUNDLE=ai.abstractframework.note.watch
 DERIVED_DATA="${DERIVED_DATA:-$ROOT/build/DerivedData}"
 SPM_SCRATCH="${SPM_SCRATCH:-}"
 SCREENS_DIR="${SCREENS_DIR:-$ROOT/../../untracked/screens/watch}"
-SCREENS=(signin note note-sending note-saved note-error ask ask-thinking ask-answer ask-deeper today today-quiet insight loop cue note-detail settings about)
+SCREENS=(signin note note-sending note-saved note-error ask ask-thinking ask-answer ask-deeper today today-quiet insight loop cue cue-why note-detail settings about)
 t() { date +%s; }
 
 # Another xcodebuild (another session's UI tests on the same simulator): wait, bounded.

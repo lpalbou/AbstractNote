@@ -67,7 +67,7 @@ xcodebuild test -project AbstractNoteWatch.xcodeproj -scheme AbstractNoteWatchUI
 | Argument | Effect |
 |---|---|
 | `--mock` | the sample notebook instead of a gateway (screenshots, UI tests); never asks for Location |
-| `--screen <name>` | with `--mock`, opens a scene: `signin` `note` `note-sending` `note-saved` `note-error` `ask` `ask-thinking` `ask-answer` `ask-deeper` `today` `today-quiet` `insight` `loop` `cue` `note-detail` `settings` `about` |
+| `--screen <name>` | with `--mock`, opens a scene: `signin` `note` `note-sending` `note-saved` `note-error` `ask` `ask-thinking` `ask-answer` `ask-deeper` `today` `today-quiet` `insight` `loop` `cue` `cue-why` `note-detail` `settings` `about` |
 | `--gateway <url> --token <token> [--user <id>]` | signs in with that gateway and token and keeps it in the sealed sign-in file, so one launch provisions a simulator or a watch |
 | `--forget-gateway` | deletes the sign-in file (the sign-in screen shows) |
 

@@ -1,0 +1,29 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/gateway/note/cues",
+    "body": null
+  },
+  "status": 200,
+  "body": {
+    "items": [
+      {
+        "cue_id": "nt_quvivdlaunywg4x46ymqmeyuzr",
+        "text": "You promised Dana the Pareto in January.",
+        "kind": "reminder",
+        "subject": {
+          "kind": "entity",
+          "id": "ex:person-dana",
+          "title": "Dana"
+        },
+        "evidence_note_ids": [
+          "nt_nlsmt6ctjllw6anpccs4zecrey"
+        ],
+        "entity_ids": [
+          "ex:person-dana"
+        ]
+      }
+    ],
+    "next_cursor": null
+  }
+}

@@ -31,10 +31,12 @@ enum RecordedFixtures {
         return out
     }
 
-    /// Paths the gateway answers that the watch never calls (the web app and the CLI do).
+    /// Paths the gateway answers that the watch never calls (the web app and the CLI do); each one
+    /// covers itself and everything below it.
     static let notCalledByWatch = ["/api/gateway/note/status", "/api/gateway/note/entities", "/api/gateway/note/graph",
                                    "/api/gateway/note/queue", "/api/gateway/note/settings", "/api/gateway/note/processor/ensure",
-                                   "/api/gateway/attachments/upload", "/api/gateway/automations/", "/api/gateway/note/claims/"]
+                                   "/api/gateway/note/review", "/api/gateway/note/claims", "/api/gateway/note/day",
+                                   "/api/gateway/attachments/upload", "/api/gateway/automations"]
 
     /// Decodes one recorded answer with the model the client uses for that path and status.
     static func check(_ f: Fixture) throws {
@@ -44,7 +46,7 @@ enum RecordedFixtures {
             return
         }
         guard (200..<300).contains(f.status) else { Issue.record("\(path): status \(f.status) has no expectation in the watch client"); return }
-        if notCalledByWatch.contains(where: { path == $0 || ($0.hasSuffix("/") && path.hasPrefix($0)) }) { return }
+        if notCalledByWatch.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) { return }
         let d = JSONDecoder()
         switch path {
         case "/api/gateway/me": _ = try d.decode(Principal.self, from: f.body)
@@ -96,7 +98,8 @@ extension ReplayGroup {
 
         @Test func aCaptureRequestHasTheRecordedShapeIncludingTheSessionInsideInputData() async throws {
             try serve("runs_start_capture_200")
-            #expect(try await ReplayStub.client().startCapture(capture) == "614658d6-524c-4c2b-8ca2-103d5cb9a968")
+            let recordedRunId = try JSONDecoder().decode(StartRunResponse.self, from: try #require(rec["runs_start_capture_200"]).body).runId
+            #expect(try await ReplayStub.client().startCapture(capture) == recordedRunId)
             let sent = try #require(ReplayStub.seen.first)
             let input = try #require(sent.body["input_data"] as? [String: Any])
             #expect(input["session_id"] as? String == "note-watch-1" && sent.body["session_id"] as? String == "note-watch-1")
@@ -119,8 +122,8 @@ extension ReplayGroup {
         @Test func recordedCaptureRunsReadAsTheirAnswers() async throws {
             try serve("run_capture_completed_200", "run_capture_duplicate_200", "run_capture_path_refused")
             let c = ReplayStub.client()
-            #expect(try await c.captureProgress(runId: "a") == .done(CaptureAnswer(response: "Saved as event “Dana and the LUT budget”.",
-                                                                                   noteId: "nt_l7e27gj63qbf7ggvjjg2q332yz", status: "queued")))
+            guard case .done(let saved) = try await c.captureProgress(runId: "a") else { Issue.record("capture"); return }
+            #expect(saved.response == "Saved as event “Dana and the LUT budget”." && saved.status == "queued" && saved.noteId?.hasPrefix("nt_") == true)
             guard case .done(let dup) = try await c.captureProgress(runId: "b") else { Issue.record("duplicate"); return }
             #expect(dup.status == "duplicate")
             // A refused input completes with success false: its sentence, without "Runtime error: ".
@@ -143,7 +146,21 @@ extension ReplayGroup {
             #expect(try await c.openLoops(limit: 5).first?.text == "Send Dana the Pareto by Friday")
             #expect(try await c.insights(limit: 5).isEmpty)
             #expect(try await c.overview().resurfacing.isEmpty)
-            #expect(try await c.note(id: "nt_l7e27gj63qbf7ggvjjg2q332yz").title == "Dana and the LUT budget")
+            let n = try await c.note(id: "n")   // the recording carries keys the watch ignores (attachments, revision, insight, …)
+            #expect(n.title == "Dana and the LUT budget" && n.insight == nil)
+        }
+
+        @Test func aRecordedCueCarriesItsSubjectAndTheNotesBehindIt() async throws {
+            try serve("note_cues_evidence_200")
+            let cue = try #require(try await ReplayStub.client().cues(limit: 3).first)
+            #expect(cue.subject?.title == "Dana" && cue.subject?.kind == "entity")
+            #expect(cue.evidenceNoteIds.count == 1 && cue.entityIds == ["ex:person-dana"])
+        }
+
+        @Test func aRecordedInsightNoteCarriesItsEvidence() async throws {
+            try serve("note_get_insight_200")
+            let n = try await ReplayStub.client().note(id: "i")
+            #expect(n.kind == "insight" && n.insight?.kind == "reminder" && n.insight?.evidenceNoteIds.count == 1)
         }
 
         @Test func recordedRefusalsMapToTheirSentences() async throws {
@@ -176,6 +193,17 @@ func theRepositoryRecordingsMatchTheBundledCopiesAndAreReadable() throws {
         let l = try #require(live[name].map { try Fixture(json: $0, name: name) }, "\(name) is no longer recorded")
         #expect(l.body == f.body && l.status == f.status && l.path == f.path, "\(name) drifted: copy the new recording into Fixtures/recorded")
     }
+}
+
+/// Strict on what the watch uses, blind to what it does not: an added key is ignored, a missing
+/// used key fails.
+@Test func addedKeysAreIgnoredAndMissingUsedKeysFail() throws {
+    let d = JSONDecoder()
+    let cue = try d.decode(Cue.self, from: Data(#"{"cue_id":"c","text":"t","evidence_note_ids":[],"entity_ids":[],"score":0.4,"new_field":{"a":1}}"#.utf8))
+    #expect(cue.cueId == "c" && cue.subject == nil)
+    #expect(throws: (any Error).self) { try d.decode(Cue.self, from: Data(#"{"cue_id":"c","text":"t","entity_ids":[]}"#.utf8)) }
+    #expect(throws: (any Error).self) { try d.decode(NoteDetail.self, from: Data(#"{"note_id":"n","title":"x"}"#.utf8)) }
+    #expect(Optional("  ").shown == nil && Optional("Dana").shown == "Dana" && (nil as String?).shown == nil)
 }
 
 @Test func runErrorsLoseTheRuntimePrefix() {

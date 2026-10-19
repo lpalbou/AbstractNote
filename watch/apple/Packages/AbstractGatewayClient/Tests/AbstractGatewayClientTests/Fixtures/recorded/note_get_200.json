@@ -1,17 +1,17 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/gateway/note/notes/nt_l7e27gj63qbf7ggvjjg2q332yz",
+    "path": "/api/gateway/note/notes/nt_mdqipeq6eohrepie467ards362",
     "body": null
   },
   "status": 200,
   "body": {
-    "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
+    "note_id": "nt_mdqipeq6eohrepie467ards362",
     "title": "Dana and the LUT budget",
     "text": "Met Dana about the LUT budget; she wants the Pareto by Friday.",
     "kind": "event",
     "occurred_at": "2026-10-19T09:12:00Z",
-    "received_at": "2026-10-19T01:23:08Z",
+    "received_at": "2026-10-19T03:23:21Z",
     "status": "processed",
     "topics": [
       "lut"
@@ -25,15 +25,15 @@
     "location": null,
     "attachments": [
       {
-        "attachment_id": "at_v74p67tsuwlfvrxbxx2w5jus7f",
-        "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
+        "attachment_id": "at_wxafgxmyu3vpkoryoevcfydj2v",
+        "note_id": "nt_mdqipeq6eohrepie467ards362",
         "sha256": "59aeb8921a4eae2304f7eaef12a47afd082c697e70070325eb8222bc490edbbd",
         "size": 37,
         "mime": "text/plain",
         "filename": "budget.txt",
         "artifact_ref": {
-          "artifact_id": "edb97d8e578363ba16e5d1a191d5d452",
-          "run_id": "session_memory_s-smoke-0326864d"
+          "artifact_id": "f82202d00e362f35827cd0f731987a5b",
+          "run_id": "session_memory_s-smoke-edfde0d3"
         },
         "blob_path": "blobs/59/59aeb8921a4eae2304f7eaef12a47afd082c697e70070325eb8222bc490edbbd",
         "extracted_by": "plain",
@@ -42,13 +42,13 @@
       }
     ],
     "revision": {
-      "revision_id": "rv_oyh5cvpbfta4r7hpje4nxavtb7",
-      "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
+      "revision_id": "rv_y5hiivnw24ix53vzd76yew2uur",
+      "note_id": "nt_mdqipeq6eohrepie467ards362",
       "attempt": 1,
       "action": null,
       "target": null,
       "at": "2026-10-19T09:12:00Z",
-      "recorded_at": "2026-10-19T01:23:14Z",
+      "recorded_at": "2026-10-19T03:23:27Z",
       "run_id": null,
       "ops": [
         {
@@ -65,7 +65,7 @@
           "op": "entity.mention",
           "payload": {
             "entity_id": "ex:person-dana",
-            "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz"
+            "note_id": "nt_mdqipeq6eohrepie467ards362"
           }
         },
         {
@@ -82,16 +82,16 @@
           "op": "entity.mention",
           "payload": {
             "entity_id": "ex:project-lut",
-            "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz"
+            "note_id": "nt_mdqipeq6eohrepie467ards362"
           }
         },
         {
           "op": "claim.add",
           "payload": {
             "certainty": "stated",
-            "claim_id": "cl_tcugdgiq6udgqtcpe57fn2nv7l",
+            "claim_id": "cl_s47wdrmah437huktbu2ts653e4",
             "evidence": "Met Dana about the LUT budget",
-            "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
+            "note_id": "nt_mdqipeq6eohrepie467ards362",
             "object_id": "ex:project-lut",
             "object_literal": null,
             "observed_at": "2026-10-19T09:12:00Z",
@@ -106,15 +106,15 @@
           "op": "task.open",
           "payload": {
             "due": null,
-            "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
-            "task_id": "tk_mtpuzdh3vqarhsh2lqakvmglrl",
+            "note_id": "nt_mdqipeq6eohrepie467ards362",
+            "task_id": "tk_kqjr25kcckag4luoqbp3y6tp2x",
             "text": "Send Dana the Pareto by Friday"
           }
         },
         {
           "op": "topic.assign",
           "payload": {
-            "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
+            "note_id": "nt_mdqipeq6eohrepie467ards362",
             "topic": "lut"
           }
         },
@@ -123,7 +123,7 @@
           "payload": {
             "kind": null,
             "language": null,
-            "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
+            "note_id": "nt_mdqipeq6eohrepie467ards362",
             "summary": "Met Dana about the LUT budget; she wants the Pareto by Friday. Met Dana about the LUT budget; she wants the Pareto by Friday."
           }
         }
@@ -160,7 +160,7 @@
     ],
     "claims": [
       {
-        "claim_id": "cl_tcugdgiq6udgqtcpe57fn2nv7l",
+        "claim_id": "cl_s47wdrmah437huktbu2ts653e4",
         "subject_id": "ex:person-dana",
         "predicate": "schema:participant",
         "object_id": "ex:project-lut",
@@ -173,15 +173,16 @@
         "status": "retracted",
         "superseded_by": null,
         "evidence": "Met Dana about the LUT budget",
-        "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
-        "revision_id": "rv_oyh5cvpbfta4r7hpje4nxavtb7",
-        "assertion_id": "cl_tcugdgiq6udgqtcpe57fn2nv7l",
+        "note_id": "nt_mdqipeq6eohrepie467ards362",
+        "revision_id": "rv_y5hiivnw24ix53vzd76yew2uur",
+        "assertion_id": "cl_s47wdrmah437huktbu2ts653e4",
         "disputed_with": [],
         "reinforced_count": 0,
         "subject_name": "Dana",
         "object_name": "LUT"
       }
     ],
-    "revisits": []
+    "revisits": [],
+    "insight": null
   }
 }

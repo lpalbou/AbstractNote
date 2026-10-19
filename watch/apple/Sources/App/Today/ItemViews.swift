@@ -106,6 +106,16 @@ struct CueView: View {
         FitScroll {
             VStack(alignment: .leading, spacing: 8) {
                 Text(cue.text).font(.rounded(.headline)).foregroundStyle(Theme.text)
+                // "Why": the notes behind the cue, when the notebook named what it is about.
+                if let subject = cue.subject, !cue.evidenceNoteIds.isEmpty {
+                    Text("About \(subject.title)").font(.rounded(.caption2)).foregroundStyle(Theme.muted)
+                    NavigationLink(value: Route.why(title: subject.title, noteIds: cue.evidenceNoteIds)) {
+                        Label("Why", systemImage: "questionmark.circle").font(.rounded(.footnote)).foregroundStyle(Theme.cyan)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Shows the notes behind this")
+                    .accessibilityIdentifier("cue.why")
+                }
                 Spacer(minLength: 6)
                 Button("Add a note") { model.addNote(about: NoteSubject(kind: "cue", id: cue.cueId, title: cue.text)) }
                     .buttonStyle(FilledButtonStyle(fill: Theme.indigoButton))
@@ -129,14 +139,21 @@ struct NoteDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
                 if let note {
-                    if let t = note.title ?? title { Text(t).font(.rounded(.headline)).foregroundStyle(Theme.text) }
+                    if let t = note.title.shown ?? title.shown { Text(t).font(.rounded(.headline)).foregroundStyle(Theme.text) }
                     if let d = When.short(note.occurredAt) { Text(d).font(.rounded(.caption2)).foregroundStyle(Theme.muted) }
                     Text(note.text).font(.rounded(.body)).foregroundStyle(Theme.text2)
+                    if let ids = note.insight?.evidenceNoteIds, !ids.isEmpty {
+                        NavigationLink(value: Route.why(title: note.title.shown ?? "This", noteIds: ids)) {
+                            Label("Why", systemImage: "questionmark.circle").font(.rounded(.footnote)).foregroundStyle(Theme.cyan)
+                        }
+                        .buttonStyle(.plain).padding(.top, 4)
+                        .accessibilityHint("Shows the notes behind this")
+                    }
                 } else if let error {
                     ErrorLine(text: error)
                     Button("Try again") { Task { await load() } }.buttonStyle(FilledButtonStyle(fill: Theme.neutralButton))
                 } else {
-                    if let title { Text(title).font(.rounded(.headline)).foregroundStyle(Theme.text) }
+                    if let t = title.shown { Text(t).font(.rounded(.headline)).foregroundStyle(Theme.text) }
                     ProgressView().frame(maxWidth: .infinity).padding(.top, 10)
                 }
             }
@@ -150,5 +167,60 @@ struct NoteDetailView: View {
     private func load() async {
         error = nil
         do { note = try await model.client.note(id: noteId) } catch { self.error = model.say(error) }
+    }
+}
+
+/// The notes behind a cue or an insight, each opening on its own page.
+struct WhyView: View {
+    let title: String
+    let noteIds: [String]
+    @EnvironmentObject private var model: AppModel
+    @State private var notes: [NoteDetail]?
+    @State private var error: String?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Behind this, from your notes").font(.rounded(.caption2)).foregroundStyle(Theme.muted)
+                if let notes {
+                    ForEach(notes) { n in
+                        NavigationLink(value: Route.note(id: n.noteId, title: n.title.shown)) {
+                            Card {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(n.title.shown ?? n.text).font(.rounded(.footnote, weight: .semibold)).foregroundStyle(Theme.text).lineLimit(2)
+                                    if let d = When.short(n.occurredAt) { Text(d).font(.rounded(.caption2)).foregroundStyle(Theme.muted) }
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Opens this note")
+                    }
+                } else if let error {
+                    ErrorLine(text: error)
+                    Button("Try again") { Task { await load() } }.buttonStyle(FilledButtonStyle(fill: Theme.neutralButton))
+                } else {
+                    ProgressView().frame(maxWidth: .infinity).padding(.top, 10)
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+        .screen("Why")
+        .task { if notes == nil { await load() } }
+    }
+
+    /// The notes, read together (a cue rests on a few).
+    private func load() async {
+        error = nil
+        let client = model.client
+        do {
+            notes = try await withThrowingTaskGroup(of: (Int, NoteDetail).self) { group in
+                for (i, id) in noteIds.prefix(8).enumerated() { group.addTask { (i, try await client.note(id: id)) } }
+                var out: [(Int, NoteDetail)] = []
+                for try await r in group { out.append(r) }
+                return out.sorted { $0.0 < $1.0 }.map(\.1)
+            }
+        } catch {
+            self.error = model.say(error)
+        }
     }
 }
