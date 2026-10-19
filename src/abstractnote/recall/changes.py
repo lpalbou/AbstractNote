@@ -142,7 +142,9 @@ def overview(nb: Any, days: int = 30, *, now: Optional[str] = None) -> Dict[str,
 def cues(nb: Any, limit: int = 3) -> Dict[str, Any]:
     """Cue cards: unacknowledged reflect insights (not dossiers), each with the subject a reply links to.
 
-    ``{items: [{cue_id, text, kind, subject: {kind, id, title}}]}``; ``cue_id`` is the insight note id.
+    ``{items: [{cue_id, text, kind, subject: {kind, id, title}, evidence_note_ids, entity_ids}]}``; ``cue_id`` is
+    the insight note id; ``evidence_note_ids`` and ``entity_ids`` are the insight's own (the notes it rests on and
+    the entities it is about), so a client shows why it surfaced without a second read.
     """
     limit = clamp_limit(limit, 3, 50)
     items = []
@@ -163,5 +165,6 @@ def cues(nb: Any, limit: int = 3) -> Dict[str, Any]:
                     subject = {"kind": "note", "id": nid, "title": n["title"] or shapes.excerpt(n["text"], 80)}
                     break
         items.append({"cue_id": r["note_id"], "text": ins["body"] or ins["title"], "kind": r["insight_kind"],
-                      "subject": subject})
+                      "subject": subject, "evidence_note_ids": ins["evidence_note_ids"],
+                      "entity_ids": ins["entity_ids"]})
     return {"items": items}

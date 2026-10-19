@@ -42,6 +42,8 @@ export type Note = NoteRef & {
   claims?: Claim[];
   revision?: { revision_id: string; summary: string; at: string; recorded_at?: string } | null;
   revisits?: NoteRef[];
+  /** Set on an insight note (`kind` = its insight_kind), null on every other note. */
+  insight?: { kind: string; evidence_note_ids: string[]; entity_ids: string[]; acked_at: string | null } | null;
   error?: string | null;
 };
 
@@ -90,8 +92,8 @@ export type Insight = { note_id: string; title: string; body: string; insight_ki
 /** What a new note is about (`input_data.context.about` on note-capture). */
 export type AboutKind = "insight" | "task" | "cue" | "entity" | "note";
 export type About = { kind: AboutKind; id: string; title: string };
-/** Pinned: GET /note/cues items {cue_id, text, kind, subject: {kind, id, title}} (cue_id is the cue's note id). */
-export type Cue = { cue_id: string; text: string; kind: string; subject: { kind: string; id: string; title: string } };
+/** Pinned: GET /note/cues items {cue_id, text, kind, subject: {kind, id, title}, evidence_note_ids, entity_ids} (cue_id is the cue's note id). */
+export type Cue = { cue_id: string; text: string; kind: string; subject: { kind: string; id: string; title: string }; evidence_note_ids: string[]; entity_ids: string[] };
 /** Pinned: GET /note/changes. Absent lists mean empty. */
 export type Changes = {
   cursor: string;

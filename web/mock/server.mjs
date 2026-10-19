@@ -521,7 +521,8 @@ export function createMockGateway(options = {}) {
       const n = db.notes.get(m[1]) || db.insights.get(m[1]);
       if (!n) return fail(res, 404, "Not found.");
       if (!n.text) {
-        return send(res, 200, { note_id: n.note_id, title: n.title, text: n.body, kind: n.kind || "insight", occurred_at: n.occurred_at, received_at: n.occurred_at, status: "processed", topics: [], summary: n.body, source: { client: "agent" }, location: null, attachments: [], revision: null, entities: (n.entity_ids || []).map(entRef), claims: [], revisits: [] });
+        // W10: an insight note's read carries `insight` {kind, evidence_note_ids, entity_ids, acked_at} (null for other notes).
+        return send(res, 200, { note_id: n.note_id, title: n.title, text: n.body, kind: n.kind || "insight", occurred_at: n.occurred_at, received_at: n.occurred_at, status: "processed", topics: [], summary: n.body, source: { client: "agent" }, location: null, attachments: [], revision: null, entities: (n.entity_ids || []).map(entRef), claims: [], revisits: [], insight: { kind: n.insight_kind, evidence_note_ids: n.evidence_note_ids || [], entity_ids: n.entity_ids || [], acked_at: n.acked_at || null } });
       }
       const rev = db.revisions.find((r) => r.revision_id === n.revision_id) || null;
       return send(res, 200, {
@@ -531,6 +532,7 @@ export function createMockGateway(options = {}) {
         entities: n.entity_ids.map(entRef),
         claims: n.claim_ids.map((id) => claimView(db.claims.get(id))),
         revisits: (n.revisits || []).map((r) => db.notes.get(r.note_id)).filter(Boolean).map(noteRef),
+        insight: null,
       });
     }
     m = np.match(/^\/notes\/([^/]+)\/attachments\/([^/]+)$/);
@@ -652,7 +654,8 @@ export function createMockGateway(options = {}) {
         const e = i.entity_ids.map(ent).find(Boolean);
         const n = i.evidence_note_ids.map((id) => db.notes.get(id)).find(Boolean);
         const subject = e ? { kind: "entity", id: e.entity_id, title: e.name } : n ? { kind: "note", id: n.note_id, title: n.title } : { kind: "cue", id: i.note_id, title: i.title };
-        return { cue_id: i.note_id, text: i.body || i.title, kind: i.insight_kind, subject };
+        // W10: a cue carries its insight's evidence_note_ids and entity_ids (why it surfaced, without a second read).
+        return { cue_id: i.note_id, text: i.body || i.title, kind: i.insight_kind, subject, evidence_note_ids: i.evidence_note_ids, entity_ids: i.entity_ids };
       });
       return send(res, 200, { items });
     }

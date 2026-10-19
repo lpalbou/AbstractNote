@@ -28,6 +28,15 @@ def insight(r: sqlite3.Row) -> Dict[str, Any]:
             "evidence_note_ids": _list(r["evidence_note_ids_json"]), "entity_ids": _list(r["entity_ids_json"])}
 
 
+def insight_facts(r: sqlite3.Row) -> Optional[Dict[str, Any]]:
+    """The ``insight`` field of ``GET /note/notes/{id}``: ``{kind, evidence_note_ids, entity_ids, acked_at}`` for an
+    insight note, ``None`` for any other note."""
+    if not r["insight_kind"]:
+        return None
+    return {"kind": r["insight_kind"], "evidence_note_ids": _list(r["evidence_note_ids_json"]),
+            "entity_ids": _list(r["entity_ids_json"]), "acked_at": r["acked_at"]}
+
+
 def task(r: sqlite3.Row) -> Dict[str, Any]:
     return {"task_id": r["task_id"], "note_id": r["note_id"], "text": r["text"], "status": r["status"],
             "due": r["due"], "closed_at": r["closed_at"]}

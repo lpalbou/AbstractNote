@@ -340,10 +340,12 @@ class Notebook:
 
     def note(self, note_id: str) -> Optional[Dict[str, Any]]:
         """A note in the pinned shape of ``GET /note/notes/{id}``: ``{note_id, title, text, kind, occurred_at,
-        received_at, status, topics, summary, source, location, attachments, revision, entities, claims, revisits}``.
+        received_at, status, topics, summary, source, location, attachments, revision, entities, claims, revisits,
+        insight}``.
 
         ``revision`` is the note's applied revision (or null); ``revisits`` lists the notes linked to it by
-        ``ex:revisits`` in either direction as ``NoteRef``.
+        ``ex:revisits`` in either direction as ``NoteRef``; ``insight`` is ``{kind, evidence_note_ids, entity_ids,
+        acked_at}`` for an insight note (``kind`` is its ``insight_kind``) and null for every other note.
         """
         from ..recall import shapes
 
@@ -373,6 +375,7 @@ class Notebook:
             "claims": [self.store.claim_dict(r) for r in self.store.q(
                 "SELECT * FROM claims WHERE note_id=? ORDER BY seq", (note_id,))],
             "revisits": [shapes.note_ref(r) for r in revisits],
+            "insight": shapes.insight_facts(row),
         }
 
     def note_links(self, note_id: str) -> Dict[str, Any]:

@@ -167,12 +167,17 @@ def test_insights_cues_and_ack(nb):
                         "entity_ids"}
     cues = nb.cues()["items"]
     assert cues == [{"cue_id": out["note_id"], "text": "You promised Dana the Pareto in January.", "kind": "reminder",
-                     "subject": {"kind": "entity", "id": "ex:person-dana", "title": "Dana"}}]
+                     "subject": {"kind": "entity", "id": "ex:person-dana", "title": "Dana"},
+                     "evidence_note_ids": [h["n1"]], "entity_ids": ["ex:person-dana"]}]
+    # the insight note's own read says what it rests on (W9 gap 5)
+    assert nb.note(out["note_id"])["insight"] == {"kind": "reminder", "evidence_note_ids": [h["n1"]],
+                                                  "entity_ids": ["ex:person-dana"], "acked_at": None}
     dossier = note_insight_write(ctx, "dossier", "Dana", "A dossier.", [h["n1"]], [])
     assert nb.store.note_row(dossier["note_id"])["kind"] == "synthesis"
     assert all(c["cue_id"] != dossier["note_id"] for c in nb.cues(limit=10)["items"])
     nb.ack_insight(out["note_id"])
     assert nb.cues()["items"] == []
+    assert nb.note(out["note_id"])["insight"]["acked_at"]
     with pytest.raises(ValueError):
         note_insight_write(ctx, "gossip", "x", "y")
     # replying to a cue links the new note to it
@@ -262,8 +267,9 @@ def test_pinned_shapes_of_note_tasks_overview(nb):
     h = history(nb)
     note = nb.note(h["n1"])
     assert set(note) == {"note_id", "title", "text", "kind", "occurred_at", "received_at", "status", "topics",
-                         "summary", "source", "location", "attachments", "revision", "entities", "claims", "revisits"}
-    assert note["revision"]["note_id"] == h["n1"] and note["revisits"] == []
+                         "summary", "source", "location", "attachments", "revision", "entities", "claims", "revisits",
+                         "insight"}
+    assert note["revision"]["note_id"] == h["n1"] and note["revisits"] == [] and note["insight"] is None
     assert nb.note(nb.capture("unprocessed").note_id)["revision"] is None
     [task] = nb.tasks()["items"]
     assert set(task) == {"task_id", "note_id", "text", "status", "due", "closed_at"}
