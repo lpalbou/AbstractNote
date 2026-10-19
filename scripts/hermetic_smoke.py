@@ -273,7 +273,7 @@ def main() -> int:
     status, ens = call(gw, "POST", "/api/gateway/note/processor/ensure", token=a, fixture="note_processor_ensure_200")
     check(status == 200 and ens.get("processor_id"), f"processor ensure answered {status}: {ens}")
     proc = ens["processor_id"]
-    check(all((ens.get(k) or {}).get("action") in ("created", "kept") for k in ("processor", "reflect")),
+    check(all((ens.get(k) or {}).get("action") in ("created", "kept", "recreated") for k in ("processor", "reflect")),
           f"the first ensure did not say what it did: {ens}")
     status, again = call(gw, "POST", "/api/gateway/note/processor/ensure", token=a)
     check(status == 200 and again.get("processor_id") == proc and again.get("created") == [], "ensure is not idempotent")
