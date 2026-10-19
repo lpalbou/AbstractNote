@@ -226,9 +226,10 @@ same communities, but another release may split it differently, so `meta.communi
 `networkx` version of each computation (`GET /note/communities` reports it) and the dependency is
 capped at the releases that were tested (`networkx>=3.2,<3.7`);
 the weight of a pair is the number of its statements that were not retracted (merged entries count
-for their survivor) plus a co-mention weight: each note that mentions `k` live entities adds
-`1/(k-1)` to every pair among them. Groups of fewer than 3 entities are the **loose ends** and
-belong to no community. A recomputation matches each new group to the previous community it
+for their survivor) plus a co-mention weight: each note that mentions `k >= 2` live entities adds
+`1/((k-1)·log2 k)` to every pair among them, so a long note weighs `k/(2·log2 k)` in all rather than
+`k/2` (docs/cognition.md, note-reflect). Groups of fewer than 3 entities are the **loose ends**
+and belong to no community. A recomputation matches each new group to the previous community it
 overlaps most (Jaccard of the member sets, best overlaps first, each previous community used once):
 an overlap of at least 0.6 keeps the id, label, summary and kind; anything else is a new community
 with a new id and no label. Once after the networkx version changed (or after a computation that

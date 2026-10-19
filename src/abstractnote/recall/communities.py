@@ -3,8 +3,8 @@
 Detection needs no model: Louvain (``networkx``, a fixed seed) over the live entities, an
 edge weighing the statements between two entities (claims with an entity object that were not retracted, merged
 entries counted for their survivor) plus their co-mentions (each note that mentions ``k`` live entities adds
-``1/(k-1)`` to each pair it mentions, so one long note does not outweigh many short ones). A community smaller
-than :data:`MIN_COMMUNITY_SIZE` is left out: its entities are the loose ends (no ``entity_communities`` row).
+:func:`co_mention_share` = ``1/((k-1)·log2 k)`` to each pair it mentions, so one long note does not outweigh many
+short ones). A community smaller than :data:`MIN_COMMUNITY_SIZE` is left out: its entities are the loose ends (no ``entity_communities`` row).
 
 Detection is deterministic for a given networkx version: the same graph under the same networkx release
 always gives the same communities, but Louvain's implementation changes between releases (3.6.1 and 3.7
@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .. import ids
@@ -121,6 +122,15 @@ def _canonical_map(nb: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
     return canon, live
 
 
+def co_mention_share(k: int) -> float:
+    """What a note that mentions ``k`` (>= 2) live entities adds to each pair among them: ``1/((k-1)·log2 k)``.
+
+    A note's total co-mention weight is then ``k / (2·log2 k)``: 1 for a two-entity note, about 13 for a
+    200-entity one (``1/(k-1)`` gave it ``k/2``, 100, enough for a single long note to form a community of its
+    own; gate 04 §5)."""
+    return 1.0 / ((k - 1) * math.log2(k))
+
+
 def entity_graph(nb: Any) -> Any:
     """The weighted entity graph communities are found in (a ``networkx.Graph``; nodes are live entity ids,
     inserted in sorted order so detection is reproducible). Edge ``weight`` = statements + co-mention weight."""
@@ -152,7 +162,7 @@ def entity_graph(nb: Any) -> Any:
         if k < 2:
             continue
         ordered = sorted(members)
-        share = 1.0 / (k - 1)
+        share = co_mention_share(k)
         for i, a in enumerate(ordered):
             for b in ordered[i + 1:]:
                 add(a, b, share)

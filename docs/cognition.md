@@ -244,6 +244,17 @@ names. The run's output adds `communities_labelled` (the number of communities n
 static system prompt and template live in `abstractnote.recall.communities` (`LABEL_SYSTEM_PROMPT`,
 `LABEL_TEMPLATE`), next to the schema. `POST /note/communities/recompute` runs detection alone.
 
+The edges detection weighs are the statements between two entities plus their co-mentions: a note
+that mentions `k >= 2` live entities adds `1 / ((k - 1) · log2 k)` to every pair among them
+(`communities.co_mention_share`). A two-entity note adds 1 to its pair, like one statement; a note's
+total co-mention weight is `k / (2 · log2 k)`, so a 200-entity note counts about 13 times a
+two-entity note, not 100 times as the flat `1 / (k - 1)` share made it. A single long note therefore
+no longer forms a community on its own unless its own statements hold its entities together. On the
+operator's notebook at revision 373 (networkx 3.6.1) the change took the communities from 21 to 35,
+the loose ends from 2 to 4 and the modularity from 0.606 to 0.667; the two largest communities made
+mostly of one note (237 and 232 entities, 87 % and 88 % from it) became one (170 entities, 84 %, the
+note whose statements link its 137 own entities) and smaller groups.
+
 ## Structured output schemas
 
 All schemas are JSON Schema objects attached as `resp_schema`; the runtime builds pydantic

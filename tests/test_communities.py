@@ -3,6 +3,8 @@ labels kept while membership changes little, loose ends, merges followed, read-o
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from test_store_support import claim, create, nb, rev, t  # noqa: F401
@@ -144,8 +146,8 @@ def test_merged_entities_count_for_the_survivor(nb):
     groups = list(_groups(nb).values())
     assert all("ex:person-ben" not in g for g in groups)
     assert {"ex:project-lut", "ex:person-dana", "ex:concept-pareto", "ex:person-benjamin"} in groups
-    # two statements LUT -> Ben, plus the note they share with two others (1/(4-1)), now Benjamin's
-    assert cm.entity_graph(nb)["ex:person-benjamin"]["ex:project-lut"]["weight"] == pytest.approx(2 + 1 / 3)
+    # two statements LUT -> Ben, plus the note they share with two others (1/((4-1)·log2 4)), now Benjamin's
+    assert cm.entity_graph(nb)["ex:person-benjamin"]["ex:project-lut"]["weight"] == pytest.approx(2 + 1 / 6)
 
 
 def test_detection_passes_its_fixed_seed_and_the_resolution(nb, monkeypatch):
@@ -164,13 +166,56 @@ def test_detection_passes_its_fixed_seed_and_the_resolution(nb, monkeypatch):
     assert seen == {"weight": "weight", "resolution": 1.5, "seed": cm.SEED}
 
 
+def long_note_world(nb):
+    """Four groups of 12 entities, each held together by short notes (three members each, one statement), and
+    one long note that mentions 60 other entities: its statements pair them up and tie every third one to a
+    group member. Returns the long note's entity ids."""
+    k = 0
+    for g in range(4):
+        ms = [f"ex:concept-g{g}m{i}" for i in range(12)]
+        n0 = nb.capture(f"Group {g}.", occurred_at=t(1)).note_id
+        nb.apply_revision(rev(f"rv_g{g}", t(1), *[create(e, e[11:]) for e in ms], note_id=n0))
+        for i in range(12):
+            k += 1
+            n = nb.capture(f"Short note {k}.", occurred_at=t(2)).note_id
+            trio = [ms[i], ms[(i + 1) % 12], ms[(i + 2) % 12]]
+            nb.apply_revision(rev(f"rv_s{k}", t(2), *[mention(e, n) for e in trio],
+                                  claim(f"cl_s{k}", trio[0], "ex:rel", trio[1], at=t(2), note_id=n), note_id=n))
+    tails = [f"ex:thing-t{j:02d}" for j in range(60)]
+    n = nb.capture("One long note.", occurred_at=t(3)).note_id
+    ops = [create(e, e[9:]) for e in tails] + [mention(e, n) for e in tails]
+    ops += [claim(f"cl_t{j}", e, "ex:part_of", f"ex:concept-g{j % 4}m{j % 12}", at=t(3), note_id=n)
+            for j, e in enumerate(tails) if j % 3 == 0]
+    ops += [claim(f"cl_c{j}", tails[j], "ex:next", tails[j + 1], at=t(3), note_id=n) for j in range(0, 59, 2)]
+    nb.apply_revision(rev("rv_long", t(3), *ops, note_id=n))
+    return set(tails)
+
+
+def test_one_long_note_does_not_form_a_community_of_its_own(nb):
+    long_note = long_note_world(nb)
+    counts = nb.recompute_communities()
+    shares = [len(long_note & set(cm.members(nb, c["community_id"]))) / c["size"]
+              for c in nb.communities()["items"]]
+    assert counts["communities"] == len(shares) >= 4
+    assert max(shares) <= 0.5  # 1/(k-1) gave the long note a community made of its entities alone (share 1.0)
+
+
+def test_a_note_s_co_mention_weight_grows_like_k_over_log_k():
+    for k in (2, 3, 10, 200):
+        total = cm.co_mention_share(k) * k * (k - 1) / 2
+        assert total == pytest.approx(k / (2 * math.log2(k)))
+    assert cm.co_mention_share(2) == 1.0  # a two-entity note links its pair as one statement does
+    assert cm.co_mention_share(200) * 199 * 200 / 2 < 14  # not 100, as 1/(k-1) made it
+
+
 def test_co_mentions_alone_link_entities(nb):
     n = nb.capture("Ann, Bo and Cy met.", occurred_at=t(1)).note_id
     ents = ["ex:person-ann", "ex:person-bo", "ex:person-cy"]
     nb.apply_revision(rev("rv_x", t(1), *[create(e, e[10:]) for e in ents], *[mention(e, n) for e in ents], note_id=n))
     assert nb.recompute_communities()["communities"] == 1  # no statement at all: the shared note links them
     g = cm.entity_graph(nb)
-    assert g["ex:person-ann"]["ex:person-bo"]["weight"] == pytest.approx(0.5)  # 1/(k-1) per shared note, k = 3
+    # 1/((k-1)·log2 k) per shared note, k = 3
+    assert g["ex:person-ann"]["ex:person-bo"]["weight"] == pytest.approx(1 / (2 * math.log2(3)))
 
 
 def test_resolution_is_a_parameter(nb):
