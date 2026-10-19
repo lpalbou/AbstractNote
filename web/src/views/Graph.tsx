@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "re
 import { createPortal } from "react-dom";
 import { AfChip, AfChipButton, AfTabs, Icon } from "@abstractframework/ui-kit";
 import { ApiError, errorSentence } from "../lib/api";
-import { CARD_DELAY_MS, communitySlots, edgeKey, edgeLabelShown, firstSentence, litBy, placeCard, radiusScale, strongestLinks, type Hover } from "../lib/graph_focus";
+import { CARD_DELAY_MS, communitySlots, themeName, edgeKey, edgeLabelShown, firstSentence, litBy, placeCard, radiusScale, strongestLinks, type Hover } from "../lib/graph_focus";
 import { useDebounced, useRead, type ReadState } from "../lib/hooks";
 import { boundsOf, fitView, layoutGraph, settleFrames, toWorld, zoomAt, type Positioned, type ViewTransform } from "../lib/graph_layout";
 import { milestones } from "../lib/milestones";
@@ -13,6 +13,7 @@ import { capitalize, claimSentence, longDate, predicateWords, shortDate } from "
 import { EmptyNotebook, EntityChip, KindBadge, NoteLink, ReadView, Section, Sparkline, openClaim, openNote, openRelation, useApp } from "../components/common";
 import { ThenNowCard } from "../components/ThenNow";
 import { TimeScrubber } from "../components/TimeScrubber";
+import { OverviewView } from "./Overview";
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -23,12 +24,16 @@ export function GraphView({ route }: { route: Route }) {
   const depth = Math.min(3, Math.max(1, Number(route.params.get("depth") || 1)));
   const selected = route.params.get("entity") || "";
   const day = DAY_RE.test(route.params.get("day") || "") ? route.params.get("day")! : "";
-  const asList = route.params.get("view") === "list";
+  const viewParam = route.params.get("view");
+  const asList = viewParam === "list";
+  // Explore's landing: with nothing focused, chosen or dated, the overview of what the notebook holds.
+  const overview = viewParam === "overview" || (!viewParam && !focus.length && !selected && !day);
+  const mode: ShowMode = overview ? "overview" : asList ? "list" : "picture";
   // One theme shown alone (a click in the legend or on a theme card in the overview).
   const isolated = route.params.get("community") || "";
 
   const go = (patch: Record<string, string | number | null>) => {
-    const cur: Record<string, string | number | null> = { focus: focus.join(","), depth, entity: selected, day, view: route.params.get("view"), community: isolated };
+    const cur: Record<string, string | number | null> = { focus: focus.join(","), depth, entity: selected, day, view: viewParam, community: isolated };
     navigate("graph", { ...cur, ...patch });
   };
   // Read once for the legend, the colours and the hover card.
@@ -38,10 +43,21 @@ export function GraphView({ route }: { route: Route }) {
   const [byReceived] = useByReceived();
   const then = useRead<Graph | null>(() => (at ? api.get<Graph>("note/graph", { focus, depth, limit: 80, ...momentParams(at, byReceived) }) : Promise.resolve(null)), [api, focus.join(","), depth, at, byReceived]);
 
+  const bar = <FocusBar focus={focus} depth={depth} onFocus={(ids) => go({ focus: ids.join(","), entity: ids[ids.length - 1] || selected, view: overview ? "picture" : viewParam })} onDepth={(d) => go({ depth: d })} mode={mode} onMode={(m) => go({ view: m, ...(m === "overview" ? { focus: "", entity: "", day: "", community: "" } : {}) })} />;
+  if (overview) {
+    return (
+      <div className="nt-graph nt-graph--wide">
+        <div className="nt-graph__main">
+          {bar}
+          <OverviewView communities={communities} onTheme={(id) => go({ view: "picture", community: id })} onEntity={(id) => go({ view: "picture", focus: id, entity: id, community: "" })} />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="nt-graph">
       <div className="nt-graph__main">
-        <FocusBar focus={focus} depth={depth} onFocus={(ids) => go({ focus: ids.join(","), entity: ids[ids.length - 1] || selected })} onDepth={(d) => go({ depth: d })} asList={asList} onList={(v) => go({ view: v ? "list" : null })} />
+        {bar}
         <div className="nt-graph__canvas">
           <ReadView read={now} what="the connections">
             {(g) =>
@@ -66,7 +82,10 @@ export function GraphView({ route }: { route: Route }) {
   );
 }
 
-function FocusBar({ focus, depth, onFocus, onDepth, asList, onList }: { focus: string[]; depth: number; onFocus: (ids: string[]) => void; onDepth: (d: number) => void; asList: boolean; onList: (list: boolean) => void }) {
+type ShowMode = "overview" | "picture" | "list";
+const MODES: Array<[ShowMode, string]> = [["overview", "Overview"], ["picture", "Picture"], ["list", "List"]];
+
+function FocusBar({ focus, depth, onFocus, onDepth, mode, onMode }: { focus: string[]; depth: number; onFocus: (ids: string[]) => void; onDepth: (d: number) => void; mode: ShowMode; onMode: (m: ShowMode) => void }) {
   const { api } = useApp();
   const [q, setQ] = useState("");
   const dq = useDebounced(q.trim(), 200);
@@ -138,17 +157,16 @@ function FocusBar({ focus, depth, onFocus, onDepth, asList, onList }: { focus: s
               <option value={3}>Three steps</option>
             </select>
           </label>
-        ) : (
+        ) : mode === "overview" ? null : (
           <span className="nt-muted">Showing everything you know.</span>
         )}
       </div>
       <div className="nt-segmented nt-focusbar__end" role="radiogroup" aria-label="Show as">
-        <button type="button" role="radio" aria-checked={!asList} className="nt-segmented__opt" onClick={() => onList(false)}>
-          Picture
-        </button>
-        <button type="button" role="radio" aria-checked={asList} className="nt-segmented__opt" onClick={() => onList(true)}>
-          List
-        </button>
+        {MODES.map(([m, label]) => (
+          <button key={m} type="button" role="radio" aria-checked={mode === m} className="nt-segmented__opt" onClick={() => onMode(m)}>
+            {label}
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -524,7 +542,7 @@ function GraphCanvas({ graph, then, selected, focus, onSelect, communities, isol
                 transform={`translate(${p.x},${p.y})`}
                 tabIndex={0}
                 role="button"
-                aria-label={`${n.name}, ${n.kind}${community ? `, in ${community.label}` : ""}${existed ? "" : ", not known yet at that time"}`}
+                aria-label={`${n.name}, ${n.kind}${community ? `, in ${themeName(community)}` : ""}${existed ? "" : ", not known yet at that time"}`}
                 onFocus={(ev) => {
                   const r = (ev.currentTarget as Element).getBoundingClientRect();
                   hoverNode(n.id, { x: r.left + r.width / 2, y: r.top + r.height / 2 });
@@ -602,9 +620,9 @@ function CommunityLegend({ communities, present, slots, isolated, onIsolate }: {
       {present.map((c) => {
         const on = isolated === c.community_id;
         return (
-          <button key={c.community_id} type="button" className={`nt-theme nt-c${slots.get(c.community_id) || 0}`} aria-pressed={on} title={on ? "Show every theme" : `Show ${c.label} alone`} onClick={() => onIsolate(on ? null : c.community_id)}>
+          <button key={c.community_id} type="button" className={`nt-theme nt-c${slots.get(c.community_id) || 0}`} aria-pressed={on} title={on ? "Show every theme" : `Show ${themeName(c)} alone`} onClick={() => onIsolate(on ? null : c.community_id)}>
             <span className="nt-theme__dot" aria-hidden="true" />
-            <span className="nt-theme__label">{c.label}</span>
+            <span className="nt-theme__label">{themeName(c)}</span>
           </button>
         );
       })}
@@ -645,7 +663,7 @@ function HoverCard({ node, at, edges, names, community, slot }: { node: GraphNod
       {community ? (
         <p className={`nt-hovercard__theme nt-c${slot}`}>
           <span className="nt-theme__dot" aria-hidden="true" />
-          <span>{community.label}</span>
+          <span>{themeName(community)}</span>
         </p>
       ) : null}
       {links.length ? (
@@ -718,9 +736,9 @@ export function EntityPanel({ id, at, onFocus, slots, onTheme }: { id: string; a
                     {at ? (byReceived ? ` · as held on ${longDate(at)}` : ` · as of ${longDate(at)}`) : ""}
                   </p>
                   {e.community && onTheme ? (
-                    <button type="button" className={`nt-theme nt-theme--inline nt-c${slots?.get(e.community.community_id) || 0}`} title={`Show ${e.community.label} in the picture`} onClick={() => onTheme(e.community!.community_id)}>
+                    <button type="button" className={`nt-theme nt-theme--inline nt-c${slots?.get(e.community.community_id) || 0}`} title={`Show ${themeName(e.community)} in the picture`} onClick={() => onTheme(e.community!.community_id)}>
                       <span className="nt-theme__dot" aria-hidden="true" />
-                      <span className="nt-theme__label">{e.community.label}</span>
+                      <span className="nt-theme__label">{themeName(e.community)}</span>
                     </button>
                   ) : null}
                   {(e.merged_from || []).length ? <MergedFrom ids={e.merged_from || []} /> : null}

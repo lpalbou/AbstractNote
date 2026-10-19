@@ -101,7 +101,12 @@ export const COMMUNITY_SLOTS = 6;
  * whatever subset of the picture is shown (colour follows the community, never its rank in the view).
  * 0 = "other" (no community, or past the sixth).
  */
-export function communitySlots(communities: Array<{ community_id: string; label: string; size: number }>): Map<string, number> {
-  const order = [...communities].sort((a, b) => b.size - a.size || a.label.localeCompare(b.label) || a.community_id.localeCompare(b.community_id));
+export function communitySlots(communities: Array<{ community_id: string; label: string | null; size: number }>): Map<string, number> {
+  const order = [...communities].sort((a, b) => b.size - a.size || (a.label || "").localeCompare(b.label || "") || a.community_id.localeCompare(b.community_id));
   return new Map(order.map((c, i) => [c.community_id, i < COMMUNITY_SLOTS ? i + 1 : 0]));
+}
+
+/** A community's name for a person: its label, or plain words while the notebook has not named it yet. */
+export function themeName(c: { label: string | null } | null | undefined): string {
+  return (c && c.label) || "A theme not named yet";
 }

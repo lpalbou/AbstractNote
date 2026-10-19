@@ -107,6 +107,45 @@ async function main() {
           check((await page.locator(".nt-hovercard").count()) === 0 && (await page.locator(".nt-node.nt-fade").count()) === 0, `${theme} ${width}: leaving hides the card and restores the picture`);
           void dot;
         }
+        if (want("overview")) {
+          // Explore's landing: what the notebook holds.
+          await page.goto(`${base}#/graph`);
+          await page.reload();
+          await page.locator(".nt-tile").first().waitFor();
+          await page.locator(".nt-themecard").first().waitFor();
+          await page.waitForTimeout(300);
+          const tops = await page.locator(".nt-tile").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+          const rowsOf = new Set(tops);
+          check(tops.length === 5 && rowsOf.size <= (narrow ? 3 : 1), `${theme} ${width}: five stat tiles, aligned in ${rowsOf.size} row(s)`);
+          const marks = await page.locator(".nt-pline__mark").count();
+          check(marks > 0, `${theme} ${width}: the activity line marks the weeks that stand out (${marks})`);
+          await page.screenshot({ path: name("overview") });
+          const grow = await page.addStyleTag({ content: ".nt-app{height:auto!important}.nt-main{overflow:visible!important}.nt-graph{height:auto!important}.nt-graph--wide .nt-graph__main{overflow:visible!important}" });
+          await page.waitForTimeout(150);
+          await page.screenshot({ path: name("overview-full"), fullPage: true });
+          await grow.evaluate((el) => el.remove());
+          // The crosshair on a marked week: exact values, inside the chart.
+          const mark = await page.locator(".nt-pline__mark circle").last().boundingBox();
+          await page.locator(".nt-pline").first().scrollIntoViewIfNeeded();
+          const mark2 = await page.locator(".nt-pline__mark circle").last().boundingBox();
+          await page.mouse.move(mark2.x + mark2.width / 2, mark2.y + mark2.height / 2);
+          await page.locator(".nt-pline__tip").waitFor();
+          await page.waitForTimeout(150);
+          const tip = await page.locator(".nt-pline__tip").boundingBox();
+          const chart = await page.locator(".nt-pline").first().boundingBox();
+          check(tip && tip.x >= chart.x - 1 && tip.x + tip.width <= chart.x + chart.width + 1, `${theme} ${width}: the tooltip stays within the chart's width`);
+          check(/Week of/.test(await page.locator(".nt-pline__tip").innerText()), `${theme} ${width}: the tooltip names the week and its numbers`);
+          await page.screenshot({ path: name("overview-tooltip") });
+          void mark;
+          await page.mouse.move(1, 1);
+          if (theme === THEMES[0] && width === WIDTHS[0]) {
+            await page.getByRole("button", { name: "Show the numbers" }).click();
+            check((await page.locator(".nt-weeks tbody tr").count()) === 16, "the numbers behind the line, as a table (16 weeks)");
+            await page.locator(".nt-themecard").first().click();
+            await page.locator(".nt-theme[aria-pressed=true]").waitFor();
+            check(/view=picture/.test(page.url()) && /community=/.test(page.url()), "a theme card opens the picture with that theme alone");
+          }
+        }
         if (want("isolate")) {
           await page.goto(`${base}#/graph?view=picture&community=${encodeURIComponent(lutTheme)}`);
           await page.reload();

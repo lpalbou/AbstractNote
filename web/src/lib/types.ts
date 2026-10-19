@@ -68,7 +68,7 @@ export type EntityCard = EntityRef & {
   /** Echoed when the card was built from what the archive held on a date (`as_received`). */
   as_received?: string;
   /** The community the entity belongs to (W17); null when it is in none. */
-  community?: { community_id: string; label: string } | null;
+  community?: { community_id: string; label: string | null } | null;
 };
 export type EntityListItem = EntityRef & { aliases?: string[]; summary?: string; first_seen?: string; last_seen?: string; note_count?: number; merged_into?: string | null };
 /** Pinned: GET /note/entities/{id}?as_merged=true, the entry's own record (not followed to the survivor of a merge). */
@@ -187,7 +187,8 @@ export type RecallOutput = {
 
 /** GET /note/communities items (W17): groups of entities the notebook found together, each with a label. */
 export type CommunityEntity = { entity_id: string; name: string; kind: string; note_count: number };
-export type Community = { community_id: string; label: string; summary: string; kind: string; size: number; top_entities: CommunityEntity[]; stale_label: boolean; labelled_at: string };
+/** `label`, `summary`, `kind` and `labelled_at` are null until the notebook names the community (W17 reflect). */
+export type Community = { community_id: string; label: string | null; summary: string | null; kind: string | null; size: number; top_entities: CommunityEntity[]; stale_label: boolean; labelled_at: string | null };
 export type Communities = { items: Community[] };
 /** GET /note/stats (W17): what the notebook has accumulated. `week` is the Monday (YYYY-MM-DD); `month` YYYY-MM. */
 export type WeekActivity = { week: string; notes: number; revisions: number; new_entities: number; claims_added: number; claims_superseded: number };

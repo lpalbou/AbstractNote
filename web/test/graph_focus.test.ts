@@ -121,3 +121,12 @@ describe("community colours", () => {
     expect([...b.entries()].sort()).toEqual([...a.entries()].sort());
   });
 });
+
+describe("theme names", () => {
+  it("a community not named yet reads in plain words", async () => {
+    const { themeName } = await import("../src/lib/graph_focus");
+    expect(themeName({ label: "LUT prefill" })).toBe("LUT prefill");
+    expect(themeName({ label: null })).toBe("A theme not named yet");
+    expect(themeName(null)).toBe("A theme not named yet");
+  });
+});
