@@ -126,6 +126,25 @@ def test_candidate_cards_show_the_statements_the_note_is_about_first():
     assert "#3 " not in part["mentions"]
 
 
+def test_packets_never_show_a_name_followed_by_its_kind_in_parentheses():
+    """Gate 04 M4: the model copied `name (kind)` from the packet into new names; kinds follow an em dash."""
+    import re
+
+    ext = {"summary": "", "mentions": [{"ref": "m1", "name": "fetch_url", "kind": "concept", "aliases": ["fetch"]}],
+           "claims": [], "tasks": []}
+    cand = {**_candidate(0, 0), "name": "fetch_url", "kind": "concept", "aliases": ["fetch"], "summary": "A tool."}
+    part = link_batches(NOTE, ext, [{"ref": "m1", "candidates": [cand]}], [])[0]
+    assert "m1 fetch_url — concept; also fetch" in part["mentions"]
+    assert "[0] fetch_url — concept; also fetch — A tool." in part["mentions"]
+    known = extraction_packet(NOTE, {"source": "note", "text": "x"}, 1, [], [{"name": "Dana", "kind": "person"}],
+                              [], [])["known"]
+    assert "Dana — person" in known
+    kinds = "|".join(("person", "org", "project", "concept", "place", "event", "artifact", "software", "thing"))
+    for text in (part["mentions"], known, prompts.system_prompt("link"), prompts.system_prompt("extract")):
+        assert not re.search(rf"\((?:{kinds})[;)]", text), text
+    assert "`[index] name — kind; also aliases — summary`" in prompts.system_prompt("link")
+
+
 def _process_prompt_flows():
     flows = build.build_all()
     nodes = {(fid, n["id"]): n for fid, f in flows.items() for n in f["nodes"]}
@@ -206,7 +225,7 @@ def test_two_notes_share_every_system_prompt_byte_and_differ_from_the_first_user
         assert calls[0]["prompt"].splitlines()[-1] != calls[1]["prompt"].splitlines()[-1]
     # the extraction prompt is the bounded packet, not the context tool's JSON
     assert "candidate_entities" not in by_schema["Extraction"][1]["prompt"]
-    assert "dana (person)" in by_schema["Extraction"][1]["prompt"]  # the first note created Dana
+    assert "dana — person" in by_schema["Extraction"][1]["prompt"]  # the first note created Dana
 
 
 def test_a_prompt_note_labels_the_author_and_the_assistant_answer(tmp_path):

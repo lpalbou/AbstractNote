@@ -86,7 +86,7 @@ def extraction_packet(note: Dict[str, Any], section: Dict[str, Any], parts: int,
     names = []
     for e in (candidate_entities or [])[:KNOWN_NAMES]:
         if isinstance(e, dict) and str(e.get("name") or "").strip():
-            names.append(clip(e.get("name"), 80) + " (" + str(e.get("kind") or "thing") + ")")
+            names.append(clip(e.get("name"), 80) + " — " + str(e.get("kind") or "thing"))
     if names:
         lines.append("Names already in the notebook that this text may use: " + "; ".join(names) + ".")
     own = [str(t) for t in (n.get("topics") or []) if str(t).strip()]
@@ -141,9 +141,8 @@ def candidate_card(c: Dict[str, Any], prefer: Any = ()) -> List[str]:
     predicate the note also uses first (the ones a supersession or contradiction can be about),
     then the most recent."""
     aliases = [clip(a, 40) for a in (c.get("aliases") or []) if str(a).strip()][:5]
-    head = "[" + str(c.get("index")) + "] " + clip(c.get("name"), 80) + " (" + str(c.get("kind") or "thing")
+    head = "[" + str(c.get("index")) + "] " + clip(c.get("name"), 80) + " — " + str(c.get("kind") or "thing")
     head += ("; also " + ", ".join(aliases)) if aliases else ""
-    head += ")"
     if str(c.get("summary") or "").strip():
         head += " — " + clip(c.get("summary"), SUMMARY_CHARS)
     if c.get("last_seen"):
@@ -199,9 +198,8 @@ def link_batches(note: Dict[str, Any], extraction: Dict[str, Any], resolved: Lis
         for m in group:
             ref = str(m.get("ref"))
             aliases = [clip(a, 40) for a in (m.get("aliases") or []) if str(a).strip()][:5]
-            line = ref + " " + clip(m.get("name"), 80) + " (" + str(m.get("kind") or "thing")
+            line = ref + " " + clip(m.get("name"), 80) + " — " + str(m.get("kind") or "thing")
             line += ("; also " + ", ".join(aliases)) if aliases else ""
-            line += ")"
             if str(m.get("role") or "").strip():
                 line += ": " + clip(m.get("role"), 160)
             mlines.append(line)

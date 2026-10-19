@@ -371,13 +371,14 @@ class Notebook:
 
     def normalize_entities(self, account: Optional[str], *, client: str = "cli", dry_run: bool = False
                            ) -> Dict[str, Any]:
-        """Merge every group of live entities that share a canonical name into the earliest one
-        (``abstractnote normalize``, ``POST /note/entities/normalize``).
+        """Merge every group of live entities that share a canonical name into the earliest one, with the entries
+        that are such a name with its kind echoed in parentheses (``abstractnote normalize``,
+        ``POST /note/entities/normalize``; :func:`abstractnote.store.names.merge_plan`).
 
         One ``entity.merge`` revision per merged entry, source ``{client, account}``, each reversible with
         :meth:`unmerge_entity`; the merged entry's names stay as aliases, and reads follow the merge for its
         statements, relations, notes and tasks. ``dry_run`` only lists the groups. Returns ``{dry_run, groups:
-        [{into_id, from_ids, name, names, kinds}], merges: [{from_id, into_id, revision_id}]}``.
+        [{into_id, from_ids, name, names, kinds, kind_suffix}], merges: [{from_id, into_id, revision_id}]}``.
         """
         plan = merge_plan(self.store)
         out: Dict[str, Any] = {"dry_run": dry_run, "groups": plan, "merges": []}
@@ -389,7 +390,8 @@ class Notebook:
             self.recover_pending()
             for group in plan:
                 for from_id in group["from_ids"]:
-                    ops, summary = merge_ops(self.store, group["into_id"], from_id)
+                    ops, summary = merge_ops(self.store, group["into_id"], from_id,
+                                             kind_suffix=from_id in group.get("kind_suffix", ()))
                     res = self._user_revision("entity.merge", f"{group['into_id']}|{from_id}|normalize", ops,
                                               account, summary, client=client)
                     out["merges"].append({"from_id": from_id, "into_id": group["into_id"],

@@ -322,3 +322,85 @@ def test_cards_lists_and_overview_show_the_canonical_name_and_keep_the_surface_f
     assert (node["name"], node["display_name"]) == ("memory", "Memory")
     line = nb.expand(entity_ids=["ex:concept-memory"])["entities"][0]["line"]
     assert line.startswith("memory (concept; also the memory)")
+
+
+# ---------------------------------------------------------------------------- 4. the echoed candidate format (gate 04 M4)
+
+
+def test_a_name_that_echoes_its_kind_is_filed_under_the_name(nb):
+    from test_process import extraction, mention, ml, run
+
+    run(nb, "Memory matters.", "2026-01-05T10:00:00Z", extraction([mention("m1", "Memory", "software")]),
+        lambda p, c: {"mentions": [ml("m1", "create", name="Memory", kind="software")], "claims": [], "tasks": []})
+    # the model wrote the name the way the packet showed a candidate: "memory (software)"
+    _, _, _, out = run(nb, "The memory keeps it.", "2026-01-06T10:00:00Z",
+                       extraction([mention("m1", "memory (software)", "software")]),
+                       lambda p, c: {"mentions": [ml("m1", "create", name="memory (software)", kind="software")],
+                                     "claims": [], "tasks": []})
+    assert out["entities_created"] == [] and _live(nb) == [("ex:software-memory", "memory")]
+    assert nb.store.entity_row("ex:software-memory")["note_count"] == 2
+    assert "memory (software)" not in {a[0] for a in nb.store.q("SELECT alias FROM entity_aliases")}
+
+
+def test_an_echoed_kind_is_stripped_from_a_new_name_and_its_aliases(nb):
+    from test_process import extraction, mention, ml, run
+
+    _, _, _, out = run(nb, "Call fetch_url first.", "2026-01-05T10:00:00Z",
+                       extraction([mention("m1", "fetch_url (concept)", "concept", aliases=["fetch_url"])]),
+                       lambda p, c: {"mentions": [ml("m1", "create", name="fetch_url (Concept)", kind="concept",
+                                                     aliases=["fetch_url (concept)"])], "claims": [], "tasks": []})
+    assert _live(nb) == [("ex:concept-fetch-url", "fetch_url")]
+    row = nb.store.entity_row("ex:concept-fetch-url")
+    assert row["display_name"] == "fetch_url"
+    assert {a[0] for a in nb.store.q("SELECT alias FROM entity_aliases")} == set()
+
+
+def test_only_a_known_kind_in_parentheses_is_stripped():
+    from abstractnote.process.revise import strip_kind_suffix
+
+    assert strip_kind_suffix("memory (software)") == "memory"
+    assert strip_kind_suffix("Tier0 Core (CONCEPT) ") == "Tier0 Core"
+    for kept in ("Mercury (planet)", "Plan (v9)", "AbstractMemory (Future)", "(software)", "memory(software)",
+                 "memory (software) notes"):
+        assert strip_kind_suffix(kept) == kept
+
+
+def _artefact_world(nb):
+    _legacy(nb, rev("rv_1", t(1), create("ex:software-memory", "Memory", kind="software"),
+                    create("ex:concept-fetch-url", "fetch_url"), create("ex:person-contact", "Contact", kind="person")))
+    _legacy(nb, rev("rv_2", t(2), create("ex:software-memory-software", "memory (software)", kind="software",
+                                         aliases=["memory"]),
+                    create("ex:concept-fetch-url-concept", "fetch_url (concept)", aliases=["fetch_url"]),
+                    create("ex:concept-contact-person", "contact person"),  # written as words: not the artefact
+                    create("ex:concept-orphan-concept", "orphan (concept)")))  # no orphan to join
+
+
+def test_normalize_joins_an_echoed_kind_into_the_entity_it_names(nb):
+    _artefact_world(nb)
+    dry = nb.normalize_entities(None, client="cli", dry_run=True)
+    assert dry["merges"] == []
+    assert sorted((g["into_id"], g["from_ids"], g["kind_suffix"]) for g in dry["groups"]) == [
+        ("ex:concept-fetch-url", ["ex:concept-fetch-url-concept"], ["ex:concept-fetch-url-concept"]),
+        ("ex:software-memory", ["ex:software-memory-software"], ["ex:software-memory-software"])]
+    out = nb.normalize_entities(None, client="cli")
+    assert sorted((m["from_id"], m["into_id"]) for m in out["merges"]) == [
+        ("ex:concept-fetch-url-concept", "ex:concept-fetch-url"), ("ex:software-memory-software", "ex:software-memory")]
+    r = nb.revision(out["merges"][0]["revision_id"])
+    assert "kind" in r["summary"]
+    live = dict(_live(nb))
+    assert "ex:concept-contact-person" in live and "ex:concept-orphan-concept" in live
+    aliases = {a[0] for a in nb.store.q("SELECT alias FROM entity_aliases WHERE entity_id='ex:software-memory'")}
+    assert "memory (software)" not in aliases  # the echoed form is not another name
+    assert nb.normalize_entities(None, dry_run=True)["groups"] == []
+
+
+def test_an_echoed_kind_and_a_shared_canonical_name_join_one_survivor(nb):
+    _legacy(nb, rev("rv_1", t(1), create("ex:software-memory", "Memory", kind="software")))
+    _legacy(nb, rev("rv_2", t(2), create("ex:software-memory-2", "memory", kind="software"),
+                    create("ex:software-memory-software", "memory (software)", kind="software"),
+                    create("ex:software-memory-software-2", "Memory (Software)", kind="software")))
+    (group,) = nb.normalize_entities(None, dry_run=True)["groups"]
+    assert group["into_id"] == "ex:software-memory"
+    assert group["from_ids"] == ["ex:software-memory-2", "ex:software-memory-software", "ex:software-memory-software-2"]
+    nb.normalize_entities(None)
+    assert _live(nb) == [("ex:software-memory", "memory")]

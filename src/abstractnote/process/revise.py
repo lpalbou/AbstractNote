@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .. import ids
 from ..ingest.normalise import normalize_topic, text_norm
+from ..store.names import strip_kind_suffix
 from ..store.notes import _TakenIds
 from . import schemas
 from .context import empty_packet, load_packet, words
@@ -128,6 +129,16 @@ class _Builder:
             self._note_words = " " + " ".join(words("\n".join(parts))) + " "
         return self._note_words
 
+    def without_kind_suffix(self, m: Any) -> Any:
+        """The mention (or mention decision) with :func:`strip_kind_suffix` applied to its name and aliases."""
+        name = strip_kind_suffix(m.name) if m.name else m.name
+        aliases = [strip_kind_suffix(a) for a in m.aliases]
+        if name == m.name and aliases == list(m.aliases):
+            return m
+        if name != m.name:
+            self.warnings.append(f"“{m.name}” ends with its kind in parentheses; it is named {name}.")
+        return m.model_copy(update={"name": name, "aliases": aliases})
+
     def written_in_note(self, m: schemas.Mention) -> bool:
         """Structural check (backlog 0024): the mention's name or one of its aliases occurs in the
         note's own words, as a whole-word sequence (case-folded). Names from the context packet or
@@ -147,6 +158,7 @@ class _Builder:
             if lm.ref not in known_refs:
                 self.warnings.append(f"The linking named a mention {lm.ref} that the extraction does not have.")
         for m in ext.mentions:
+            m = self.without_kind_suffix(m)
             if m.ref in self.refmap or m.ref in self.dropped:
                 self.warnings.append(f"The mention ref {m.ref} appears twice; the first one was used.")
                 continue
@@ -155,6 +167,8 @@ class _Builder:
                 self.warnings.append(f"{m.name} is not written in the note; it was left out.")
                 continue
             lm = by_ref.get(m.ref)
+            if lm is not None:
+                lm = self.without_kind_suffix(lm)
             if lm is None:
                 self.warnings.append(f"No linking decision for {m.name} ({m.ref}); it was created as new.")
             decision = lm.decision if lm else "create"

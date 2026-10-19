@@ -94,7 +94,11 @@ existing one, a statement linking the entity to itself is left out), the revisio
 (with `kind_conflict` when the kinds differ: the existing kind is kept, never a second entity), and
 the stored revision is the rewritten one, so a replay agrees. A rename onto a canonical name another
 live entity has is refused (that is a merge). Aliases never force a reuse: an alias is the model's
-word for an entity, and only produces candidates.
+word for an entity, and only produces candidates. A mention name or alias that ends with one of the
+entity kinds in parentheses (`memory (software)`) loses that suffix before its canonical name is
+taken, with a warning (`names.strip_kind_suffix`): the linking packet once showed entities as
+`name (kind)` and the model copied the form into names; it now shows `name — kind`. This is
+structural (a known kind word in a fixed position), not a reading of the name.
 
 Notebooks written before canonical names (schema 1) are upgraded on open: `name_key`, `display_name`
 and `alias_key` are filled in, a later live entity whose canonical name an earlier one holds is marked
@@ -104,7 +108,11 @@ canonical name is merged into its earliest entity, one `entity.merge` revision p
 source `{client, account}` (`migration` for the automatic run), the merged entry's names kept as
 aliases. Reads follow merges, so its statements, relations, notes and tasks come with it; an unmerge
 undoes it, and the separated entry takes the first free `<name>_2`, `<name>_3` so two live entities
-never share a canonical name. A pair a person separated is never joined again by the repair.
+never share a canonical name. A pair a person separated is never joined again by the repair. The
+repair also joins the entries left by the `name (kind)` echo: a live entity whose surface form ends
+with ` (<kind>)` and whose canonical name is `<name>_<kind>` is merged into the live entity named
+`<name>` when there is one (the group lists it under `kind_suffix`; the echoed form is not kept as an
+alias); an entry written as words (`contact person`) or whose plain name no entity has is left alone.
 
 ## Claim
 

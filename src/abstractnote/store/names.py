@@ -8,8 +8,11 @@ identity judgement (ADR 0004): ``Gateway`` and ``abstractgateway`` stay the mode
 does a name that is only an alias of another entity (aliases are the model's words, and often loose: a project
 listed with its parts' names as aliases). Alias keys only produce candidates (``process.resolve``).
 
-``merge_plan`` lists the groups of live entities an older notebook holds under one canonical name;
-``Notebook.normalize_entities`` merges each group into its earliest entity.
+``merge_plan`` lists the groups of live entities an older notebook holds under one canonical name, plus the
+entries whose name is another entity's name with its kind echoed in parentheses (``memory (software)`` next to
+``Memory``, canonical ``memory_software`` = ``memory`` + ``_`` + a kind: the linking packet once showed candidates
+as ``name (kind)``; structural, see :func:`strip_kind_suffix`); ``Notebook.normalize_entities`` merges each group
+into its earliest entity.
 """
 
 from __future__ import annotations
@@ -19,6 +22,32 @@ from typing import Any, Dict, List, Optional, Tuple
 from .. import ids
 
 _ENTITY_FIELDS = ("entity_id", "from_id", "into_id", "subject_id", "object_id")
+
+
+def strip_kind_suffix(name: Any) -> str:
+    """``"memory (software)"`` -> ``"memory"``: a name that ends with one of the entity kinds in parentheses
+    (`` (<kind>)``, case-folded) loses that suffix; any other name is returned unchanged. Structural, not
+    semantic (ADR 0004): the linking packet used to show candidates as ``name (kind)`` and the model sometimes
+    copied that whole form into a name (gate 04 M4). Applied to mention names at apply time
+    (``process.revise``) and by :func:`merge_plan` to entries already stored."""
+    text = str(name or "")
+    body = text.strip()
+    if body.endswith(")"):
+        head, sep, tail = body[:-1].rpartition(" (")
+        if sep and head.strip() and tail.casefold() in ids.ENTITY_KINDS:
+            return head.strip()
+    return text
+
+
+def kind_suffix_target(name_key: Optional[str], surface: Any) -> Optional[str]:
+    """The canonical name an entry names once its echoed kind is stripped, or None: its surface form ends with
+    `` (<kind>)`` and its canonical name is that name's canonical name + ``_<kind>``."""
+    stripped = strip_kind_suffix(surface)
+    if not name_key or stripped == str(surface or ""):
+        return None
+    base = ids.name_key(stripped)
+    kind = str(surface).strip()[:-1].rpartition(" (")[2].casefold()
+    return base if name_key == f"{base}_{kind}" else None
 
 
 def _holder_view(store: Any, eid: str, created: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
@@ -139,11 +168,31 @@ def reuse_taken_names(store: Any, rev: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def merge_plan(store: Any) -> List[Dict[str, Any]]:
-    """``[{into_id, from_ids, name, names, kinds}]``: each group of live entities sharing a canonical name, to be
-    merged into its earliest entity. A pair a person separated again (an undone merge) stays apart."""
+    """``[{into_id, from_ids, name, names, kinds, kind_suffix}]``: each group of live entities sharing a canonical
+    name, to be merged into its earliest entity, joined by the entries whose surface form is that name with its
+    kind echoed in parentheses (:func:`kind_suffix_target`; their ids are also listed in ``kind_suffix``). The
+    group's entity is the earliest one that has the name itself. A pair a person separated again (an undone
+    merge) stays apart."""
+    rows = store.q("SELECT entity_id, name_key, name, display_name FROM entities WHERE merged_into IS NULL AND"
+                   " name_key IS NOT NULL ORDER BY created_at, recorded_at, entity_id")
+    holder: Dict[str, str] = {}
+    for r in rows:
+        holder.setdefault(r["name_key"], r["entity_id"])
+    groups: Dict[str, List[str]] = {}
+    suffixed: set = set()
+    for r in rows:
+        key = r["name_key"]
+        base = kind_suffix_target(key, r["display_name"] or r["name"])
+        if base is not None and base in holder:
+            key = base
+            suffixed.add(r["entity_id"])
+        groups.setdefault(key, []).append(r["entity_id"])
     plan = []
-    for group in store.name_key_groups():
-        into = group[0]
+    for key, members in groups.items():
+        if len(members) < 2:
+            continue
+        into = holder[key]
+        group = [into, *(e for e in members if e != into)]
         q = ",".join("?" for _ in group)
         apart = store.q(f"SELECT from_id, into_id FROM merges WHERE undone_at IS NOT NULL AND from_id IN ({q})"
                         f" AND into_id IN ({q})", [*group, *group])
@@ -151,21 +200,29 @@ def merge_plan(store: Any) -> List[Dict[str, Any]]:
         froms = [e for e in group[1:] if e not in undone]
         if not froms:
             continue
-        rows = {e: store.entity_row(e) for e in [into, *froms]}
-        plan.append({"into_id": into, "from_ids": froms, "name": rows[into]["name"],
-                     "names": [rows[e]["display_name"] or rows[e]["name"] for e in [into, *froms]],
-                     "kinds": [rows[e]["kind"] for e in [into, *froms]]})
+        rows_by = {e: store.entity_row(e) for e in [into, *froms]}
+        plan.append({"into_id": into, "from_ids": froms, "name": rows_by[into]["name"],
+                     "names": [rows_by[e]["display_name"] or rows_by[e]["name"] for e in [into, *froms]],
+                     "kinds": [rows_by[e]["kind"] for e in [into, *froms]],
+                     "kind_suffix": [e for e in froms if e in suffixed]})
     return plan
 
 
-def merge_ops(store: Any, into_id: str, from_id: str) -> Tuple[List[Dict[str, Any]], str]:
-    """The ops of one normalisation merge (the merge plus the separated entry's names as aliases) and its summary."""
+def merge_ops(store: Any, into_id: str, from_id: str, *, kind_suffix: bool = False
+              ) -> Tuple[List[Dict[str, Any]], str]:
+    """The ops of one normalisation merge (the merge plus the separated entry's names as aliases) and its summary.
+    ``kind_suffix``: the entry is the name with its kind echoed in parentheses; that form is not kept as an alias."""
     into, frm = store.entity_row(into_id), store.entity_row(from_id)
     reason = f"the same canonical name ({into['name_key'] or into['name']})"
+    if kind_suffix:
+        reason = f"the same name with its kind in parentheses ({frm['display_name'] or frm['name']})"
     ops: List[Dict[str, Any]] = [{"op": "entity.merge", "payload": {"from_id": from_id, "into_id": into_id,
                                                                     "reason": reason}}]
-    names = [frm["display_name"] or frm["name"], *(a[0] for a in store.q(
+    names = [] if kind_suffix else [frm["display_name"] or frm["name"]]
+    names += [*(a[0] for a in store.q(
         "SELECT alias FROM entity_aliases WHERE entity_id=? ORDER BY added_at, alias", (from_id,)))]
+    if kind_suffix:
+        names = [strip_kind_suffix(n) for n in names]
     known = {ids.fold(into["name"]), ids.fold(into["display_name"] or into["name"]), *(ids.fold(a[0]) for a in store.q(
         "SELECT alias FROM entity_aliases WHERE entity_id=?", (into_id,)))}
     for alias in names:
