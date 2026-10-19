@@ -152,8 +152,11 @@ class _Builder:
             name = (lm.name.strip() if lm and lm.name and lm.name.strip() else m.name.strip()) or m.ref
             if eid is None:
                 kind = (lm.kind if lm and lm.kind else m.kind)
-                eid = self.create(kind, name, [m.name, *m.aliases, *((lm.aliases if lm else []) or [])],
-                                  lm.summary if lm else None)
+                summary = (lm.summary or "").strip() if lm else ""
+                if not summary:
+                    summary = placeholder_summary(m.role, self.note)
+                    self.warnings.append(f"No summary was written for {name}; it was described from this note.")
+                eid = self.create(kind, name, [m.name, *m.aliases, *((lm.aliases if lm else []) or [])], summary)
                 self.stats["created"][eid] = m.ref
                 if close_to:
                     cid = ids.claim_id(self.note_id, eid, CLOSE_MATCH, close_to)
@@ -326,8 +329,22 @@ class _Builder:
                 self.ops.append(_op("topic.assign", note_id=self.note_id, topic=tt))
 
 
-def _require_summaries(b: "_Builder", ext: schemas.Extraction, link: schemas.Linking) -> None:
-    """A reused or merged entity that this note tells something new about needs a summary sentence."""
+def placeholder_summary(role: str, note: Any) -> str:
+    """A summary for a created entity the model left without one: its role in the note, as a sentence,
+    else where it was first seen. Never a failed note (backlog 0024)."""
+    role = " ".join(str(role or "").split())
+    if role:
+        sentence = role[0].upper() + role[1:]
+        return sentence if sentence[-1] in ".!?" else sentence + "."
+    title = " ".join(str(note["title"] or "").split())
+    day = str(note["occurred_at"] or "")[:10]
+    where = f"\u201c{title}\u201d" if title else "a note"
+    return f"Mentioned in {where}" + (f" on {day}." if day else ".")
+
+
+def _note_missing_summaries(b: "_Builder", ext: schemas.Extraction, link: schemas.Linking) -> None:
+    """A reused or merged entity that this note tells something new about should get a summary sentence;
+    when the model left it out, the entity keeps its current summary and the revision says so."""
     changed: set = set()
     for op in b.ops:
         p = op["payload"]
@@ -347,10 +364,10 @@ def _require_summaries(b: "_Builder", ext: schemas.Extraction, link: schemas.Lin
         if lm is None or eid is None or lm.decision not in ("reuse", "merge") or eid in b.stats["created"]:
             continue
         if eid in changed and not (lm.summary or "").strip():
-            missing.append(f"{m.name} ({m.ref})")
+            missing.append(m.name)
     if missing:
-        raise ValueError("The linking needs a one-sentence summary for each entity this note tells something new "
-                         "about: " + ", ".join(missing) + ".")
+        b.warnings.append("No new summary was written for " + ", ".join(missing)
+                          + "; the earlier summary was kept.")
 
 
 def _validated(extraction: Any, linking: Any) -> Tuple[schemas.Extraction, schemas.Linking]:
@@ -370,11 +387,13 @@ def build_revision(nb: Any, note_id: str, extraction: Any, linking: Any, *, atte
     ext, link = _validated(extraction, linking)
     packet = load_packet(nb, note_id)
     b = _Builder(nb, note, packet or empty_packet())
+    flags = extraction.get("warnings") if isinstance(extraction, dict) else None
+    b.warnings.extend(str(w) for w in (flags or []) if isinstance(w, str) and w.strip())
     if packet is None and (link.mentions or link.claims or link.tasks):
         b.warnings.append("The note's context was not looked up first, so every reference was treated as new.")
     b.mentions(ext, link)
     b.claims(ext, link)
-    _require_summaries(b, ext, link)
+    _note_missing_summaries(b, ext, link)
     b.tasks(ext, link)
     b.topics(ext)
     b.ops.append(_op("note.summary", note_id=note_id, summary=ext.summary or None, kind=None, language=None))

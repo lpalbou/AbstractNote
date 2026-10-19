@@ -835,6 +835,16 @@
             "type": "number"
           },
           {
+            "id": "thinking",
+            "label": "thinking",
+            "type": "string"
+          },
+          {
+            "id": "max_output_tokens",
+            "label": "max_output_tokens",
+            "type": "number"
+          },
+          {
             "id": "resp_schema",
             "label": "resp_schema",
             "type": "json_schema"
@@ -917,7 +927,8 @@
             "required": [
               "items"
             ]
-          }
+          },
+          "max_output_tokens": 8192
         }
       }
     },

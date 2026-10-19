@@ -746,6 +746,16 @@
             "type": "number"
           },
           {
+            "id": "thinking",
+            "label": "thinking",
+            "type": "string"
+          },
+          {
+            "id": "max_output_tokens",
+            "label": "max_output_tokens",
+            "type": "number"
+          },
+          {
             "id": "resp_schema",
             "label": "resp_schema",
             "type": "json_schema"
@@ -845,7 +855,9 @@
               "language",
               "one_line"
             ]
-          }
+          },
+          "thinking": "off",
+          "max_output_tokens": 400
         }
       }
     },
@@ -854,7 +866,7 @@
       "type": "break_object",
       "position": {
         "x": 2400.0,
-        "y": 692.0
+        "y": 744.0
       },
       "data": {
         "nodeType": "break_object",

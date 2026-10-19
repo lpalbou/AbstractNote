@@ -324,6 +324,16 @@
             "type": "number"
           },
           {
+            "id": "thinking",
+            "label": "thinking",
+            "type": "string"
+          },
+          {
+            "id": "max_output_tokens",
+            "label": "max_output_tokens",
+            "type": "number"
+          },
+          {
             "id": "resp_schema",
             "label": "resp_schema",
             "type": "json_schema"
@@ -424,7 +434,8 @@
               "contradictions_to_test",
               "rounds"
             ]
-          }
+          },
+          "max_output_tokens": 4096
         }
       }
     },
@@ -935,6 +946,16 @@
             "type": "number"
           },
           {
+            "id": "thinking",
+            "label": "thinking",
+            "type": "string"
+          },
+          {
+            "id": "max_output_tokens",
+            "label": "max_output_tokens",
+            "type": "number"
+          },
+          {
             "id": "resp_schema",
             "label": "resp_schema",
             "type": "json_schema"
@@ -1019,7 +1040,8 @@
               "changes",
               "gaps"
             ]
-          }
+          },
+          "max_output_tokens": 4096
         }
       }
     },
@@ -1254,6 +1276,16 @@
             "type": "number"
           },
           {
+            "id": "thinking",
+            "label": "thinking",
+            "type": "string"
+          },
+          {
+            "id": "max_output_tokens",
+            "label": "max_output_tokens",
+            "type": "number"
+          },
+          {
             "id": "resp_schema",
             "label": "resp_schema",
             "type": "json_schema"
@@ -1368,7 +1400,8 @@
               "suggestions",
               "confidence"
             ]
-          }
+          },
+          "max_output_tokens": 8192
         }
       }
     },
@@ -1642,7 +1675,7 @@
       "type": "code",
       "position": {
         "x": 5760.0,
-        "y": 692.0
+        "y": 744.0
       },
       "data": {
         "nodeType": "code",

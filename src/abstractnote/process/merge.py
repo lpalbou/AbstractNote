@@ -2,7 +2,8 @@
 
 Mentions are unioned by exact case-folded name and kind (refs renumbered m1,
 m2, ...; aliases unioned); claims, tasks and time references are concatenated
-with their refs remapped; topics are unioned; summaries are joined. This is
+with their refs remapped; topics are unioned; summaries are joined; the flow's warnings about a
+part (a part that names nothing) are kept. This is
 the same rule as the flow's merge step.
 """
 
@@ -27,6 +28,7 @@ def merge_extractions(parts: Sequence[Dict[str, Any]]) -> Tuple[Dict[str, Any], 
         time_refs: List[Dict[str, Any]] = []
         topics: List[str] = []
         summaries: List[str] = []
+        warnings: List[str] = []
         for i, part in enumerate(parts):
             for m in part.get("mentions") or []:
                 key = (str(m.get("name") or "").casefold(), str(m.get("kind") or ""))
@@ -53,8 +55,13 @@ def merge_extractions(parts: Sequence[Dict[str, Any]]) -> Tuple[Dict[str, Any], 
                     topics.append(t)
             if part.get("summary"):
                 summaries.append(str(part["summary"]))
+            for w in part.get("warnings") or []:
+                if w not in warnings:
+                    warnings.append(w)
         merged = {"summary": " ".join(summaries), "mentions": mentions, "claims": claims, "tasks": tasks,
                   "time_refs": time_refs, "topics": topics}
+        if warnings:
+            merged["warnings"] = warnings
     names = [{"ref": m.get("ref"), "name": m.get("name"), "kind": m.get("kind"), "aliases": m.get("aliases") or []}
              for m in merged.get("mentions") or []]
     return merged, names

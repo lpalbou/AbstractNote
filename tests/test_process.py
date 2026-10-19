@@ -331,19 +331,25 @@ def test_schemas_match_the_flow_copy_and_prompts_render():
                                  "tasks": [], "revision_summary": "x"})
 
 
-def test_summaries_are_required_where_knowledge_changes(nb):
+def test_a_missing_summary_is_a_warning_never_a_failed_note(nb):
+    """Backlog 0024: the schema asks for summaries, but a missing one never fails the note."""
     seed(nb)
     ctx = ToolContext(nb=nb)
-    # create without a summary: refused by the Linking schema mirror
+    # create without a summary: applied, with a placeholder from the mention's role and a warning
     nid = nb.capture("Zed called.", occurred_at="2026-02-02T10:00:00Z").note_id
     note_context(ctx, nid)
-    with pytest.raises(ValueError, match="summary"):
-        note_apply_revision(ctx, nid, extraction([mention("m1", "Zed", "person")]),
-                            {"mentions": [ml("m1", "create", name="Zed", kind="person", summary=None)]})
-    with pytest.raises(ValueError, match="summary"):
-        note_apply_revision(ctx, nid, extraction([mention("m1", "Zed", "person")]),
-                            {"mentions": [ml("m1", "create", name="Zed", kind="person", summary="  ")]})
-    # a reused entity the note tells something new about needs one too
+    out = note_apply_revision(ctx, nid, extraction([mention("m1", "Zed", "person", role="called about the budget")]),
+                              {"mentions": [ml("m1", "create", name="Zed", kind="person", summary=None)]})
+    assert out["revision_id"] and any("No summary was written for Zed" in w for w in out["warnings"])
+    zed = nb.store.q1("SELECT entity_id, summary FROM entities WHERE name='Zed'")
+    assert zed["summary"] == "Called about the budget."
+    # blank summary and no role: the placeholder says where it was seen
+    nid1 = nb.capture("Yan too.", title="Calls", occurred_at="2026-02-02T11:00:00Z").note_id
+    note_context(ctx, nid1)
+    note_apply_revision(ctx, nid1, extraction([mention("m1", "Yan", "person")]),
+                        {"mentions": [ml("m1", "create", name="Yan", kind="person", summary="  ")]})
+    assert nb.store.q1("SELECT summary FROM entities WHERE name='Yan'")[0] == "Mentioned in \u201cCalls\u201d on 2026-02-02."
+    # a reused entity the note tells something new about, without a summary: kept, with a warning
     ext = extraction([mention("m1", "Dana", "person"), mention("m2", "LUT", "project")],
                      [stmt("m1", "schema:knowsAbout", "m2")])
     nid2 = nb.capture("Dana knows LUT well.", occurred_at="2026-02-03T10:00:00Z").note_id
@@ -352,18 +358,20 @@ def test_summaries_are_required_where_knowledge_changes(nb):
     cands = note_resolve_candidates(ctx, nid2, names)
     link = {"mentions": [ml("m1", "reuse", cand_index(cands, "m1", "ex:person-dana"), summary=None),
                          ml("m2", "reuse", cand_index(cands, "m2", "ex:project-lut"), summary="LUT is the project.")]}
-    with pytest.raises(ValueError, match=r"Dana \(m1\)"):
-        note_apply_revision(ctx, nid2, ext, link)
-    assert nb.store.counts()["revisions"] == 1  # nothing applied
-    # an untouched reused entity may keep null
+    out2 = note_apply_revision(ctx, nid2, ext, link)
+    assert out2["revision_id"] and nb.store.note_row(nid2)["status"] == "processed"
+    assert any(w == "No new summary was written for Dana; the earlier summary was kept." for w in out2["warnings"])
+    assert nb.store.entity_row("ex:person-dana")["summary"] == "A colleague at Acme."
+    assert nb.store.entity_row("ex:project-lut")["summary"] == "LUT is the project."
+    # an untouched reused entity may keep null, silently
     ext3 = extraction([mention("m1", "Dana", "person")])
     nid3 = nb.capture("Saw Dana.", occurred_at="2026-02-04T10:00:00Z").note_id
     note_context(ctx, nid3)
     cands3 = note_resolve_candidates(ctx, nid3, merge_extractions([ext3])[1])
-    out = note_apply_revision(ctx, nid3, ext3, {"mentions": [ml("m1", "reuse", cand_index(cands3, "m1",
-                                                                                          "ex:person-dana"),
-                                                               summary=None)]})
-    assert out["revision_id"] and nb.store.entity_row("ex:person-dana")["summary"] == "A colleague at Acme."
+    out3 = note_apply_revision(ctx, nid3, ext3, {"mentions": [ml("m1", "reuse", cand_index(cands3, "m1",
+                                                                                           "ex:person-dana"),
+                                                                summary=None)]})
+    assert out3["revision_id"] and not any("summary" in w for w in out3["warnings"])
 
 
 def test_extraction_prompt_steers_facts_to_literal_ex_claims():

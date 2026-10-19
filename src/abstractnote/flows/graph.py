@@ -302,12 +302,22 @@ class Flow:
         return nid
 
     def llm(self, node_id: str, label: str, *, schema: Dict[str, Any], prompt: Src, provider: Src, model: Src,
-            system: str, temperature: float = 0.2) -> str:
+            system: str, temperature: float = 0.2, thinking: Optional[str] = None,
+            max_output_tokens: Optional[int] = None) -> str:
+        """One structured model call. ``thinking`` ("on"/"off") and ``max_output_tokens`` are pinned
+        on the node (a node value wins over the run's ``_runtime.thinking`` and over the model
+        card's output limit; backlog 0024)."""
+        defaults: Dict[str, Any] = {"tools": [], "system": system, "temperature": temperature, "resp_schema": schema}
+        if thinking is not None:
+            defaults["thinking"] = thinking
+        if max_output_tokens is not None:
+            defaults["max_output_tokens"] = int(max_output_tokens)
         nid = self.node(
             node_id, "llm_call", label,
             inputs=[
                 EXEC_IN, pin("provider", "provider_text"), pin("model", "model"), pin("system", "string"),
                 pin("prompt", "string"), pin("tools", "tools"), pin("temperature", "number"),
+                pin("thinking", "string"), pin("max_output_tokens", "number"),
                 pin("resp_schema", "json_schema"),
             ],
             outputs=[
@@ -315,7 +325,7 @@ class Flow:
                 pin("meta", "object"), pin("tool_calls", "array"),
             ],
             # tools = [] as a DECLARED default so no host-injected tool list reaches a judgement call.
-            pin_defaults={"tools": [], "system": system, "temperature": temperature, "resp_schema": schema},
+            pin_defaults=defaults,
         )
         self.wire(prompt, nid, "prompt")
         self.wire(provider, nid, "provider")

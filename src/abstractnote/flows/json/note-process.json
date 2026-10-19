@@ -66,6 +66,11 @@
             "type": "string"
           },
           {
+            "id": "max_chars",
+            "label": "max_chars",
+            "type": "number"
+          },
+          {
             "id": "permissions",
             "label": "permissions",
             "type": "string"
@@ -84,10 +89,11 @@
           }
         ],
         "pinDefaults": {
-          "permissions": "sandbox"
+          "permissions": "sandbox",
+          "max_chars": 6000
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif note_id is not None and note_id != \"\":\n    arguments[\"note_id\"] = note_id\nreturn {\"tool_calls\": [{\"name\": \"note_context\", \"call_id\": \"context\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif note_id is not None and note_id != \"\":\n    arguments[\"note_id\"] = note_id\nif max_chars is not None and max_chars != \"\":\n    arguments[\"max_chars\"] = max_chars\nreturn {\"tool_calls\": [{\"name\": \"note_context\", \"call_id\": \"context\", \"arguments\": arguments}]}\n"
       }
     },
     {
@@ -430,6 +436,16 @@
             "type": "number"
           },
           {
+            "id": "thinking",
+            "label": "thinking",
+            "type": "string"
+          },
+          {
+            "id": "max_output_tokens",
+            "label": "max_output_tokens",
+            "type": "number"
+          },
+          {
             "id": "resp_schema",
             "label": "resp_schema",
             "type": "json_schema"
@@ -663,20 +679,500 @@
               "time_refs",
               "topics"
             ]
-          }
+          },
+          "thinking": "on",
+          "max_output_tokens": 4000
         }
+      }
+    },
+    {
+      "id": "nothing_named",
+      "type": "code",
+      "position": {
+        "x": 3360.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Nothing named?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "item",
+            "label": "item",
+            "type": "object"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "again",
+            "label": "again",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "d = data if isinstance(data, dict) else {}\ntext = str((item or {}).get(\"text\") or \"\") if isinstance(item, dict) else str(item or \"\")\nreturn {\"again\": not (d.get(\"mentions\") or []) and len(text.strip()) >= 1}\n"
+      }
+    },
+    {
+      "id": "read_again",
+      "type": "if",
+      "position": {
+        "x": 3840.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Read it again?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
       }
     },
     {
       "id": "keep_extraction",
       "type": "add_to_list",
       "position": {
-        "x": 3360.0,
+        "x": 4320.0,
         "y": 0.0
       },
       "data": {
         "nodeType": "add_to_list",
         "label": "Keep the extraction",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "item",
+            "label": "item",
+            "type": "any"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "list",
+            "label": "list",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "name": "extractions"
+        }
+      }
+    },
+    {
+      "id": "extract_again",
+      "type": "llm_call",
+      "position": {
+        "x": 4320.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "llm_call",
+        "label": "Extract again",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          },
+          {
+            "id": "system",
+            "label": "system",
+            "type": "string"
+          },
+          {
+            "id": "prompt",
+            "label": "prompt",
+            "type": "string"
+          },
+          {
+            "id": "tools",
+            "label": "tools",
+            "type": "tools"
+          },
+          {
+            "id": "temperature",
+            "label": "temperature",
+            "type": "number"
+          },
+          {
+            "id": "thinking",
+            "label": "thinking",
+            "type": "string"
+          },
+          {
+            "id": "max_output_tokens",
+            "label": "max_output_tokens",
+            "type": "number"
+          },
+          {
+            "id": "resp_schema",
+            "label": "resp_schema",
+            "type": "json_schema"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          },
+          {
+            "id": "meta",
+            "label": "meta",
+            "type": "object"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "tools": [],
+          "system": "You file and connect a person's notes. Output JSON only, matching the schema.",
+          "temperature": 0.2,
+          "resp_schema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string",
+                "description": "1-3 sentences"
+              },
+              "mentions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "ref": {
+                      "type": "string",
+                      "description": "m1, m2, ..."
+                    },
+                    "name": {
+                      "type": "string",
+                      "description": "as written in the note"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "person",
+                        "org",
+                        "project",
+                        "concept",
+                        "place",
+                        "event",
+                        "artifact",
+                        "software",
+                        "thing"
+                      ]
+                    },
+                    "aliases": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "other names as written in the note"
+                    },
+                    "role": {
+                      "type": "string",
+                      "description": "what the note says about it, one phrase"
+                    }
+                  },
+                  "required": [
+                    "ref",
+                    "name",
+                    "kind",
+                    "aliases",
+                    "role"
+                  ]
+                }
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "subject": {
+                      "type": "string",
+                      "description": "a mention ref"
+                    },
+                    "predicate": {
+                      "type": "string",
+                      "description": "a CURIE from the vocabulary, or ex:snake_case"
+                    },
+                    "object": {
+                      "type": "string",
+                      "description": "a mention ref, or a literal value"
+                    },
+                    "object_is_literal": {
+                      "type": "boolean"
+                    },
+                    "certainty": {
+                      "type": "string",
+                      "enum": [
+                        "stated",
+                        "probable",
+                        "possible",
+                        "reported",
+                        "disputed"
+                      ]
+                    },
+                    "stance": {
+                      "type": "string",
+                      "enum": [
+                        "assert",
+                        "revise",
+                        "retract"
+                      ]
+                    },
+                    "evidence": {
+                      "type": "string",
+                      "description": "verbatim excerpt of the note"
+                    },
+                    "valid_from": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "ISO date or null"
+                    },
+                    "valid_until": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "ISO date or null"
+                    }
+                  },
+                  "required": [
+                    "subject",
+                    "predicate",
+                    "object",
+                    "object_is_literal",
+                    "certainty",
+                    "stance",
+                    "evidence",
+                    "valid_from",
+                    "valid_until"
+                  ]
+                }
+              },
+              "tasks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "open",
+                        "done"
+                      ]
+                    },
+                    "due": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "ISO date or null"
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "status",
+                    "due"
+                  ]
+                }
+              },
+              "time_refs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "iso": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "ISO or null"
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "iso"
+                  ]
+                }
+              },
+              "topics": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "summary",
+              "mentions",
+              "claims",
+              "tasks",
+              "time_refs",
+              "topics"
+            ]
+          },
+          "thinking": "on",
+          "max_output_tokens": 4000
+        }
+      }
+    },
+    {
+      "id": "flag_empty",
+      "type": "code",
+      "position": {
+        "x": 4800.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Flag a part that names nothing",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "entry",
+            "label": "entry",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "d = dict(data) if isinstance(data, dict) else {}\nif not (d.get(\"mentions\") or []):\n    d[\"warnings\"] = list(d.get(\"warnings\") or []) + [\"A part of this note names nothing although it has \"\n                                                  \"text, even when read a second time.\"]\nreturn {\"entry\": d}\n"
+      }
+    },
+    {
+      "id": "keep_retry",
+      "type": "add_to_list",
+      "position": {
+        "x": 5280.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "add_to_list",
+        "label": "Keep the second reading",
         "inputs": [
           {
             "id": "exec-in",
@@ -756,7 +1252,7 @@
       "type": "code",
       "position": {
         "x": 2880.0,
-        "y": 372.0
+        "y": 424.0
       },
       "data": {
         "nodeType": "code",
@@ -799,7 +1295,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "parts = [e for e in (extractions or []) if isinstance(e, dict)]\nif not parts:\n    raise ValueError(\"The note could not be read.\")\nif len(parts) == 1:\n    merged = parts[0]\nelse:\n    mentions, refmap, by_key = [], {}, {}\n    claims, tasks, time_refs, topics, summaries = [], [], [], [], []\n    for i, part in enumerate(parts):\n        for m in part.get(\"mentions\") or []:\n            key = (str(m.get(\"name\") or \"\").casefold(), str(m.get(\"kind\") or \"\"))\n            if key in by_key:\n                kept = by_key[key]\n                for a in m.get(\"aliases\") or []:\n                    if a not in kept[\"aliases\"]:\n                        kept[\"aliases\"].append(a)\n            else:\n                kept = dict(m, ref=\"m\" + str(len(mentions) + 1), aliases=list(m.get(\"aliases\") or []))\n                by_key[key] = kept\n                mentions.append(kept)\n            refmap[(i, m.get(\"ref\"))] = kept[\"ref\"]\n        for c in part.get(\"claims\") or []:\n            c2 = dict(c)\n            c2[\"subject\"] = refmap.get((i, c.get(\"subject\")), c.get(\"subject\"))\n            if not c.get(\"object_is_literal\"):\n                c2[\"object\"] = refmap.get((i, c.get(\"object\")), c.get(\"object\"))\n            claims.append(c2)\n        tasks.extend(part.get(\"tasks\") or [])\n        time_refs.extend(part.get(\"time_refs\") or [])\n        for t in part.get(\"topics\") or []:\n            if t not in topics:\n                topics.append(t)\n        if part.get(\"summary\"):\n            summaries.append(str(part.get(\"summary\")))\n    merged = {\"summary\": \" \".join(summaries), \"mentions\": mentions, \"claims\": claims,\n              \"tasks\": tasks, \"time_refs\": time_refs, \"topics\": topics}\nnames = [{\"ref\": m.get(\"ref\"), \"name\": m.get(\"name\"), \"kind\": m.get(\"kind\"), \"aliases\": m.get(\"aliases\") or []}\n         for m in merged.get(\"mentions\") or []]\nreturn {\"extraction\": merged, \"mentions\": names}\n"
+        "codeBody": "parts = [e for e in (extractions or []) if isinstance(e, dict)]\nif not parts:\n    raise ValueError(\"The note could not be read.\")\nif len(parts) == 1:\n    merged = parts[0]\nelse:\n    mentions, refmap, by_key = [], {}, {}\n    claims, tasks, time_refs, topics, summaries, warnings = [], [], [], [], [], []\n    for i, part in enumerate(parts):\n        for m in part.get(\"mentions\") or []:\n            key = (str(m.get(\"name\") or \"\").casefold(), str(m.get(\"kind\") or \"\"))\n            if key in by_key:\n                kept = by_key[key]\n                for a in m.get(\"aliases\") or []:\n                    if a not in kept[\"aliases\"]:\n                        kept[\"aliases\"].append(a)\n            else:\n                kept = dict(m, ref=\"m\" + str(len(mentions) + 1), aliases=list(m.get(\"aliases\") or []))\n                by_key[key] = kept\n                mentions.append(kept)\n            refmap[(i, m.get(\"ref\"))] = kept[\"ref\"]\n        for c in part.get(\"claims\") or []:\n            c2 = dict(c)\n            c2[\"subject\"] = refmap.get((i, c.get(\"subject\")), c.get(\"subject\"))\n            if not c.get(\"object_is_literal\"):\n                c2[\"object\"] = refmap.get((i, c.get(\"object\")), c.get(\"object\"))\n            claims.append(c2)\n        tasks.extend(part.get(\"tasks\") or [])\n        time_refs.extend(part.get(\"time_refs\") or [])\n        for t in part.get(\"topics\") or []:\n            if t not in topics:\n                topics.append(t)\n        if part.get(\"summary\"):\n            summaries.append(str(part.get(\"summary\")))\n        for w in part.get(\"warnings\") or []:\n            if w not in warnings:\n                warnings.append(w)\n    merged = {\"summary\": \" \".join(summaries), \"mentions\": mentions, \"claims\": claims,\n              \"tasks\": tasks, \"time_refs\": time_refs, \"topics\": topics}\n    if warnings:\n        merged[\"warnings\"] = warnings\nnames = [{\"ref\": m.get(\"ref\"), \"name\": m.get(\"name\"), \"kind\": m.get(\"kind\"), \"aliases\": m.get(\"aliases\") or []}\n         for m in merged.get(\"mentions\") or []]\nreturn {\"extraction\": merged, \"mentions\": names}\n"
       }
     },
     {
@@ -858,7 +1354,7 @@
       "type": "tool_calls",
       "position": {
         "x": 3840.0,
-        "y": 0.0
+        "y": 320.0
       },
       "data": {
         "nodeType": "tool_calls",
@@ -914,7 +1410,7 @@
       "type": "code",
       "position": {
         "x": 4320.0,
-        "y": 0.0
+        "y": 744.0
       },
       "data": {
         "nodeType": "code",
@@ -965,7 +1461,7 @@
       "type": "string_template",
       "position": {
         "x": 4320.0,
-        "y": 320.0
+        "y": 1064.0
       },
       "data": {
         "nodeType": "string_template",
@@ -1014,7 +1510,7 @@
       "type": "llm_call",
       "position": {
         "x": 4800.0,
-        "y": 0.0
+        "y": 320.0
       },
       "data": {
         "nodeType": "llm_call",
@@ -1053,6 +1549,16 @@
           {
             "id": "temperature",
             "label": "temperature",
+            "type": "number"
+          },
+          {
+            "id": "thinking",
+            "label": "thinking",
+            "type": "string"
+          },
+          {
+            "id": "max_output_tokens",
+            "label": "max_output_tokens",
             "type": "number"
           },
           {
@@ -1255,7 +1761,9 @@
               "tasks",
               "revision_summary"
             ]
-          }
+          },
+          "thinking": "on",
+          "max_output_tokens": 3000
         }
       }
     },
@@ -1264,7 +1772,7 @@
       "type": "code",
       "position": {
         "x": 5280.0,
-        "y": 0.0
+        "y": 320.0
       },
       "data": {
         "nodeType": "code",
@@ -1625,6 +2133,41 @@
       "targetHandle": "exec-in"
     },
     {
+      "id": "e-extract-data-nothing_named-data",
+      "source": "extract",
+      "sourceHandle": "data",
+      "target": "nothing_named",
+      "targetHandle": "data"
+    },
+    {
+      "id": "e-each_section-item-nothing_named-item",
+      "source": "each_section",
+      "sourceHandle": "item",
+      "target": "nothing_named",
+      "targetHandle": "item"
+    },
+    {
+      "id": "e-extract-exec-out-nothing_named-exec-in",
+      "source": "extract",
+      "sourceHandle": "exec-out",
+      "target": "nothing_named",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-nothing_named-again-read_again-condition",
+      "source": "nothing_named",
+      "sourceHandle": "again",
+      "target": "read_again",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-nothing_named-exec-out-read_again-exec-in",
+      "source": "nothing_named",
+      "sourceHandle": "exec-out",
+      "target": "read_again",
+      "targetHandle": "exec-in"
+    },
+    {
       "id": "e-extract-data-keep_extraction-item",
       "source": "extract",
       "sourceHandle": "data",
@@ -1632,10 +2175,66 @@
       "targetHandle": "item"
     },
     {
-      "id": "e-extract-exec-out-keep_extraction-exec-in",
-      "source": "extract",
-      "sourceHandle": "exec-out",
+      "id": "e-read_again-false-keep_extraction-exec-in",
+      "source": "read_again",
+      "sourceHandle": "false",
       "target": "keep_extraction",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-extract_prompt-result-extract_again-prompt",
+      "source": "extract_prompt",
+      "sourceHandle": "result",
+      "target": "extract_again",
+      "targetHandle": "prompt"
+    },
+    {
+      "id": "e-start-provider-extract_again-provider",
+      "source": "start",
+      "sourceHandle": "provider",
+      "target": "extract_again",
+      "targetHandle": "provider"
+    },
+    {
+      "id": "e-start-model-extract_again-model",
+      "source": "start",
+      "sourceHandle": "model",
+      "target": "extract_again",
+      "targetHandle": "model"
+    },
+    {
+      "id": "e-read_again-true-extract_again-exec-in",
+      "source": "read_again",
+      "sourceHandle": "true",
+      "target": "extract_again",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-extract_again-data-flag_empty-data",
+      "source": "extract_again",
+      "sourceHandle": "data",
+      "target": "flag_empty",
+      "targetHandle": "data"
+    },
+    {
+      "id": "e-extract_again-exec-out-flag_empty-exec-in",
+      "source": "extract_again",
+      "sourceHandle": "exec-out",
+      "target": "flag_empty",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-flag_empty-entry-keep_retry-item",
+      "source": "flag_empty",
+      "sourceHandle": "entry",
+      "target": "keep_retry",
+      "targetHandle": "item"
+    },
+    {
+      "id": "e-flag_empty-exec-out-keep_retry-exec-in",
+      "source": "flag_empty",
+      "sourceHandle": "exec-out",
+      "target": "keep_retry",
       "targetHandle": "exec-in"
     },
     {

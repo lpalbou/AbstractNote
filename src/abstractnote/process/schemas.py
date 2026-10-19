@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 ENTITY_KINDS = ["person", "org", "project", "concept", "place", "event", "artifact", "software", "thing"]
 NOTE_KINDS = ["idea", "task", "decision", "fact", "event", "question", "reflection", "reference", "log",
@@ -237,9 +237,10 @@ class Extraction(_M):
 
 
 class MentionLink(_M):
-    """A mention decision. ``summary`` is required (non-empty) when the entity is created
-    (``create``, ``unsure``); for reused entities the revision builder requires it when the
-    note changes what is known about them."""
+    """A mention decision. The schema asks for ``summary`` when the entity is created (``create``,
+    ``unsure``) and when the note changes what is known about a reused entity; a missing one is
+    never a failed note: the revision builder warns and writes a placeholder from the mention's
+    role (created entities) or keeps the current summary (reused ones)."""
 
     ref: str
     decision: Literal[tuple(MENTION_DECISIONS)]  # type: ignore[valid-type]
@@ -250,13 +251,6 @@ class MentionLink(_M):
     aliases: List[str] = Field(default_factory=list)
     summary: Optional[str] = None
     reason: str = ""
-
-
-    @model_validator(mode="after")
-    def _summary_for_new_entities(self) -> "MentionLink":
-        if self.decision in ("create", "unsure") and not (self.summary or "").strip():
-            raise ValueError(f"the {self.decision} decision for {self.ref} needs a one-sentence summary")
-        return self
 
 
 class ClaimLink(_M):

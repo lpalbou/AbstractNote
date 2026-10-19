@@ -66,6 +66,32 @@ AUTOMATION_DEFAULTS = {
 
 SYSTEM_JSON = "You file and connect a person's notes. Output JSON only, matching the schema."
 
+#: Per-step model settings (backlog 0024). ``thinking`` is pinned on the node, so it holds whatever
+#: the run request or the gateway default says; None leaves the runtime default. Every call has an
+#: explicit output budget: without one the runtime uses the model card's limit (81920 for Qwen3.6)
+#: and one runaway generation takes many minutes.
+STEP_SETTINGS: Dict[str, Dict[str, Any]] = {
+    "quick_filing": {"thinking": "off", "max_output_tokens": 400},
+    "extract": {"thinking": "on", "max_output_tokens": 4000},
+    "link": {"thinking": "on", "max_output_tokens": 3000},
+    "synthesize": {"thinking": None, "max_output_tokens": 8192},
+    "mine_plan": {"thinking": None, "max_output_tokens": 4096},
+    "mine_findings": {"thinking": None, "max_output_tokens": 4096},
+    "mine_dossier": {"thinking": None, "max_output_tokens": 8192},
+    "reflect": {"thinking": None, "max_output_tokens": 8192},
+}
+#: Characters per section the extraction reads in one call (``note_context`` max_chars), so that an
+#: extraction answer stays within its output budget; the whole text is still read.
+SECTION_CHARS = 6000
+#: A section with at least this much text whose extraction names nothing is read once more, then flagged.
+EMPTY_RETRY_MIN_CHARS = 1
+
+
+def _step(name: str) -> Dict[str, Any]:
+    """The llm() settings of a step."""
+    cfg = STEP_SETTINGS[name]
+    return {"thinking": cfg["thinking"], "max_output_tokens": cfg["max_output_tokens"]}
+
 
 # ------------------------------------------------------------------ inputs
 
@@ -216,7 +242,7 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
         "revisits": (cap, "revisits"), "topics": (cap, "topics"),
     })
     f.llm("filing", "File it quickly", schema=schemas["QuickFiling"], prompt=("filing_prompt", "result"),
-          provider=S("provider"), model=S("model"), system=SYSTEM_JSON)
+          provider=S("provider"), model=S("model"), system=SYSTEM_JSON, **_step("quick_filing"))
     f.then("dup_branch", "filing", "false")
     f.break_object("filing_fields", "Filing", ("filing", "data"), [
         ("title", "string"), ("kind", "string"), ("topics", "array"), ("urgency", "string"),
@@ -309,7 +335,7 @@ if len(parts) == 1:
     merged = parts[0]
 else:
     mentions, refmap, by_key = [], {}, {}
-    claims, tasks, time_refs, topics, summaries = [], [], [], [], []
+    claims, tasks, time_refs, topics, summaries, warnings = [], [], [], [], [], []
     for i, part in enumerate(parts):
         for m in part.get("mentions") or []:
             key = (str(m.get("name") or "").casefold(), str(m.get("kind") or ""))
@@ -336,8 +362,13 @@ else:
                 topics.append(t)
         if part.get("summary"):
             summaries.append(str(part.get("summary")))
+        for w in part.get("warnings") or []:
+            if w not in warnings:
+                warnings.append(w)
     merged = {"summary": " ".join(summaries), "mentions": mentions, "claims": claims,
               "tasks": tasks, "time_refs": time_refs, "topics": topics}
+    if warnings:
+        merged["warnings"] = warnings
 names = [{"ref": m.get("ref"), "name": m.get("name"), "kind": m.get("kind"), "aliases": m.get("aliases") or []}
          for m in merged.get("mentions") or []]
 return {"extraction": merged, "mentions": names}
@@ -354,7 +385,7 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
     S = lambda p: ("start", p)  # noqa: E731
     ctx = f.tool_step(
         "context", "Look at what is known", "note_context",
-        {"note_id": ("string", S("note_id"))},
+        {"note_id": ("string", S("note_id")), "max_chars": ("number", SECTION_CHARS)},
         [("note", "object"), ("sections", "array"), ("similar_notes", "array"),
          ("candidate_entities", "array"), ("open_tasks", "array"), ("topics", "array"),
          ("vocabulary", "array")],
@@ -376,10 +407,38 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
         "topics": (ctx, "topics"), "vocabulary": (ctx, "vocabulary"),
     })
     f.llm("extract", "Extract", schema=schemas["Extraction"], prompt=("extract_prompt", "result"),
-          provider=S("provider"), model=S("model"), system=SYSTEM_JSON)
+          provider=S("provider"), model=S("model"), system=SYSTEM_JSON, **_step("extract"))
     f.then("each_section", "extract", "loop")
+    # A section with text whose extraction names nothing is read once more (the model sometimes
+    # answers valid empty lists); a second empty answer is kept and flagged in the revision.
+    f.code(
+        "nothing_named", "Nothing named?",
+        "d = data if isinstance(data, dict) else {}\n"
+        "text = str((item or {}).get(\"text\") or \"\") if isinstance(item, dict) else str(item or \"\")\n"
+        f"return {{\"again\": not (d.get(\"mentions\") or []) and len(text.strip()) >= {EMPTY_RETRY_MIN_CHARS}}}",
+        inputs={"data": ("object", ("extract", "data")), "item": ("object", ("each_section", "item"))},
+        outputs=[("again", "boolean")],
+    )
+    f.then("extract", "nothing_named")
+    f.if_("read_again", "Read it again?", ("nothing_named", "again"))
+    f.then("nothing_named", "read_again")
     f.add_to_list("keep_extraction", "Keep the extraction", "extractions", ("extract", "data"))
-    f.then("extract", "keep_extraction")
+    f.then("read_again", "keep_extraction", "false")
+    f.llm("extract_again", "Extract again", schema=schemas["Extraction"], prompt=("extract_prompt", "result"),
+          provider=S("provider"), model=S("model"), system=SYSTEM_JSON, **_step("extract"))
+    f.then("read_again", "extract_again", "true")
+    f.code(
+        "flag_empty", "Flag a part that names nothing",
+        "d = dict(data) if isinstance(data, dict) else {}\n"
+        "if not (d.get(\"mentions\") or []):\n"
+        "    d[\"warnings\"] = list(d.get(\"warnings\") or []) + [\"A part of this note names nothing although it has \"\n"
+        "                                                  \"text, even when read a second time.\"]\n"
+        "return {\"entry\": d}",
+        inputs={"data": ("object", ("extract_again", "data"))}, outputs=[("entry", "object")],
+    )
+    f.then("extract_again", "flag_empty")
+    f.add_to_list("keep_retry", "Keep the second reading", "extractions", ("flag_empty", "entry"))
+    f.then("flag_empty", "keep_retry")
     f.get_var("extractions", "extractions", [])
     f.code("merge", "Merge the sections", MERGE_EXTRACTIONS,
            inputs={"extractions": ("array", ("extractions", "value"))},
@@ -396,7 +455,7 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
         "packet": (ctx, "tool_output"),
     })
     f.llm("link", "Link", schema=schemas["Linking"], prompt=("link_prompt", "result"),
-          provider=S("provider"), model=S("model"), system=SYSTEM_JSON)
+          provider=S("provider"), model=S("model"), system=SYSTEM_JSON, **_step("link"))
     f.then(res, "link")
     rev = f.tool_step(
         "apply", "Revise the graph", "note_apply_revision",
@@ -633,7 +692,7 @@ def build_recall(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, 
     })
     f.llm("synthesize", "Answer", schema=schemas["Answer"], prompt=("answer_prompt", "result"),
           provider=S("provider"), model=S("model"), system="You answer questions from a person's notes. "
-          "Output JSON only, matching the schema.")
+          "Output JSON only, matching the schema.", **_step("synthesize"))
     f.then(exp, "synthesize")
     f.code(
         "standard", "Shape the answer",
@@ -691,7 +750,7 @@ def build_mine(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, An
         "question": S("question"), "since": S("since"), "until": S("until"), "hits": (first, "tool_output"),
     })
     f.llm("plan", "Plan the search", schema=schemas["MiningPlan"], prompt=("plan_prompt", "result"),
-          provider=S("provider"), model=S("model"), system=SYSTEM_JSON)
+          provider=S("provider"), model=S("model"), system=SYSTEM_JSON, **_step("mine_plan"))
     f.then(first, "plan")
     f.code(
         "steps", "Steps",
@@ -729,7 +788,7 @@ def build_mine(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, An
         "question": S("question"), "step": ("each_step", "item"), "hits": (step_hits, "tool_output"),
     })
     f.llm("findings", "Read this slice", schema=schemas["SliceFindings"], prompt=("findings_prompt", "result"),
-          provider=S("provider"), model=S("model"), system=SYSTEM_JSON)
+          provider=S("provider"), model=S("model"), system=SYSTEM_JSON, **_step("mine_findings"))
     f.then(step_ok[0], "findings", step_ok[1])
     f.code(
         "finding", "Keep the findings",
@@ -747,7 +806,7 @@ def build_mine(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, An
         "question": S("question"), "plan": ("plan", "data"), "findings": ("all_findings", "value"),
     })
     f.llm("dossier", "Write the dossier", schema=schemas["Dossier"], prompt=("dossier_prompt", "result"),
-          provider=S("provider"), model=S("model"), system=SYSTEM_JSON)
+          provider=S("provider"), model=S("model"), system=SYSTEM_JSON, **_step("mine_dossier"))
     f.then("each_step", "dossier", "done")
     f.code(
         "dossier_note", "Dossier note",
@@ -852,7 +911,7 @@ def build_reflect(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
         "candidates": ("candidates", "candidates"), "limit": S("limit"),
     })
     f.llm("reflect", "Choose what matters", schema=schemas["Reflections"], prompt=("reflect_prompt", "result"),
-          provider=S("provider"), model=S("model"), system=SYSTEM_JSON)
+          provider=S("provider"), model=S("model"), system=SYSTEM_JSON, **_step("reflect"))
     f.then("candidates", "reflect")
     f.code(
         "chosen", "Chosen insights",
