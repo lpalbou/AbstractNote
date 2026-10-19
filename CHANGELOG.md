@@ -9,6 +9,35 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 Install with `pip install "abstractnote[gateway]"` (AbstractGateway 0.15.11 or later carries the
 AbstractNote integration); the web app is `@abstractframework/note` on npm.
 
+### Added
+
+- **Themes**: the notebook finds the groups of things your notes keep bringing together (a project
+  and its people, a set of tools, a recurring subject) without a model, and the weekly reflection
+  names each one in a few words with one sentence on what holds it together. A theme keeps its name
+  while it changes little and is named again when it has changed a lot. `GET /note/communities`
+  lists them, `POST /note/communities/recompute` finds them again on request, and every entity
+  card says which theme it belongs to. A single long note no longer makes a theme of its own.
+- **Numbers**: `GET /note/stats` counts what the notebook has gathered: notes by kind and by where
+  they came from, attachments, weekly activity over its whole span, people, projects and ideas,
+  statements and how many were replaced, open and closed actions, insights, themes, processing, and
+  the entities that have gone quiet.
+- **Web app, Overview**: Explore opens on an Overview of the notebook: five figures (notes
+  understood and waiting, people projects and ideas, beliefs and how many were replaced, open
+  actions, themes), notes per week over the last 16 weeks with the busy weeks marked, entries by
+  kind and the most noted ones, a card per theme that opens the picture with that theme alone, what
+  has gone quiet, and processing in words.
+- **Web app, picture**: nodes take their theme's colour, with a legend that shows one theme alone;
+  hovering a node or a link fades the rest, and a card beside it (also on keyboard focus) gives its
+  name, kind, one sentence, how many notes, first and latest, its theme and its three strongest
+  links in words, drawn on top and never over the node or its neighbours. Link words appear when
+  you zoom in.
+- **Web app, how an entry evolved**: an entity's history opens with a line of what was said about
+  it, week by week (month by month past half a year), with a marker and a date on each period where
+  a belief was replaced.
+- **Apple Watch app**: sign in on the watch with your user name or email, then a token or the
+  8-digit code sent to you, on a screen that also sets the server; a server that cannot transcribe
+  voice says so in one sentence and keeps the recording, so it can be sent as it is.
+
 ### Changed
 
 - **Entities**: every entity has one canonical name, shown everywhere: lower case, with spaces and
@@ -22,12 +51,17 @@ AbstractNote integration); the web app is `@abstractframework/note` on npm.
 - **Capture**: reading a notebook never changes it. Capture, quick filing, your own actions and
   archiving first finish any change a stopped process left half applied; `abstractnote recover`
   does it on request.
-- **Understanding**: every model step has a fixed thinking setting and output budget (quick filing
-  without thinking; extraction and linking with it), whatever the model or the run asks. Long
+- **Understanding**: every model step has a fixed output budget and a known thinking setting
+  (quick filing and naming themes without thinking); thinking for extraction and linking is chosen
+  per run: on when a note is processed on its own, off by default for the background processing of
+  a queue or an import (`thinking` on note-process and note-drain). Long
   notes are read in 6000-character sections; a section with text whose extraction finds nothing is
   read once more, and a second empty answer is marked on the note. The prompts start with the same
   instructions for every note, and the linking step sees a short list of candidates per name, so
-  prompts are several times smaller and a note is understood faster.
+  prompts are several times smaller and a note is understood faster. The prompts show an entity's
+  kind after a dash (`memory — software`) and a name that still arrives with its kind in parentheses
+  (`memory (software)`) is filed under the name alone; `abstractnote normalize` joins the entries an
+  earlier version created that way into the entity they name.
 - **Understanding**: a name becomes an entity only when it occurs in the note and is something you
   would look up again (ids, values, versions and generic words stay text); an existing entity is
   reused only for the very same thing (a part, version or feature of it is a new one); one to three
@@ -65,7 +99,14 @@ AbstractNote integration); the web app is `@abstractframework/note` on npm.
   version of AbstractNote they were set up with, so after an upgrade notes stayed queued. Opening
   the web app now repairs them (or press Repair in Settings, Queue; `POST /note/processor/ensure`
   through the API), keeping your schedules and a paused state; `GET /note/status` and
-  `GET /note/queue` say whether each one can run.
+  `GET /note/queue` say whether each one can run. The same repair applies when a new version adds or
+  removes a tool the processing uses ("The tool list changed."), and the Apple Watch app runs it at
+  launch and after each sign-in.
+- **Themes after a library upgrade**: the themes depended on the installed `networkx` release, so an
+  upgrade could rename or drop some of them. AbstractNote now accepts only the tested releases
+  (`networkx>=3.2,<3.7`), records the release each computation used, and after a change keeps every
+  name that still fits, hands the others to the theme they overlap most to be named again, and
+  lists what it did in the recompute answer.
 
 ## [0.1.0] - 2026-10-19
 
