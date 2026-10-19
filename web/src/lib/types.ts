@@ -63,6 +63,8 @@ export type EntityCard = EntityRef & {
   open_tasks?: Task[];
   /** Ids of the entries merged into this one (W1 expand.entity_card). */
   merged_from?: string[];
+  /** Echoed when the card was built from what the archive held on a date (`as_received`). */
+  as_received?: string;
 };
 export type EntityListItem = EntityRef & { aliases?: string[]; summary?: string; first_seen?: string; last_seen?: string; note_count?: number; merged_into?: string | null };
 /** Pinned: GET /note/entities/{id}?as_merged=true, the entry's own record (not followed to the survivor of a merge). */
@@ -97,7 +99,8 @@ export type ClaimChain = {
 
 export type GraphNode = { id: string; kind: string; name: string; first_seen?: string; last_seen?: string; note_count?: number; summary?: string };
 export type GraphEdge = { source: string; target: string; predicate: string; first_seen?: string; last_seen?: string; count: number; active: boolean };
-export type Graph = { as_of: string; nodes: GraphNode[]; edges: GraphEdge[] };
+/** `as_received` is echoed when the graph was asked for what the archive held on a date (docs/api.md "Three dates"). */
+export type Graph = { as_of: string; as_received?: string; nodes: GraphNode[]; edges: GraphEdge[] };
 
 /** Pinned: {note_id, title, body, insight_kind, occurred_at, acked_at, evidence_note_ids, entity_ids}. */
 export type Insight = { note_id: string; title: string; body: string; insight_kind: string; occurred_at: string; acked_at: string | null; evidence_note_ids: string[]; entity_ids: string[] };
@@ -121,7 +124,7 @@ export type Changes = {
 export type Overview = { recent?: NoteRef[]; entities?: Array<EntityRef & { note_count: number; last_seen: string }>; insights?: Insight[]; resurfacing?: NoteRef[]; activity?: Array<{ day: string; notes: number; revisions: number }> };
 export type SearchResult = { notes: Array<NoteRef & { score?: number; entities?: EntityRef[] }>; entities: EntityListItem[]; claims: Claim[]; facets?: { kinds?: Record<string, number>; topics?: Record<string, number>; months?: Record<string, number> } };
 /** GET /note/day/{date} (W1 NoteStore.day). */
-export type Day = { day: string; tz: string; notes: NoteRef[]; revisions: Array<{ revision_id: string; at: string; summary: string; note_id?: string | null }>; entities_touched: EntityListItem[]; entities_created: string[]; claims_superseded: Claim[] };
+export type Day = { day: string; tz: string; as_received?: string; notes: NoteRef[]; revisions: Array<{ revision_id: string; at: string; summary: string; note_id?: string | null }>; entities_touched: EntityListItem[]; entities_created: string[]; claims_superseded: Claim[] };
 /** GET /note/timeline (W1 NoteStore.timeline); `bucket` is the day, the Monday of the week, or the month. */
 export type TimelineBuckets = { granularity: string; buckets: Array<{ bucket: string; notes: number; revisions: number; entities_created: number; claims_superseded: number }> };
 export type Topic = { topic: string; count: number; first_seen?: string; last_seen?: string };

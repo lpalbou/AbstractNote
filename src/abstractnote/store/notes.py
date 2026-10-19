@@ -455,31 +455,59 @@ class NoteStore:
 
     # ------------------------------------------------------------------ reads: beliefs and graph
 
-    def beliefs_at(self, at: str, *, subject_id: Optional[str] = None, entity_id: Optional[str] = None
-                   ) -> List[Dict[str, Any]]:
-        """Claims valid at ``at``: ``valid_from <= at`` and (``valid_until`` empty or ``> at``)."""
+    def beliefs_at(self, at: str, *, subject_id: Optional[str] = None, entity_id: Optional[str] = None,
+                   as_received: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Claims valid at ``at``: ``valid_from <= at`` and (``valid_until`` empty or ``> at``); with
+        ``as_received``, from what the archive held on that date (see :mod:`abstractnote.store.archive`)."""
+        from .archive import archive_for
+
         at = ids.normalize_time(at, field="at")
-        sql = ("SELECT * FROM claims WHERE (valid_from IS NULL OR valid_from<=?) AND"
-               " (valid_until IS NULL OR valid_until>?)")
-        params: List[Any] = [at, at]
+        arch = archive_for(self, as_received)
+        sql = "SELECT * FROM claims WHERE (valid_from IS NULL OR valid_from<=?)"
+        params: List[Any] = [at]
+        if arch is None:
+            sql += " AND (valid_until IS NULL OR valid_until>?)"
+            params.append(at)
+        else:
+            frag, fp = arch.revisions_in("revision_id")
+            sql += f" AND {frag}"
+            params += fp
+
+        def members_of(eid: str) -> List[str]:
+            return arch.members(arch.canonical(eid)) if arch else self.merged_members(self.canonical(eid))
+
         if subject_id:
-            members = self.merged_members(self.canonical(subject_id))
+            members = members_of(subject_id)
             sql += f" AND subject_id IN ({','.join('?' for _ in members)})"
             params += members
         if entity_id:
-            members = self.merged_members(self.canonical(entity_id))
+            members = members_of(entity_id)
             q = ",".join("?" for _ in members)
             sql += f" AND (subject_id IN ({q}) OR object_id IN ({q}))"
             params += members + members
         sql += " ORDER BY observed_at, claim_id"
-        return [self.claim_dict(r) for r in self.q(sql, params)]
+        rows = self.q(sql, params)
+        if arch is None:
+            return [self.claim_dict(r) for r in rows]
+        out = []
+        for r in rows:
+            d = arch.claim_dict(r)
+            if d["valid_until"] is None or d["valid_until"] > at:
+                out.append(d)
+        return out
 
     def graph(self, *, focus: Optional[Sequence[str]] = None, at: Optional[str] = None, depth: int = 1,
               since: Optional[str] = None, until: Optional[str] = None, kinds: Optional[Sequence[str]] = None,
-              min_count: int = 1, limit: int = 200) -> Dict[str, Any]:
+              min_count: int = 1, limit: int = 200, as_received: Optional[str] = None) -> Dict[str, Any]:
         """Nodes and edges as of ``at`` (None = now). An entity exists at T when it was
-        first seen at or before T; an edge exists when one of its claims was observed by T."""
+        first seen at or before T; an edge exists when one of its claims was observed by T.
+        ``as_received`` restricts both to what the archive held on that date (notes received by then and what
+        they caused; :mod:`abstractnote.store.archive`); it composes with ``at``."""
+        from .archive import archive_for
+
+        arch = archive_for(self, as_received)
         at_n = ids.optional_time(at, field="at")
+        canon = (lambda e: arch.canonical(e, at_n)) if arch else (lambda e: self.canonical_at(e, at_n))
         since_n = ids.optional_time(since, field="since")
         until_n = ids.optional_time(until, field="until")
         limit = clamp_limit(limit, 200, 2000)
@@ -495,11 +523,15 @@ class NoteStore:
         if since_n:
             sql += " AND observed_at>=?"
             params.append(since_n)
+        if arch:
+            frag, fp = arch.revisions_in("revision_id")
+            sql += f" AND {frag}"
+            params += fp
         claims = self.q(sql, params)
         edges: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
         for r in claims:
-            s = self.canonical_at(r["subject_id"], at_n)
-            o = self.canonical_at(r["object_id"], at_n)
+            s = canon(r["subject_id"])
+            o = canon(r["object_id"])
             if s == o:
                 continue  # both ends are one entity by then (a confirmed close match): no edge to draw
             key = (s, o, r["predicate"])
@@ -510,25 +542,30 @@ class NoteStore:
             e["first_seen"] = min(filter(None, [e["first_seen"], r["observed_at"]]))
             e["last_seen"] = max(filter(None, [e["last_seen"], r["observed_at"]]))
             ref = at_n or "9999-12-31T23:59:59Z"
-            vf, vu = r["valid_from"], r["valid_until"]
-            if (vf is None or vf <= ref) and (vu is None or vu > ref) and (at_n is not None or r["status"] == "active"):
+            st = arch.claim_state(r) if arch else r
+            vf, vu = r["valid_from"], st["valid_until"]
+            if (vf is None or vf <= ref) and (vu is None or vu > ref) and (at_n is not None or st["status"] == "active"):
                 e["active"] = True
         edge_list = [e for e in edges.values() if e["count"] >= max(1, int(min_count or 1))]
 
-        node_sql = "SELECT * FROM entities WHERE 1=1"
-        nparams: List[Any] = []
-        if at_n:
-            node_sql += " AND COALESCE(first_seen, created_at)<=? AND (merged_into IS NULL OR merged_at>?)"
-            nparams += [at_n, at_n]
+        nodes: Dict[str, Any]
+        if arch:
+            nodes = self._archive_nodes(arch, at_n)
         else:
-            node_sql += " AND merged_into IS NULL"
-        nodes = {r["entity_id"]: r for r in self.q(node_sql, nparams)}
+            node_sql = "SELECT * FROM entities WHERE 1=1"
+            nparams: List[Any] = []
+            if at_n:
+                node_sql += " AND COALESCE(first_seen, created_at)<=? AND (merged_into IS NULL OR merged_at>?)"
+                nparams += [at_n, at_n]
+            else:
+                node_sql += " AND merged_into IS NULL"
+            nodes = {r["entity_id"]: r for r in self.q(node_sql, nparams)}
         if kinds:
             nodes = {k: v for k, v in nodes.items() if v["kind"] in set(kinds)}
         edge_list = [e for e in edge_list if e["source"] in nodes and e["target"] in nodes]
 
         if focus:
-            keep = {self.canonical_at(f, at_n) for f in focus}
+            keep = {canon(f) for f in focus}
             frontier = set(keep)
             for _ in range(depth):
                 nxt = set()
@@ -552,7 +589,7 @@ class NoteStore:
         out_nodes = []
         for r in ranked:
             summary = r["summary"]
-            if at_n:
+            if at_n and not arch:
                 srow = self.q1("SELECT summary FROM entity_summaries WHERE entity_id=? AND at<=? ORDER BY at DESC,"
                                " revision_id DESC LIMIT 1", (r["entity_id"], at_n))
                 summary = srow[0] if srow else None
@@ -562,7 +599,30 @@ class NoteStore:
         for e in edge_list:
             e.pop("claim_ids", None)
         edge_list.sort(key=lambda e: (e["source"], e["target"], e["predicate"]))
-        return {"as_of": at_n or ids.utc_now(), "nodes": out_nodes, "edges": edge_list}
+        out: Dict[str, Any] = {"as_of": at_n or ids.utc_now(), "nodes": out_nodes, "edges": edge_list}
+        if arch:
+            out["as_received"] = arch.at
+        return out
+
+    def _archive_nodes(self, arch: Any, at_n: Optional[str]) -> Dict[str, Dict[str, Any]]:
+        """Graph nodes from what the archive held (as of ``at_n``): stats over the archive's notes of each surviving
+        entity and the entries merged into it, its name and summary as the archive's revisions left them."""
+        nodes: Dict[str, Dict[str, Any]] = {}
+        for eid, st in arch.entity_stats().items():
+            c = arch.canonical(eid, at_n)
+            agg = nodes.setdefault(c, {"first_seen": st["first_seen"], "last_seen": st["last_seen"], "notes": set()})
+            agg["first_seen"] = min(agg["first_seen"], st["first_seen"])
+            agg["last_seen"] = max(agg["last_seen"], st["last_seen"])
+            agg["notes"] |= st["notes"]
+        out: Dict[str, Dict[str, Any]] = {}
+        for c, agg in nodes.items():
+            row = self.entity_row(c)
+            if row is None or (at_n and agg["first_seen"] > at_n):
+                continue
+            out[c] = {"entity_id": c, "kind": row["kind"], "name": arch.name(c, at_n) or row["name"],
+                      "first_seen": agg["first_seen"], "last_seen": agg["last_seen"], "note_count": len(agg["notes"]),
+                      "summary": arch.summary(c, at_n)}
+        return out
 
     # ------------------------------------------------------------------ reads: lists
 
@@ -718,8 +778,12 @@ class NoteStore:
         params.append(limit)
         return [self.note_dict(r) for r in self.q(sql, params)]
 
-    def day(self, day: str, tz: Optional[str] = None) -> Dict[str, Any]:
-        """Notes, revisions and entities touched on one calendar day in ``tz`` (default UTC)."""
+    def day(self, day: str, tz: Optional[str] = None, as_received: Optional[str] = None) -> Dict[str, Any]:
+        """Notes, revisions and entities touched on one calendar day in ``tz`` (default UTC); with ``as_received``,
+        only what the archive held on that date (notes received by then and the revisions they caused)."""
+        from .archive import archive_for
+
+        arch = archive_for(self, as_received)
         try:
             d = datetime.strptime(day, "%Y-%m-%d")
         except ValueError:
@@ -735,21 +799,39 @@ class NoteStore:
         start = d.replace(tzinfo=zone).astimezone(timezone.utc)
         end = (d + timedelta(days=1)).replace(tzinfo=zone).astimezone(timezone.utc)
         s, e = start.strftime("%Y-%m-%dT%H:%M:%SZ"), end.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        def only(col: str, kind: str) -> Tuple[str, List[Any]]:
+            if arch is None:
+                return "", []
+            frag, fp = arch.notes_in(col) if kind == "note" else arch.revisions_in(col)
+            return f" AND {frag}", fp
+
+        f_note, p_note = only("note_id", "note")
+        f_rev, p_rev = only("revision_id", "revision")
+        f_created, p_created = only("created_revision_id", "revision")
+        f_closed, p_closed = only("closed_revision_id", "revision")
         notes = [self.note_dict(r, full=False) for r in self.q(
-            "SELECT * FROM notes WHERE occurred_at>=? AND occurred_at<? AND archived_at IS NULL"
-            " ORDER BY occurred_at, note_id", (s, e))]
+            "SELECT * FROM notes WHERE occurred_at>=? AND occurred_at<? AND archived_at IS NULL" + f_note +
+            " ORDER BY occurred_at, note_id", (s, e, *p_note))]
         revs = [self.revision_dict(r) for r in self.q(
-            "SELECT * FROM revisions WHERE applied_index=1 AND at>=? AND at<? ORDER BY at, seq", (s, e))]
+            "SELECT * FROM revisions WHERE applied_index=1 AND at>=? AND at<?" + f_rev + " ORDER BY at, seq",
+            (s, e, *p_rev))]
         touched = [self.entity_brief(r[0]) for r in self.q(
-            "SELECT DISTINCT entity_id FROM entity_notes WHERE at>=? AND at<? ORDER BY entity_id", (s, e))]
-        created = [r[0] for r in self.q("SELECT entity_id FROM entities WHERE created_at>=? AND created_at<?", (s, e))]
+            "SELECT DISTINCT entity_id FROM entity_notes WHERE at>=? AND at<?" + f_note + " ORDER BY entity_id",
+            (s, e, *p_note))]
+        created = [r[0] for r in self.q("SELECT entity_id FROM entities WHERE created_at>=? AND created_at<?" +
+                                        f_created, (s, e, *p_created))]
         superseded = [self.claim_dict(r) for r in self.q(
-            "SELECT * FROM claims WHERE status='superseded' AND valid_until>=? AND valid_until<?", (s, e))]
+            "SELECT * FROM claims WHERE status='superseded' AND valid_until>=? AND valid_until<?" + f_closed,
+            (s, e, *p_closed))]
         for r in revs:
             r.pop("ops", None)
-        return {"day": day, "tz": tz or "UTC", "start": s, "end": e, "notes": notes, "revisions": revs,
-                "entities_touched": [t for t in touched if t], "entities_created": created,
-                "claims_superseded": superseded}
+        out = {"day": day, "tz": tz or "UTC", "start": s, "end": e, "notes": notes, "revisions": revs,
+               "entities_touched": [t for t in touched if t], "entities_created": created,
+               "claims_superseded": superseded}
+        if arch:
+            out["as_received"] = arch.at
+        return out
 
     def timeline(self, *, since: Optional[str] = None, until: Optional[str] = None,
                  granularity: str = "day") -> Dict[str, Any]:

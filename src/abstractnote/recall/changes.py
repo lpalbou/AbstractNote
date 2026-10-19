@@ -27,7 +27,8 @@ def _since(since: Optional[str]) -> Tuple[str, set]:
     return str(cur[1]), set(cur[2])
 
 
-def changes(nb: Any, since: Optional[str] = None, limit: int = 50) -> Dict[str, Any]:
+def changes(nb: Any, since: Optional[str] = None, limit: int = 50, as_received: Optional[str] = None
+            ) -> Dict[str, Any]:
     """``{cursor, notes, entities, superseded_claims, closed_loops, failed_notes, insights}``.
 
     ``superseded_claims`` lists every claim that stopped being believed: ``kind`` ``superseded``
@@ -37,10 +38,29 @@ def changes(nb: Any, since: Optional[str] = None, limit: int = 50) -> Dict[str, 
     ``since`` is a cursor from an earlier call or an ISO time. At most ``limit``
     items in total are returned, earliest first; the returned cursor continues
     exactly after them.
+
+    ``as_received`` keeps only what derives from the archive as it stood on that date: notes and insights
+    received by then, entities created and claims and tasks closed by the revisions those notes caused (or
+    user actions recorded by then), failed notes received by then.
     """
+    from ..store.archive import archive_for
+
     limit = clamp_limit(limit, 50, 500)
     ts, seen = _since(since)
     q = nb.store.q
+    arch = archive_for(nb.store, as_received)
+
+    def only(col: str, kind: str) -> Tuple[str, List[Any]]:
+        if arch is None:
+            return "", []
+        frag, fp = arch.notes_in(col) if kind == "note" else arch.revisions_in(col)
+        return f" AND {frag}", fp
+
+    f_note, p_note = only("note_id", "note")
+    f_qnote, p_qnote = only("q.note_id", "note")
+    f_created, p_created = only("created_revision_id", "revision")
+    f_closed, p_closed = only("c.closed_revision_id", "revision")
+    f_task, p_task = only("closed_revision_id", "revision")
     found: List[Tuple[str, str, str, Dict[str, Any]]] = []  # (at, key, bucket, item)
 
     def add(bucket: str, kind: str, key: str, at: Optional[str], item: Dict[str, Any]) -> None:
@@ -48,31 +68,32 @@ def changes(nb: Any, since: Optional[str] = None, limit: int = 50) -> Dict[str, 
             return
         found.append((at, f"{kind}:{key}", bucket, item))
 
-    for r in q("SELECT * FROM notes WHERE insight_kind IS NULL AND received_at>=? AND archived_at IS NULL"
-               " ORDER BY received_at, note_id LIMIT ?", (ts, limit + len(seen))):
+    for r in q("SELECT * FROM notes WHERE insight_kind IS NULL AND received_at>=? AND archived_at IS NULL" + f_note +
+               " ORDER BY received_at, note_id LIMIT ?", (ts, *p_note, limit + len(seen))):
         add("notes", "note", r["note_id"], r["received_at"], shapes.note_ref(r))
-    for r in q("SELECT * FROM entities WHERE recorded_at>=? ORDER BY recorded_at, entity_id LIMIT ?",
-               (ts, limit + len(seen))):
+    for r in q("SELECT * FROM entities WHERE recorded_at>=?" + f_created + " ORDER BY recorded_at, entity_id LIMIT ?",
+               (ts, *p_created, limit + len(seen))):
         add("entities", "entity", r["entity_id"], r["recorded_at"],
             {"entity_id": r["entity_id"], "name": r["name"], "kind": r["kind"], "first_seen": r["first_seen"]})
     for r in q("SELECT c.*, v.recorded_at AS closed_recorded_at, v.note_id AS closing_note_id FROM claims c"
                " JOIN revisions v ON v.revision_id=c.closed_revision_id WHERE c.status IN ('superseded','retracted')"
-               " AND v.recorded_at>=? ORDER BY v.recorded_at, c.claim_id LIMIT ?", (ts, limit + len(seen))):
+               " AND v.recorded_at>=?" + f_closed + " ORDER BY v.recorded_at, c.claim_id LIMIT ?",
+               (ts, *p_closed, limit + len(seen))):
         add("superseded_claims", "claim", r["claim_id"], r["closed_recorded_at"],
             {"claim_id": r["claim_id"], "kind": "superseded" if r["status"] == "superseded" else "retracted",
              "text": claim_text(nb, r), "superseded_by": r["superseded_by"] if r["status"] == "superseded" else None,
              "note_id": r["closing_note_id"] or r["note_id"]})
-    for r in q("SELECT * FROM tasks WHERE status='done' AND recorded_closed_at>=? ORDER BY recorded_closed_at,"
-               " task_id LIMIT ?", (ts, limit + len(seen))):
+    for r in q("SELECT * FROM tasks WHERE status='done' AND recorded_closed_at>=?" + f_task +
+               " ORDER BY recorded_closed_at, task_id LIMIT ?", (ts, *p_task, limit + len(seen))):
         add("closed_loops", "task", r["task_id"], r["recorded_closed_at"],
             {"task_id": r["task_id"], "text": r["text"], "closed_at": r["closed_at"]})
     for r in q("SELECT q.note_id, q.last_error, q.failed_at, n.title FROM queue q JOIN notes n ON n.note_id=q.note_id"
-               " WHERE q.state='failed' AND q.failed_at>=? ORDER BY q.failed_at, q.note_id LIMIT ?",
-               (ts, limit + len(seen))):
+               " WHERE q.state='failed' AND q.failed_at>=?" + f_qnote + " ORDER BY q.failed_at, q.note_id LIMIT ?",
+               (ts, *p_qnote, limit + len(seen))):
         add("failed_notes", "failed", r["note_id"], r["failed_at"],
             {"note_id": r["note_id"], "title": r["title"] or "", "error": r["last_error"] or ""})
-    for r in q("SELECT * FROM notes WHERE insight_kind IS NOT NULL AND received_at>=? AND archived_at IS NULL"
-               " ORDER BY received_at, note_id LIMIT ?", (ts, limit + len(seen))):
+    for r in q("SELECT * FROM notes WHERE insight_kind IS NOT NULL AND received_at>=? AND archived_at IS NULL" +
+               f_note + " ORDER BY received_at, note_id LIMIT ?", (ts, *p_note, limit + len(seen))):
         add("insights", "insight", r["note_id"], r["received_at"], shapes.insight(r))
 
     found.sort(key=lambda x: (x[0], x[1]))
@@ -88,7 +109,7 @@ def changes(nb: Any, since: Optional[str] = None, limit: int = 50) -> Dict[str, 
             keys |= seen
     else:
         high, keys = ts, set(seen)
-    return {"cursor": encode_cursor("chg", high, sorted(keys)), **out}
+    return {"cursor": encode_cursor("chg", high, sorted(keys)), **out}  # pinned keys only, with or without as_received
 
 
 def claim_text(nb: Any, r: Any) -> str:

@@ -105,6 +105,12 @@ export function createMockGateway(options = {}) {
   const claimsOf = (id) => [...db.claims.values()].filter((c) => c.subject_id === id || c.object_id === id);
   const notesOf = (id) => [...db.notes.values()].filter((n) => n.entity_ids.includes(id)).sort((a, b) => ms(a.occurred_at) - ms(b.occurred_at));
   const inRange = (iso, since, until) => (!since || ms(iso) >= ms(since)) && (!until || ms(iso) <= ms(until));
+  // W10 as_received (docs/data-model.md "Time"): only notes received by R count, and what they caused.
+  const heldNote = (n, rcv) => !rcv || (n && ms(n.received_at || n.occurred_at) <= ms(rcv));
+  const heldClaim = (c, rcv) => !rcv || heldNote(db.notes.get(c.note_id), rcv);
+  const heldEntity = (id, rcv) => !rcv || [...db.notes.values()].some((n) => n.entity_ids.includes(id) && heldNote(n, rcv));
+  /** A claim as the archive at R held it: a supersession from a note received later is not in yet. */
+  const asHeld = (c, rcv) => (rcv && c.superseded_by && !heldClaim(db.claims.get(c.superseded_by), rcv) ? { ...c, status: "active", valid_until: null, superseded_by: null } : c);
 
   function relations() {
     const map = new Map();
@@ -120,12 +126,13 @@ export function createMockGateway(options = {}) {
     return [...map.values()];
   }
 
-  function entityCard(asked, at) {
+  function entityCard(asked, at, rcv = null) {
     // W1 expand.entity_card answers with the surviving entity of a merge (resolved_from = the id asked).
-    const id = ent(asked)?.merged_into || asked;
+    const mergedIn = ent(asked)?.merged_into && (!rcv || heldEntity(asked, rcv) && [...db.notes.values()].some((n) => n.entity_ids.includes(asked) && heldNote(n, rcv)));
+    const id = mergedIn ? ent(asked).merged_into : asked;
     const e = ent(id);
     if (!e || (at && e.first_seen && ms(e.first_seen) > ms(at))) return null;
-    const cl = claimsOf(id).filter((c) => !at || ms(c.observed_at) <= ms(at));
+    const cl = claimsOf(id).filter((c) => (!at || ms(c.observed_at) <= ms(at)) && heldClaim(c, rcv)).map((c) => asHeld(c, rcv));
     const beliefs = cl.filter((c) => c.subject_id === id && activeAt(c, at)).map(claimView);
     const rels = relations()
       .filter((r) => (r.source === id || r.target === id) && (!at || ms(r.first_seen) <= ms(at)))
@@ -135,14 +142,14 @@ export function createMockGateway(options = {}) {
         return { other_id: other, other_name: entRef(other).name, predicate: r.predicate, direction: r.source === id ? "out" : "in", count: list.length, first_seen: r.first_seen, last_seen: r.last_seen, active: list.some((c) => activeAt(c, at)) };
       });
     const history = e.summary_history.filter((h) => !at || ms(h.at) <= ms(at));
-    const notes = notesOf(id).filter((n) => !at || ms(n.occurred_at) <= ms(at));
+    const notes = notesOf(id).filter((n) => (!at || ms(n.occurred_at) <= ms(at)) && heldNote(n, rcv));
     return {
       entity_id: e.entity_id, kind: e.kind, name: e.name, aliases: e.aliases,
       summary: history.length ? history[history.length - 1].summary : e.summary,
       summary_history: history, first_seen: e.first_seen, last_seen: notes.length ? notes[notes.length - 1].occurred_at : e.last_seen,
       note_count: notes.length, beliefs, relations: rels, notes: notes.map(noteRef).reverse(),
       open_tasks: [...db.tasks.values()].filter((t) => t.status === "open" && t.entity_ids.includes(id)).map(taskView),
-      as_of: at || null, resolved_from: id !== asked ? asked : null, merged_from: [...db.entities.values()].filter((m) => m.merged_into === id).map((m) => m.entity_id), merged_into: null,
+      as_of: at || null, ...(rcv ? { as_received: rcv } : {}), resolved_from: id !== asked ? asked : null, merged_from: [...db.entities.values()].filter((m) => m.merged_into === id).map((m) => m.entity_id), merged_into: null,
       sparkline: [...notes.reduce((m, n) => m.set(n.occurred_at.slice(0, 7), (m.get(n.occurred_at.slice(0, 7)) || 0) + 1), new Map())].map(([month, n]) => ({ month, notes: n })),
     };
   }
@@ -476,14 +483,15 @@ export function createMockGateway(options = {}) {
       const since = q.get("since") || new Date(Date.now() - 7 * 86400_000).toISOString();
       const t = ms(since);
       const fresh = (iso) => ms(iso) > t;
+      const rcv = q.get("as_received") || null;
       return send(res, 200, {
         cursor: nowIso(),
-        notes: [...db.notes.values()].filter((n) => fresh(n.received_at) && n.status !== "failed").sort((a, b) => ms(b.received_at) - ms(a.received_at)).map(noteRef),
-        entities: [...db.entities.values()].filter((e) => e.created_at && fresh(e.created_at)).map((e) => ({ ...entRef(e.entity_id), first_seen: e.first_seen })),
-        superseded_claims: [...db.claims.values()].filter((c) => c.status !== "active" && fresh(c.valid_until || c.retracted_at || c.recorded_at)).map((c) => ({ claim_id: c.claim_id, kind: c.status === "superseded" ? "superseded" : "retracted", text: describe(c), superseded_by: c.status === "superseded" ? c.superseded_by : null, note_id: c.note_id })),
+        notes: [...db.notes.values()].filter((n) => fresh(n.received_at) && n.status !== "failed" && heldNote(n, rcv)).sort((a, b) => ms(b.received_at) - ms(a.received_at)).map(noteRef),
+        entities: [...db.entities.values()].filter((e) => e.created_at && fresh(e.created_at) && heldEntity(e.entity_id, rcv)).map((e) => ({ ...entRef(e.entity_id), first_seen: e.first_seen })),
+        superseded_claims: [...db.claims.values()].filter((c) => asHeld(c, rcv).status !== "active" && heldClaim(c, rcv) && fresh(c.valid_until || c.retracted_at || c.recorded_at)).map((c) => ({ claim_id: c.claim_id, kind: c.status === "superseded" ? "superseded" : "retracted", text: describe(c), superseded_by: c.status === "superseded" ? c.superseded_by : null, note_id: c.note_id })),
         closed_loops: [...db.tasks.values()].filter((tk) => tk.status !== "open" && tk.closed_at && fresh(tk.closed_at)).map((tk) => ({ task_id: tk.task_id, text: tk.text, closed_at: tk.closed_at })),
         failed_notes: [...db.notes.values()].filter((n) => n.status === "failed").map((n) => ({ note_id: n.note_id, title: n.title, error: n.error })),
-        insights: [...db.insights.values()].filter((i) => fresh(i.occurred_at)).map(insightView),
+        insights: [...db.insights.values()].filter((i) => fresh(i.occurred_at) && (!rcv || ms(i.occurred_at) <= ms(rcv))).map(insightView),
       });
     }
     if (np === "/overview") {
@@ -578,7 +586,9 @@ export function createMockGateway(options = {}) {
         });
       }
       if (!m[2]) {
-        const card = entityCard(id, at);
+        const rcv = q.get("as_received") || null;
+        if (rcv && !heldEntity(id, rcv)) return fail(res, 400, "That entity was not in your notebook yet on that date.");
+        const card = entityCard(id, at, rcv);
         if (!card) return fail(res, 404, "Not known at that time.");
         return send(res, 200, card);
       }
@@ -696,7 +706,7 @@ export function createMockGateway(options = {}) {
       db.revisions.push({ revision_id, note_id: null, at: when, recorded_at: when, summary, ops, action: "match.confirm", target: it.review_id, source: { client: "web", account: who.user_id } });
       return send(res, 200, { revision_id, summary, entities_merged, review_id: it.review_id });
     }
-    if (np === "/graph") return send(res, 200, graph(list("focus"), at, Number(q.get("depth") || 1), Number(q.get("limit") || 60)));
+    if (np === "/graph") return send(res, 200, graph(list("focus"), at, Number(q.get("depth") || 1), Number(q.get("limit") || 60), q.get("as_received") || null));
     if (np === "/timeline") {
       const gran = q.get("granularity") || "week";
       const bucket = (iso) => {
@@ -723,14 +733,15 @@ export function createMockGateway(options = {}) {
     m = np.match(/^\/day\/(\d{4}-\d{2}-\d{2})$/);
     if (m) {
       const day = m[1];
+      const rcv = q.get("as_received") || null;
       const onDay = (iso) => iso && iso.slice(0, 10) === day;
-      const notes = [...db.notes.values()].filter((n) => onDay(n.occurred_at)).map(noteRef);
-      const revs = db.revisions.filter((r) => onDay(r.at)).map((r) => ({ revision_id: r.revision_id, at: r.at, summary: r.summary, note_id: r.note_id }));
+      const notes = [...db.notes.values()].filter((n) => onDay(n.occurred_at) && heldNote(n, rcv)).map(noteRef);
+      const revs = db.revisions.filter((r) => onDay(r.at) && (!rcv || (r.note_id ? heldNote(db.notes.get(r.note_id), rcv) : ms(r.recorded_at) <= ms(rcv)))).map((r) => ({ revision_id: r.revision_id, at: r.at, summary: r.summary, note_id: r.note_id }));
       const touched = new Map();
-      for (const n of db.notes.values()) if (onDay(n.occurred_at)) for (const id of n.entity_ids) touched.set(id, { ...entRef(id), change: ent(id).created_at && onDay(ent(id).created_at) ? "created" : "touched" });
-      const superseded = [...db.claims.values()].filter((c) => onDay(c.valid_until) && c.status === "superseded").map(claimView);
-      const created = [...db.entities.values()].filter((e) => onDay(e.created_at)).map((e) => e.entity_id);
-      return send(res, 200, { day, tz: q.get("tz") || "UTC", notes, revisions: revs, entities_touched: [...touched.values()].map(({ change, ...e }) => e), entities_created: created, claims_superseded: superseded });
+      for (const n of db.notes.values()) if (onDay(n.occurred_at) && heldNote(n, rcv)) for (const id of n.entity_ids) touched.set(id, { ...entRef(id), change: ent(id).created_at && onDay(ent(id).created_at) ? "created" : "touched" });
+      const superseded = [...db.claims.values()].filter((c) => onDay(c.valid_until) && asHeld(c, rcv).status === "superseded" && heldClaim(c, rcv)).map(claimView);
+      const created = [...db.entities.values()].filter((e) => onDay(e.created_at) && heldEntity(e.entity_id, rcv)).map((e) => e.entity_id);
+      return send(res, 200, { day, tz: q.get("tz") || "UTC", ...(rcv ? { as_received: rcv } : {}), notes, revisions: revs, entities_touched: [...touched.values()].map(({ change, ...e }) => e), entities_created: created, claims_superseded: superseded });
     }
     if (np === "/revisions") return send(res, 200, { items: [...db.revisions].sort((a, b) => ms(b.recorded_at) - ms(a.recorded_at)).slice(0, Number(q.get("limit") || 50)), next_cursor: null });
     if (np === "/topics") {
@@ -842,9 +853,9 @@ export function createMockGateway(options = {}) {
     };
   }
 
-  function graph(focus, at, depth, limit) {
-    const known = (e) => e && !e.merged_into && (!at || (e.first_seen && ms(e.first_seen) <= ms(at)));
-    const rels = relations().filter((r) => !at || ms(r.first_seen) <= ms(at));
+  function graph(focus, at, depth, limit, rcv = null) {
+    const known = (e) => e && !e.merged_into && heldEntity(e.entity_id, rcv) && (!at || (e.first_seen && ms(e.first_seen) <= ms(at)));
+    const rels = relations().map((r) => ({ ...r, claims: r.claims.filter((c) => heldClaim(c, rcv)).map((c) => asHeld(c, rcv)) })).filter((r) => r.claims.length && (!at || ms(r.first_seen) <= ms(at)));
     let ids;
     if (focus.length) {
       ids = new Set(focus.filter((id) => known(ent(id))));
@@ -863,7 +874,7 @@ export function createMockGateway(options = {}) {
     }
     const nodes = [...ids].slice(0, limit).map((id) => {
       const e = ent(id);
-      const notes = notesOf(id).filter((n) => !at || ms(n.occurred_at) <= ms(at));
+      const notes = notesOf(id).filter((n) => (!at || ms(n.occurred_at) <= ms(at)) && heldNote(n, rcv));
       return { id, kind: e.kind, name: e.name, first_seen: e.first_seen, last_seen: notes.length ? notes[notes.length - 1].occurred_at : e.first_seen, note_count: notes.length, summary: e.summary };
     });
     const nodeIds = new Set(nodes.map((n) => n.id));
@@ -871,7 +882,7 @@ export function createMockGateway(options = {}) {
       const cl = r.claims.filter((c) => !at || ms(c.observed_at) <= ms(at));
       return { source: r.source, target: r.target, predicate: r.predicate, first_seen: r.first_seen, last_seen: r.last_seen, count: cl.length, active: cl.some((c) => activeAt(c, at)) };
     });
-    return { as_of: at || nowIso(), nodes, edges };
+    return { as_of: at || nowIso(), ...(rcv ? { as_received: rcv } : {}), nodes, edges };
   }
 
   async function handler(req, res) {

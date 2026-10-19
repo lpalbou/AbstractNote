@@ -83,3 +83,29 @@ def test_the_review_list_and_confirm_over_http(gw):
                   json=mg["actions"][1]["body"])
     assert undo.status_code == 200, undo.text
     assert {i["kind"] for i in c.get("/api/gateway/note/review", headers=h).json()["items"]} == {"contradiction"}
+
+
+def test_as_received_travels_over_http_and_composes_with_at(gw):
+    from test_review_and_archive import FEB, archive_world
+
+    from abstractnote.gateway.router import notebook_for
+
+    c, h = gw["client"], gw["alice"]
+    w = archive_world(notebook_for(_plane(gw, "alice")))
+
+    def get(path, **params):
+        r = c.get(f"/api/gateway/note/{path}", params=params, headers=h)
+        assert r.status_code == 200, (path, r.text)
+        return r.json()
+
+    assert {n["id"] for n in get("graph", as_received=FEB)["nodes"]} == {"ex:person-dana", "ex:org-acme", "ex:person-d"}
+    assert {n["id"] for n in get("graph", as_received=FEB, at="2026-01-05T12:00:00Z")["nodes"]} == {
+        "ex:person-dana", "ex:org-acme"}
+    assert len(get("graph")["nodes"]) == 4
+    card = get("entities/ex:person-dana", as_received=FEB)
+    assert card["as_received"] == FEB and [b["claim_id"] for b in card["beliefs"]] == ["cl_works"]
+    r = c.get("/api/gateway/note/entities/ex:org-beta", params={"as_received": FEB}, headers=h)
+    assert r.status_code == 400 and r.json()["detail"] == "That entity was not in your notebook yet on that date."
+    assert {n["note_id"] for n in get("changes", as_received=FEB)["notes"]} == {w["n1"], w["n2"]}
+    assert get("day/2026-01-20", as_received=FEB)["notes"] == [] and get("day/2026-01-20")["notes"]
+    assert c.get("/api/gateway/note/graph", params={"as_received": "soon"}, headers=h).status_code == 400

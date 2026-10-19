@@ -445,12 +445,15 @@ class Notebook:
 
     def graph(self, *, focus: Optional[Sequence[str]] = None, at: Optional[str] = None, depth: int = 1,
               since: Optional[str] = None, until: Optional[str] = None, kinds: Optional[Sequence[str]] = None,
-              min_count: int = 1, limit: int = 200, as_of: Optional[str] = None) -> Dict[str, Any]:
+              min_count: int = 1, limit: int = 200, as_of: Optional[str] = None,
+              as_received: Optional[str] = None) -> Dict[str, Any]:
+        """Nodes and edges as of ``at``; ``as_received`` keeps what the archive held on that date
+        (docs/data-model.md "Time")."""
         return self.store.graph(focus=focus, at=at or as_of, depth=depth, since=since, until=until, kinds=kinds,
-                                min_count=min_count, limit=limit)
+                                min_count=min_count, limit=limit, as_received=as_received)
 
-    def day(self, day: str, tz: Optional[str] = None) -> Dict[str, Any]:
-        return self.store.day(day, tz)
+    def day(self, day: str, tz: Optional[str] = None, as_received: Optional[str] = None) -> Dict[str, Any]:
+        return self.store.day(day, tz, as_received)
 
     def timeline(self, since: Optional[str] = None, until: Optional[str] = None, granularity: str = "day"
                  ) -> Dict[str, Any]:
@@ -494,11 +497,12 @@ class Notebook:
         params.append(clamp_limit(limit))
         return {"items": [shapes.insight(r) for r in self.store.q(sql, params)]}
 
-    def changes(self, since: Optional[str] = None, limit: int = 50) -> Dict[str, Any]:
+    def changes(self, since: Optional[str] = None, limit: int = 50, as_received: Optional[str] = None
+                ) -> Dict[str, Any]:
         """Since you last looked; see :func:`abstractnote.recall.changes.changes`."""
         from ..recall.changes import changes
 
-        return changes(self, since, limit)
+        return changes(self, since, limit, as_received)
 
     def overview(self, days: int = 30, *, now: Optional[str] = None) -> Dict[str, Any]:
         from ..recall.changes import overview
@@ -538,11 +542,12 @@ class Notebook:
 
         return search(self, query, **kwargs)
 
-    def entity(self, entity_id: str, at: Optional[str] = None) -> Dict[str, Any]:
-        """The entity card as of ``at`` (merged ids resolve to the surviving entity)."""
+    def entity(self, entity_id: str, at: Optional[str] = None, as_received: Optional[str] = None) -> Dict[str, Any]:
+        """The entity card as of ``at`` (merged ids resolve to the surviving entity); ``as_received`` builds it from
+        what the archive held on that date."""
         from ..recall.expand import entity_card
 
-        return entity_card(self, entity_id, at)
+        return entity_card(self, entity_id, at, as_received)
 
     def entity_record(self, entity_id: str) -> Dict[str, Any]:
         """The entry's own record, not followed to the surviving entity of a merge (``GET /note/entities/{id}?

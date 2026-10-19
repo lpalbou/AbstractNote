@@ -26,12 +26,21 @@ def _require_entity(nb: Any, entity_id: str) -> Any:
     return row
 
 
-def entity_card(nb: Any, entity_id: str, at: Optional[str] = None) -> Dict[str, Any]:
+def entity_card(nb: Any, entity_id: str, at: Optional[str] = None, as_received: Optional[str] = None
+                ) -> Dict[str, Any]:
     """The entity as known at ``at`` (default now): name, aliases, summary and its history,
-    beliefs valid at ``at``, relations, notes, open tasks and a monthly activity sparkline."""
+    beliefs valid at ``at``, relations, notes, open tasks and a monthly activity sparkline.
+
+    ``as_received`` builds the card from what the archive held on that date only (notes received by then and
+    the revisions they caused, :mod:`abstractnote.store.archive`); it composes with ``at``."""
+    from ..store.archive import archive_for
+
     _require_entity(nb, entity_id)
     at_n = ids.optional_time(at, field="at")
     s = nb.store
+    arch = archive_for(s, as_received)
+    if arch is not None:
+        return _archive_card(nb, arch, entity_id, at_n)
     eid = s.canonical_at(entity_id, at_n)
     row = s.entity_row(eid)
     if at_n and (row["first_seen"] or row["created_at"]) > at_n:
@@ -84,9 +93,79 @@ def entity_card(nb: Any, entity_id: str, at: Optional[str] = None) -> Dict[str, 
     }
 
 
-def relations_of(nb: Any, entity_id: str, at: Optional[str] = None) -> List[Dict[str, Any]]:
-    graph = nb.store.graph(focus=[entity_id], at=at, depth=1, limit=2000)
-    eid = nb.store.canonical_at(entity_id, at)
+def _archive_card(nb: Any, arch: Any, entity_id: str, at_n: Optional[str]) -> Dict[str, Any]:
+    """:func:`entity_card` from what the archive held at ``arch.at`` (same keys, plus ``as_received``)."""
+    s = nb.store
+    eid = arch.canonical(entity_id, at_n)
+    row = s.entity_row(eid)
+    members = arch.members(eid, at_n)
+    held = [m for m in members if arch.holds_entity(m)]
+    if not held:
+        raise ValueError("That entity was not in your notebook yet on that date.")
+    ref = at_n or "9999-12-31T23:59:59Z"
+    q = ",".join("?" for _ in members)
+    in_rev, p_rev = arch.revisions_in("revision_id")
+    in_note, p_note = arch.notes_in("en.note_id")
+    stats = s.q1(f"SELECT MIN(en.at), MAX(en.at), COUNT(DISTINCT en.note_id) FROM entity_notes en WHERE en.entity_id"
+                 f" IN ({q}) AND en.at<=? AND {in_note}", [*members, ref, *p_note])
+    created = s.q1(f"SELECT MIN(created_at) FROM entities WHERE entity_id IN ({q}) AND"
+                   f" {arch.revisions_in('created_revision_id')[0]}", [*members, arch.at])[0]
+    first = min([x for x in (stats[0], created) if x], default=None)
+    if at_n and (first is None or first > at_n):
+        raise ValueError("That entity was not known yet at that time.")
+    name = arch.name(eid, at_n) or row["name"]
+    aliases: List[str] = []
+    for m in members:
+        for (a,) in s.q(f"SELECT alias FROM entity_aliases WHERE entity_id=? AND added_at<=? AND {in_rev}"
+                        " ORDER BY added_at, alias", [m, ref, *p_rev]):
+            if ids.fold(a) != ids.fold(name) and ids.fold(a) not in {ids.fold(x) for x in aliases}:
+                aliases.append(a)
+        if m != eid:
+            mname = arch.name(m, at_n) or s.entity_row(m)["name"]
+            if ids.fold(mname) != ids.fold(name) and ids.fold(mname) not in {ids.fold(x) for x in aliases}:
+                aliases.append(mname)
+    history = [{"at": r["at"], "summary": r["summary"], "note_id": r["note_id"], "revision_id": r["revision_id"]}
+               for r in s.q(f"SELECT * FROM entity_summaries WHERE entity_id IN ({q}) AND at<=? AND {in_rev}"
+                            " ORDER BY at, revision_id", [*members, ref, *p_rev])]
+    notes = s.q(f"SELECT DISTINCT n.* FROM entity_notes en JOIN notes n ON n.note_id=en.note_id WHERE en.entity_id IN"
+                f" ({q}) AND en.at<=? AND n.archived_at IS NULL AND {in_note} ORDER BY n.occurred_at DESC LIMIT ?",
+                [*members, ref, *p_note, CARD_NOTES])
+    opened, p_open = arch.revisions_in("t.opened_revision_id")
+    tasks = []
+    for r in s.q(f"SELECT t.* FROM tasks t WHERE t.note_id IN (SELECT en.note_id FROM entity_notes en WHERE"
+                 f" en.entity_id IN ({q})) AND t.opened_at<=? AND {opened} ORDER BY t.opened_at",
+                 [*members, ref, *p_open]):
+        closed = r["closed_at"] is not None and arch.has(r["closed_revision_id"]) and r["closed_at"] <= ref
+        if not closed:
+            tasks.append(shapes.task(r) | {"status": "open", "closed_at": None})
+    months: Dict[str, int] = {}
+    for r in s.q(f"SELECT substr(en.at,1,7), COUNT(DISTINCT en.note_id) FROM entity_notes en WHERE en.entity_id IN"
+                 f" ({q}) AND en.at<=? AND {in_note} GROUP BY substr(en.at,1,7) ORDER BY 1", [*members, ref, *p_note]):
+        months[r[0]] = r[1]
+    return {
+        "entity_id": eid, "resolved_from": entity_id if entity_id != eid else None, "as_of": at_n,
+        "as_received": arch.at, "kind": row["kind"], "name": name, "aliases": aliases,
+        "summary": history[-1]["summary"] if history else None, "summary_history": history,
+        "first_seen": first, "last_seen": stats[1] or first, "note_count": int(stats[2] or 0),
+        "merged_from": [m for m in members if m != eid], "merged_into": None,
+        "beliefs": [c for c in s.beliefs_at(at_n or ids.utc_now(), as_received=arch.at)
+                    if c["subject_id"] in members or c["object_id"] in members],
+        "relations": relations_of(nb, eid, at_n, as_received=arch.at),
+        "notes": [shapes.note_ref(r) for r in notes],
+        "open_tasks": tasks,
+        "sparkline": [{"month": k, "notes": v} for k, v in months.items()],
+    }
+
+
+def relations_of(nb: Any, entity_id: str, at: Optional[str] = None, *, as_received: Optional[str] = None
+                 ) -> List[Dict[str, Any]]:
+    graph = nb.store.graph(focus=[entity_id], at=at, depth=1, limit=2000, as_received=as_received)
+    if as_received:
+        from ..store.archive import Archive
+
+        eid = Archive(nb.store, as_received).canonical(entity_id, at)
+    else:
+        eid = nb.store.canonical_at(entity_id, at)
     names = {n["id"]: n["name"] for n in graph["nodes"]}
     out = []
     for e in graph["edges"]:

@@ -178,8 +178,10 @@ async def note_status(request: Request) -> Dict[str, Any]:
 
 
 @router.get("/changes")
-async def note_changes(request: Request, since: Optional[str] = None, limit: int = Query(100, ge=1, le=1000)) -> Dict[str, Any]:
-    return await _run(request, lambda nb, svc, p: _call(nb, "changes", since=since, limit=limit))
+async def note_changes(request: Request, since: Optional[str] = None, limit: int = Query(100, ge=1, le=1000),
+                       as_received: Optional[str] = None) -> Dict[str, Any]:
+    return await _run(request, lambda nb, svc, p: _call(nb, "changes", since=since, limit=limit,
+                                                        **_clean(as_received=as_received or None)))
 
 
 @router.get("/overview")
@@ -262,14 +264,14 @@ async def note_entities(
 
 @router.get("/entities/{entity_id}")
 async def note_entity(request: Request, entity_id: str, at: Optional[str] = None,
-                      as_merged: bool = False) -> Dict[str, Any]:
+                      as_received: Optional[str] = None, as_merged: bool = False) -> Dict[str, Any]:
     def work(nb, svc, p):
         _require(nb, "entity", entity_id, "entity")
         if as_merged:
-            if at:
+            if at or as_received:
                 raise HTTPException(status_code=400, detail="An entry's own record has no date; leave out at.")
             return _call(nb, "entity_record", entity_id)
-        return _call(nb, "entity", entity_id, **_clean(at=at))
+        return _call(nb, "entity", entity_id, **_clean(at=at or None, as_received=as_received or None))
 
     return await _run(request, work)
 
@@ -410,11 +412,11 @@ async def note_cues(request: Request, limit: int = Query(3, ge=1, le=50)) -> Dic
 async def note_graph(
     request: Request, focus: Optional[str] = None, at: Optional[str] = None, depth: int = Query(1, ge=1, le=3),
     since: Optional[str] = None, until: Optional[str] = None, kinds: Optional[str] = None,
-    min_count: int = Query(1, ge=1), limit: int = Query(200, ge=1, le=2000),
+    min_count: int = Query(1, ge=1), limit: int = Query(200, ge=1, le=2000), as_received: Optional[str] = None,
 ) -> Dict[str, Any]:
     return await _run(request, lambda nb, svc, p: _call(nb, "graph", **_clean(
         focus=_csv(focus), at=at, depth=depth, since=since, until=until, kinds=_csv(kinds), min_count=min_count,
-        limit=limit)))
+        limit=limit, as_received=as_received or None)))
 
 
 @router.get("/timeline")
@@ -424,8 +426,9 @@ async def note_timeline(request: Request, since: Optional[str] = None, until: Op
 
 
 @router.get("/day/{day}")
-async def note_day(request: Request, day: str, tz: Optional[str] = None) -> Dict[str, Any]:
-    return await _run(request, lambda nb, svc, p: _call(nb, "day", day, tz))
+async def note_day(request: Request, day: str, tz: Optional[str] = None,
+                   as_received: Optional[str] = None) -> Dict[str, Any]:
+    return await _run(request, lambda nb, svc, p: _call(nb, "day", day, tz, as_received or None))
 
 
 @router.get("/revisions")

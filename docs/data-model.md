@@ -184,16 +184,27 @@ unacknowledged insights other than dossiers, newest first.
 
 ## Time
 
-AbstractNote is bitemporal.
+AbstractNote is bitemporal, and every note carries three dates that answer three different questions:
 
-| Axis | Field | Question it answers |
+| Date | Field | Question it answers |
 |---|---|---|
-| History time | `occurred_at`, `claim.observed_at`, `revision.at` | "What did I note in July?" "What did the graph look like on day X?" |
-| Validity | `claim.valid_from`, `claim.valid_until` | "What did I believe about X at time T?" |
-| System time | `received_at`, `processed_at`, `revision.recorded_at` | "What has the processor done since I last looked?" |
+| Authored (history time) | `occurred_at`, `claim.observed_at`, `revision.at` | "When was this written or did it happen?" "What did the graph look like on day X?" |
+| Valid | `claim.valid_from`, `claim.valid_until` | "What did I believe about X at time T?" |
+| Archive-accepted (system time) | `received_at` (and `processed_at`, `revision.recorded_at`) | "What did my archive hold on date R?" "What has the processor done since I last looked?" |
+
+The axes are independent: an import received today can hold notes authored years ago, and a note
+written in January can say something stopped being true in March.
 
 Rules:
 
+- The archive **as received at R** (`as_received=R` on `GET /note/graph`, `GET /note/entities/{id}`,
+  `GET /note/changes` and `GET /note/day/{date}`) = only the notes with `received_at <= R`, so material
+  imported later is left out even when it was authored earlier. What derives from notes follows them: a
+  revision belongs when the note that caused it was received by R (a user action without a note: when it was
+  recorded by R); entities exist when such a revision created them or such a note mentions them; merges,
+  names, aliases, summaries and the closing of claims count only when their revision belongs, so a claim a
+  later note superseded reads as it stood before. `at` and `as_received` compose: "the graph as of T, from
+  what the archive held on R".
 - The graph **as of T** = entities first seen at or before T (their creating revision's `at`, or an
   earlier note that mentions them when notes are processed out of history order), not merged away
   by T; edges from claims with `observed_at <= T`.

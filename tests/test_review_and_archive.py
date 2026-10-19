@@ -189,3 +189,125 @@ def test_an_unmerged_model_merge_leaves_the_review(nb):
     mg = _by_kind(nb)["merge"]
     nb.unmerge_entity("ex:person-dana", "ex:person-d-ng", "alice", "")
     assert "merge" not in _by_kind(nb) and nb.review_item(mg["review_id"]) is None
+
+
+# --------------------------------------------------------------------------- archive snapshot (as_received)
+
+FEB, MAR11, NOW_ = "2026-02-15T00:00:00Z", "2026-03-11T00:00:00Z", None
+
+
+def archive_world(nb):
+    """Notes with controlled arrival times. Received 1 Feb: n1 (Jan 5, Dana works at Acme) and n2 (Jan 6, D. and a
+    phone number). Imported 10 Mar: n_old (written 1 Dec 2025, Dana knows Beta, a new summary). Received 12 Mar:
+    n_sup (Jan 20, Dana works at Gamma, superseding Acme). Received 15 Mar: n_merge (D. is Dana). The phone number
+    is retracted by the user (recorded today)."""
+    from test_store_support import claim, create, rev
+
+    def note(text, occurred, received):
+        nid = nb.capture(text, occurred_at=occurred).note_id
+        with nb.store.tx() as c:
+            c.execute("UPDATE notes SET received_at=? WHERE note_id=?", (received, nid))
+        return nid
+
+    n1 = note("Dana works at Acme.", "2026-01-05T09:00:00Z", "2026-02-01T09:00:00Z")
+    n2 = note("D. called from 555.", "2026-01-06T09:00:00Z", "2026-02-01T09:05:00Z")
+    old = note("Old notes: Dana knows Beta.", "2025-12-01T09:00:00Z", "2026-03-10T09:00:00Z")
+    sup = note("Dana now works at Gamma.", "2026-01-20T09:00:00Z", "2026-03-12T09:00:00Z")
+    mrg = note("D. is Dana.", "2026-01-21T09:00:00Z", "2026-03-15T09:00:00Z")
+    nb.apply_revision(rev("rv_a1", "2026-01-05T09:00:00Z", create("ex:person-dana", "Dana", summary="Works at Acme."),
+                          create("ex:org-acme", "Acme"), mention("ex:person-dana", n1), mention("ex:org-acme", n1),
+                          claim("cl_works", "ex:person-dana", "ex:works_at", "ex:org-acme", at="2026-01-05T09:00:00Z",
+                                note_id=n1), note_id=n1))
+    nb.apply_revision(rev("rv_a2", "2026-01-06T09:00:00Z", create("ex:person-d", "D."), mention("ex:person-d", n2),
+                          claim("cl_phone", "ex:person-d", "ex:phone", literal="555", at="2026-01-06T09:00:00Z",
+                                note_id=n2), note_id=n2))
+    nb.apply_revision(rev("rv_a3", "2025-12-01T09:00:00Z", create("ex:org-beta", "Beta"), mention("ex:org-beta", old),
+                          mention("ex:person-dana", old),
+                          {"op": "entity.summary", "payload": {"entity_id": "ex:person-dana",
+                                                               "summary": "Knew Beta in 2025.", "previous": None}},
+                          {"op": "entity.alias", "payload": {"entity_id": "ex:person-dana", "alias": "Dee"}},
+                          claim("cl_knows", "ex:person-dana", "schema:knows", "ex:org-beta",
+                                at="2025-12-01T09:00:00Z", note_id=old), note_id=old))
+    nb.apply_revision(rev("rv_a4", "2026-01-20T09:00:00Z", create("ex:org-gamma", "Gamma"),
+                          mention("ex:org-gamma", sup), mention("ex:person-dana", sup),
+                          claim("cl_new", "ex:person-dana", "ex:works_at", "ex:org-gamma", at="2026-01-20T09:00:00Z",
+                                note_id=sup),
+                          {"op": "claim.supersede", "payload": {"claim_id": "cl_works", "by_claim_id": "cl_new",
+                                                                "reason": "moved", "valid_until": "2026-01-20T09:00:00Z"}},
+                          note_id=sup))
+    nb.apply_revision(rev("rv_a5", "2026-01-21T09:00:00Z", {"op": "entity.merge", "payload": {
+        "from_id": "ex:person-d", "into_id": "ex:person-dana", "reason": "same"}}, mention("ex:person-dana", mrg),
+        note_id=mrg))
+    nb.retract_claim("cl_phone", "alice", "wrong number")
+    return {"n1": n1, "n2": n2, "old": old, "sup": sup, "mrg": mrg}
+
+
+def _edges(g):
+    return {(e["source"], e["predicate"], e["target"]): e["active"] for e in g["edges"]}
+
+
+def test_the_graph_as_the_archive_held_it(nb):
+    archive_world(nb)
+    now = nb.graph()
+    assert {n["id"] for n in now["nodes"]} == {"ex:person-dana", "ex:org-acme", "ex:org-beta", "ex:org-gamma"}
+    assert _edges(now)[("ex:person-dana", "ex:works_at", "ex:org-acme")] is False
+    feb = nb.graph(as_received=FEB)
+    assert feb["as_received"] == FEB
+    assert {n["id"] for n in feb["nodes"]} == {"ex:person-dana", "ex:org-acme", "ex:person-d"}  # merge not in yet
+    assert _edges(feb) == {("ex:person-dana", "ex:works_at", "ex:org-acme"): True}  # supersession not in yet
+    dana = {n["id"]: n for n in feb["nodes"]}["ex:person-dana"]
+    assert (dana["note_count"], dana["summary"], dana["first_seen"]) == (1, "Works at Acme.", "2026-01-05T09:00:00Z")
+    mar = nb.graph(as_received=MAR11)  # the old import is in; the move to Gamma is not
+    assert {n["id"] for n in mar["nodes"]} == {"ex:person-dana", "ex:org-acme", "ex:person-d", "ex:org-beta"}
+    assert _edges(mar)[("ex:person-dana", "ex:works_at", "ex:org-acme")] is True
+    assert {n["id"]: n for n in mar["nodes"]}["ex:person-dana"]["first_seen"] == "2025-12-01T09:00:00Z"
+    # at and as_received compose: as of 5 Jan noon, from what the archive held on 15 Feb
+    jan5 = nb.graph(at="2026-01-05T12:00:00Z", as_received=FEB)
+    assert {n["id"] for n in jan5["nodes"]} == {"ex:person-dana", "ex:org-acme"}
+    assert nb.graph(at="2026-01-05T12:00:00Z")["nodes"] and {n["id"] for n in nb.graph(
+        at="2026-01-05T12:00:00Z")["nodes"]} == {"ex:person-dana", "ex:org-acme", "ex:org-beta"}
+    with pytest.raises(ValueError):
+        nb.graph(as_received="last week")
+
+
+def test_the_entity_card_as_the_archive_held_it(nb):
+    w = archive_world(nb)
+    now = nb.entity("ex:person-dana")
+    assert now["merged_from"] == ["ex:person-d"] and "Dee" in now["aliases"]
+    feb = nb.entity("ex:person-dana", as_received=FEB)
+    assert feb["as_received"] == FEB and feb["merged_from"] == [] and feb["aliases"] == []
+    assert [c["claim_id"] for c in feb["beliefs"]] == ["cl_works"]
+    assert [n["note_id"] for n in feb["notes"]] == [w["n1"]] and feb["note_count"] == 1
+    assert feb["summary"] == "Works at Acme." and [h["summary"] for h in feb["summary_history"]] == ["Works at Acme."]
+    assert {r["other_id"] for r in feb["relations"]} == {"ex:org-acme"}
+    mar = nb.entity("ex:person-dana", as_received=MAR11)
+    assert {c["claim_id"] for c in mar["beliefs"]} == {"cl_works", "cl_knows"} and mar["aliases"] == ["Dee"]
+    assert mar["first_seen"] == "2025-12-01T09:00:00Z"
+    # the merged entry is still itself in February; today it resolves to Dana
+    d_feb = nb.entity("ex:person-d", as_received=FEB)
+    assert d_feb["entity_id"] == "ex:person-d" and [c["claim_id"] for c in d_feb["beliefs"]] == ["cl_phone"]
+    assert nb.entity("ex:person-d")["entity_id"] == "ex:person-dana"
+    with pytest.raises(ValueError, match="not in your notebook yet"):
+        nb.entity("ex:org-beta", as_received=FEB)
+    with pytest.raises(ValueError, match="not known yet"):
+        nb.entity("ex:person-dana", at="2026-01-01T00:00:00Z", as_received=FEB)
+    assert [c["claim_id"] for c in nb.entity("ex:person-dana", at="2026-01-10T00:00:00Z",
+                                             as_received=FEB)["beliefs"]] == ["cl_works"]
+
+
+def test_changes_and_day_as_the_archive_held_them(nb):
+    w = archive_world(nb)
+    feb = nb.changes(None, 100, as_received=FEB)
+    assert {n["note_id"] for n in feb["notes"]} == {w["n1"], w["n2"]}
+    assert {e["entity_id"] for e in feb["entities"]} == {"ex:person-dana", "ex:org-acme", "ex:person-d"}
+    assert feb["superseded_claims"] == []
+    assert set(feb) == set(nb.changes(None, 100))  # the pinned keys, with or without the axis
+    later = nb.changes(None, 100)
+    assert {c["claim_id"] for c in later["superseded_claims"]} == {"cl_works", "cl_phone"}
+    assert nb.day("2026-01-20")["notes"] and nb.day("2026-01-20", as_received=FEB)["notes"] == []
+    assert [c["claim_id"] for c in nb.day("2026-01-20")["claims_superseded"]] == ["cl_works"]
+    assert nb.day("2026-01-20", as_received=FEB)["claims_superseded"] == []
+    assert nb.day("2025-12-01", as_received=FEB)["notes"] == []
+    dec = nb.day("2025-12-01", as_received=MAR11)
+    assert [n["note_id"] for n in dec["notes"]] == [w["old"]] and dec["entities_created"] == ["ex:org-beta"]
+    assert dec["as_received"] == MAR11

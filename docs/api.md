@@ -68,14 +68,14 @@ signed-in principal for their own notebook. The few write actions are bookkeepin
 | Method and path | Purpose | Main parameters |
 |---|---|---|
 | `GET /note/status` | notebook health: counts, queue state, processor and reflect automation ids, model settings, store versions, embedding pin | |
-| `GET /note/changes` | since you last looked: new notes, new entities, superseded claims, closed loops, failed notes, insights since a cursor; the default screen for humans and the first call for agents | `since (cursor or ISO), limit` |
+| `GET /note/changes` | since you last looked: new notes, new entities, superseded claims, closed loops, failed notes, insights since a cursor; the default screen for humans and the first call for agents | `since (cursor or ISO), limit, as_received` |
 | `GET /note/overview` | the landing data: recent notes, active entities, unacknowledged insights, today's resurfacing, activity sparkline | `days` |
 | `GET /note/notes` | list notes | `q, since, until, kind, topic, entity, status, cursor, limit` |
 | `GET /note/notes/{note_id}` | a note with attachments, revision, claims, linked entities, revisits | |
 | `GET /note/notes/{note_id}/attachments/{attachment_id}` | attachment bytes (streams the blob) | |
 | `GET /note/search` | quick recall (full-text plus vector), grouped | `q, since, until, kinds, entities, topics, limit` |
 | `GET /note/entities` | list or search entities (entries merged into another are left out unless `include_merged=true`; each item carries `merged_into`) | `q, kind, sort=recent|frequent|name, cursor, limit, include_merged` |
-| `GET /note/entities/{entity_id}` | entity card as of a moment: name, aliases, summary history, beliefs at `at`, relations, notes, open tasks (a merged id answers with the surviving entity and `resolved_from`); with `as_merged=true`, the entry's own record instead, not followed to the survivor | `at, as_merged` |
+| `GET /note/entities/{entity_id}` | entity card as of a moment: name, aliases, summary history, beliefs at `at`, relations, notes, open tasks (a merged id answers with the surviving entity and `resolved_from`); with `as_merged=true`, the entry's own record instead, not followed to the survivor | `at, as_received, as_merged` |
 | `GET /note/entities/{entity_id}/timeline` | claims and notes about the entity in history order, with supersessions | `since, until` |
 | `GET /note/entities/{entity_id}/then-now` | the earliest and latest summaries and the turning points (cached synthesis) | |
 | `GET /note/relations/{a}/{b}` | the relationship between two entities through time: claims in history order, supersessions, then-versus-now of the link | `since, until` |
@@ -105,9 +105,9 @@ principal; `client` is `web` when the request came through the Note web app's pr
 what it relays with `X-AbstractFramework-App-Proxy: abstractnote`) and `api` otherwise. Request
 bodies cannot set it (an unknown field such as `client` is refused with 422).
 | `GET /note/cues` | cue cards: a few reflect-generated prompts you can answer by adding a note (a person gone quiet, a decision that aged, a task mentioned often and never closed) | `limit` |
-| `GET /note/graph` | nodes and edges for the explorer | `focus (entity ids), at, depth (1..3), since, until, kinds, min_count, limit` |
+| `GET /note/graph` | nodes and edges for the explorer | `focus (entity ids), at, as_received, depth (1..3), since, until, kinds, min_count, limit` |
 | `GET /note/timeline` | activity per bucket: notes, revisions, new entities, superseded claims | `since, until, granularity=day|week|month` |
-| `GET /note/day/{YYYY-MM-DD}` | what happened on a day: notes, revisions with summaries, entities touched | `tz` |
+| `GET /note/day/{YYYY-MM-DD}` | what happened on a day: notes, revisions with summaries, entities touched | `tz, as_received` |
 | `GET /note/revisions` | revision feed | `since, until, entity, cursor, limit` |
 | `GET /note/topics` | topics with counts and date ranges | |
 | `GET /note/tasks` | open loops | `status, entity, limit` |
@@ -118,6 +118,14 @@ bodies cannot set it (an unknown field such as `client` is refused with 422).
 | `POST /note/notes/{note_id}/archive` | archive a note (never delete) | |
 | `GET /note/settings` and `PUT /note/settings` | per-notebook settings: filing model, answering model, reflect schedule, processor schedule (`{every, max_items}`, default `2m` and 20; `max_items` 1 to 200), inline processing default; the automations take them when `processor/ensure` creates them | |
 | `POST /note/processor/ensure` | create the processor and reflect automations if missing; returns their ids | |
+
+Three dates (data-model.md "Time"): `at` asks what was true or known as of a moment of history (the
+authored and valid dates); `as_received` (ISO) asks what the archive held on a date: only the notes received
+by then and what they caused, leaving out material imported later even when it was written earlier. They
+compose (`at` and `as_received` together: the graph as of T, from what the archive held on R). With
+`as_received`, the graph, the entity card and the day answer carry `as_received` (normalised); `/changes` keeps
+its pinned keys. An entity the archive did not hold yet is `400` ("That entity was not in your notebook yet on
+that date."), as is a date that cannot be read.
 
 Response envelopes are plain JSON objects; every list (`/notes`, `/entities`, `/revisions`,
 `/tasks`, `/cues`, `/topics`, `/insights`, `/review`) returns `{items, next_cursor}`, with `next_cursor` null
