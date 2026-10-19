@@ -211,7 +211,7 @@ export function createMockGateway(options = {}) {
     n.processed_at = at;
     n.revision_id = revision_id;
     db.queue.delete(n.note_id);
-    db.revisions.push({ revision_id, note_id: n.note_id, at: n.occurred_at, recorded_at: at, summary: linked.length ? `Linked to ${linked.map((e) => e.name).slice(0, 3).join(", ")}.` : "Filed with no new links.", ops: [], source: { client: n.source.client } });
+    db.revisions.push({ revision_id, note_id: n.note_id, at: n.occurred_at, recorded_at: at, summary: linked.length > 1 ? `Linked ${linked[0].name} to ${linked.slice(1, 3).map((e) => e.name).join(" and ")}.` : linked.length ? `Added to what you know about ${linked[0].name}.` : "Filed with no new links.", ops: [], source: { client: n.source.client } });
   }
   function scheduleProcessing() {
     setTimeout(() => {

@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { findVerbToggleLabels } from "@abstractframework/ui-kit";
 import { deltaVocabulary } from "./delta_words";
+import { ACK_WORDS } from "../src/lib/ack";
 
 const SRC = join(__dirname, "..", "src");
 const FORBIDDEN = /\b(ledger|gateway|workflow|run ids?|records?|runs?|artifacts?|automations?|entity id|note id|claim id|revision id|http \d{3})\b/i;
@@ -74,6 +75,19 @@ describe("copy rules", () => {
     const delta = JSON.parse(readFileSync(recorded, "utf8")).body;
     expect(delta.superseded_claims.length).toBeGreaterThan(0); // a recording without one would check nothing
     expect(deltaVocabulary(delta)).toEqual([]);
+  });
+
+  it("capture states use the deck's words, plainly, one word or two each", () => {
+    const words = Object.values(ACK_WORDS);
+    expect(words).toEqual(expect.arrayContaining(["Received", "Organizing", "Organized", "Needs attention"]));
+    for (const w of words) {
+      expect(FORBIDDEN.test(w), w).toBe(false);
+      expect(w.split(" ").length, w).toBeLessThanOrEqual(2);
+    }
+    // The view renders the words from the table (never its own spelling of a state).
+    const capture = readFileSync(join(SRC, "views", "Capture.tsx"), "utf8");
+    expect(capture).toContain("ACK_WORDS[state]");
+    for (const w of words) expect(capture.includes(`"${w}"`), `Capture.tsx spells "${w}" itself`).toBe(false);
   });
 
   it("no on/off setting is labelled with a verb", () => {

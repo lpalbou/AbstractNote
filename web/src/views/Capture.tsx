@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChatComposer, ChatThread, DragPresence, Markdown, dragCarriesFiles, droppedFiles, folderRefusal, pastedFiles, type ChatMessage } from "@abstractframework/panel-chat";
-import { AfChip, AfChipButton, Icon, randomId } from "@abstractframework/ui-kit";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ChatComposer, DragPresence, Markdown, dragCarriesFiles, droppedFiles, folderRefusal, pastedFiles } from "@abstractframework/panel-chat";
+import { AfChipButton, Icon, randomId } from "@abstractframework/ui-kit";
 import { ApiError, errorSentence } from "../lib/api";
-import { runCapture, tooLarge, watchNote, type CaptureItem } from "../lib/capture";
+import { ACK_ICONS, ACK_WORDS, ackState, ackSummary, pendingLine } from "../lib/ack";
+import { runCapture, tooLarge, watchNote, type CaptureFile, type CaptureItem } from "../lib/capture";
 import { THREAD_KEY, readLocal, writeLocal } from "../lib/local";
 import { currentPlace } from "../lib/location";
 import { navigate, type Route } from "../lib/nav";
 import type { About, AboutKind } from "../lib/types";
-import { capitalize, longDate, topicLabel } from "../lib/words";
-import { EntityChip, openNote, useApp } from "../components/common";
+import { capitalize, entryTime, exactTime, longDate, sizeWords, topicLabel } from "../lib/words";
+import { EntityChip, KindBadge, openNote, useApp } from "../components/common";
 
-const MARK = /\n?<!--nt:([A-Za-z0-9-]+)-->$/;
 const MAX_KEPT = 40;
 
 function loadThread(): CaptureItem[] {
@@ -33,20 +33,13 @@ export function aboutFromParams(params: URLSearchParams): About | null {
   return { kind, id, title: params.get("title") || "" };
 }
 
-function stateLine(item: CaptureItem): string {
-  switch (item.state) {
-    case "uploading":
-      return item.files.length > 1 ? "Adding your files…" : "Adding your file…";
-    case "saving":
-      return "Saving…";
-    case "queued":
-      return "Saved. The links come when it is processed.";
-    case "processed":
-      return "";
-    case "duplicate":
-      return "";
-    case "failed":
-      return item.error || "This note could not be saved.";
+/** A preview for an image the person picked (this page only; a reload shows the file name). */
+function previewOf(f: File): string | null {
+  if (!f.type.startsWith("image/") || typeof URL === "undefined" || !URL.createObjectURL) return null;
+  try {
+    return URL.createObjectURL(f);
+  } catch {
+    return null;
   }
 }
 
@@ -58,7 +51,10 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
   const [notice, setNotice] = useState("");
   const [dragging, setDragging] = useState(false);
   const filesFor = useRef(new Map<string, File[]>());
+  const previewsFor = useRef(new Map<string, Array<string | null>>());
   const fileInput = useRef<HTMLInputElement>(null);
+  const stream = useRef<HTMLDivElement>(null);
+  const stick = useRef(true);
   const alive = useRef(true);
   const inlineRef = useRef(processInline);
   inlineRef.current = processInline;
@@ -67,13 +63,21 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
 
   useEffect(() => {
     alive.current = true;
+    const previews = previewsFor.current;
     return () => {
       alive.current = false;
+      for (const urls of previews.values()) for (const u of urls) if (u) URL.revokeObjectURL(u);
     };
   }, []);
 
   useEffect(() => {
     writeLocal(THREAD_KEY, JSON.stringify(items.slice(-MAX_KEPT).map((i) => ({ ...i }))));
+  }, [items]);
+
+  // The stream follows the newest note unless the person scrolled up to read.
+  useLayoutEffect(() => {
+    const el = stream.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [items]);
 
   const update = useCallback((id: string, patch: Partial<CaptureItem>) => {
@@ -83,7 +87,7 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
 
   const deps = useMemo(() => ({ api, sessionId, processInline: () => inlineRef.current, update, alive: () => alive.current }), [api, sessionId, update]);
 
-  // A reload resumes watching the notes that were still queued.
+  // A reload resumes watching the notes that were still being organized.
   useEffect(() => {
     for (const it of loadThread()) {
       if ((it.state === "queued" || it.state === "saving") && it.noteId) void watchNote(it.id, it.noteId, deps, (ms) => new Promise((r) => setTimeout(r, ms)), () => alive.current);
@@ -102,6 +106,10 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
     setNotice("");
     setFiles((prev) => [...prev, ...incoming]);
   }, []);
+
+  // Previews of the files waiting in the composer.
+  const pendingPreviews = useMemo(() => files.map(previewOf), [files]);
+  useEffect(() => () => pendingPreviews.forEach((u) => u && URL.revokeObjectURL(u)), [pendingPreviews]);
 
   // Drop anywhere on the capture view.
   useEffect(() => {
@@ -157,6 +165,9 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
       state: files.length ? "uploading" : "saving",
     };
     filesFor.current.set(item.id, files);
+    // The composer's previews move to the note (not revoked: the stream shows them now).
+    previewsFor.current.set(item.id, files.map(previewOf));
+    stick.current = true;
     setItems((prev) => [...prev.slice(-(MAX_KEPT - 1)), item]);
     setText("");
     setFiles([]);
@@ -178,177 +189,237 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
     [deps, update],
   );
 
-  const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
-
-  const messages: ChatMessage[] = useMemo(() => {
-    const out: ChatMessage[] = [];
-    for (const it of items) {
-      out.push({
-        id: `u:${it.id}`,
-        role: "user",
-        content: it.text || (it.files.length ? "(files)" : ""),
-        ts: it.occurred_at,
-        attachments: it.files.map((f, i) => ({ id: `${it.id}:f${i}`, label: f.name, title: `${f.name} · ${Math.max(1, Math.round(f.size / 1024))} KB`, disabled: true })),
-      });
-      const pending = it.state === "uploading" || (it.state === "saving" && !it.answer);
-      out.push({
-        id: `a:${it.id}`,
-        role: "assistant",
-        title: "Notebook",
-        content: `${it.answer || ""}\n<!--nt:${it.id}-->`,
-        ts: it.occurred_at,
-        level: it.state === "failed" ? "error" : undefined,
-        live: pending ? { callId: it.id, reasoning: "", label: it.state === "uploading" ? "adding files" : "saving" } : undefined,
-      });
-    }
-    return out;
-  }, [items]);
-
-  const renderMarkdown = useCallback(
-    (md: string) => {
-      const m = md.match(MARK);
-      const it = m ? byId.get(m[1]) : undefined;
-      const body = md.replace(MARK, "");
-      return (
-        <div className="nt-answer">
-          {body.trim() ? <Markdown text={body} images="link" /> : null}
-          {it ? <Filing item={it} onRetry={() => retry(it)} /> : null}
-        </div>
-      );
-    },
-    [byId, retry],
-  );
-
   return (
     <div className="nt-capture">
-      <ChatThread
-        className="nt-thread"
-        messages={messages}
-        messageProps={{ renderMarkdown, showCopy: false }}
-        empty={
+      <div
+        ref={stream}
+        className="nt-stream"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        }}
+      >
+        {items.length ? (
+          <ol className="nt-stream__inner" aria-label="Your notes">
+            {items.map((it) => (
+              <li key={it.id}>
+                <Entry item={it} previews={previewsFor.current.get(it.id) || []} onRetry={() => retry(it)} />
+              </li>
+            ))}
+          </ol>
+        ) : (
           <div className="nt-empty">
-            <h2>Write it down</h2>
-            <p>Type a thought, paste a link, or drop a file. You will see what was saved, how it was filed, and what it connects to.</p>
+            <h1>What is on your mind?</h1>
+            <p>Write a thought, paste a link or drop a file.</p>
+            <p className="nt-empty__hint">It is kept as you wrote it, then organized into topics and links.</p>
           </div>
-        }
-      />
+        )}
+      </div>
       <div className="nt-composer">
-        {about ? (
-          <div className="nt-about" role="status">
-            <span>
-              {about.kind === "cue" ? "Answering" : "A note about"} <strong>{about.title}</strong>
-            </span>
-            <button type="button" className="nt-btn nt-btn--quiet" onClick={() => navigate("capture")}>
-              Cancel
-            </button>
-          </div>
-        ) : null}
-        {notice ? (
-          <p className="nt-notice" role="alert">
-            {notice}
-          </p>
-        ) : null}
-        <ChatComposer
-          value={text}
-          onChange={setText}
-          onSubmit={() => void send()}
-          placeholder={about ? "Write your answer…" : "Write a note…"}
-          ariaLabel="Note"
-          sendLabel="Save"
-          autoFocus
-          onPaste={(e) => {
-            const pasted = pastedFiles(e.clipboardData);
-            if (pasted.length) {
-              e.preventDefault();
-              addFiles(pasted);
-            }
-          }}
-          leading={
-            files.length ? (
-              <div className="nt-files">
-                {files.map((f, i) => (
-                  <AfChip key={`${f.name}:${i}`} size="sm" onRemove={() => setFiles((prev) => prev.filter((_, j) => j !== i))} removeLabel={`Remove ${f.name}`}>
-                    {f.name}
-                  </AfChip>
-                ))}
-              </div>
-            ) : null
-          }
-          actions={
-            <>
-              <input
-                ref={fileInput}
-                type="file"
-                multiple
-                hidden
-                onChange={(e) => {
-                  addFiles(Array.from(e.target.files || []));
-                  e.target.value = "";
-                }}
-              />
-              <button type="button" className="nt-icon-btn" aria-label="Add files" title="Add files" onClick={() => fileInput.current?.click()}>
-                <Icon name="paperclip" size={18} />
+        <div className="nt-composer__inner">
+          {about ? (
+            <div className="nt-about" role="status">
+              <span>
+                {about.kind === "cue" ? "Answering" : "A note about"} <strong>{about.title}</strong>
+              </span>
+              <button type="button" className="nt-btn nt-btn--quiet" onClick={() => navigate("capture")}>
+                Cancel
               </button>
-            </>
-          }
-          overlay={dragging ? <div className="nt-drop">Drop to add to this note</div> : null}
-        />
+            </div>
+          ) : null}
+          {notice ? (
+            <p className="nt-notice" role="alert">
+              {notice}
+            </p>
+          ) : null}
+          <ChatComposer
+            value={text}
+            onChange={setText}
+            onSubmit={() => void send()}
+            placeholder={about ? "Write your answer…" : "Write a note…"}
+            ariaLabel="Note"
+            sendLabel="Save"
+            autoFocus
+            onPaste={(e) => {
+              const pasted = pastedFiles(e.clipboardData);
+              if (pasted.length) {
+                e.preventDefault();
+                addFiles(pasted);
+              }
+            }}
+            leading={
+              files.length ? (
+                <ul className="nt-pending" aria-label="Files to add">
+                  {files.map((f, i) => (
+                    <FileChip key={`${f.name}:${i}`} file={{ name: f.name, size: f.size, type: f.type }} preview={pendingPreviews[i]} onRemove={() => setFiles((prev) => prev.filter((_, j) => j !== i))} />
+                  ))}
+                </ul>
+              ) : null
+            }
+            actions={
+              <>
+                <input
+                  ref={fileInput}
+                  type="file"
+                  multiple
+                  hidden
+                  onChange={(e) => {
+                    addFiles(Array.from(e.target.files || []));
+                    e.target.value = "";
+                  }}
+                />
+                <button type="button" className="nt-icon-btn" aria-label="Add files" title="Add files" onClick={() => fileInput.current?.click()}>
+                  <Icon name="paperclip" size={18} />
+                </button>
+              </>
+            }
+            overlay={dragging ? <div className="nt-drop">Drop to add to this note</div> : null}
+          />
+          <p className="nt-composer__hint">
+            <span>
+              <kbd>Enter</kbd> saves · <kbd>Shift</kbd> + <kbd>Enter</kbd> starts a new line
+            </span>
+            <span>Paste or drop files to attach them</span>
+          </p>
+        </div>
       </div>
     </div>
   );
 }
 
-/** What was saved and how it was filed, with links into Graph and Remember. */
-function Filing({ item, onRetry }: { item: CaptureItem; onRetry: () => void }) {
-  const note = item.note;
-  const line = stateLine(item);
-  const revisits = (note?.revisits || []).filter((r) => r.note_id !== note?.note_id);
-  const revisit = revisits[0];
-  const entities = note?.entities || [];
-  const summary = note?.revision?.summary || item.revisionSummary || "";
+function fileIcon(type: string): "image" | "video" | "music" | "file" {
+  if (type.startsWith("image/")) return "image";
+  if (type.startsWith("video/")) return "video";
+  if (type.startsWith("audio/")) return "music";
+  return "file";
+}
+
+function FileChip({ file, preview, onRemove }: { file: CaptureFile; preview?: string | null; onRemove?: () => void }) {
   return (
-    <div className="nt-filing" data-state={item.state} data-answer-source={item.answerSource || ""}>
-      {note ? (
-        <div className="nt-filing__row">
-          <span className={`nt-kind nt-kind--${note.kind}`}>{note.kind}</span>
-          <button type="button" className="nt-link" onClick={() => openNote(note.note_id)}>
-            <span className="nt-link__title">{note.title}</span>
-          </button>
-          {(note.topics || []).map((t) => (
-            <AfChipButton key={t} size="sm" tone="muted" title="Find notes with this topic" onClick={() => navigate("remember", { topic: t })}>
-              {`#${topicLabel(t)}`}
-            </AfChipButton>
-          ))}
-        </div>
+    <li className="nt-file">
+      {preview ? (
+        <img className="nt-file__thumb" src={preview} alt="" />
+      ) : (
+        <span className="nt-file__thumb" aria-hidden="true">
+          <Icon name={fileIcon(file.type)} size={18} />
+        </span>
+      )}
+      <span className="nt-file__name" title={file.name}>
+        {file.name}
+      </span>
+      <span className="nt-file__size">{sizeWords(file.size)}</span>
+      {onRemove ? (
+        <button type="button" className="nt-icon-btn nt-file__remove" aria-label={`Remove ${file.name}`} title={`Remove ${file.name}`} onClick={onRemove}>
+          <Icon name="x" size={14} />
+        </button>
       ) : null}
-      {revisit ? (
-        <p className="nt-filing__revisit">
-          You noted this on{" "}
-          <button type="button" className="nt-link" onClick={() => openNote(revisit.note_id)}>
-            <span className="nt-link__title">{longDate(revisit.occurred_at)}</span>
-          </button>
-          {revisits.length > 1 ? ` and ${revisits.length - 1} more ${revisits.length === 2 ? "time" : "times"}` : ""}.
+    </li>
+  );
+}
+
+/** One captured note: the original as written, then its acknowledgement. */
+function Entry({ item, previews, onRetry }: { item: CaptureItem; previews: Array<string | null>; onRetry: () => void }) {
+  return (
+    <article className="nt-entry" aria-label={`Note written ${exactTime(item.occurred_at)}`}>
+      <div className="nt-entry__card">
+        <p className="nt-entry__meta">
+          <time dateTime={item.occurred_at} title={exactTime(item.occurred_at)}>
+            {entryTime(item.occurred_at)}
+          </time>
+          {item.about ? <span>{`· ${item.about.kind === "cue" ? "answering" : "about"} ${item.about.title}`}</span> : null}
         </p>
-      ) : null}
-      {entities.length ? (
-        <div className="nt-filing__row" aria-label="Linked to">
-          <span className="nt-muted">Linked to</span>
-          {entities.map((e) => (
-            <EntityChip key={e.entity_id} entity={e} />
-          ))}
-        </div>
-      ) : null}
-      {summary && item.state === "processed" ? <p className="nt-muted">{capitalize(summary)}</p> : null}
-      {line ? (
-        <p className={item.state === "failed" ? "nt-error-text" : "nt-filing__state"} role={item.state === "failed" ? "alert" : "status"}>
-          {item.state === "queued" ? <Icon name="clock" size={14} /> : null}
-          <span>{line}</span>
-          {item.state === "failed" && !item.noteId ? (
-            <button type="button" className="nt-btn nt-btn--quiet" onClick={onRetry}>
-              Retry
-            </button>
+        {item.text ? (
+          <div className="nt-entry__text">
+            <Markdown text={item.text} images="link" />
+          </div>
+        ) : null}
+        {item.files.length ? (
+          <ul className="nt-files" aria-label="Files">
+            {item.files.map((f, i) => (
+              <FileChip key={`${f.name}:${i}`} file={f} preview={previews[i]} />
+            ))}
+          </ul>
+        ) : null}
+      </div>
+      <Ack item={item} onRetry={onRetry} />
+    </article>
+  );
+}
+
+/** The acknowledgement: one state, one short line; it opens on what was filed and linked. */
+function Ack({ item, onRetry }: { item: CaptureItem; onRetry: () => void }) {
+  const state = ackState(item);
+  const [open, setOpen] = useState(false);
+  const note = item.note;
+  const organized = state === "organized";
+  const summary = organized ? ackSummary(note, item.state === "duplicate") : state === "attention" ? item.error || "This note could not be saved." : pendingLine(item);
+  const expandable = Boolean(note || item.answer);
+  const panel = `ack-${item.id}`;
+  const revisits = (note?.revisits || []).filter((r) => r.note_id !== note?.note_id);
+  const changed = note?.revision?.summary || item.revisionSummary || "";
+  return (
+    <div className="nt-ack" data-state={state} data-answer-source={item.answerSource || ""} aria-live="polite">
+      <div className="nt-ack__row">
+        <button
+          type="button"
+          className="nt-ack__line"
+          aria-expanded={expandable ? open : undefined}
+          aria-controls={expandable && open ? panel : undefined}
+          aria-disabled={expandable ? undefined : true}
+          onClick={() => expandable && setOpen(!open)}
+        >
+          <span className={`nt-state nt-state--${state}`}>
+            <Icon name={ACK_ICONS[state]} size={14} className={state === "sending" ? "nt-spin" : undefined} />
+            <span>{ACK_WORDS[state]}</span>
+          </span>
+          {summary ? <span className="nt-ack__summary">{summary}</span> : null}
+          {expandable ? <Icon name="chevronRight" size={14} className="nt-ack__chev" /> : null}
+        </button>
+        {state === "attention" && !item.noteId ? (
+          <button type="button" className="nt-btn nt-btn--quiet nt-btn--sm" onClick={onRetry}>
+            Retry
+          </button>
+        ) : null}
+      </div>
+      {expandable && open ? (
+        <div id={panel} className="nt-ack__more">
+          {note ? (
+            <div className="nt-ack__row">
+              <KindBadge kind={note.kind} />
+              <button type="button" className="nt-link" onClick={() => openNote(note.note_id)}>
+                <span className="nt-link__title">{note.title}</span>
+              </button>
+            </div>
           ) : null}
-        </p>
+          {!organized && item.answer ? <p className="nt-ack__reply">{item.answer}</p> : null}
+          {organized && (note?.topics || []).length ? (
+            <div className="nt-ack__row" aria-label="Topics">
+              {(note?.topics || []).map((t) => (
+                <AfChipButton key={t} size="sm" tone="muted" title="Find notes with this topic" onClick={() => navigate("remember", { topic: t })}>
+                  {`#${topicLabel(t)}`}
+                </AfChipButton>
+              ))}
+            </div>
+          ) : null}
+          {organized && (note?.entities || []).length ? (
+            <div className="nt-ack__row" aria-label="Linked to">
+              <span className="nt-muted">Linked to</span>
+              {(note?.entities || []).map((e) => (
+                <EntityChip key={e.entity_id} entity={e} />
+              ))}
+            </div>
+          ) : null}
+          {organized && revisits[0] ? (
+            <p className="nt-muted">
+              {"You noted this before on "}
+              <button type="button" className="nt-link" onClick={() => openNote(revisits[0].note_id)}>
+                <span className="nt-link__title">{longDate(revisits[0].occurred_at)}</span>
+              </button>
+              {revisits.length > 1 ? ` and ${revisits.length - 1} more ${revisits.length === 2 ? "time" : "times"}` : ""}.
+            </p>
+          ) : null}
+          {organized && changed ? <p className="nt-muted">{capitalize(changed)}</p> : null}
+        </div>
       ) : null}
     </div>
   );

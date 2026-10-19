@@ -260,7 +260,7 @@ p { margin: 0 0 6px; }
 /* ---- capture */
 .nt-capture { display: grid; grid-template-rows: minmax(0, 1fr) auto; height: 100%; min-height: 0; }
 .nt-stream { overflow: auto; min-height: 0; }
-.nt-stream__inner { max-width: 760px; margin: 0 auto; padding: 20px 20px 12px; display: flex; flex-direction: column; gap: 14px; }
+.nt-stream__inner { list-style: none; max-width: 760px; margin: 0 auto; padding: 20px 20px 12px; display: flex; flex-direction: column; gap: 16px; }
 .nt-empty { max-width: 520px; margin: 14vh auto 0; text-align: center; color: var(--text-secondary); padding: 0 16px; }
 .nt-empty h1 { margin-bottom: 8px; color: var(--text-primary); }
 .nt-empty__hint { color: var(--text-muted); font-size: var(--font-size-md); }

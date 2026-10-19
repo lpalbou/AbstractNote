@@ -1,6 +1,6 @@
 /** Plain words for the notebook's vocabulary (kinds, predicates, dates). */
 
-import { formatRelativeTime, formatShortDate } from "@abstractframework/ui-kit";
+import { formatExactTime, formatRelativeTime, formatShortDate } from "@abstractframework/ui-kit";
 
 export const NOTE_KINDS = ["idea", "task", "decision", "fact", "event", "question", "reflection", "reference", "log", "conversation", "personal"] as const;
 
@@ -51,4 +51,22 @@ export function capitalize(s: string): string {
 /** "#lut" -> "lut" for display. */
 export function topicLabel(t: string): string {
   return String(t || "").replace(/^#/, "");
+}
+
+/** When a captured note was written: "14:05" today, "Oct 2 · 14:05" before. */
+export function entryTime(iso: string | null | undefined, nowMs = Date.now()): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return new Date(nowMs).toDateString() === d.toDateString() ? hm : `${formatShortDate(iso, nowMs)} · ${hm}`;
+}
+export function exactTime(iso: string | null | undefined): string {
+  return iso ? formatExactTime(iso) : "";
+}
+/** "12 KB", "1.4 MB". */
+export function sizeWords(bytes: number | null | undefined): string {
+  const b = Math.max(0, Number(bytes) || 0);
+  if (b < 1024 * 1024) return `${Math.max(1, Math.round(b / 1024))} KB`;
+  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
 }
