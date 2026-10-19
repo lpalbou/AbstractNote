@@ -248,7 +248,9 @@ def test_a_normalisation_merge_is_undone_with_unmerge_and_stays_apart(nb):
     assert nb.normalize_entities(None)["merges"] == []  # separated by a person: not joined again
 
 
-def test_an_upgraded_notebook_is_repaired_at_its_next_write(tmp_path):
+def test_an_upgraded_notebook_is_repaired_when_it_next_processes_a_note(tmp_path):
+    from test_process import extraction, mention, ml, run
+
     root = tmp_path / "nb"
     with Notebook.open(root) as nb:
         _legacy_world(nb)
@@ -261,7 +263,10 @@ def test_an_upgraded_notebook_is_repaired_at_its_next_write(tmp_path):
     with Notebook.open(root) as nb:
         assert nb.store.meta_get("name_key_repair") == "pending"
         assert len(nb.store.name_key_groups()) == 1  # reads change nothing
-        nb.capture("A new note.", occurred_at=t(4))
+        nb.capture("A new note.", occurred_at=t(4))  # a capture answers at once: no repair on its path
+        assert len(nb.store.name_key_groups()) == 1
+        run(nb, "Memory again.", t(5), extraction([mention("m1", "Memory", "concept")]),
+            lambda p, c: {"mentions": [ml("m1", "create", name="Memory", kind="concept")], "claims": [], "tasks": []})
         assert nb.store.name_key_groups() == [] and nb.store.meta_get("name_key_repair") is None
         sources = [r["source_json"] for r in nb.store.q("SELECT source_json FROM revisions WHERE action='entity.merge'")]
         assert len(sources) == 2 and all('"migration"' in s for s in sources)

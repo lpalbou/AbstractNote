@@ -447,6 +447,7 @@ def apply_note_revision(nb: Any, note_id: str, extraction: Any, linking: Any, *,
     if nb.store.note_row(note_id) is None:
         raise ValueError("That note is not in this notebook.")
     nb.recover()
+    nb.repair_names_if_pending()  # an upgraded notebook joins the entities that share a canonical name first
     done = nb.store.q1("SELECT revision_id FROM revisions WHERE note_id=? AND action IS NULL AND applied_index=1"
                        " AND abandoned=0 ORDER BY seq DESC LIMIT 1", (note_id,))
     if done is not None:

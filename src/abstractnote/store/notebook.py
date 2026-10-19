@@ -302,11 +302,16 @@ class Notebook:
         without its embedder cannot write, and the write itself says so). Read paths never call it."""
         if self.cache.embedder is None:
             return []
-        done = self.recover()
-        if self.store.meta_get(NAME_KEY_REPAIR_META) == "pending" and not self._normalizing:
-            # A notebook upgraded from before canonical names: merge what shares one, once (the repair).
-            self.normalize_entities(None, client="migration")
-        return done
+        return self.recover()
+
+    def repair_names_if_pending(self) -> Optional[Dict[str, Any]]:
+        """A notebook upgraded from before canonical names (schema 2 flags it) merges what shares one, once:
+        :meth:`normalize_entities` with source client ``migration``. Called by processing (a batch step, never a
+        capture waiting for an answer); None when there is nothing to repair or no embedder."""
+        if self.cache.embedder is None or self._normalizing or \
+                self.store.meta_get(NAME_KEY_REPAIR_META) != "pending":
+            return None
+        return self.normalize_entities(None, client="migration")
 
     def revision(self, revision_id: str) -> Optional[Dict[str, Any]]:
         row = self.store.revision_row(revision_id)
