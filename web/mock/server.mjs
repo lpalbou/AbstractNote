@@ -552,17 +552,31 @@ export function createMockGateway(options = {}) {
     if (np === "/search") return send(res, 200, search(q.get("q") || "", { since: q.get("since"), until: q.get("until"), kinds: list("kinds"), entities: list("entities"), topics: list("topics"), limit: q.get("limit") }));
     if (np === "/entities") {
       const term = norm(q.get("q"));
-      let items = [...db.entities.values()].filter((e) => !e.merged_into && (!term || norm([e.name, ...e.aliases].join(" ")).includes(term)));
+      // W10: include_merged=true also lists entries merged into another (each item carries merged_into).
+      const withMerged = q.get("include_merged") === "true";
+      let items = [...db.entities.values()].filter((e) => (withMerged || !e.merged_into) && (!term || norm([e.name, ...e.aliases].join(" ")).includes(term)));
       if (q.get("kind")) items = items.filter((e) => e.kind === q.get("kind"));
       const sort = q.get("sort") || "recent";
       items.sort(sort === "name" ? (a, b) => a.name.localeCompare(b.name) : sort === "frequent" ? (a, b) => b.note_count - a.note_count : (a, b) => ms(b.last_seen) - ms(a.last_seen));
-      return send(res, 200, { items: items.slice(0, Number(q.get("limit") || 50)).map((e) => ({ ...entRef(e.entity_id), aliases: e.aliases, summary: e.summary, first_seen: e.first_seen, last_seen: e.last_seen, note_count: e.note_count })), next_cursor: null });
+      return send(res, 200, { items: items.slice(0, Number(q.get("limit") || 50)).map((e) => ({ ...entRef(e.entity_id), aliases: e.aliases, summary: e.summary, first_seen: e.first_seen, last_seen: e.last_seen, note_count: e.note_count, merged_into: e.merged_into || null })), next_cursor: null });
     }
     m = np.match(/^\/entities\/([^/]+)(\/timeline|\/then-now|\/unmerge)?$/);
     if (m) {
       const id = decodeURIComponent(m[1]);
       const e = ent(id);
       if (!e) return fail(res, 404, "Not found.");
+      if (!m[2] && q.get("as_merged") === "true") {
+        // W10: the entry's own record (Notebook.entity_record), not followed to the survivor of a merge.
+        if (at) return fail(res, 400, "An entry's own record has no date; leave out at.");
+        const mergeRev = e.merged_into ? [...db.revisions].reverse().find((r) => (r.ops || []).some((op) => op.op === "entity.merge" && op.from_id === id && op.into_id === e.merged_into)) : null;
+        const mergeOp = mergeRev ? mergeRev.ops.find((op) => op.op === "entity.merge" && op.from_id === id) : null;
+        return send(res, 200, {
+          entity_id: e.entity_id, kind: e.kind, name: e.name, aliases: e.aliases, summary: e.summary, first_seen: e.first_seen, last_seen: e.last_seen,
+          note_count: notesOf(id).length, merged_into: e.merged_into || null, merged_at: mergeRev ? mergeRev.at : null,
+          merge: mergeRev ? { revision_id: mergeRev.revision_id, at: mergeRev.at, recorded_at: mergeRev.recorded_at, reason: mergeOp.reason || null, summary: mergeRev.summary, note_id: mergeRev.note_id } : null,
+          notes: notesOf(id).map(noteRef).reverse(),
+        });
+      }
       if (!m[2]) {
         const card = entityCard(id, at);
         if (!card) return fail(res, 404, "Not known at that time.");

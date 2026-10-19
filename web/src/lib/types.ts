@@ -64,7 +64,19 @@ export type EntityCard = EntityRef & {
   /** Ids of the entries merged into this one (W1 expand.entity_card). */
   merged_from?: string[];
 };
-export type EntityListItem = EntityRef & { aliases?: string[]; summary?: string; first_seen?: string; last_seen?: string; note_count?: number };
+export type EntityListItem = EntityRef & { aliases?: string[]; summary?: string; first_seen?: string; last_seen?: string; note_count?: number; merged_into?: string | null };
+/** Pinned: GET /note/entities/{id}?as_merged=true, the entry's own record (not followed to the survivor of a merge). */
+export type EntityRecord = EntityRef & {
+  aliases: string[];
+  summary: string | null;
+  first_seen: string | null;
+  last_seen: string | null;
+  note_count: number;
+  merged_into: string | null;
+  merged_at: string | null;
+  merge: { revision_id: string; at: string; recorded_at: string; reason: string | null; summary: string; note_id: string | null } | null;
+  notes: NoteRef[];
+};
 
 /** GET /note/revisions items (W1 revision_dict); `ops` are the revision's operations ({op, ...}). */
 export type Revision = { revision_id: string; note_id: string | null; at: string; recorded_at?: string; summary: string; ops: Array<Record<string, unknown>>; source?: Record<string, unknown> | null };

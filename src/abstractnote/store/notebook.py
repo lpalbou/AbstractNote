@@ -524,6 +524,30 @@ class Notebook:
 
         return entity_card(self, entity_id, at)
 
+    def entity_record(self, entity_id: str) -> Dict[str, Any]:
+        """The entry's own record, not followed to the surviving entity of a merge (``GET /note/entities/{id}?
+        as_merged=true``): ``{entity_id, kind, name, aliases, summary, first_seen, last_seen, note_count, merged_into,
+        merged_at, merge, notes}``. ``merge`` is the revision that joined it into ``merged_into`` (``{revision_id, at,
+        recorded_at, reason, summary, note_id}``) or null when it is not merged; ``notes`` are its own notes."""
+        from ..recall import shapes
+
+        brief = self.store.entity_brief(entity_id)
+        if brief is None:
+            raise ValueError("That entity is not in this notebook.")
+        row = self.store.entity_row(entity_id)
+        merge = None
+        if row["merged_into"]:
+            m = self.store.q1("SELECT m.*, r.summary, r.note_id, r.recorded_at FROM merges m JOIN revisions r ON"
+                              " r.revision_id=m.revision_id WHERE m.from_id=? AND m.into_id=? AND m.undone_at IS NULL"
+                              " ORDER BY m.at DESC LIMIT 1", (entity_id, row["merged_into"]))
+            if m is not None:
+                merge = {"revision_id": m["revision_id"], "at": m["at"], "recorded_at": m["recorded_at"],
+                         "reason": m["reason"], "summary": m["summary"], "note_id": m["note_id"]}
+        notes = self.store.q("SELECT n.* FROM entity_notes en JOIN notes n ON n.note_id=en.note_id WHERE"
+                             " en.entity_id=? AND n.archived_at IS NULL ORDER BY n.occurred_at DESC LIMIT 10",
+                             (entity_id,))
+        return {**brief, "merged_at": row["merged_at"], "merge": merge, "notes": [shapes.note_ref(r) for r in notes]}
+
     def entity_timeline(self, entity_id: str, since: Optional[str] = None, until: Optional[str] = None
                         ) -> Dict[str, Any]:
         from ..recall.expand import entity_timeline

@@ -254,16 +254,21 @@ async def note_search(
 @router.get("/entities")
 async def note_entities(
     request: Request, q: Optional[str] = None, kind: Optional[str] = None, sort: Optional[str] = None,
-    cursor: Optional[str] = None, limit: int = Query(50, ge=1, le=500),
+    cursor: Optional[str] = None, limit: int = Query(50, ge=1, le=500), include_merged: bool = False,
 ) -> Dict[str, Any]:
     return await _run(request, lambda nb, svc, p: _items(_call(nb, "entities", **_clean(
-        q=q, kind=kind, sort=sort, cursor=cursor, limit=limit))))
+        q=q, kind=kind, sort=sort, cursor=cursor, limit=limit, include_merged=include_merged or None))))
 
 
 @router.get("/entities/{entity_id}")
-async def note_entity(request: Request, entity_id: str, at: Optional[str] = None) -> Dict[str, Any]:
+async def note_entity(request: Request, entity_id: str, at: Optional[str] = None,
+                      as_merged: bool = False) -> Dict[str, Any]:
     def work(nb, svc, p):
         _require(nb, "entity", entity_id, "entity")
+        if as_merged:
+            if at:
+                raise HTTPException(status_code=400, detail="An entry's own record has no date; leave out at.")
+            return _call(nb, "entity_record", entity_id)
         return _call(nb, "entity", entity_id, **_clean(at=at))
 
     return await _run(request, work)
