@@ -1,13 +1,13 @@
 # AbstractNote backlog overview
 
-Last reconciled: 2026-10-19 (evening pass)
+Last reconciled: 2026-10-19 (end of day)
 
 ## Counts
 | State | Count |
 |---|---|
-| planned | 2 (track `planned/v1/`: 0011, 0029) |
-| proposed | 10 (0014-0023) |
-| completed | 18 (track `completed/v1/`) |
+| planned | 1 (track `planned/v1/`: 0029) |
+| proposed | 10 |
+| completed | 19 (track `completed/v1/`) |
 | deprecated | 0 |
 | recurrent | 1 (0901) |
 
@@ -20,8 +20,7 @@ Next free id: 0031.
 
 ## Ledgers
 ### Planned
-- [0029 Ingest the rest of the framework's history](planned/v1/0029_ingest_the_rest_of_the_framework_history.md)
-- [0011 Corpus evaluation: the framework's own history](planned/v1/0011_corpus_evaluation_framework_history.md)
+- [0029 Ingest the rest of the framework's history into the operator's notebook](planned/v1/0029_ingest_the_rest_of_the_framework_history.md)
 
 ### Proposed
 - [0014 iPhone app](proposed/0014_iphone_app.md)
@@ -36,24 +35,25 @@ Next free id: 0031.
 - [0023 Release preparation for 0.1.0](proposed/0023_release_preparation_v0_1_0.md)
 
 ### Completed
-- [0001 Notebook store and data model](completed/v1/0001_notebook_store_and_data_model.md) — completed 2026-10-19; see its completion report
-- [0002 Capture, attachments and de-duplication](completed/v1/0002_capture_and_deduplication.md) — completed 2026-10-19; see its completion report
-- [0003 Processing pipeline: context, extraction, linking, revision](completed/v1/0003_processing_pipeline_extraction_linking_revision.md) — completed 2026-10-19; see its completion report
-- [0004 Queue, priorities and the processor automation](completed/v1/0004_queue_priorities_and_processor_automation.md) — completed 2026-10-19; see its completion report
-- [0005 Flows bundle and headless runner](completed/v1/0005_flows_bundle_and_headless_runner.md) — completed 2026-10-19; see its completion report
-- [0006 Recall tiers, then-versus-now and reflect](completed/v1/0006_recall_tiers_then_now_and_reflect.md) — completed 2026-10-19; see its completion report
-- [0007 Gateway integration seam (tools binding, read API, app catalog)](completed/v1/0007_gateway_integration_seam.md) — completed 2026-10-19; see its completion report
-- [0008 Web app: Capture, Graph, Remember](completed/v1/0008_web_app_capture_graph_remember.md) — completed 2026-10-19; see its completion report
-- [0009 Apple Watch app](completed/v1/0009_apple_watch_app.md) — completed 2026-10-19; see its completion report
-- [0010 Importers: Claude sessions, agora hub, Markdown, files](completed/v1/0010_importers.md) — completed 2026-10-19; see its completion report
-- [0012 Documentation core set and llms files](completed/v1/0012_documentation_core_set.md) — completed 2026-10-19; see its completion report
-- [0013 CLI](completed/v1/0013_cli.md) — completed 2026-10-19; see its completion report
-- [0024 Processing quality and speed on a local model](completed/v1/0024_processing_quality_and_speed.md) — completed 2026-10-19; see its completion report
-- [0025 Web app: design and experience pass](completed/v1/0025_web_design_and_experience_pass.md) — completed 2026-10-19; see its completion report
-- [0026 Server gaps behind the web design pass: review, merged entries, cue evidence, archive snapshot, throughput](completed/v1/0026_server_gaps_behind_the_web_design_pass.md) — completed 2026-10-19; see its completion report
-- [0027 Importer fidelity: faithful dates, prompt authorship, agora selection](completed/v1/0027_importer_fidelity_dates_outcomes_agora_selection.md) — completed 2026-10-19; see its completion report
-- [0028 Recall relevance, the standard packet budget, contradiction candidates and read-only reads](completed/v1/0028_recall_relevance_budget_and_read_paths.md) — completed 2026-10-19; see its completion report
-- [0030 Graph communities, their labels, and statistics](completed/v1/0030_graph_communities_labels_and_statistics.md) — completed 2026-10-19; see its completion report
+- [0001 Notebook store and data model](completed/v1/0001_notebook_store_and_data_model.md) — completed 2026-10-19
+- [0002 Capture, attachments and de-duplication](completed/v1/0002_capture_and_deduplication.md) — completed 2026-10-19
+- [0003 Processing pipeline: context, extraction, linking, revision](completed/v1/0003_processing_pipeline_extraction_linking_revision.md) — completed 2026-10-19
+- [0004 Queue, priorities and the processor automation](completed/v1/0004_queue_priorities_and_processor_automation.md) — completed 2026-10-19
+- [0005 Flows bundle and headless runner](completed/v1/0005_flows_bundle_and_headless_runner.md) — completed 2026-10-19
+- [0006 Recall tiers, then-versus-now and reflect](completed/v1/0006_recall_tiers_then_now_and_reflect.md) — completed 2026-10-19
+- [0007 Gateway integration seam (tools binding, read API, app catalog)](completed/v1/0007_gateway_integration_seam.md) — completed 2026-10-19
+- [0008 Web app: Capture, Graph, Remember](completed/v1/0008_web_app_capture_graph_remember.md) — completed 2026-10-19
+- [0009 Apple Watch app](completed/v1/0009_apple_watch_app.md) — completed 2026-10-19
+- [0010 Importers: Claude sessions, agora hub, Markdown, files](completed/v1/0010_importers.md) — completed 2026-10-19
+- [0011 Corpus evaluation: the framework's own history](completed/v1/0011_corpus_evaluation_framework_history.md) — completed 2026-10-19
+- [0012 Documentation core set and llms files](completed/v1/0012_documentation_core_set.md) — completed 2026-10-19
+- [0013 CLI](completed/v1/0013_cli.md) — completed 2026-10-19
+- [0024 Processing quality and speed on a local model](completed/v1/0024_processing_quality_and_speed.md) — completed 2026-10-19
+- [0025 Web app: design and experience pass](completed/v1/0025_web_design_and_experience_pass.md) — completed 2026-10-19
+- [0026 Server gaps behind the web design pass: review, merged entries, cue evidence, archive snapshot, throughput](completed/v1/0026_server_gaps_behind_the_web_design_pass.md) — completed 2026-10-19
+- [0027 Importer fidelity: faithful dates, prompt authorship, agora selection](completed/v1/0027_importer_fidelity_dates_outcomes_agora_selection.md) — completed 2026-10-19
+- [0028 Recall relevance, the standard packet budget, contradiction candidates and read-only reads](completed/v1/0028_recall_relevance_budget_and_read_paths.md) — completed 2026-10-19
+- [0030 Graph communities, their labels, and statistics](completed/v1/0030_graph_communities_labels_and_statistics.md) — completed 2026-10-19
 
 ### Recurrent
 - [0901 Backlog and docs hygiene](recurrent/0901_backlog_and_docs_hygiene.md)

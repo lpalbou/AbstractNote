@@ -32,5 +32,12 @@ The report exists, numbers reproduce from the notebook, graded samples are liste
 
 ## Metadata
 - Created: 2026-10-19
-- Status: planned
+- Status: completed
+- Completed: 2026-10-19
 - Area: evaluation
+
+## Completion report
+- Date: 2026-10-19
+- Landed: the evaluation itself (untracked/eval/REPORT.md: imports 3,987 notes, 29 processed with the first prompts, graded samples, six forgotten items, prompt/importer/recall findings) and everything it triggered: processing steps 1–4 (0024), importer fidelity (0027), recall relevance and budgets (0028), canonical entity names and repair (W15), communities and statistics (0030). The operator's notebook on the local test gateway then had 201 notes understood (200 chosen + live captures) with 33 labelled themes.
+- Validation: real-model smoke runs on the test gateway after each change; gates 02–05 (untracked/reviews/).
+- Findings carried forward: the remaining 300 prioritised + 3,510 removed notes are backlog 0029 (one-line resume); long documents cost up to 15 minutes each (AbstractCore truncated-answer escalation filed upstream); the MLX Outlines path cannot use the prompt cache; one theme can still be held together by one long note's statements.
