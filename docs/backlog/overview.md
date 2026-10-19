@@ -7,11 +7,11 @@ Last reconciled: 2026-10-19 (evening pass)
 |---|---|
 | planned | 2 (track `planned/v1/`: 0011, 0029) |
 | proposed | 10 (0014-0023) |
-| completed | 17 (track `completed/v1/`) |
+| completed | 18 (track `completed/v1/`) |
 | deprecated | 0 |
 | recurrent | 1 (0901) |
 
-Next free id: 0030.
+Next free id: 0031.
 
 ## Priorities and recommended order
 1. 0011 Corpus evaluation (finish grading, feed prompt findings into a tuning item)
@@ -53,6 +53,7 @@ Next free id: 0030.
 - [0026 Server gaps behind the web design pass: review, merged entries, cue evidence, archive snapshot, throughput](completed/v1/0026_server_gaps_behind_the_web_design_pass.md) — completed 2026-10-19; see its completion report
 - [0027 Importer fidelity: faithful dates, prompt authorship, agora selection](completed/v1/0027_importer_fidelity_dates_outcomes_agora_selection.md) — completed 2026-10-19; see its completion report
 - [0028 Recall relevance, the standard packet budget, contradiction candidates and read-only reads](completed/v1/0028_recall_relevance_budget_and_read_paths.md) — completed 2026-10-19; see its completion report
+- [0030 Graph communities, their labels, and statistics](completed/v1/0030_graph_communities_labels_and_statistics.md) — completed 2026-10-19; see its completion report
 
 ### Recurrent
 - [0901 Backlog and docs hygiene](recurrent/0901_backlog_and_docs_hygiene.md)
