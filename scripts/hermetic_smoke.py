@@ -13,7 +13,8 @@ What it checks (exit 1 on the first failure, with the reason):
   - the processor automation is created, ``automation.run_now`` starts a drain, a second one while it
     runs answers 409 ``automation_busy``, and the queue drains;
   - after the first drain ``GET /note/status`` reports both automations ``healthy`` on the served
-    workflows and a further ``processor/ensure`` answers ``kept`` for both (W14);
+    workflows and a further ``processor/ensure`` answers ``kept`` for both (W14), and every tool the
+    flows' ``tool_calls`` nodes use (src/abstractnote/flows/json) is in both automations' allowed_tools;
   - a note-recall run started with ``prompt`` (the agent contract) answers on ``output.response`` (S3);
   - a retraction through the API closes the statement's window where it opens and is listed in the
     delta as ``kind: retracted`` in plain words (no vocabulary term);
@@ -179,6 +180,33 @@ def ledger(gw: str, token: str, run_id: str) -> list:
     return list(body.get("items") or [])
 
 
+FLOWS_JSON = Path(__file__).resolve().parent.parent / "src" / "abstractnote" / "flows" / "json"
+
+
+def flow_tools(flows_dir: Path = FLOWS_JSON) -> Dict[str, set]:
+    """``{flow file: tools}`` its ``tool_calls`` nodes may call (``allowed_tools`` of each such node,
+    embedded subflows included): what an automation's run-level ``_runtime.allowed_tools`` must cover."""
+    out: Dict[str, set] = {}
+
+    def walk(obj: Any, acc: set) -> None:
+        if isinstance(obj, dict):
+            if obj.get("type") == "tool_calls" or (obj.get("data") or {}).get("nodeType") == "tool_calls":
+                data = obj.get("data") or {}
+                for key in ("effectConfig", "pinDefaults"):
+                    acc.update(t for t in ((data.get(key) or {}).get("allowed_tools") or []) if isinstance(t, str))
+            for v in obj.values():
+                walk(v, acc)
+        elif isinstance(obj, list):
+            for v in obj:
+                walk(v, acc)
+
+    for f in sorted(flows_dir.glob("*.json")):
+        acc: set = set()
+        walk(json.loads(f.read_text(encoding="utf-8")), acc)
+        out[f.name] = acc
+    return out
+
+
 def start_run(gw: str, token: str, flow_id: str, input_data: Dict[str, Any], session_id: str,
               fixture: Optional[str] = None) -> str:
     body = {"bundle_id": "abstractnote", "flow_id": flow_id, "session_id": session_id, "input_data": input_data}
@@ -292,6 +320,18 @@ def main() -> int:
     check(status == 200 and [(kept.get(k) or {}).get("action") for k in ("processor", "reflect")] == ["kept", "kept"]
           and kept.get("processor_id") == proc and kept.get("created") == [], f"a second ensure did not keep both: {kept}")
     report["automations_health"] = {k: autos[k]["target"] for k in ("processor", "reflect")}
+    # Every tool a flow's tool_calls nodes use is allowed by the automations' run input (a tool missing
+    # there fails its step: "Tool ... is not allowed for this node or run"; lead, 2026-10-19).
+    used = flow_tools()
+    every = set().union(*used.values()) if used else set()
+    check(len(used) >= 4 and "note_communities_recompute" in every, f"no tool_calls nodes found under {FLOWS_JSON}: {used}")
+    for kind in ("processor", "reflect"):
+        status, got = call(gw, "GET", f"/api/gateway/automations/{ens[f'{kind}_id']}", token=a)
+        allowed = set(((((got or {}).get("definition") or {}).get("target") or {}).get("input_data") or {})
+                      .get("_runtime", {}).get("allowed_tools") or [])
+        check(status == 200 and every <= allowed,
+              f"the {kind} automation does not allow {sorted(every - allowed)} that the flows call")
+    report["flow_tools_allowed"] = len(every)
     # A second note, then "Process now": 200, and a repeat while it runs is 409 automation_busy.
     second = start_run(gw, a, "note-capture", {"text": "Dana moved the Pareto deadline to next week.",
                                                "idempotency_key": str(uuid.uuid4()), "session_id": session}, session)

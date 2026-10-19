@@ -10,7 +10,7 @@ and ``GET /note/status`` / ``GET /note/queue`` can report it.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 #: Automation states (the runtime's ``automation_status``) in which an automation still runs.
 RUNNING_STATES = ("active", "paused")
@@ -29,13 +29,18 @@ def automation_health(
     state: Optional[str] = None,
     target: Optional[str] = None,
     paused: bool = False,
+    allowed_tools: Optional[Iterable[str]] = None,
+    expected_tools: Optional[Iterable[str]] = None,
 ) -> Dict[str, Any]:
     """``{id, state, target, healthy, reason, paused}`` of one automation.
 
     ``state`` is ``None`` when the automation does not exist (never created, or gone);
     ``served_version`` is ``None`` when the gateway has no note workflows loaded. ``reason`` is
     one sentence when ``healthy`` is false, else ``None``. A paused automation is healthy (the
-    user paused it; it resumes on the current workflows).
+    user paused it; it resumes on the current workflows). ``allowed_tools`` is the tool list frozen
+    in the automation's run input (``_runtime.allowed_tools``); when ``expected_tools`` is given, a
+    different set is unhealthy: a tool added since then would be refused at its step ("Tool ... is
+    not allowed for this node or run").
     """
     out: Dict[str, Any] = {"id": automation_id or None, "state": state or "missing", "target": target,
                            "healthy": False, "reason": None, "paused": bool(paused)}
@@ -50,6 +55,8 @@ def automation_health(
     elif target != expected_workflow_id(bundle_id, served_version, flow_id):
         out["reason"] = (f"It runs {target or 'an unknown workflow'}, which this server no longer serves "
                          f"(it serves {expected_workflow_id(bundle_id, served_version, flow_id)}).")
+    elif expected_tools is not None and set(allowed_tools or ()) != set(expected_tools):
+        out["reason"] = "The tool list changed."
     else:
         out["healthy"] = True
     return out

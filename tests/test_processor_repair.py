@@ -183,3 +183,35 @@ def test_ensure_never_archives_when_the_note_workflows_are_not_served(gw, monkey
     assert r.status_code == 503 and "not loaded" in r.json()["detail"]
     assert "automation.archive" not in _commands(svc, first["processor_id"])
     assert router.notebook_for(_plane(gw, "alice")).meta("processor_automation_id") == first["processor_id"]
+
+
+def test_health_is_false_when_the_frozen_tool_list_differs():
+    full = ["note_search", "note_communities_recompute"]
+    assert _health(allowed_tools=full, expected_tools=list(reversed(full)))["healthy"] is True
+    short = _health(allowed_tools=["note_search"], expected_tools=full)
+    assert short["healthy"] is False and short["reason"] == "The tool list changed."
+    assert _health(allowed_tools=full + ["note_gone"], expected_tools=full)["healthy"] is False
+
+
+def test_ensure_recreates_an_automation_created_with_a_shorter_tool_list(gw, monkeypatch):
+    """Live 2026-10-19: a reflect automation made before note_communities_recompute existed failed at
+    that step ("Tool ... is not allowed for this node or run") while ensure answered kept."""
+    import abstractnote.tools as note_tools
+
+    full = list(note_tools.TOOL_NAMES)
+    c, h = gw["client"], gw["alice"]
+    monkeypatch.setattr(note_tools, "TOOL_NAMES", [t for t in full if not t.startswith("note_communities_")])
+    first = c.post(ENSURE, headers=h).json()
+    old = _definition(c, h, first["reflect_id"])["target"]["input_data"]["_runtime"]["allowed_tools"]
+    assert "note_communities_recompute" not in old
+    monkeypatch.setattr(note_tools, "TOOL_NAMES", full)
+    status = c.get("/api/gateway/note/status", headers=h).json()["automations"]
+    for kind in ("processor", "reflect"):
+        assert status[kind]["healthy"] is False and status[kind]["reason"] == "The tool list changed."
+    second = c.post(ENSURE, headers=h).json()
+    for kind in ("processor", "reflect"):
+        assert second[kind]["action"] == "recreated" and second[kind]["reason"] == "The tool list changed."
+    tools = _definition(c, h, second["reflect_id"])["target"]["input_data"]["_runtime"]["allowed_tools"]
+    assert set(tools) == set(full)
+    third = c.post(ENSURE, headers=h).json()
+    assert (third["processor"]["action"], third["reflect"]["action"]) == ("kept", "kept")

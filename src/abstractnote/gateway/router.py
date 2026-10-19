@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict
 
-from ..flows.build import BUNDLE_ID, DRAIN_DEFAULTS, NOTE_TOOLS
+from ..flows.build import BUNDLE_ID, DRAIN_DEFAULTS
 from .tools import notebook_dir
 
 router = APIRouter(prefix="/note", tags=["note"])
@@ -578,8 +578,10 @@ def _read_automation(svc: Any, automation_id: Optional[str]) -> Optional[Dict[st
     definition = (vars_obj.get("_meta") or {}).get("automation") or {}
     state = (vars_obj.get("_runtime") or {}).get("automation") or {}
     target = definition.get("target") if isinstance(definition.get("target"), dict) else {}
+    runtime_in = ((target.get("input_data") or {}).get("_runtime") or {}) if isinstance(target.get("input_data"), dict) else {}
+    tools = runtime_in.get("allowed_tools") if isinstance(runtime_in, dict) else None
     return {"state": automation_status(controller), "target": target.get("workflow_id"),
-            "paused": bool(state.get("paused"))}
+            "paused": bool(state.get("paused")), "allowed_tools": list(tools) if isinstance(tools, list) else []}
 
 
 #: (kind, notebook meta key, flow) of the two automations a notebook runs.
@@ -588,11 +590,13 @@ AUTOMATIONS = (("processor", "processor_automation_id", "note-drain"),
 
 
 def _health(svc: Any, automation_id: Optional[str], flow_id: str, served: Optional[str]) -> Dict[str, Any]:
+    from abstractnote.tools import TOOL_NAMES
+
     from .health import automation_health
 
     seen = _read_automation(svc, automation_id)
     return automation_health(automation_id=automation_id, flow_id=flow_id, bundle_id=BUNDLE_ID,
-                             served_version=served, **(seen or {}))
+                             served_version=served, expected_tools=TOOL_NAMES, **(seen or {}))
 
 
 def automations_health(nb: Any, svc: Any) -> Dict[str, Any]:
@@ -650,8 +654,9 @@ def ensure_automations(nb: Any, svc: Any, principal: Any) -> Dict[str, Any]:
     An automation targets the concrete ``abstractnote@<version>:<flow>`` it was created on (the
     gateway resolves the version at creation and the runtime starts exactly that workflow; there is
     no "latest" target), so after an upgrade the old one fails on its next occurrence. Each stored
-    automation is kept when it runs the served version and is active or paused; otherwise (another
-    version, failed, completed, archived or gone) it is archived and a new one is created from the
+    automation is kept when it runs the served version with the current tool list
+    (``abstractnote.tools.TOOL_NAMES``, frozen in its ``_runtime.allowed_tools``) and is active or
+    paused; otherwise (another version or tool list, failed, completed, archived or gone) it is archived and a new one is created from the
     current settings, paused again when the old one was paused.
 
     The processor's first drain runs at once (an empty queue completes without a model call); the
@@ -660,6 +665,8 @@ def ensure_automations(nb: Any, svc: Any, principal: Any) -> Dict[str, Any]:
     processor's replacement also starts one interval later, so no drain runs before the pause lands.
     """
     from abstractgateway.routes.automations import CreateAutomationBody, _command
+
+    from abstractnote.tools import TOOL_NAMES
 
     served = _served_version(svc)
     if served is None:  # never archive what cannot be replaced
@@ -699,7 +706,7 @@ def ensure_automations(nb: Any, svc: Any, principal: Any) -> Dict[str, Any]:
         body = CreateAutomationBody(
             request_id=request_id, title=title,
             target={"bundle_ref": BUNDLE_ID, "flow_id": flow_id,
-                    "input_data": {**inputs, "_runtime": {"allowed_tools": list(NOTE_TOOLS)}}},
+                    "input_data": {**inputs, "_runtime": {"allowed_tools": list(TOOL_NAMES)}}},
             trigger={"source_id": "schedule", "source_version": 2, "config": dict(schedule)},
             context={"mode": "independent"},
         )

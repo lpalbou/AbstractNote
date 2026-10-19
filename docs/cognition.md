@@ -158,8 +158,12 @@ flowchart TD
   the note workflows, so after an upgrade and a restart the old automation's next occurrence fails
   ("Workflow 'abstractnote@0.1.0:note-drain' not found in registry") and the queue stops draining. A
   revision of the target cannot fix it either: a failed automation accepts only `archive`.
+  The same holds for the tool list: the automation's run input freezes `_runtime.allowed_tools`
+  at creation, so a tool added later (`note_communities_recompute` in reflect) is refused at its
+  step ("Tool ... is not allowed for this node or run").
   So `processor/ensure` repairs: it keeps an automation that is active or paused on the served
-  version; any other one (another version, failed, completed, archived, gone) is archived (its
+  version with exactly the current tools (`abstractnote.tools.TOOL_NAMES`); any other one (another
+  version or tool list, failed, completed, archived, gone) is archived (its
   history stays) and replaced by a new automation built from the current settings
   (`processor_schedule`, `reflect_schedule`, the models), under the next request generation
   (`abstractnote-processor-<n>`) so the replacement is a new automation, never the failed one. A
