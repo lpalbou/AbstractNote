@@ -215,6 +215,12 @@ day = nb.day("2026-09-14")
 needed for the built-in hashing embedder; `abstractnote.store.embeddings.openai_compat_embedder(url,
 model)` for an OpenAI-compatible server). `Notebook` is also a context manager.
 
+Opening a notebook never finishes a revision that a stopped process left half applied, because
+another process may still be applying it: reads (status, search, entity cards, days, changes, open
+loops) leave it alone. Writes finish it first (capture, filing, processing, user actions, archiving,
+through `Notebook.recover_pending()`), and so do `Notebook.recover()`, `Notebook.open(dir, recover=True)`
+and `abstractnote recover`.
+
 The note tools and the flows run headlessly too:
 
 ```python
@@ -249,6 +255,7 @@ abstractnote day YYYY-MM-DD --notebook DIR [--tz ZONE]
 abstractnote status --notebook DIR
 abstractnote changes --notebook DIR [--since CURSOR_OR_ISO] [--limit N]
 abstractnote process --local --notebook DIR --provider P --model M [--max-items 20] [--budget-s 90]
+abstractnote recover --notebook DIR                              # finish revisions a stopped process left half applied
 abstractnote rebuild --notebook DIR [--reembed]                  # replay revisions into fresh stores
 abstractnote bundle [--out DIR]                                  # pack abstractnote@<version>.flow
 

@@ -6,6 +6,10 @@ gateway the notebook is ``<gateway data dir>/abstractnote``, or
 ``--gateway URL --token T`` client mode is not available yet and says so.
 Output is JSON on stdout. Exit codes: 0 done, 2 bad input, 3 a part of
 AbstractNote that is not installed or not available yet.
+
+Read commands (search, entity, day, status, changes) never finish a half-applied revision:
+another process may still be applying it. ``capture`` and ``process`` recover first, and
+``abstractnote recover`` does it on request.
 """
 
 from __future__ import annotations
@@ -79,6 +83,9 @@ def build_parser() -> argparse.ArgumentParser:
     _common(p)
     p.add_argument("--since")
     p.add_argument("--limit", type=int, default=50)
+
+    p = sub.add_parser("recover", help="finish revisions a stopped process left half applied")
+    _common(p)
 
     p = sub.add_parser("rebuild", help="replay revisions into fresh index and triple stores")
     _common(p)
@@ -213,6 +220,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         elif args.command == "changes":
             with _open(args) as nb:
                 out = nb.changes(args.since, args.limit)
+        elif args.command == "recover":
+            with _open(args) as nb:
+                nb.require_embedder()
+                out = {"recovered": nb.recover()}
         elif args.command == "rebuild":
             with _open(args) as nb:
                 out = nb.rebuild(reembed=args.reembed, embedder=_embedder(args))

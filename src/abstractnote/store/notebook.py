@@ -11,7 +11,9 @@ Revisions are the truth. :meth:`Notebook.apply_revision` is the only path that
 changes entities, claims, relations, topics and tasks, and it is idempotent.
 Write order: revision row (intent) -> index projection (one transaction that
 sets ``applied_index``) -> vectors -> AbstractMemory projection -> ``applied_kg``.
-:meth:`Notebook.recover` replays revisions whose flags are not both set.
+:meth:`Notebook.recover` replays revisions whose flags are not both set. Reads never recover:
+only writes (capture, filing, processing, user actions) and an explicit ``abstractnote recover``
+do, so a read in one process never finishes a revision another process is still applying.
 """
 
 from __future__ import annotations
@@ -111,12 +113,16 @@ class Notebook:
 
     @classmethod
     def open(cls, root: "str | os.PathLike[str]", *, embedder: Optional[TextEmbedder] = None,
-             recover: bool = True) -> "Notebook":
+             recover: bool = False) -> "Notebook":
         """Open (and create when missing) a notebook directory.
 
         ``embedder`` selects the embedding space. A new notebook without one uses
         the deterministic :class:`HashingEmbedder`. A notebook pinned to another
         model must be opened with that model (or rebuilt with ``reembed=True``).
+
+        Opening never replays half-applied revisions unless ``recover=True``: the
+        write paths (capture, filing, processing, user actions) recover first, and
+        reads leave another process's revision alone (:meth:`recover_pending`).
         """
         root = Path(root).expanduser()
         root.mkdir(parents=True, exist_ok=True)
@@ -285,6 +291,13 @@ class Notebook:
                 done.append(row["revision_id"])
         return done
 
+    def recover_pending(self) -> List[str]:
+        """Recovery before a write: :meth:`recover` when this notebook can embed (a notebook opened
+        without its embedder cannot write, and the write itself says so). Read paths never call it."""
+        if self.cache.embedder is None:
+            return []
+        return self.recover()
+
     def revision(self, revision_id: str) -> Optional[Dict[str, Any]]:
         row = self.store.revision_row(revision_id)
         return self.store.revision_dict(row) if row else None
@@ -299,6 +312,7 @@ class Notebook:
             "target": target, "at": at, "ops": ops, "summary": summary,
             "source": {"client": client, "account": account},
         }
+        self.recover_pending()
         return self.apply_revision(rev)
 
     def close_task(self, task_id: str, account: Optional[str], note: Optional[str] = None, *,
@@ -348,11 +362,13 @@ class Notebook:
 
         kwargs.setdefault("vision", self.extractors.get("vision"))
         kwargs.setdefault("stt", self.extractors.get("stt"))
+        self.recover_pending()
         return capture(self, text, **kwargs)
 
     def file_note(self, note_id: str, **kwargs: Any) -> Dict[str, Any]:
         from ..ingest.capture import file_note
 
+        self.recover_pending()
         return file_note(self, note_id, **kwargs)
 
     def note(self, note_id: str) -> Optional[Dict[str, Any]]:
@@ -422,6 +438,7 @@ class Notebook:
         """Archive a note (never deleted); it leaves lists and search but keeps its links."""
         if self.store.note_row(note_id) is None:
             raise ValueError("That note is not in this notebook.")
+        self.recover_pending()
         now = ids.utc_now()
         with self.store.tx() as c:
             c.execute("UPDATE notes SET archived_at=COALESCE(archived_at, ?), status='archived' WHERE note_id=?",
