@@ -154,6 +154,23 @@ def test_reflect_candidates_carry_their_rule(nb):
     assert note_resurface(ToolContext(nb=nb), limit=5, since="")["items"] is not None
 
 
+def test_contradictions_are_disputed_pairs_never_several_objects(nb):
+    """Several current objects of one predicate (mentions, parts, a person on two projects) are ordinary;
+    only a note's explicit contradiction (disputed_with) is a candidate (eval REPORT section 2)."""
+    from test_store_support import claim, create, rev, t
+
+    nb.apply_revision(rev("rv_a", t(1), create("ex:person-dana", "Dana"), create("ex:project-lut", "LUT"),
+                          create("ex:project-kiwi", "Kiwi"),
+                          claim("cl_a", "ex:person-dana", "schema:participant", "ex:project-lut", at=t(1)),
+                          claim("cl_b", "ex:person-dana", "schema:participant", "ex:project-kiwi", at=t(1)),
+                          claim("cl_c", "ex:project-lut", "ex:budget", literal="25k", at=t(1))))
+    assert nb.contradictions()["items"] == []
+    nb.apply_revision(rev("rv_b", t(2), claim("cl_d", "ex:project-lut", "ex:budget", literal="55k", at=t(2),
+                                              certainty="disputed", disputes="cl_c")))
+    [item] = nb.contradictions()["items"]
+    assert item["rule"] == "disputed_pair" and {c["claim_id"] for c in item["claims"]} == {"cl_c", "cl_d"}
+
+
 def test_insights_cues_and_ack(nb):
     h = history(nb)
     ctx = ToolContext(nb=nb)

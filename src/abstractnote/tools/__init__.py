@@ -162,9 +162,9 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
         """Open tasks and unanswered questions."""
         return rec.note_open_loops(ctx, limit, since)
 
-    @tool(name="note_contradictions", description="Disputed statements and subjects with several current values.")
+    @tool(name="note_contradictions", description="Statements a note said disagree with an earlier one.")
     def note_contradictions(limit: int = 20, since: Optional[str] = None) -> Dict[str, Any]:
-        """Disputed statements and subjects with several current values."""
+        """Statements a note said disagree with an earlier one (disputed pairs)."""
         return rec.note_contradictions(ctx, limit, since)
 
     @tool(name="note_resurface", description="Entities and topics gone quiet that relate to recent notes.")

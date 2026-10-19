@@ -187,7 +187,7 @@ candidates; the model judges and writes:
 | Tool | Candidates |
 |---|---|
 | `note_open_loops` | open tasks older than N days, questions never answered |
-| `note_contradictions` | disputed claim pairs, single-valued predicates with several active objects |
+| `note_contradictions` | disputed claim pairs only (a note's `contradicts` decision); a subject with several current objects of one predicate is never a candidate, since processing records no single-valued predicates |
 | `note_resurface` | entities and topics active before but silent for N days that relate to recent notes |
 | `note_anniversaries` | notes from the same day in previous months or years |
 

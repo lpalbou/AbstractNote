@@ -83,6 +83,10 @@ def open_loops(nb: Any, limit: int = 20, since: Optional[str] = None, *, now: Op
 
 
 def contradictions(nb: Any, limit: int = 20, since: Optional[str] = None) -> Dict[str, Any]:
+    """Claim pairs a note marked as disagreeing (rule ``disputed_pair``: the linking's ``contradicts``
+    decision, stored as ``disputed_with``). Nothing else is a candidate: processing records no
+    single-valued predicates, and a subject with several current objects of one predicate (several
+    mentions, several parts) is ordinary, so it is never offered as a contradiction."""
     limit = clamp_limit(limit, 20, 200)
     since_n = _since(since)
     q = nb.store.q
@@ -107,19 +111,6 @@ def contradictions(nb: Any, limit: int = 20, since: Optional[str] = None) -> Dic
                           "text": " / ".join(_claim_line(c) for c in claims),
                           "note_ids": sorted({c["note_id"] for c in claims if c["note_id"]}),
                           "entity_ids": sorted({nb.store.canonical(c["subject_id"]) for c in claims})})
-    groups: Dict[Tuple[str, str], List[Any]] = {}
-    for r in q("SELECT * FROM claims WHERE status='active' AND valid_until IS NULL ORDER BY observed_at, claim_id"):
-        groups.setdefault((nb.store.canonical(r["subject_id"]), r["predicate"]), []).append(r)
-    for (subject, predicate), rows in sorted(groups.items()):
-        objects = {(nb.store.canonical(x["object_id"]) if x["object_id"] else None, x["object_literal"]) for x in rows}
-        if len(objects) < 2:
-            continue
-        if since_n and max(x["observed_at"] for x in rows) < since_n:
-            continue
-        claims = [nb.store.claim_dict(x) for x in rows]
-        items.append({"rule": "several_active_objects", "subject_id": subject, "predicate": predicate,
-                      "claims": claims, "text": " / ".join(_claim_line(c) for c in claims),
-                      "note_ids": sorted({c["note_id"] for c in claims if c["note_id"]}), "entity_ids": [subject]})
     return {"items": items[:limit]}
 
 

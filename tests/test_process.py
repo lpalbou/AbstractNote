@@ -207,7 +207,7 @@ def test_contradiction_marks_both_disputed(nb):
     from abstractnote.recall.reflect import contradictions
 
     rules = {i["rule"] for i in contradictions(nb)["items"]}
-    assert {"disputed_pair", "several_active_objects"} <= rules
+    assert rules == {"disputed_pair"}
 
 
 def test_task_close_by_index(nb):
