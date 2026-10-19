@@ -39,7 +39,8 @@ export function ProgressLine({ values, ticks, markers, tip, label, height = 170,
     if (active === null || !tipRef.current || !wrap.current) return setTipBox(null);
     const p = pts[active];
     const r = tipRef.current.getBoundingClientRect();
-    const c = placeCard(p.x, Math.min(p.y, base - 10), r.width, r.height, { left: 0, top: -8, width, height: height + 16 }, 12, 0);
+    // Beside the point, preferably below the line (it may hang under the chart) so the line stays in sight.
+    const c = placeCard(p.x, Math.max(p.y, base - 20), r.width, r.height, { left: 0, top: -8, width, height: height + Math.max(16, r.height) }, 12, 0);
     setTipBox(c);
   }, [active, pts, width, height, base]);
 

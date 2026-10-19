@@ -152,7 +152,7 @@ export function countIn(times: number[], ps: Period[]): number[] {
   return ps.map((p) => times.filter((t) => t >= p.start && t < p.end).length);
 }
 
-export type Progression = { periods: Period[]; added: number[]; total: number[]; replaced: number[]; changes: Array<{ index: number; texts: string[] }> };
+export type Progression = { periods: Period[]; added: number[]; total: number[]; replaced: number[]; changes: Array<{ index: number; at: number; texts: string[] }> };
 
 /**
  * An entity's progression: statements about it per period (added), their running total (the line), and the
@@ -168,7 +168,10 @@ export function progression(statements: string[], turns: Array<{ at: string; tex
   const added = countIn(times, ps);
   const replaced = countIn(turnTimes.map((t) => t.t), ps);
   const changes = ps
-    .map((p, index) => ({ index, texts: turnTimes.filter((t) => t.t >= p.start && t.t < p.end).map((t) => t.text) }))
+    .map((p, index) => {
+      const inside = turnTimes.filter((t) => t.t >= p.start && t.t < p.end).sort((a, b) => a.t - b.t);
+      return { index, at: inside.length ? inside[0].t : p.start, texts: inside.map((t) => t.text) };
+    })
     .filter((c) => c.texts.length);
   return { periods: ps, added, total: cumulative(added), replaced, changes };
 }

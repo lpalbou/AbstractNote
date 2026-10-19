@@ -146,6 +146,32 @@ async function main() {
             check(/view=picture/.test(page.url()) && /community=/.test(page.url()), "a theme card opens the picture with that theme alone");
           }
         }
+        if (want("progression")) {
+          // An entity's "How it evolved": the progression line above the milestones.
+          await page.goto(`${base}#/graph?focus=ex:project-lut&entity=ex:project-lut`);
+          await page.reload();
+          await page.locator(".nt-progress-line .nt-pline__line").waitFor();
+          await page.locator(".nt-milestone").first().waitFor();
+          await page.waitForTimeout(300);
+          const changes = await page.locator(".nt-progress-line .nt-pline__mark--changed").count();
+          check(changes === 2, `${theme} ${width}: LUT's progression marks its two replaced beliefs (${changes})`);
+          const line = await page.locator(".nt-progress-line").boundingBox();
+          const first = await page.locator(".nt-milestone").first().boundingBox();
+          check(line && first && line.y + line.height <= first.y, `${theme} ${width}: the line sits above the milestones`);
+          await page.locator(".nt-progress-line").scrollIntoViewIfNeeded();
+          await page.screenshot({ path: name("entity-progression") });
+          const m = await page.locator(".nt-progress-line .nt-pline__mark--changed circle").first().boundingBox();
+          await page.mouse.move(m.x + m.width / 2, m.y + m.height / 2);
+          await page.locator(".nt-progress-line .nt-pline__tip").waitFor();
+          await page.waitForTimeout(200);
+          const tipText = await page.locator(".nt-progress-line .nt-pline__tip").innerText();
+          check(/→/.test(tipText), `${theme} ${width}: the tooltip on a change says what changed (${tipText.replace(/\s+/g, " ").slice(0, 70)})`);
+          const tip = await page.locator(".nt-progress-line .nt-pline__tip").boundingBox();
+          const vp = page.viewportSize();
+          check(tip && tip.x >= 0 && tip.x + tip.width <= vp.width, `${theme} ${width}: the tooltip is inside the window`);
+          await page.screenshot({ path: name("entity-progression-tooltip") });
+          await page.mouse.move(1, 1);
+        }
         if (want("isolate")) {
           await page.goto(`${base}#/graph?view=picture&community=${encodeURIComponent(lutTheme)}`);
           await page.reload();

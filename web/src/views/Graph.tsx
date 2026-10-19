@@ -13,7 +13,9 @@ import { capitalize, claimSentence, longDate, predicateWords, shortDate } from "
 import { EmptyNotebook, EntityChip, KindBadge, NoteLink, ReadView, Section, Sparkline, openClaim, openNote, openRelation, useApp } from "../components/common";
 import { ThenNowCard } from "../components/ThenNow";
 import { TimeScrubber } from "../components/TimeScrubber";
-import { OverviewView } from "./Overview";
+import { OverviewView, monthTicks } from "./Overview";
+import { ProgressLine, type LineMarker } from "../components/ProgressLine";
+import { progression } from "../lib/progression";
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -753,7 +755,12 @@ export function EntityPanel({ id, at, onFocus, slots, onTheme }: { id: string; a
                 {e.last_seen ? ` · latest ${shortDate(e.last_seen)}` : ""}
               </p>
               <AfTabs tabs={tabs} value={tab} onChange={(v) => setTab(v as PanelTab)} ariaLabel={`About ${e.name}`} idBase={`nt-entity-${e.entity_id.replace(/[^A-Za-z0-9_-]/g, "-")}`}>
-                {tab === "evolved" ? <Evolved steps={steps} at={at} loading={timeline.loading || thenNow.loading} /> : null}
+                {tab === "evolved" ? (
+                  <>
+                    <EntityProgression name={e.name} timeline={timeline.data?.items} turning={tn?.turning} />
+                    <Evolved steps={steps} at={at} loading={timeline.loading || thenNow.loading} />
+                  </>
+                ) : null}
                 {tab === "changes" ? (
                   <>
                     {(e.beliefs || []).length ? (
@@ -853,6 +860,46 @@ function MergedFrom({ ids }: { ids: string[] }) {
   const entries = useRead<EntityRecord[]>(() => Promise.all(ids.slice(0, 5).map((id) => api.get<EntityRecord>(`note/entities/${encodeURIComponent(id)}`, { as_merged: true }))), [api, ids.join(",")]);
   if (!entries.data?.length) return null;
   return <p className="nt-muted">{`Includes ${entries.data.map((r) => `${r.name} (${r.note_count === 1 ? "1 note" : `${r.note_count} notes`})`).join(", ")}`}</p>;
+}
+
+/**
+ * The progression line above the milestones (deck slides 04, 19, 20): what was stated about it, as a running
+ * total period by period, with a marker where a belief was replaced (its words in the tooltip). Shown once
+ * there are at least two statements to draw a line through.
+ */
+function EntityProgression({ name, timeline, turning }: { name: string; timeline: TimelineItem[] | undefined; turning: Array<{ at: string; text: string }> | undefined }) {
+  const p = useMemo(() => progression((timeline || []).filter((i) => i.type === "claim").map((i) => i.at), turning || []), [timeline, turning]);
+  if (p.periods.length < 2 || (p.total[p.total.length - 1] || 0) < 2) return null;
+  const weekly = p.periods[0].label === "week";
+  const when = (i: number) => {
+    const d = new Date(p.periods[i].start + 12 * 3600_000).toISOString();
+    return weekly ? `Week of ${shortDate(d)}` : new Date(d).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  };
+  const markers: LineMarker[] = p.changes.map((c) => ({ index: c.index, kind: "changed", label: shortDate(new Date(c.at).toISOString()) }));
+  return (
+    <figure className="nt-progress-line">
+      <figcaption className="nt-progress-line__head">
+        <span className="nt-eyebrow">{`Beliefs about ${name}, ${weekly ? "week" : "month"} by ${weekly ? "week" : "month"}`}</span>
+        {p.changes.length ? <span className="nt-pline__legend-item nt-pline__legend-item--changed">{p.changes.length === 1 ? "1 change" : `${p.changes.length} changes`}</span> : null}
+      </figcaption>
+      <ProgressLine
+        values={p.total}
+        height={124}
+        ticks={monthTicks(p.periods.map((x) => new Date(x.start + 12 * 3600_000).toISOString().slice(0, 10)))}
+        markers={markers}
+        unit="Beliefs stated so far"
+        label={`Beliefs stated about ${name}: ${p.total[p.total.length - 1]} in all, ${p.changes.length} replaced. Use the arrow keys for each ${weekly ? "week" : "month"}.`}
+        tip={(i) => ({
+          title: when(i),
+          rows: [
+            { value: String(p.total[i]), label: "stated so far", key: "line" },
+            { value: `+${p.added[i]}`, label: weekly ? "this week" : "this month" },
+            ...(p.changes.find((c) => c.index === i)?.texts || []).map((t) => ({ value: "", label: capitalize(t), key: "changed" as const })),
+          ],
+        })}
+      />
+    </figure>
+  );
 }
 
 /** Milestones, oldest first; those after the chosen date stay in place, faded, so nothing jumps. */

@@ -511,6 +511,12 @@ p { margin: 0 0 6px; }
 .nt-summary { font-size: var(--font-size-base); line-height: 1.55; margin: 2px 0 4px; }
 .nt-notyet { padding: 12px 14px; border-radius: var(--radius-md); border: 1px dashed var(--nt-line-strong); color: var(--text-secondary); }
 
+/* How it evolved: the progression line above the milestones. */
+.nt-progress-line { margin: 0 0 14px; padding: 10px 12px 8px; border-radius: var(--radius-md); border: 1px solid var(--nt-line); background: var(--nt-raise); }
+.nt-progress-line__head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 10px; }
+.nt-progress-line__head .nt-eyebrow { margin: 0; }
+.nt-progress-line .nt-pline__legend-item { color: var(--text-muted); font-size: var(--font-size-sm); }
+
 /* How it evolved: milestones on a spectrum line, oldest first. */
 .nt-milestones { list-style: none; margin: 0; padding: 0 0 0 22px; position: relative; display: flex; flex-direction: column; gap: 10px; }
 .nt-milestones::before { content: ""; position: absolute; left: 6px; top: 10px; bottom: 10px; width: 2px; border-radius: 2px; background: var(--nt-spectrum-down); opacity: 0.8; }

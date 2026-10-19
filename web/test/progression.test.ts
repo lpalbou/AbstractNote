@@ -89,6 +89,8 @@ describe("an entity's progression", () => {
     expect(p.added.reduce((a, b) => a + b, 0)).toBe(5);
     expect(p.changes.map((c) => c.texts)).toEqual([["LUT budget: 40k → 25k"], ["LUT status: exploring → stopped"]]);
     expect(p.replaced.filter(Boolean)).toHaveLength(2);
+    // A marker is labelled with the day of its change, not the start of its week (2 October, in the week of 28 September).
+    expect(new Date(p.changes[1].at).toISOString().slice(0, 10)).toBe("2026-10-02");
     expect(p.total.every((v, i) => i === 0 || v >= p.total[i - 1])).toBe(true);
   });
   it("nothing stated: an empty progression", () => {
