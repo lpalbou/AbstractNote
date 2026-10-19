@@ -76,7 +76,10 @@ def test_status_for_a_signed_in_user(gw):
     assert r.status_code == 200, r.text
     body = r.json()
     assert "notebook" not in body  # no server paths to clients
-    assert body["automations"] == {"processor_id": None, "reflect_id": None}
+    autos = body["automations"]
+    assert (autos["processor_id"], autos["reflect_id"]) == (None, None)
+    assert {k: (autos[k]["state"], autos[k]["healthy"]) for k in ("processor", "reflect")} == {
+        "processor": ("missing", False), "reflect": ("missing", False)}
     assert body["embedding_pin"]["model_id"]
     assert (_plane(gw, "alice") / "abstractnote" / "note.sqlite3").is_file()
 

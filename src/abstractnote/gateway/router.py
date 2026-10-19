@@ -170,7 +170,7 @@ def _automation_ids(nb: Any) -> Dict[str, Optional[str]]:
 async def note_status(request: Request) -> Dict[str, Any]:
     def work(nb, svc, principal):
         out = dict(_call(nb, "status"))
-        out["automations"] = _automation_ids(nb)
+        out["automations"] = automations_health(nb, svc)
         out.pop("notebook", None)  # a server path: not for clients
         return out
 
@@ -467,7 +467,7 @@ async def note_insight_ack(request: Request, note_id: str) -> Dict[str, Any]:
 async def note_queue(request: Request, limit: int = Query(50, ge=1, le=500)) -> Dict[str, Any]:
     def work(nb, svc, p):
         out = dict(_call(nb.queue, "summary", limit=limit))
-        out["automations"] = _automation_ids(nb)
+        out["automations"] = automations_health(nb, svc)
         out["processor"] = _call(nb, "processor_throughput")
         return out
 
@@ -501,19 +501,61 @@ def _model_inputs(model_setting: Any) -> Dict[str, Any]:
     return {k: str(m[k]) for k in ("provider", "model") if isinstance(m.get(k), str) and m[k].strip()}
 
 
-def _existing_automation(svc: Any, automation_id: Optional[str]) -> Optional[str]:
+def _served_version(svc: Any) -> Optional[str]:
+    """The note workflows' version this gateway serves (the latest loaded), ``None`` when none is."""
+    from abstractgateway.routes.gateway import _resolve_bundle_from_host
+
+    try:
+        version, _bundle = _resolve_bundle_from_host(host=svc.host, bundle_id=BUNDLE_ID, bundle_version=None)
+    except HTTPException as e:
+        if e.status_code in (400, 404):
+            return None
+        raise
+    return str(version)
+
+
+def _read_automation(svc: Any, automation_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """``{state, target, paused}`` of an automation in the caller's plane, ``None`` when absent."""
     if not automation_id:
         return None
     from abstractgateway.automation_errors import AutomationError
     from abstractgateway.routes.automations import load_automation_controller
+    from abstractruntime.automations.models import automation_status
 
     try:
-        load_automation_controller(svc, automation_id)
+        controller = load_automation_controller(svc, automation_id)
     except AutomationError as e:
         if e.status_code == 404:
             return None
         raise
-    return automation_id
+    vars_obj = controller.vars if isinstance(controller.vars, dict) else {}
+    definition = (vars_obj.get("_meta") or {}).get("automation") or {}
+    state = (vars_obj.get("_runtime") or {}).get("automation") or {}
+    target = definition.get("target") if isinstance(definition.get("target"), dict) else {}
+    return {"state": automation_status(controller), "target": target.get("workflow_id"),
+            "paused": bool(state.get("paused"))}
+
+
+#: (kind, notebook meta key, flow) of the two automations a notebook runs.
+AUTOMATIONS = (("processor", "processor_automation_id", "note-drain"),
+               ("reflect", "reflect_automation_id", "note-reflect"))
+
+
+def _health(svc: Any, automation_id: Optional[str], flow_id: str, served: Optional[str]) -> Dict[str, Any]:
+    from .health import automation_health
+
+    seen = _read_automation(svc, automation_id)
+    return automation_health(automation_id=automation_id, flow_id=flow_id, bundle_id=BUNDLE_ID,
+                             served_version=served, **(seen or {}))
+
+
+def automations_health(nb: Any, svc: Any) -> Dict[str, Any]:
+    """``{processor_id, reflect_id, processor: {id, state, target, healthy, reason, paused}, reflect: {...}}``."""
+    served = _served_version(svc)
+    out: Dict[str, Any] = dict(_automation_ids(nb))
+    for kind, meta_key, flow_id in AUTOMATIONS:
+        out[kind] = _health(svc, nb.meta(meta_key), flow_id, served)
+    return out
 
 
 def _after_one_interval(every: str) -> Dict[str, str]:
@@ -526,43 +568,108 @@ def _after_one_interval(every: str) -> Dict[str, str]:
     return {"start_at": format_timestamp(datetime.now(timezone.utc) + parse_duration(every, field="every"))}
 
 
+def _archive(svc: Any, principal: Any, automation_id: str) -> None:
+    """Archive a replaced automation (history kept; nothing runs again). Idempotent per automation."""
+    from abstractgateway.automation_errors import AutomationError
+    from abstractgateway.routes.automations import _command
+
+    try:
+        _command(svc, principal, automation_id, f"abstractnote-replaced-{automation_id}", "automation.archive", {})
+    except AutomationError as e:
+        if e.status_code not in (404, 409):  # gone or already archived: nothing to do
+            raise
+
+
+def _create_or_refind(svc: Any, principal: Any, body: Any) -> str:
+    """``_create``; a concurrent ensure that already created this request's automation is that one."""
+    from abstractgateway.automation_errors import AutomationError
+    from abstractgateway.routes.automations import _create, _principal_tuple
+    from abstractruntime.automations.models import automation_id_for
+
+    try:
+        return str(_create(svc, principal, body)["automation_id"])
+    except AutomationError as e:
+        if not (e.status_code == 409 and isinstance(e.detail, dict) and e.detail.get("reason_code") == "identity_conflict"):
+            raise
+        tenant, user = _principal_tuple(principal)
+        existing = automation_id_for(tenant=tenant, user=user, request_id=str(body.request_id))
+        if _read_automation(svc, existing) is None:
+            raise
+        return existing
+
+
 def ensure_automations(nb: Any, svc: Any, principal: Any) -> Dict[str, Any]:
-    """Create the processor and reflect automations of this notebook when missing (idempotent).
+    """Create the processor and reflect automations of this notebook, or repair them (idempotent).
+
+    An automation targets the concrete ``abstractnote@<version>:<flow>`` it was created on (the
+    gateway resolves the version at creation and the runtime starts exactly that workflow; there is
+    no "latest" target), so after an upgrade the old one fails on its next occurrence. Each stored
+    automation is kept when it runs the served version and is active or paused; otherwise (another
+    version, failed, completed, archived or gone) it is archived and a new one is created from the
+    current settings, paused again when the old one was paused.
 
     The processor's first drain runs at once (an empty queue completes without a model call); the
     reflect automation's first occurrence is one interval after creation, so opening an empty
-    notebook never starts an answering-model call ("Reflect now" = ``automation.run_now``)."""
-    from abstractgateway.routes.automations import CreateAutomationBody, _create
+    notebook never starts an answering-model call ("Reflect now" = ``automation.run_now``). A paused
+    processor's replacement also starts one interval later, so no drain runs before the pause lands.
+    """
+    from abstractgateway.routes.automations import CreateAutomationBody, _command
 
+    served = _served_version(svc)
+    if served is None:  # never archive what cannot be replaced
+        raise HTTPException(status_code=503, detail="The note workflows are not loaded on this server; restart it "
+                                                    "or reinstall AbstractNote, then try again.")
     settings = nb.settings()
     reflect_every = str((settings.get("reflect_schedule") or {}).get("every") or "7d")
     processor = dict(settings["processor_schedule"])
     out: Dict[str, Any] = {}
     created: List[str] = []
     plans = (
-        ("processor_automation_id", PROCESSOR_REQUEST_ID, "Process my notes", "note-drain",
+        ("processor", "processor_automation_id", PROCESSOR_REQUEST_ID, "Process my notes", "note-drain",
          {**DRAIN_DEFAULTS, "max_items": int(processor["max_items"]), **_model_inputs(settings.get("filing_model"))},
          {"kind": "every", "every": str(processor["every"])}),
-        ("reflect_automation_id", REFLECT_REQUEST_ID, "Reflect on my notes", "note-reflect",
+        ("reflect", "reflect_automation_id", REFLECT_REQUEST_ID, "Reflect on my notes", "note-reflect",
          {"limit": 10, **_model_inputs(settings.get("answering_model"))},
          {"kind": "every", "every": reflect_every, **_after_one_interval(reflect_every)}),
     )
-    for meta_key, request_id, title, flow_id, inputs, schedule in plans:
-        automation_id = _existing_automation(svc, nb.meta(meta_key))
-        if automation_id is None:
-            body = CreateAutomationBody(
-                request_id=request_id, title=title,
-                target={"bundle_ref": BUNDLE_ID, "flow_id": flow_id,
-                        "input_data": {**inputs, "_runtime": {"allowed_tools": list(NOTE_TOOLS)}}},
-                trigger={"source_id": "schedule", "source_version": 2, "config": dict(schedule)},
-                context={"mode": "independent"},
-            )
-            automation_id = str(_create(svc, principal, body)["automation_id"])
-            nb.set_meta(meta_key, automation_id)
-            if flow_id == "note-drain":  # what GET /note/queue reports as the processor's throughput
-                nb.set_meta("processor_schedule_applied", processor)
-            created.append(flow_id)
-        out[meta_key.replace("_automation_id", "_id")] = automation_id
+    for kind, meta_key, request_id, title, flow_id, inputs, schedule in plans:
+        previous = nb.meta(meta_key)
+        health = _health(svc, previous, flow_id, served)
+        if health["healthy"]:
+            out[kind] = {"id": previous, "action": "kept", "reason": None}
+            out[f"{kind}_id"] = previous
+            continue
+        paused = bool(health.get("paused"))
+        if previous:
+            if health["state"] not in ("missing", "archived"):
+                _archive(svc, principal, previous)
+            # A replacement is a new request: the request id names the automation (same id + same
+            # request = the same automation), so each repair takes the next generation.
+            generation = int(nb.meta(f"{meta_key}_generation") or 0) + 1
+            request_id = f"{request_id}-{generation}"
+            nb.set_meta(f"{meta_key}_generation", generation)
+        if paused and "start_at" not in schedule:
+            schedule = {**schedule, **_after_one_interval(str(schedule["every"]))}
+        body = CreateAutomationBody(
+            request_id=request_id, title=title,
+            target={"bundle_ref": BUNDLE_ID, "flow_id": flow_id,
+                    "input_data": {**inputs, "_runtime": {"allowed_tools": list(NOTE_TOOLS)}}},
+            trigger={"source_id": "schedule", "source_version": 2, "config": dict(schedule)},
+            context={"mode": "independent"},
+        )
+        automation_id = _create_or_refind(svc, principal, body)
+        if paused:
+            _command(svc, principal, automation_id, f"abstractnote-keep-paused-{automation_id}", "automation.pause", {})
+        nb.set_meta(meta_key, automation_id)
+        if flow_id == "note-drain":  # what GET /note/queue reports as the processor's throughput
+            nb.set_meta("processor_schedule_applied", processor)
+        created.append(flow_id)
+        entry: Dict[str, Any] = {"id": automation_id, "action": "recreated" if previous else "created",
+                                 "reason": health["reason"] if previous else None}
+        if previous:
+            entry["previous_id"] = previous
+        out[kind] = entry
+        out[f"{kind}_id"] = automation_id
     out["created"] = created
     return out
 
