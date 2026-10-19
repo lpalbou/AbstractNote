@@ -282,6 +282,44 @@ def test_markdown_dates_titles_and_git_provenance(tmp_path):
     assert report.skipped["excluded_dir"] == 1 and report.skipped["empty"] == 1
 
 
+def test_markdown_dates_from_fields_then_git_following_moves_then_mtime(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / "planned").mkdir(parents=True)
+    (repo / "completed").mkdir()
+    d1 = {"GIT_AUTHOR_DATE": "2026-02-01T10:00:00+00:00", "GIT_COMMITTER_DATE": "2026-02-01T10:00:00+00:00"}
+    d2 = {"GIT_AUTHOR_DATE": "2026-03-01T10:00:00+00:00", "GIT_COMMITTER_DATE": "2026-03-01T10:00:00+00:00"}
+    moved_body = "# 0001 Moved item\n\n" + "".join(f"Line {i} of a long enough body.\n" for i in range(30))
+    (repo / "planned" / "0001_moved.md").write_text(moved_body)
+    (repo / "planned" / "0002_created.md").write_text(
+        "# 0002 Created line\n\n## Summary\nx\n\n## Metadata\n- **Created:** 2025-12-24\n- Status: completed\n"
+        "- **Completed:** 2026-01-05 (released as x 1.0)\n")
+    (repo / "planned" / "0003_date.md").write_text("# 0003 Date line\n**Date**: 2025-11-02  \n**Status**: Accepted\n")
+    late = "# 0004 Late date\n\n" + "".join(f"Line {i}.\n" for i in range(45)) + "Date: 2025-01-01\nCompleted: N/A\n"
+    (repo / "planned" / "0004_late.md").write_text(late)
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "add", env=d1)
+    _git(repo, "mv", "planned/0001_moved.md", "completed/0001_moved.md")
+    (repo / "completed" / "0001_moved.md").write_text(moved_body + "- Completed: 2026-03-01\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "complete", env=d2)
+    (repo / "loose.md").write_text("# Loose\n")  # not committed
+    os.utime(repo / "loose.md", (1760000000, 1760000000))
+    drafts, report = _drafts(markdown.drafts, path=repo)
+    got = {d.source["origin"]["path"]: (d.occurred_at, d.source["origin"]["date_basis"]) for d in drafts}
+    assert got == {"completed/0001_moved.md": ("2026-02-01T10:00:00Z", "git_added"),  # the add before the move
+                   "planned/0002_created.md": ("2025-12-24T00:00:00Z", "created_line"),
+                   "planned/0003_date.md": ("2025-11-02T00:00:00Z", "date_line"),
+                   "planned/0004_late.md": ("2026-02-01T10:00:00Z", "git_added"),     # a late Date: is not the creation
+                   "loose.md": (importers.iso_from_epoch(1760000000), "file_mtime")}
+    by_path = {d.source["origin"]["path"]: d for d in drafts}
+    moved = by_path["completed/0001_moved.md"].source["origin"]
+    assert moved["added_as"] == "planned/0001_moved.md" and moved["completed"] == "2026-03-01"
+    assert by_path["planned/0002_created.md"].source["origin"]["completed"] == "2026-01-05"
+    assert "completed" not in by_path["planned/0004_late.md"].source["origin"]  # "N/A" is not a date
+    assert "added_as" not in by_path["planned/0003_date.md"].source["origin"]
+
+
 def test_markdown_edit_is_a_new_note(tmp_path, notebook):
     root = tmp_path / "notes"
     root.mkdir()
