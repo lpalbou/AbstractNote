@@ -3,14 +3,14 @@ import { AfChip, AfChipButton, Icon } from "@abstractframework/ui-kit";
 import { ApiError, errorSentence } from "../lib/api";
 import { splitCitations } from "../lib/citations";
 import { useDebounced, useRead, type ReadState } from "../lib/hooks";
-import { CURSOR_KEY, REVIEW_KEPT_KEY, readLocal, writeLocal } from "../lib/local";
+import { CURSOR_KEY, readLocal, writeLocal } from "../lib/local";
 import { noteAbout, useAt, type Route } from "../lib/nav";
-import { proposedMatches, type ProposedMatch } from "../lib/review";
+import { fetchReview, reviewAction, runReviewAction } from "../lib/review";
 import { followRun, runErrorText, startFlow, stepWords } from "../lib/runs";
-import type { Changes, Cue, EntityCard, EntityListItem, Insight, ListOf, Note, NoteRef, Overview, RecallOutput, RelationTimeline, Revision, SearchResult, Task, ThenNowRaw, Topic } from "../lib/types";
+import type { Changes, Cue, EntityListItem, EntityCard, EntityRecord, Insight, ListOf, Note, NoteRef, Overview, RecallOutput, RelationTimeline, ReviewAction, ReviewItem, ReviewSide, SearchResult, Task, ThenNowRaw, Topic } from "../lib/types";
 import { claimsById, thenNowView } from "../lib/shapes";
-import { NOTE_KINDS, capitalize, claimSentence, longDate, relative, shortDate, topicLabel } from "../lib/words";
-import { basisLine, whyLine } from "../lib/why";
+import { NOTE_KINDS, claimSentence, longDate, relative, shortDate, topicLabel } from "../lib/words";
+import { basisLine, reviewWhy, whyLine } from "../lib/why";
 import { Disclose, EntityChip, KindBadge, NoteLink, ReadView, Section, Sparkline, openClaim, openEntity, openNote, useApp } from "../components/common";
 import { ThenNowCard } from "../components/ThenNow";
 import { TimeScrubber } from "../components/TimeScrubber";
@@ -25,7 +25,7 @@ const EFFORTS: Array<[Effort, string, string]> = [
 export function RememberView({ route }: { route: Route }) {
   const { api } = useApp();
   // Cue cards are unacknowledged insights (docs/data-model.md): read once here so the other sections
-  // do not show the same insight twice, and so each cue can say why it surfaced.
+  // do not show the same insight twice. Each cue carries its evidence (why it surfaced).
   const cues = useRead<ListOf<Cue>>(() => api.get<ListOf<Cue>>("note/cues", { limit: 3 }), [api]);
   const insights = useRead<ListOf<Insight>>(() => api.get<ListOf<Insight>>("note/insights", { acked: false, limit: 20 }), [api]);
   const cueIds = useMemo(() => new Set((cues.data?.items || []).map((c) => c.cue_id)), [cues.data]);
@@ -33,7 +33,7 @@ export function RememberView({ route }: { route: Route }) {
     <div className="nt-remember">
       <div className="nt-remember__top">
         <SinceLastLooked hide={cueIds} />
-        <CueCards cues={cues} insights={insights.data?.items || []} />
+        <CueCards cues={cues} />
       </div>
       <AskPanel initialTopic={route.params.get("topic") || ""} />
       <ThenVersusNow />
@@ -187,8 +187,7 @@ export function readMark(): { cursor: string; at: string } {
 
 // ---------------------------------------------------------------- cue cards
 
-function CueCards({ cues, insights }: { cues: ReadState<ListOf<Cue>>; insights: Insight[] }) {
-  const byId = useMemo(() => new Map(insights.map((i) => [i.note_id, i])), [insights]);
+function CueCards({ cues }: { cues: ReadState<ListOf<Cue>> }) {
   return (
     <Section id="cues" title="Worth a thought">
       <ReadView read={cues} what="your prompts" empty={(c) => (c.items.length ? false : "No prompts right now.")}>
@@ -197,7 +196,7 @@ function CueCards({ cues, insights }: { cues: ReadState<ListOf<Cue>>; insights: 
             {c.items.map((cue) => (
               <article key={cue.cue_id} className="nt-card nt-cue">
                 <p className="nt-cue__text">{cue.text}</p>
-                <WhySurfaced id={cue.cue_id} kind={cue.kind} evidence={byId.get(cue.cue_id)?.evidence_note_ids || []} />
+                <WhySurfaced id={cue.cue_id} kind={cue.kind} evidence={cue.evidence_note_ids || []} />
                 <div className="nt-actions">
                   <button type="button" className="nt-btn nt-btn--primary nt-btn--sm" onClick={() => noteAbout("cue", cue.cue_id, cue.text)}>
                     Answer
@@ -805,48 +804,31 @@ function Revisit({ insights, hide }: { insights: ReadState<ListOf<Insight>>; hid
 
 // ---------------------------------------------------------------- review
 
-function readKept(): string[] {
-  try {
-    const v = JSON.parse(readLocal(REVIEW_KEPT_KEY) || "[]");
-    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
 /**
- * Matches the notebook made on its own (two entries joined as one), to keep or undo. Shown only when there
- * is one: built from the revision feed's merge operations (lib/review.ts).
+ * What the notebook proposed or did on its own and you may want to check (GET /note/review): close matches,
+ * merges it made, disagreements it kept. Each item brings its own actions. Shown only when there is one.
  */
 function ReviewInbox() {
   const { api } = useApp();
-  const revisions = useRead<ListOf<Revision>>(() => api.get<ListOf<Revision>>("note/revisions", { limit: 200 }), [api]);
-  const [kept, setKept] = useState<string[]>(readKept);
+  const review = useRead<ListOf<ReviewItem>>(() => fetchReview(api), [api]);
   const [line, setLine] = useState("");
-  const matches = useMemo(() => proposedMatches(revisions.data?.items || []).filter((m) => !kept.includes(m.key)), [revisions.data, kept]);
-  if (!matches.length && !line) return null;
-  const keep = (m: ProposedMatch) => {
-    const next = [...kept, m.key];
-    writeLocal(REVIEW_KEPT_KEY, JSON.stringify(next));
-    setKept(next);
-    setLine("Kept. It stays joined.");
-  };
+  const items = review.data?.items || [];
+  if (!items.length && !line) return null;
   return (
-    <Section id="review" title="To review" sub="matches your notebook made on its own">
+    <Section id="review" title="To review" sub="what your notebook decided on its own">
       {line ? (
         <p className="nt-muted" role="status">
           {line}
         </p>
       ) : null}
       <ul className="nt-list nt-review nt-revisit">
-        {matches.map((m) => (
-          <ReviewItem
-            key={m.key}
-            match={m}
-            onKeep={() => keep(m)}
-            onUndone={() => {
-              setLine("Undone. They are separate again.");
-              revisions.reload();
+        {items.map((it) => (
+          <ReviewCard
+            key={it.review_id}
+            item={it}
+            onDone={(words) => {
+              setLine(words);
+              review.reload();
             }}
           />
         ))}
@@ -855,57 +837,105 @@ function ReviewInbox() {
   );
 }
 
-function ReviewItem({ match, onKeep, onUndone }: { match: ProposedMatch; onKeep: () => void; onUndone: () => void }) {
+function SideChip({ side }: { side: ReviewSide }) {
+  if (side.type === "entity") return <EntityChip entity={{ entity_id: side.id, name: side.name, kind: side.kind || "thing" }} />;
+  return (
+    <button type="button" className="nt-link" onClick={() => openClaim(side.id)}>
+      <span className="nt-link__title">{side.name}</span>
+    </button>
+  );
+}
+
+type Pending = { action: ReviewAction; question: string; verb: string; done: string; reason?: string; danger?: boolean } | null;
+
+function ReviewCard({ item, onDone }: { item: ReviewItem; onDone: (words: string) => void }) {
   const { api } = useApp();
-  const into = useRead<EntityCard>(() => api.get<EntityCard>(`note/entities/${encodeURIComponent(match.into_id)}`), [api, match.into_id]);
-  const [confirming, setConfirming] = useState(false);
+  const [pending, setPending] = useState<Pending>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const undo = async () => {
+  const [a, b] = item.sides;
+  // A merge's first side is the entry that was joined in: its own record (as_merged) says what it was.
+  const own = useRead<EntityRecord | null>(() => (item.kind === "merge" && a?.type === "entity" ? api.get<EntityRecord>(`note/entities/${encodeURIComponent(a.id)}`, { as_merged: true }) : Promise.resolve(null)), [api, item.kind, a?.id]);
+  const run = async (p: NonNullable<Pending>) => {
     setBusy(true);
     setError("");
     try {
-      await api.post(`note/entities/${encodeURIComponent(match.into_id)}/unmerge`, { from_id: match.from_id, reason: "Undone in the web app." });
-      onUndone();
+      await runReviewAction(api, p.action, p.reason);
+      setPending(null);
+      onDone(p.done);
     } catch (e) {
-      setError(e instanceof ApiError && e.status === 401 ? "Please sign in again." : "This could not be undone.");
+      setError(e instanceof ApiError && e.status === 401 ? "Please sign in again." : "That did not work; try again.");
     } finally {
       setBusy(false);
     }
   };
+  const confirm = reviewAction(item, "confirm");
+  const unmerge = reviewAction(item, "unmerge");
+  const apart = reviewAction(item, "keep_apart");
+  const retracts = item.actions.filter((x) => x.action === "retract");
+  const head =
+    item.kind === "merge" ? "Joined" : item.kind === "close_match" ? "Maybe the same" : "These disagree";
   return (
-    <li className="nt-item">
+    <li className="nt-item" data-kind={item.kind}>
       <p className="nt-review__pair">
-        <span>Joined into</span>
-        {into.data ? <EntityChip entity={into.data} /> : <span>…</span>}
-        <span className="nt-link__date">{shortDate(match.at)}</span>
+        <span>{head}</span>
+        {a ? <SideChip side={a} /> : null}
+        <span className="nt-muted">{item.kind === "merge" ? "into" : item.kind === "close_match" ? "and" : "versus"}</span>
+        {b ? <SideChip side={b} /> : null}
+        <span className="nt-link__date">{shortDate(item.at)}</span>
       </p>
-      {match.summary ? <p>{capitalize(match.summary)}</p> : null}
-      {match.reason ? <p className="nt-muted">{`Why: ${match.reason}`}</p> : null}
+      <p className="nt-muted">{reviewWhy(item.why)}</p>
+      {own.data ? (
+        <p className="nt-muted">{`${own.data.name} on its own: ${own.data.note_count === 1 ? "1 note" : `${own.data.note_count} notes`}${own.data.summary ? `; ${own.data.summary}` : ""}`}</p>
+      ) : null}
+      {item.reason ? <p className="nt-muted">{`Why: ${item.reason}`}</p> : null}
+      {item.evidence_note_ids.length ? (
+        <div className="nt-chips">
+          {item.evidence_note_ids.slice(0, 3).map((id) => (
+            <EvidenceLink key={id} id={id} />
+          ))}
+        </div>
+      ) : null}
       {error ? <p className="nt-error-text">{error}</p> : null}
-      {confirming ? (
+      {pending ? (
         <div className="nt-confirm" role="group" aria-label="Confirm">
-          <span>Undo this match? The two entries become separate again; your notes stay.</span>
-          <button type="button" className="nt-btn nt-btn--sm" onClick={() => setConfirming(false)} disabled={busy}>
-            Keep it
+          <span>{pending.question}</span>
+          <button type="button" className="nt-btn nt-btn--sm" onClick={() => setPending(null)} disabled={busy}>
+            Not now
           </button>
-          <button type="button" className="nt-btn nt-btn--danger nt-btn--sm" onClick={() => void undo()} disabled={busy}>
-            {busy ? "Undoing…" : "Undo"}
+          <button type="button" className={`nt-btn nt-btn--sm${pending.danger ? " nt-btn--danger" : ""}`} onClick={() => void run(pending)} disabled={busy}>
+            {busy ? "Saving…" : pending.verb}
           </button>
         </div>
       ) : (
         <div className="nt-actions">
-          {match.note_id ? (
-            <button type="button" className="nt-btn nt-btn--quiet nt-btn--sm" onClick={() => openNote(match.note_id!)}>
-              The note behind it
+          {item.kind === "merge" && confirm ? (
+            <button type="button" className="nt-btn nt-btn--sm" disabled={busy} onClick={() => void run({ action: confirm, question: "", verb: "", done: "Kept. They stay joined." })}>
+              Keep
             </button>
           ) : null}
-          <button type="button" className="nt-btn nt-btn--sm" onClick={onKeep}>
-            Keep
-          </button>
-          <button type="button" className="nt-btn nt-btn--sm" onClick={() => setConfirming(true)}>
-            Undo the match
-          </button>
+          {item.kind === "merge" && unmerge ? (
+            <button type="button" className="nt-btn nt-btn--sm" onClick={() => setPending({ action: unmerge, question: "Undo this match? The two entries become separate again; your notes stay.", verb: "Undo", done: "Undone. They are separate again.", danger: true })}>
+              Undo the match
+            </button>
+          ) : null}
+          {item.kind === "close_match" && confirm ? (
+            <button type="button" className="nt-btn nt-btn--sm" onClick={() => setPending({ action: confirm, question: `Join ${a?.name} into ${b?.name}? Their notes and links come together.`, verb: "Join them", done: "Joined." })}>
+              Same
+            </button>
+          ) : null}
+          {item.kind === "close_match" && apart ? (
+            <button type="button" className="nt-btn nt-btn--sm" disabled={busy} onClick={() => void run({ action: apart, question: "", verb: "", done: "Kept apart.", reason: "Kept apart in the web app." })}>
+              Not the same
+            </button>
+          ) : null}
+          {item.kind === "contradiction"
+            ? retracts.map((r, i) => (
+                <button key={r.path} type="button" className="nt-btn nt-btn--sm" onClick={() => setPending({ action: r, question: `Withdraw "${item.sides[i]?.name}"? The note stays.`, verb: "Withdraw", done: "Withdrawn.", reason: "Withdrawn while reviewing a disagreement in the web app.", danger: true })}>
+                  {`${item.sides[i]?.name} is wrong`}
+                </button>
+              ))
+            : null}
         </div>
       )}
     </li>

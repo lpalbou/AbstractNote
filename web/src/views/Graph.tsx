@@ -4,9 +4,9 @@ import { ApiError } from "../lib/api";
 import { useDebounced, useRead } from "../lib/hooks";
 import { layoutGraph } from "../lib/graph_layout";
 import { milestones } from "../lib/milestones";
-import { navigate, noteAbout, useAt, type Route } from "../lib/nav";
+import { momentParams, navigate, noteAbout, useAt, useByReceived, type Route } from "../lib/nav";
 import { thenNowView } from "../lib/shapes";
-import type { Day, EntityCard, EntityListItem, Graph, ListOf, ThenNowRaw, TimelineItem } from "../lib/types";
+import type { Day, EntityCard, EntityListItem, EntityRecord, Graph, ListOf, ThenNowRaw, TimelineItem } from "../lib/types";
 import { capitalize, claimSentence, longDate, predicateWords, shortDate } from "../lib/words";
 import { EntityChip, KindBadge, NoteLink, ReadView, Section, Sparkline, openClaim, openNote, openRelation, useApp } from "../components/common";
 import { ThenNowCard } from "../components/ThenNow";
@@ -29,7 +29,8 @@ export function GraphView({ route }: { route: Route }) {
   };
 
   const now = useRead<Graph>(() => api.get<Graph>("note/graph", { focus, depth, limit: 80 }), [api, focus.join(","), depth]);
-  const then = useRead<Graph | null>(() => (at ? api.get<Graph>("note/graph", { focus, depth, limit: 80, at }) : Promise.resolve(null)), [api, focus.join(","), depth, at]);
+  const [byReceived] = useByReceived();
+  const then = useRead<Graph | null>(() => (at ? api.get<Graph>("note/graph", { focus, depth, limit: 80, ...momentParams(at, byReceived) }) : Promise.resolve(null)), [api, focus.join(","), depth, at, byReceived]);
 
   return (
     <div className="nt-graph">
@@ -46,7 +47,7 @@ export function GraphView({ route }: { route: Route }) {
             }
           </ReadView>
         </div>
-        <TimeScrubber onDay={(d) => go({ day: d, entity: "" })} />
+        <TimeScrubber archive onDay={(d) => go({ day: d, entity: "" })} />
       </div>
       <aside className="nt-graph__side" aria-label="Details">
         {day ? <DayPanel date={day} onClose={() => go({ day: "" })} /> : selected ? <EntityPanel id={selected} at={at} onFocus={() => go({ focus: selected, entity: selected })} /> : <p className="nt-muted nt-pad">Pick a person, project or idea to see how it evolved, then choose a date to see what you knew then.</p>}
@@ -327,7 +328,8 @@ export function EntityPanel({ id, at, onFocus }: { id: string; at: string | null
   const { api } = useApp();
   const [, setAt] = useAt();
   const [tab, setTab] = useState<PanelTab>("evolved");
-  const card = useRead<EntityCard>(() => api.get<EntityCard>(`note/entities/${encodeURIComponent(id)}`, { at }), [api, id, at]);
+  const [byReceived] = useByReceived();
+  const card = useRead<EntityCard>(() => api.get<EntityCard>(`note/entities/${encodeURIComponent(id)}`, momentParams(at, byReceived)), [api, id, at, byReceived]);
   const timeline = useRead<{ items: TimelineItem[] }>(() => api.get<{ items: TimelineItem[] }>(`note/entities/${encodeURIComponent(id)}/timeline`), [api, id]);
   const thenNow = useRead<ThenNowRaw>(() => api.get<ThenNowRaw>(`note/entities/${encodeURIComponent(id)}/then-now`), [api, id]);
   // Milestones come from the card as it is now, so the list keeps its shape when the date changes.
@@ -374,8 +376,9 @@ export function EntityPanel({ id, at, onFocus }: { id: string; at: string | null
                   <p className="nt-meta">
                     {capitalize(e.kind)}
                     {e.aliases?.length ? ` · also ${e.aliases.join(", ")}` : ""}
-                    {at ? ` · as of ${longDate(at)}` : ""}
+                    {at ? (byReceived ? ` · as held on ${longDate(at)}` : ` · as of ${longDate(at)}`) : ""}
                   </p>
+                  {(e.merged_from || []).length ? <MergedFrom ids={e.merged_from || []} /> : null}
                 </div>
                 {timeline.data ? <Sparkline dates={noteDates} from={range.from} to={range.to} label={`${e.name} activity`} /> : null}
               </header>
@@ -481,6 +484,14 @@ export function EntityPanel({ id, at, onFocus }: { id: string; at: string | null
   );
 }
 
+/** The entries joined into this one, by their own names (`as_merged`: the entry's own record, W10). */
+function MergedFrom({ ids }: { ids: string[] }) {
+  const { api } = useApp();
+  const entries = useRead<EntityRecord[]>(() => Promise.all(ids.slice(0, 5).map((id) => api.get<EntityRecord>(`note/entities/${encodeURIComponent(id)}`, { as_merged: true }))), [api, ids.join(",")]);
+  if (!entries.data?.length) return null;
+  return <p className="nt-muted">{`Includes ${entries.data.map((r) => `${r.name} (${r.note_count === 1 ? "1 note" : `${r.note_count} notes`})`).join(", ")}`}</p>;
+}
+
 /** Milestones, oldest first; those after the chosen date stay in place, faded, so nothing jumps. */
 function Evolved({ steps, at, loading }: { steps: ReturnType<typeof milestones>; at: string | null; loading: boolean }) {
   if (!steps.length) return <p className="nt-muted">{loading ? "Loading…" : "One note so far; its history starts here."}</p>;
@@ -528,7 +539,9 @@ function DayPanel({ date, onClose }: { date: string; onClose: () => void }) {
       return "";
     }
   })();
-  const day = useRead<Day>(() => api.get<Day>(`note/day/${date}`, { tz }), [api, date]);
+  const [at] = useAt();
+  const [byReceived] = useByReceived();
+  const day = useRead<Day>(() => api.get<Day>(`note/day/${date}`, { tz, ...(byReceived && at ? { as_received: at } : {}) }), [api, date, byReceived, at]);
   return (
     <div className="nt-panel">
       <header className="nt-panel__head">

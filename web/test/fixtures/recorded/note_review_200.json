@@ -1,0 +1,160 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/gateway/note/review",
+    "body": null
+  },
+  "status": 200,
+  "body": {
+    "items": [
+      {
+        "review_id": "rq_1c35857fa3fe2eb88f9d1c230c",
+        "kind": "close_match",
+        "why": "unsure_match",
+        "reason": null,
+        "at": "2026-10-19T03:24:43Z",
+        "sides": [
+          {
+            "type": "entity",
+            "id": "ex:org-acme-corp",
+            "name": "Acme Corp",
+            "kind": "org",
+            "note_ids": [
+              "nt_zydepslutyu6fzpabrsraf6m5c"
+            ]
+          },
+          {
+            "type": "entity",
+            "id": "ex:org-acme",
+            "name": "Acme",
+            "kind": "org",
+            "note_ids": [
+              "nt_fk7ehc5walzrxvm7w55jv5o4bh"
+            ]
+          }
+        ],
+        "evidence_note_ids": [
+          "nt_zydepslutyu6fzpabrsraf6m5c",
+          "nt_fk7ehc5walzrxvm7w55jv5o4bh"
+        ],
+        "actions": [
+          {
+            "action": "confirm",
+            "method": "POST",
+            "path": "/note/review/rq_1c35857fa3fe2eb88f9d1c230c/confirm",
+            "body": {}
+          },
+          {
+            "action": "keep_apart",
+            "method": "POST",
+            "path": "/note/claims/cl_np6nqnuvykxz3xq4uw3r7y3iof/retract",
+            "body": {
+              "reason": null
+            }
+          }
+        ]
+      },
+      {
+        "review_id": "rq_15b675b7f7ef61af513b86e651",
+        "kind": "contradiction",
+        "why": "disputed_pair",
+        "reason": null,
+        "at": "2026-10-19T03:24:43Z",
+        "sides": [
+          {
+            "type": "claim",
+            "id": "cl_otwpergikobbyo4gfatjkvixk3",
+            "name": "LUT budget 40k",
+            "kind": null,
+            "note_ids": [
+              "nt_vbwu4bkytbpt25lb4np2hodmbx"
+            ]
+          },
+          {
+            "type": "claim",
+            "id": "cl_atzyf2yf44l33esnqfxrwhneso",
+            "name": "LUT budget 55k",
+            "kind": null,
+            "note_ids": [
+              "nt_yftocj4tsejdfji52suehychvf"
+            ]
+          }
+        ],
+        "evidence_note_ids": [
+          "nt_yftocj4tsejdfji52suehychvf",
+          "nt_vbwu4bkytbpt25lb4np2hodmbx"
+        ],
+        "actions": [
+          {
+            "action": "retract",
+            "method": "POST",
+            "path": "/note/claims/cl_otwpergikobbyo4gfatjkvixk3/retract",
+            "body": {
+              "reason": null
+            }
+          },
+          {
+            "action": "retract",
+            "method": "POST",
+            "path": "/note/claims/cl_atzyf2yf44l33esnqfxrwhneso/retract",
+            "body": {
+              "reason": null
+            }
+          }
+        ]
+      },
+      {
+        "review_id": "rq_05851216d3b896f9521bf10aba",
+        "kind": "merge",
+        "why": "merged_by_model",
+        "reason": "test",
+        "at": "2026-10-19T03:24:43Z",
+        "sides": [
+          {
+            "type": "entity",
+            "id": "ex:person-d-ng",
+            "name": "D. Ng",
+            "kind": "person",
+            "note_ids": [
+              "nt_h2dlmuogyqetrekp6xfgu2eh5c"
+            ]
+          },
+          {
+            "type": "entity",
+            "id": "ex:person-dana",
+            "name": "Dana",
+            "kind": "person",
+            "note_ids": [
+              "nt_mdqipeq6eohrepie467ards362",
+              "nt_nlsmt6ctjllw6anpccs4zecrey",
+              "nt_h2dlmuogyqetrekp6xfgu2eh5c"
+            ]
+          }
+        ],
+        "evidence_note_ids": [
+          "nt_nlsmt6ctjllw6anpccs4zecrey",
+          "nt_h2dlmuogyqetrekp6xfgu2eh5c",
+          "nt_mdqipeq6eohrepie467ards362"
+        ],
+        "actions": [
+          {
+            "action": "confirm",
+            "method": "POST",
+            "path": "/note/review/rq_05851216d3b896f9521bf10aba/confirm",
+            "body": {}
+          },
+          {
+            "action": "unmerge",
+            "method": "POST",
+            "path": "/note/entities/ex:person-dana/unmerge",
+            "body": {
+              "from_id": "ex:person-d-ng",
+              "reason": ""
+            }
+          }
+        ]
+      }
+    ],
+    "next_cursor": null
+  }
+}

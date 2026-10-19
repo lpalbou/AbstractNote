@@ -23,3 +23,13 @@ export function basisLine(count: number): string {
   if (!count) return "";
   return count === 1 ? "Based on 1 note" : `Based on ${count} notes`;
 }
+
+/** Why an item waits in "To review": the review rule (`why` on GET /note/review items) in plain words. */
+export const REVIEW_WHY: Record<string, string> = {
+  unsure_match: "Your notebook was not sure these are the same.",
+  merged_by_model: "Your notebook joined these on its own.",
+  disputed_pair: "Two of your notes disagree.",
+};
+export function reviewWhy(why: string | null | undefined): string {
+  return REVIEW_WHY[String(why || "")] || "Your notebook would like you to look at this.";
+}

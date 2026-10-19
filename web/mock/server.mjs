@@ -84,7 +84,7 @@ export function createMockGateway(options = {}) {
   // Pinned shapes: docs/api.md "Pinned response shapes".
   const entBrief = (id) => {
     const e = ent(id);
-    return { entity_id: e.entity_id, kind: e.kind, name: e.name, aliases: e.aliases, summary: e.summary, first_seen: e.first_seen, last_seen: e.last_seen, note_count: e.note_count, merged_into: null };
+    return { entity_id: e.entity_id, kind: e.kind, name: e.name, aliases: e.aliases, summary: e.summary, first_seen: e.first_seen, last_seen: e.last_seen, note_count: e.note_count, merged_into: e.merged_into || null };
   };
   const noteRef = (n) => ({ note_id: n.note_id, title: n.title, kind: n.kind, occurred_at: n.occurred_at, excerpt: n.text.length > 160 ? `${n.text.slice(0, 157)}…` : n.text });
   const insightView = (i) => ({ note_id: i.note_id, title: i.title, body: i.body, insight_kind: i.insight_kind, occurred_at: i.occurred_at, acked_at: i.acked_at, evidence_note_ids: i.evidence_note_ids, entity_ids: i.entity_ids });
@@ -681,7 +681,7 @@ export function createMockGateway(options = {}) {
         // W10: a cue carries its insight's evidence_note_ids and entity_ids (why it surfaced, without a second read).
         return { cue_id: i.note_id, text: i.body || i.title, kind: i.insight_kind, subject, evidence_note_ids: i.evidence_note_ids, entity_ids: i.entity_ids };
       });
-      return send(res, 200, { items });
+      return send(res, 200, { items, next_cursor: null });
     }
     if (np === "/review") return send(res, 200, { items: reviewItems().slice(0, Number(q.get("limit") || 50)).map(({ _target, ...it }) => it), next_cursor: null });
     m = np.match(/^\/review\/([^/]+)\/confirm$/);
@@ -704,7 +704,8 @@ export function createMockGateway(options = {}) {
       }
       const summary = it.kind === "close_match" ? `Joined ${it.sides[0].name} into ${it.sides[1].name}: you confirmed they are the same.` : `You confirmed that ${it.sides[0].name} and ${it.sides[1].name} are the same.`;
       db.revisions.push({ revision_id, note_id: null, at: when, recorded_at: when, summary, ops, action: "match.confirm", target: it.review_id, source: { client: "web", account: who.user_id } });
-      return send(res, 200, { revision_id, summary, entities_merged, review_id: it.review_id });
+      // The recorded answer's keys (untracked/fixtures/gateway/note_review_confirm_200.json, pinned in web/test/fixtures).
+      return send(res, 200, { revision_id, summary, entities_created: [], entities_merged, claims_added: [], claims_reinforced: [], claims_superseded: it.kind === "close_match" ? [it._target.claim_id] : [], claims_retracted: [], tasks_opened: [], tasks_closed: [], warnings: [], review_id: it.review_id });
     }
     if (np === "/graph") return send(res, 200, graph(list("focus"), at, Number(q.get("depth") || 1), Number(q.get("limit") || 60), q.get("as_received") || null));
     if (np === "/timeline") {
@@ -741,7 +742,15 @@ export function createMockGateway(options = {}) {
       for (const n of db.notes.values()) if (onDay(n.occurred_at) && heldNote(n, rcv)) for (const id of n.entity_ids) touched.set(id, { ...entRef(id), change: ent(id).created_at && onDay(ent(id).created_at) ? "created" : "touched" });
       const superseded = [...db.claims.values()].filter((c) => onDay(c.valid_until) && asHeld(c, rcv).status === "superseded" && heldClaim(c, rcv)).map(claimView);
       const created = [...db.entities.values()].filter((e) => onDay(e.created_at) && heldEntity(e.entity_id, rcv)).map((e) => e.entity_id);
-      return send(res, 200, { day, tz: q.get("tz") || "UTC", ...(rcv ? { as_received: rcv } : {}), notes, revisions: revs, entities_touched: [...touched.values()].map(({ change, ...e }) => e), entities_created: created, claims_superseded: superseded });
+      // The recorded day (untracked/fixtures/gateway/note_day_as_received_200.json): the day's bounds, notes in the
+      // store's list form, revisions without their ops, entities as briefs.
+      const listNote = (r) => {
+        const n = db.notes.get(r.note_id);
+        return { note_id: n.note_id, kind: n.kind, title: n.title, summary: n.summary, occurred_at: n.occurred_at, received_at: n.received_at, processed_at: n.processed_at, source: n.source, location: n.location, language: null, topics: n.topics, priority: n.priority, status: n.status, duplicate_of: null, session_id: null, run_id: null, archived_at: null, excerpt: r.excerpt };
+      };
+      const revFull = db.revisions.filter((r) => revs.some((x) => x.revision_id === r.revision_id)).map((r) => ({ revision_id: r.revision_id, note_id: r.note_id, attempt: 1, action: r.action || null, target: r.target || null, at: r.at, recorded_at: r.recorded_at, run_id: null, summary: r.summary, source: r.source || null, warnings: [], applied_index: true, applied_kg: true }));
+      const next = new Date(Date.parse(`${day}T00:00:00Z`) + 86400_000).toISOString().replace(".000Z", "Z");
+      return send(res, 200, { day, tz: q.get("tz") || "UTC", start: `${day}T00:00:00Z`, end: next, notes: notes.map(listNote), revisions: revFull, entities_touched: [...touched.keys()].map(entBrief), entities_created: created, claims_superseded: superseded, ...(rcv ? { as_received: rcv } : {}) });
     }
     if (np === "/revisions") return send(res, 200, { items: [...db.revisions].sort((a, b) => ms(b.recorded_at) - ms(a.recorded_at)).slice(0, Number(q.get("limit") || 50)), next_cursor: null });
     if (np === "/topics") {

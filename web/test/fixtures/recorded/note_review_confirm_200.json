@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/gateway/note/review/rq_05851216d3b896f9521bf10aba/confirm",
+    "body": {}
+  },
+  "status": 200,
+  "body": {
+    "revision_id": "rv_kcutebkrzpn2qu3ufrrsb32msz",
+    "summary": "You confirmed that D. Ng and Dana are the same.",
+    "entities_created": [],
+    "entities_merged": [],
+    "claims_added": [],
+    "claims_reinforced": [],
+    "claims_superseded": [],
+    "claims_retracted": [],
+    "tasks_opened": [],
+    "tasks_closed": [],
+    "warnings": [],
+    "review_id": "rq_05851216d3b896f9521bf10aba"
+  }
+}

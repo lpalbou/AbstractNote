@@ -1,0 +1,74 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/gateway/note/day/2026-01-11?as_received=2026-10-18T15%3A24%3A43Z",
+    "body": null
+  },
+  "status": 200,
+  "body": {
+    "day": "2026-01-11",
+    "tz": "UTC",
+    "start": "2026-01-11T00:00:00Z",
+    "end": "2026-01-12T00:00:00Z",
+    "notes": [
+      {
+        "note_id": "nt_yftocj4tsejdfji52suehychvf",
+        "kind": null,
+        "title": null,
+        "summary": "A note.",
+        "occurred_at": "2026-01-11T10:00:00Z",
+        "received_at": "2026-10-18T03:24:43Z",
+        "processed_at": "2026-10-19T03:24:43Z",
+        "source": {
+          "client": "cli",
+          "origin": {}
+        },
+        "location": null,
+        "language": null,
+        "topics": [],
+        "priority": 1,
+        "status": "processed",
+        "duplicate_of": null,
+        "session_id": null,
+        "run_id": null,
+        "archived_at": null,
+        "excerpt": "Finance says the LUT budget is 55k."
+      }
+    ],
+    "revisions": [
+      {
+        "revision_id": "rv_qro4j2luhxhe6b2sboufook4ik",
+        "note_id": "nt_yftocj4tsejdfji52suehychvf",
+        "attempt": 1,
+        "action": null,
+        "target": null,
+        "at": "2026-01-11T10:00:00Z",
+        "recorded_at": "2026-10-19T03:24:43Z",
+        "run_id": null,
+        "summary": "Conflicting budget.",
+        "source": null,
+        "warnings": [
+          "The predicate ex:budget is outside the vocabulary."
+        ],
+        "applied_index": true,
+        "applied_kg": true
+      }
+    ],
+    "entities_touched": [
+      {
+        "entity_id": "ex:project-lut",
+        "kind": "project",
+        "name": "LUT",
+        "aliases": [],
+        "summary": "The LUT project and its budget.",
+        "first_seen": "2026-01-10T10:00:00Z",
+        "last_seen": "2026-10-19T09:12:00Z",
+        "note_count": 3,
+        "merged_into": null
+      }
+    ],
+    "entities_created": [],
+    "claims_superseded": [],
+    "as_received": "2026-10-18T15:24:43Z"
+  }
+}

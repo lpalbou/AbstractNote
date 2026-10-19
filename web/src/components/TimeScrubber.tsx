@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useRead } from "../lib/hooks";
-import { useAt } from "../lib/nav";
+import { useAt, useByReceived } from "../lib/nav";
 import { isoToScrub, scrubToIso } from "../lib/sparkline";
 import type { TimelineBuckets } from "../lib/types";
 import { longDate } from "../lib/words";
@@ -19,9 +19,11 @@ export function localDay(iso: string): string {
  * The time slider shared by Explore and Remember: the notebook as it was at a moment (right end = now).
  * A date field beside it reaches any day without dragging (keyboard and assistive technology).
  */
-export function TimeScrubber({ onDay }: { onDay?: (date: string) => void }) {
+export function TimeScrubber({ onDay, archive = false }: { onDay?: (date: string) => void; archive?: boolean }) {
   const { api } = useApp();
   const [at, setAt] = useAt();
+  const [byReceived, setByReceived] = useByReceived();
+  const held = archive && byReceived;
   const buckets = useRead<TimelineBuckets>(() => api.get<TimelineBuckets>("note/timeline", { granularity: "week" }), [api]);
   const range = useMemo(() => {
     const to = Date.now();
@@ -55,9 +57,19 @@ export function TimeScrubber({ onDay }: { onDay?: (date: string) => void }) {
       />
       <div className="nt-scrubber__row">
         <span className="nt-scrubber__label" aria-live="polite">
-          {at ? `As it was on ${label}` : "As it is now"}
+          {at ? (held ? `As your notebook held it on ${label}` : `As it was on ${label}`) : "As it is now"}
         </span>
         <span className="nt-scrubber__actions">
+          {archive ? (
+            <span className="nt-segmented" role="radiogroup" aria-label="Read the date as">
+              <button type="button" role="radio" aria-checked={!byReceived} className="nt-segmented__opt" title="What your notes said was true on that date" onClick={() => setByReceived(false)}>
+                True then
+              </button>
+              <button type="button" role="radio" aria-checked={byReceived} className="nt-segmented__opt" title="Only the notes your notebook had received by that date" onClick={() => setByReceived(true)}>
+                Saved by then
+              </button>
+            </span>
+          ) : null}
           <label className="nt-field nt-field--inline">
             <span className="nt-sr">Show the notebook as it was on the date</span>
             <input

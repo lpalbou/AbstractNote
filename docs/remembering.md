@@ -73,11 +73,13 @@ last looked beside the cue cards, then the ask bar) fits a 1280x800 window; the 
    One tap says "this is wrong" and writes a retract revision with your account as the source.
 6. **Revisit**: open loops with a close action, unread insights, "on this day" notes, entities
    that went silent but relate to what you added this week, contradictions awaiting a decision.
-7. **To review** (only when there is something): matches the notebook made on its own, two
-   entries joined as one (`entity.merge` in the revision feed, `GET /note/revisions`), each with
-   the note behind it and the reason. **Undo the match** separates them again
-   (`POST /note/entities/{id}/unmerge`); **Keep** hides it in this browser (the note API has no
-   confirm action yet).
+7. **To review** (only when there is something, `GET /note/review`): what the notebook decided
+   on its own, each with why, the two sides, the notes behind them and its own actions. A merge it
+   made: **Keep** (recorded for your account, `POST /note/review/{id}/confirm`) or **Undo the
+   match** (separates them again; the joined entry's own name and notes come from
+   `GET /note/entities/{id}?as_merged=true`). A close match it was unsure about: **Same** (joins
+   them) or **Not the same** (withdraws the close match). Two notes that disagree: say which one is
+   wrong (withdraws that statement).
 
 Each entity card carries a small activity sparkline. A multi-lane time river is a candidate for
 a later version once real notebooks show which lanes deserve a lane; the time scrubber in the
@@ -90,7 +92,10 @@ Explore view already covers "what did this look like then".
 - **Picture or List**: the same connections drawn, or as a readable table (from, link, to, since,
   believed or no longer believed); each row opens the link's history or the entity.
 - **Time scrubber and date field**: moving the slider or choosing a date changes `as_of` (the date
-  field reaches any day without dragging); the layout stays where it is: entities and edges that did not exist yet fade
+  field reaches any day without dragging). Beside it, **True then** reads the date as what your
+  notes said was true then (`at`); **Saved by then** reads it as what the notebook held on that
+  date (`as_received`: only notes received by then), so a June note imported in October is absent
+  from a September snapshot. The layout stays where it is: entities and edges that did not exist yet fade
   out, superseded claims show as dashed; the entity card shows the beliefs at that moment. An edge
   opens the relation timeline between its two entities.
 - **Day page**: "what happened on day X": notes captured, revisions applied with their one-line
@@ -100,8 +105,9 @@ Explore view already covers "what did this look like then".
   refined, latest expressed view) and the changes between them (a belief replaced or withdrawn),
   oldest first, each opening its note or its evidence; with a date chosen, the milestones after it
   stay in place, faded. Then **Changes** (what you believe or believed then, then-versus-now),
-  **Open actions**, **Sources** (the notes) and **Links** (relations). An entity asked for at a
-  date before it existed says so.
+  **Open actions**, **Sources** (the notes) and **Links** (relations). An entity that absorbed
+  others names them ("Includes Dana R. (1 note)", from each entry's own record). An entity asked
+  for at a date before it existed says so.
 
 ## The Capture view
 

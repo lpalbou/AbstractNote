@@ -1,0 +1,97 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/gateway/note/graph?as_received=2026-10-18T15%3A24%3A43Z",
+    "body": null
+  },
+  "status": 200,
+  "body": {
+    "as_of": "2026-10-19T03:24:43Z",
+    "nodes": [
+      {
+        "id": "ex:person-dana",
+        "kind": "person",
+        "name": "Dana",
+        "first_seen": "2026-01-02T10:00:00Z",
+        "last_seen": "2026-01-07T10:00:00Z",
+        "note_count": 2,
+        "summary": "Dana as this note describes it."
+      },
+      {
+        "id": "ex:project-lut",
+        "kind": "project",
+        "name": "LUT",
+        "first_seen": "2026-01-10T10:00:00Z",
+        "last_seen": "2026-01-11T10:00:00Z",
+        "note_count": 2,
+        "summary": "m1 as this note describes it."
+      },
+      {
+        "id": "ex:org-acme",
+        "kind": "org",
+        "name": "Acme",
+        "first_seen": "2026-01-05T10:00:00Z",
+        "last_seen": "2026-01-05T10:00:00Z",
+        "note_count": 1,
+        "summary": "Acme as this note describes it."
+      },
+      {
+        "id": "ex:org-acme-corp",
+        "kind": "org",
+        "name": "Acme Corp",
+        "first_seen": "2026-01-13T10:00:00Z",
+        "last_seen": "2026-01-13T10:00:00Z",
+        "note_count": 1,
+        "summary": "Acme Corp as this note describes it."
+      },
+      {
+        "id": "ex:person-dana-3",
+        "kind": "person",
+        "name": "Dana",
+        "first_seen": "2026-01-05T10:00:00Z",
+        "last_seen": "2026-01-05T10:00:00Z",
+        "note_count": 1,
+        "summary": "A colleague at Acme."
+      },
+      {
+        "id": "ex:project-lut-3",
+        "kind": "project",
+        "name": "LUT",
+        "first_seen": "2026-01-05T10:00:00Z",
+        "last_seen": "2026-01-05T10:00:00Z",
+        "note_count": 1,
+        "summary": "LUT as this note describes it."
+      }
+    ],
+    "edges": [
+      {
+        "source": "ex:org-acme-corp",
+        "target": "ex:org-acme",
+        "predicate": "skos:closeMatch",
+        "first_seen": "2026-01-13T10:00:00Z",
+        "last_seen": "2026-01-13T10:00:00Z",
+        "count": 1,
+        "active": true
+      },
+      {
+        "source": "ex:person-dana-3",
+        "target": "ex:org-acme",
+        "predicate": "ex:works_at",
+        "first_seen": "2026-01-05T10:00:00Z",
+        "last_seen": "2026-01-05T10:00:00Z",
+        "count": 1,
+        "active": true
+      },
+      {
+        "source": "ex:person-dana-3",
+        "target": "ex:project-lut-3",
+        "predicate": "schema:participant",
+        "first_seen": "2026-01-05T10:00:00Z",
+        "last_seen": "2026-01-05T10:00:00Z",
+        "count": 1,
+        "active": true
+      }
+    ],
+    "as_received": "2026-10-18T15:24:43Z"
+  }
+}

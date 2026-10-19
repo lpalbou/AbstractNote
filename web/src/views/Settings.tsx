@@ -12,8 +12,6 @@ export const REFLECT_CHOICES: Array<[string, string]> = [
   ["30d", "Every month"],
 ];
 
-/** The processor automation's documented defaults (docs/cognition.md "note-drain and the queue"): the queue answer does not carry them. */
-export const PROCESSOR_DEFAULTS = { every: "2m", max_items: 20 };
 
 /** "2m" -> "2 minutes" (the processor's interval as words). */
 export function everyWords(every: string | undefined): string {
@@ -29,7 +27,9 @@ export function queueSentence(q: QueueInfo): string {
   const parts: string[] = [];
   parts.push(s.queued === 0 ? "Nothing is waiting." : s.queued === 1 ? "1 note is waiting." : `${s.queued} notes are waiting.`);
   if (s.processing) parts.push(s.processing === 1 ? "1 is being processed." : `${s.processing} are being processed.`);
-  parts.push(`Up to ${PROCESSOR_DEFAULTS.max_items} notes are processed ${everyWords(PROCESSOR_DEFAULTS.every)}.`);
+  // What the processor runs with (GET /note/queue `processor`, W10), never a number written here.
+  const p = q.processor;
+  if (p && p.max_items > 0) parts.push(`Up to ${p.max_items} ${p.max_items === 1 ? "note is" : "notes are"} processed ${everyWords(p.interval)}.`);
   return parts.join(" ");
 }
 

@@ -1,0 +1,116 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/gateway/note/entities?include_merged=true",
+    "body": null
+  },
+  "status": 200,
+  "body": {
+    "items": [
+      {
+        "entity_id": "ex:project-lut",
+        "kind": "project",
+        "name": "LUT",
+        "aliases": [],
+        "summary": "The LUT project and its budget.",
+        "first_seen": "2026-01-10T10:00:00Z",
+        "last_seen": "2026-10-19T09:12:00Z",
+        "note_count": 3,
+        "merged_into": null
+      },
+      {
+        "entity_id": "ex:person-dana",
+        "kind": "person",
+        "name": "Dana",
+        "aliases": [
+          "D. Ng"
+        ],
+        "summary": "Dana owns the LUT budget decisions.",
+        "first_seen": "2026-01-02T10:00:00Z",
+        "last_seen": "2026-10-19T09:12:00Z",
+        "note_count": 3,
+        "merged_into": null
+      },
+      {
+        "entity_id": "ex:project-lut-2",
+        "kind": "project",
+        "name": "LUT",
+        "aliases": [],
+        "summary": "The LUT project and its budget.",
+        "first_seen": "2026-10-19T03:23:28Z",
+        "last_seen": "2026-10-19T03:23:28Z",
+        "note_count": 1,
+        "merged_into": null
+      },
+      {
+        "entity_id": "ex:person-dana-2",
+        "kind": "person",
+        "name": "Dana",
+        "aliases": [],
+        "summary": "Dana owns the LUT budget decisions.",
+        "first_seen": "2026-10-19T03:23:28Z",
+        "last_seen": "2026-10-19T03:23:28Z",
+        "note_count": 1,
+        "merged_into": null
+      },
+      {
+        "entity_id": "ex:org-acme-corp",
+        "kind": "org",
+        "name": "Acme Corp",
+        "aliases": [],
+        "summary": "Acme Corp as this note describes it.",
+        "first_seen": "2026-01-13T10:00:00Z",
+        "last_seen": "2026-01-13T10:00:00Z",
+        "note_count": 1,
+        "merged_into": null
+      },
+      {
+        "entity_id": "ex:project-lut-3",
+        "kind": "project",
+        "name": "LUT",
+        "aliases": [],
+        "summary": "LUT as this note describes it.",
+        "first_seen": "2026-01-05T10:00:00Z",
+        "last_seen": "2026-01-05T10:00:00Z",
+        "note_count": 1,
+        "merged_into": null
+      },
+      {
+        "entity_id": "ex:person-dana-3",
+        "kind": "person",
+        "name": "Dana",
+        "aliases": [
+          "Dana Ng"
+        ],
+        "summary": "A colleague at Acme.",
+        "first_seen": "2026-01-05T10:00:00Z",
+        "last_seen": "2026-01-05T10:00:00Z",
+        "note_count": 1,
+        "merged_into": null
+      },
+      {
+        "entity_id": "ex:org-acme",
+        "kind": "org",
+        "name": "Acme",
+        "aliases": [],
+        "summary": "Acme as this note describes it.",
+        "first_seen": "2026-01-05T10:00:00Z",
+        "last_seen": "2026-01-05T10:00:00Z",
+        "note_count": 1,
+        "merged_into": null
+      },
+      {
+        "entity_id": "ex:person-d-ng",
+        "kind": "person",
+        "name": "D. Ng",
+        "aliases": [],
+        "summary": "D. Ng as this note describes it.",
+        "first_seen": "2026-01-02T10:00:00Z",
+        "last_seen": "2026-01-02T10:00:00Z",
+        "note_count": 1,
+        "merged_into": "ex:person-dana"
+      }
+    ],
+    "next_cursor": null
+  }
+}

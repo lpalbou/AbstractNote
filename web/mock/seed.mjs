@@ -46,6 +46,8 @@ const E = {
   effort: ["ex:concept-recall-effort", "concept", "Recall effort", ["effort dial"], "Quick, standard and deep recall."],
   // Created from a note, then merged into Dana by the linking model (the review inbox shows it).
   danaR: ["ex:person-dana-r", "person", "Dana R.", [], "Sent the watch budget sheet."],
+  // An unsure match (W8 revise: entity.create + skos:closeMatch to the candidate), for the review inbox.
+  priyaS: ["ex:person-priya-s", "person", "P. Shah", [], "Wrote the kernel notes for the prefill benchmark."],
 };
 
 /*
@@ -140,6 +142,12 @@ const N = [
   ["2026-10-14T16:20", "fact", "Budget sheet from Dana R.", "Dana R. sent the watch budget sheet: 15k for the quarter.", ["watch", "budget"], ["danaR", "watch"], [], {
     merge: ["danaR", "dana", "Same person: Dana R. sent the sheet for the watch budget that Dana agreed to."],
   }],
+  ["2026-10-15T11:10", "reference", "Kernel notes from P. Shah", "P. Shah sent kernel notes for the prefill benchmark.", ["lut", "mlx"], ["priyaS", "mlx"], [
+    ["priyaS-close", "priyaS", "skos:closeMatch", "priya", { certainty: "possible" }],
+  ]],
+  ["2026-10-16T18:30", "fact", "Marc in Paris", "Marc works from the Paris office now, he said at the release party.", ["people"], ["marc", "paris"], [
+    ["marc-paris", "marc", "schema:workLocation", "paris", { disputes: "marc-lyon" }],
+  ]],
 ];
 
 const MIN = 60_000;
@@ -207,6 +215,8 @@ export function buildSeed() {
         observed_at: occurred, valid_from: occurred, valid_until: null, status: "active",
         superseded_by: null, supersedes: null, evidence: text, note_id, revision_id, recorded_at: plus(occurred, 3),
       };
+      // W10 review: two active claims the model kept side by side (disputed_with).
+      if (opt.disputes) claim.disputes = claimByRef.get(opt.disputes).claim_id;
       if (opt.supersedes) {
         const old = claimByRef.get(opt.supersedes);
         old.valid_until = occurred;

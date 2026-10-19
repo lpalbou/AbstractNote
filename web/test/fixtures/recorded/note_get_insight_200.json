@@ -1,0 +1,39 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/gateway/note/notes/nt_quvivdlaunywg4x46ymqmeyuzr",
+    "body": null
+  },
+  "status": 200,
+  "body": {
+    "note_id": "nt_quvivdlaunywg4x46ymqmeyuzr",
+    "title": "Pareto still not sent",
+    "text": "You promised Dana the Pareto in January.",
+    "kind": "insight",
+    "occurred_at": "2026-10-19T03:24:43Z",
+    "received_at": "2026-10-19T03:24:43Z",
+    "status": "processed",
+    "topics": [],
+    "summary": null,
+    "source": {
+      "author": "abstractnote",
+      "client": "agent"
+    },
+    "location": null,
+    "attachments": [],
+    "revision": null,
+    "entities": [],
+    "claims": [],
+    "revisits": [],
+    "insight": {
+      "kind": "reminder",
+      "evidence_note_ids": [
+        "nt_nlsmt6ctjllw6anpccs4zecrey"
+      ],
+      "entity_ids": [
+        "ex:person-dana"
+      ],
+      "acked_at": null
+    }
+  }
+}

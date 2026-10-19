@@ -1,0 +1,33 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/gateway/note/queue",
+    "body": null
+  },
+  "status": 200,
+  "body": {
+    "stats": {
+      "queued": 0,
+      "processing": 0,
+      "failed": 0,
+      "done": 2,
+      "by_priority": {
+        "3": 0,
+        "2": 0,
+        "1": 0,
+        "0": 0
+      },
+      "oldest_enqueued_at": null
+    },
+    "failed": [],
+    "waiting": [],
+    "automations": {
+      "processor_id": "921d325f-7496-5039-b9bc-cc0833cb0ad4",
+      "reflect_id": "16d2fe7d-8130-552d-a214-9262ad016e0b"
+    },
+    "processor": {
+      "max_items": 20,
+      "interval": "2m"
+    }
+  }
+}

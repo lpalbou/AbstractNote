@@ -1,0 +1,91 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/gateway/note/changes?as_received=2026-10-18T15%3A24%3A43Z",
+    "body": null
+  },
+  "status": 200,
+  "body": {
+    "cursor": "WyJjaGciLCIyMDI2LTEwLTE5VDAzOjI0OjQzWiIsWyJlbnRpdHk6ZXg6b3JnLWFjbWUiLCJlbnRpdHk6ZXg6b3JnLWFjbWUtY29ycCIsImVudGl0eTpleDpwZXJzb24tZC1uZyIsImVudGl0eTpleDpwZXJzb24tZGFuYS0zIiwiZW50aXR5OmV4OnByb2plY3QtbHV0LTMiXV0",
+    "notes": [
+      {
+        "note_id": "nt_fk7ehc5walzrxvm7w55jv5o4bh",
+        "title": "",
+        "kind": null,
+        "occurred_at": "2026-01-05T10:00:00Z",
+        "excerpt": "A note."
+      },
+      {
+        "note_id": "nt_h2dlmuogyqetrekp6xfgu2eh5c",
+        "title": "",
+        "kind": null,
+        "occurred_at": "2026-01-02T10:00:00Z",
+        "excerpt": "A note."
+      },
+      {
+        "note_id": "nt_nlsmt6ctjllw6anpccs4zecrey",
+        "title": "",
+        "kind": null,
+        "occurred_at": "2026-01-07T10:00:00Z",
+        "excerpt": "A note."
+      },
+      {
+        "note_id": "nt_vbwu4bkytbpt25lb4np2hodmbx",
+        "title": "",
+        "kind": null,
+        "occurred_at": "2026-01-10T10:00:00Z",
+        "excerpt": "A note."
+      },
+      {
+        "note_id": "nt_yftocj4tsejdfji52suehychvf",
+        "title": "",
+        "kind": null,
+        "occurred_at": "2026-01-11T10:00:00Z",
+        "excerpt": "A note."
+      },
+      {
+        "note_id": "nt_zydepslutyu6fzpabrsraf6m5c",
+        "title": "",
+        "kind": null,
+        "occurred_at": "2026-01-13T10:00:00Z",
+        "excerpt": "A note."
+      }
+    ],
+    "entities": [
+      {
+        "entity_id": "ex:org-acme",
+        "name": "Acme",
+        "kind": "org",
+        "first_seen": "2026-01-05T10:00:00Z"
+      },
+      {
+        "entity_id": "ex:org-acme-corp",
+        "name": "Acme Corp",
+        "kind": "org",
+        "first_seen": "2026-01-13T10:00:00Z"
+      },
+      {
+        "entity_id": "ex:person-d-ng",
+        "name": "D. Ng",
+        "kind": "person",
+        "first_seen": "2026-01-02T10:00:00Z"
+      },
+      {
+        "entity_id": "ex:person-dana-3",
+        "name": "Dana",
+        "kind": "person",
+        "first_seen": "2026-01-05T10:00:00Z"
+      },
+      {
+        "entity_id": "ex:project-lut-3",
+        "name": "LUT",
+        "kind": "project",
+        "first_seen": "2026-01-05T10:00:00Z"
+      }
+    ],
+    "superseded_claims": [],
+    "closed_loops": [],
+    "failed_notes": [],
+    "insights": []
+  }
+}

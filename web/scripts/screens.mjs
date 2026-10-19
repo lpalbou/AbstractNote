@@ -241,9 +241,10 @@ async function main() {
     await page.locator(".nt-why .nt-link").first().waitFor();
     check(true, "a cue says why it surfaced, with the notes it rests on");
     await page.locator("#review-h").scrollIntoViewIfNeeded();
+    check((await page.locator(".nt-review .nt-item").count()) === 3, "To review lists a merge, a close match and a disagreement from GET /note/review");
     await page.getByRole("button", { name: "Undo the match" }).first().click();
     await page.screenshot({ path: join(OUT, "remember-review-dark-1280.png") });
-    await page.getByRole("button", { name: "Keep it" }).click();
+    await page.getByRole("button", { name: "Not now" }).click();
     await page.goto(`${base}#/graph?focus=ex:project-lut&depth=2&entity=ex:person-dana`);
     await page.locator(".nt-node").first().waitFor();
     await page.getByLabel("Show the notebook as it was on the date").fill("2026-08-20");
@@ -252,6 +253,18 @@ async function main() {
     await page.waitForTimeout(400);
     check((await page.locator(".nt-node--future").count()) > 0, "choosing an earlier date fades entities that did not exist yet");
     await page.screenshot({ path: join(OUT, "explore-then-dark-1280.png") });
+    const held = page.waitForRequest((r) => r.url().includes("note/graph") && r.url().includes("as_received="));
+    await page.getByRole("radio", { name: "Saved by then" }).click();
+    await held;
+    await page.locator(".nt-scrubber__label", { hasText: "As your notebook held it on" }).waitFor();
+    await page.waitForTimeout(500);
+    check(true, "Saved by then reads the archive snapshot (as_received)");
+    await page.screenshot({ path: join(OUT, "explore-held-dark-1280.png") });
+    await page.setViewportSize({ width: 400, height: 860 });
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: join(OUT, "explore-held-dark-400.png"), fullPage: true });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.getByRole("radio", { name: "True then" }).click();
     await page.goto(`${base}#/graph?focus=ex:project-lut&depth=2&entity=ex:project-watch-app`);
     await page.getByLabel("Show the notebook as it was on the date").fill("2026-07-30");
     await page.locator(".nt-notyet").waitFor({ timeout: 10_000 });
@@ -269,6 +282,7 @@ async function main() {
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Settings" }).click();
     await page.locator(".nt-queue p").first().waitFor();
+    check((await page.locator(".nt-queue p").first().innerText()).includes("Up to 20 notes are processed every 2 minutes"), "the queue says what the processor runs with (GET /note/queue processor)");
     await page.getByRole("button", { name: "Process now" }).click();
     await page.getByRole("button", { name: "Process now" }).click().catch(() => undefined);
     await page.waitForTimeout(500);

@@ -1,0 +1,11 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/gateway/note/entities/ex:person-dana?as_received=2020-01-01T00%3A00%3A00Z",
+    "body": null
+  },
+  "status": 400,
+  "body": {
+    "detail": "That entity was not in your notebook yet on that date."
+  }
+}

@@ -53,3 +53,17 @@ export const atStore = createStore<string | null>(null);
 export function useAt(): [string | null, (next: string | null) => void] {
   return useStore(atStore);
 }
+
+/**
+ * Explore's reading of the chosen date: false = what was true then (`at`, validity), true = what the notebook
+ * held then (`as_received`, the archive snapshot: notes received by that date and what they caused).
+ */
+export const receivedStore = createStore<boolean>(false);
+export function useByReceived(): [boolean, (next: boolean) => void] {
+  return useStore(receivedStore);
+}
+/** The date parameters of a read for the chosen moment in Explore. */
+export function momentParams(at: string | null, byReceived: boolean): Record<string, string> {
+  if (!at) return {};
+  return byReceived ? { as_received: at } : { at };
+}

@@ -1,0 +1,37 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/gateway/note/entities/ex:person-d-ng?as_merged=true",
+    "body": null
+  },
+  "status": 200,
+  "body": {
+    "entity_id": "ex:person-d-ng",
+    "kind": "person",
+    "name": "D. Ng",
+    "aliases": [],
+    "summary": "D. Ng as this note describes it.",
+    "first_seen": "2026-01-02T10:00:00Z",
+    "last_seen": "2026-01-02T10:00:00Z",
+    "note_count": 1,
+    "merged_into": "ex:person-dana",
+    "merged_at": "2026-01-07T10:00:00Z",
+    "merge": {
+      "revision_id": "rv_cqkx65uzhto45lzfnkjxm4l5oz",
+      "at": "2026-01-07T10:00:00Z",
+      "recorded_at": "2026-10-19T03:24:43Z",
+      "reason": "test",
+      "summary": "D. Ng is Dana.",
+      "note_id": "nt_nlsmt6ctjllw6anpccs4zecrey"
+    },
+    "notes": [
+      {
+        "note_id": "nt_h2dlmuogyqetrekp6xfgu2eh5c",
+        "title": "",
+        "kind": null,
+        "occurred_at": "2026-01-02T10:00:00Z",
+        "excerpt": "A note."
+      }
+    ]
+  }
+}

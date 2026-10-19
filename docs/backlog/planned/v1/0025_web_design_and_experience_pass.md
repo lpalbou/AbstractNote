@@ -60,3 +60,11 @@ untracked/screens/web-v2/, three themes at 1280x800 and 400 px), screenshots rev
   untracked/reports/W9.md; "Keep" in the review inbox is per browser; Inter is used only when
   installed (no font is bundled); near-black needs relative colour (older browsers keep the theme's
   page colour); llms-full.txt was not regenerated (not this lane's path).
+
+## Follow-up (after W10, backlog 0026)
+- To review reads `GET /note/review` (merges, close matches, disagreements, each with its actions;
+  Keep is recorded on the server); cues carry their evidence; the queue sentence reads
+  `processor {max_items, interval}`; a merged entry's own name comes from `as_merged`; Explore offers
+  True then | Saved by then (`as_received`) beside the date field (it fits at 1280 and 400).
+- The mock's answers are compared key by key with the recordings (web/test/recorded_shapes.test.ts,
+  copies in web/test/fixtures/recorded/); the seed gains a close match and a disagreement.

@@ -68,23 +68,47 @@ describe("How it evolved", () => {
 });
 
 import * as http from "node:http";
-import { proposedMatches } from "../src/lib/review";
+import { fetchReview, reviewAction, runReviewAction } from "../src/lib/review";
+import { createApi } from "../src/lib/api";
+import { momentParams } from "../src/lib/nav";
+import { queueSentence } from "../src/views/Settings";
+import { reviewWhy } from "../src/lib/why";
 import { stepWords } from "../src/lib/runs";
 import { WHY_WORDS, basisLine, whyLine } from "../src/lib/why";
 // @ts-expect-error plain ESM module
 import { MOCK_TOKEN, createMockGateway } from "../mock/server.mjs";
 
 describe("review inbox", () => {
-  const rev = (id: string, at: string, ops: Array<Record<string, unknown>>) => ({ revision_id: id, note_id: `nt_${id}`, at, recorded_at: at, summary: `summary ${id}`, ops });
-  it("lists the merges no later unmerge undid, newest first", () => {
-    const revs = [
-      rev("r1", "2026-10-01T00:00:00Z", [{ op: "entity.merge", from_id: "a", into_id: "b", reason: "same" }]),
-      rev("r2", "2026-10-02T00:00:00Z", [{ op: "entity.merge", from_id: "c", into_id: "d", reason: "same too" }, { op: "claim.add", claim_id: "x" }]),
-      rev("r3", "2026-10-03T00:00:00Z", [{ op: "entity.unmerge", entity_id: "b", from_id: "a" }]),
-    ];
-    expect(proposedMatches(revs).map((m) => [m.from_id, m.into_id, m.note_id, m.reason])).toEqual([["c", "d", "nt_r2", "same too"]]);
-    expect(proposedMatches(revs.slice(0, 2)).map((m) => m.key)).toEqual(["c>d", "a>b"]);
-    expect(proposedMatches([])).toEqual([]);
+  const item = {
+    review_id: "rq_1", kind: "close_match" as const, why: "unsure_match" as const, reason: null, at: "2026-10-15T00:00:00Z",
+    sides: [], evidence_note_ids: [],
+    actions: [
+      { action: "confirm", method: "POST" as const, path: "/note/review/rq_1/confirm", body: {} },
+      { action: "keep_apart", method: "POST" as const, path: "/note/claims/cl_1/retract", body: { reason: null } },
+    ],
+  };
+  it("takes the item's own actions: path under the api, a null reason filled by the person", async () => {
+    const sent: Array<{ url: string; body: unknown }> = [];
+    const fetch = async (url: RequestInfo | URL, init?: RequestInit) => {
+      sent.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : null });
+      return new Response("{}");
+    };
+    const api = createApi({ fetch: fetch as unknown as typeof globalThis.fetch, sleep: async () => undefined, csrf: () => "c" });
+    await runReviewAction(api, reviewAction(item, "keep_apart")!, "Not the same.");
+    await runReviewAction(api, reviewAction(item, "confirm")!);
+    expect(sent.map((x) => [x.url.replace(/^.*api\/gateway\//, ""), x.body])).toEqual([["note/claims/cl_1/retract", { reason: "Not the same." }], ["note/review/rq_1/confirm", {}]]);
+    expect(reviewAction(item, "unmerge")).toBeNull();
+    expect(reviewWhy("merged_by_model")).toMatch(/on its own/);
+    expect(reviewWhy("something new")).toBeTruthy();
+  });
+  it("Explore reads a date as validity or as the archive snapshot", () => {
+    expect(momentParams(null, true)).toEqual({});
+    expect(momentParams("2026-08-20T21:59:59Z", false)).toEqual({ at: "2026-08-20T21:59:59Z" });
+    expect(momentParams("2026-08-20T21:59:59Z", true)).toEqual({ as_received: "2026-08-20T21:59:59Z" });
+  });
+  it("the queue sentence says what the processor runs with, not a number written in the app", () => {
+    const q = { stats: { queued: 0, processing: 0, failed: 0 }, failed: [], waiting: [], automations: { processor_id: "p", reflect_id: "r" }, processor: { max_items: 5, interval: "10m" } };
+    expect(queueSentence(q)).toBe("Nothing is waiting. Up to 5 notes are processed every 10 minutes.");
   });
 });
 
@@ -113,7 +137,7 @@ describe("mock gateway shapes the design pass reads", () => {
   let base = "";
   const H = { Authorization: `Bearer ${MOCK_TOKEN}`, "Content-Type": "application/json" };
   const get = async (p: string) => (await fetch(`${base}/api/gateway/note/${p}`, { headers: H })).json();
-  it("cues are unacknowledged insights; a merged entry resolves to its survivor; a merge can be undone", async () => {
+  it("cues are unacknowledged insights with their evidence; a merged entry resolves to its survivor; review actions settle items", async () => {
     server = http.createServer(createMockGateway({ processDelayMs: 50 }).handler);
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
     base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
@@ -123,14 +147,21 @@ describe("mock gateway shapes the design pass reads", () => {
       const ids = new Set(insights.items.map((i: { note_id: string }) => i.note_id));
       expect(cues.items.length).toBe(3);
       for (const c of cues.items) expect(ids.has(c.cue_id)).toBe(true);
+      expect(cues.items.every((c: { evidence_note_ids: string[] }) => c.evidence_note_ids.length > 0)).toBe(true);
       const card = await get("entities/ex%3Aperson-dana-r");
       expect(card).toMatchObject({ entity_id: "ex:person-dana", resolved_from: "ex:person-dana-r" });
       expect(card.summary_history.every((h: { note_id?: string }) => typeof h.note_id === "string")).toBe(true);
-      const matches = proposedMatches((await get("revisions?limit=200")).items);
-      expect(matches.map((m) => [m.from_id, m.into_id])).toEqual([["ex:person-dana-r", "ex:person-dana"]]);
-      const undo = await fetch(`${base}/api/gateway/note/entities/ex%3Aperson-dana/unmerge`, { method: "POST", headers: H, body: JSON.stringify({ from_id: "ex:person-dana-r", reason: "test" }) });
-      expect(undo.status).toBe(200);
-      expect(proposedMatches((await get("revisions?limit=200")).items)).toEqual([]);
+      const api = createApi({ fetch: ((u: RequestInfo | URL, init?: RequestInit) => fetch(String(u).replace(/^api\/gateway/, `${base}/api/gateway`), { ...init, headers: H })) as typeof globalThis.fetch, sleep: async () => undefined, csrf: () => "c" });
+      const kinds = (await fetchReview(api)).items.map((i) => i.kind).sort();
+      expect(kinds).toEqual(["close_match", "contradiction", "merge"]);
+      const merge = (await fetchReview(api)).items.find((i) => i.kind === "merge")!;
+      expect(merge.sides.map((x) => x.id)).toEqual(["ex:person-dana-r", "ex:person-dana"]);
+      const own = await get("entities/ex%3Aperson-dana-r?as_merged=true");
+      expect(own).toMatchObject({ name: "Dana R.", merged_into: "ex:person-dana" });
+      await runReviewAction(api, reviewAction(merge, "unmerge")!);
+      const close = (await fetchReview(api)).items.find((i) => i.kind === "close_match")!;
+      await runReviewAction(api, reviewAction(close, "confirm")!);
+      expect((await fetchReview(api)).items.map((i) => i.kind)).toEqual(["contradiction"]);
     } finally {
       server.close();
     }
