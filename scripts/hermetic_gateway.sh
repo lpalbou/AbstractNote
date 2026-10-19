@@ -12,6 +12,9 @@
 #   MAX_ATTACHMENT_BYTES  upload limit for the 413 case (default 1048576)
 #   STUB_DELAY_S          seconds the scripted model waits per answer (default 1: a drain is visibly busy)
 #
+# Every request the scripted model receives is saved under $ROOT/logs/stub_requests/<n>-<schema>.json
+# ("chat" when it recognised no AbstractNote schema: the answer was a plain sentence).
+#
 # The gateway never sees the caller's environment (env -i): no ABSTRACTGATEWAY_AUTH_TOKEN, no provider
 # keys, no live flows dir. Its model is scripts/stub_llm.py (OpenAI-compatible, no weights). User
 # accounts are on; two users (alice, bob) are created through the admin API with the bootstrap token.
@@ -48,7 +51,8 @@ start() {
     fi
   done
   nohup env -i PATH="$VENV/bin:/usr/bin:/bin" HOME="$SCRATCH_HOME" \
-    "$VENV/bin/python" "$HERE/stub_llm.py" --port "$STUB_PORT" --delay "${STUB_DELAY_S:-1}" >"$LOGS/stub_llm.log" 2>&1 &
+    "$VENV/bin/python" "$HERE/stub_llm.py" --port "$STUB_PORT" --delay "${STUB_DELAY_S:-1}" \
+    --log-requests "$LOGS/stub_requests" >"$LOGS/stub_llm.log" 2>&1 &
   echo $! >"$ROOT/stub.pid"
   disown || true
   # The text default every blank provider/model pin resolves to: the scripted model, in the scratch

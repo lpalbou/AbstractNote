@@ -1,0 +1,18 @@
+{
+  "model": "note-stub",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You file and connect a person's notes. Output JSON only, matching the schema.\n\nRUNTIME GROUNDING: a user message may begin with a machine-generated <runtime_metadata>{...}</runtime_metadata> envelope carrying the local date/time that message was sent (and optionally timezone, country, or OS user) for grounding; the newest one is the current time. It is not written by the user and it is not a language or locale preference. Always respond in the language of the user's request itself unless the user explicitly asks otherwise."
+    },
+    {
+      "role": "user",
+      "content": "<runtime_metadata>{\"display\":\"[2026-10-19 03:02:11]\",\"local_datetime\":\"2026-10-19T03:02:11+02:00\"}</runtime_metadata>\nYou look over candidates drawn from a person's notebook and choose what deserves their attention now.\n\nCandidates (each has an `index` and the `rule` that found it):\n[]\n\nChoose at most 10 items. For each, give the `candidate` index, the `kind` (warning, reminder, connection, contradiction or evolution), a short `title`, and a `body` of two or three sentences that says why it matters now and invites the person to add a note about it. Choose nothing when nothing deserves attention.\n\nRules:\n- Use only the candidates above; never invent notes, people or dates.\n- Output JSON only, matching the schema.\n\nPlease respond with valid JSON that matches this exact schema for LLM_StructuredOutput:\n\n{\n  \"$defs\": {\n    \"LLM_StructuredOutput_itemsItem\": {\n      \"properties\": {\n        \"candidate\": {\n          \"description\": \"index in the candidate list\",\n          \"title\": \"Candidate\",\n          \"type\": \"integer\"\n        },\n        \"kind\": {\n          \"enum\": [\n            \"warning\",\n            \"reminder\",\n            \"connection\",\n            \"contradiction\",\n            \"evolution\"\n          ],\n          \"title\": \"Kind\",\n          \"type\": \"string\"\n        },\n        \"title\": {\n          \"title\": \"Title\",\n          \"type\": \"string\"\n        },\n        \"body\": {\n          \"title\": \"Body\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"candidate\",\n        \"kind\",\n        \"title\",\n        \"body\"\n      ],\n      \"title\": \"LLM_StructuredOutput_itemsItem\",\n      \"type\": \"object\"\n    }\n  },\n  \"properties\": {\n    \"items\": {\n      \"items\": {\n        \"$ref\": \"#/$defs/LLM_StructuredOutput_itemsItem\"\n      },\n      \"title\": \"Items\",\n      \"type\": \"array\"\n    }\n  },\n  \"required\": [\n    \"items\"\n  ],\n  \"title\": \"LLM_StructuredOutput\",\n  \"type\": \"object\"\n}\n\nExample format:\n{\n  \"items\": [\n    {\n      \"candidate\": 42,\n      \"kind\": \"warning\",\n      \"title\": \"example_string\",\n      \"body\": \"example_string\"\n    }\n  ]\n}\n\nImportant: Return ONLY the JSON object, no additional text or formatting."
+    }
+  ],
+  "stream": false,
+  "temperature": 0.2,
+  "top_p": 0.9,
+  "max_tokens": 4096,
+  "prompt_cache_key": "session:61cacaefa954f713e6d51517"
+}

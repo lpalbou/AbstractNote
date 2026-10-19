@@ -5,22 +5,27 @@
 
 Answers ``POST /v1/chat/completions`` with a JSON object valid for whichever AbstractNote schema
 the request asks for (QuickFiling, Extraction, Linking, Answer, MiningPlan, SliceFindings,
-Dossier, Reflections): the schema is recognised by its property names in the request
-(``response_format`` or the prompt), and a plain chat request gets a short sentence.
+Dossier, Reflections): the schema is read from the request (``response_format``, or the JSON Schema
+block AbstractCore writes into the prompt for providers without native structured output) and
+recognised by its exact top-level property names; a request without one gets a short sentence.
 ``GET /v1/models`` lists one model, ``note-stub``. Development and smoke tests only.
 """
 
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import sys
 import time
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Optional
 
 MODEL = "note-stub"
 DELAY_S = 0.0  # --delay: seconds per answer (lets a smoke test see a busy processor)
+LOG_DIR: Optional[Path] = None  # --log-requests: every request body saved as <n>-<schema>.json
+_SEQ = itertools.count(1)
 
 ANSWERS: Dict[str, Dict[str, Any]] = {
     "QuickFiling": {"title": "Dana and the LUT budget", "kind": "event", "topics": ["lut"], "urgency": "normal",
@@ -52,33 +57,56 @@ ANSWERS: Dict[str, Dict[str, Any]] = {
                 "evolution": "", "contradictions": [], "forgotten": [], "suggestions": [], "confidence": "low"},
     "Reflections": {"items": []},
 }
-# Schema recognition by property names (ordered: most specific first).
+# Schema recognition: the top-level property names of the schema the request carries, compared exactly.
 SIGNATURES = [
     ("Linking", {"mentions", "claims", "tasks", "revision_summary"}),
     ("Extraction", {"summary", "mentions", "claims", "tasks", "time_refs", "topics"}),
     ("QuickFiling", {"title", "kind", "topics", "urgency", "language", "one_line"}),
     ("MiningPlan", {"steps", "contradictions_to_test", "rounds"}),
     ("SliceFindings", {"facts", "changes", "gaps"}),
-    ("Dossier", {"narrative", "timeline", "forgotten", "confidence"}),
+    ("Dossier", {"title", "narrative", "timeline", "evolution", "contradictions", "forgotten", "suggestions", "confidence"}),
     ("Answer", {"answer", "evidence", "evolution", "open_loops", "follow_ups"}),
     ("Reflections", {"items"}),
 ]
+# AbstractCore's prompted structured output (providers without native response_format, which is what the
+# runtime sends to an openai-compatible endpoint): the JSON Schema follows this sentence in the last user
+# message (abstractcore/structured/handler.py ``_create_schema_prompt``).
+PROMPTED_SCHEMA_LEAD = "Please respond with valid JSON that matches this exact schema for "
+
+
+def request_schema(body: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The JSON Schema the request asks the answer to match: ``response_format`` or the prompted block."""
+    fmt = body.get("response_format")
+    if isinstance(fmt, dict):
+        schema = (fmt.get("json_schema") or {}).get("schema")
+        if isinstance(schema, dict):
+            return schema
+    for message in reversed(body.get("messages") or []):
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, str):
+            continue
+        at = content.rfind(PROMPTED_SCHEMA_LEAD)
+        if at < 0:
+            continue
+        brace = content.find("{", at)
+        if brace < 0:
+            continue
+        try:
+            schema, _ = json.JSONDecoder().raw_decode(content, brace)
+        except json.JSONDecodeError:
+            return None
+        return schema if isinstance(schema, dict) else None
+    return None
 
 
 def schema_for(body: Dict[str, Any]) -> Optional[str]:
-    fmt = body.get("response_format") or {}
-    props: set = set()
-    schema = ((fmt.get("json_schema") or {}).get("schema") or {}) if isinstance(fmt, dict) else {}
-    if isinstance(schema.get("properties"), dict):
-        props = set(schema["properties"])
+    """Which AbstractNote schema the request asks for (``None``: a plain chat request)."""
+    schema = request_schema(body) or {}
+    props = set(schema.get("properties") or {}) if isinstance(schema.get("properties"), dict) else set()
     for name, sig in SIGNATURES:
-        if props and sig <= props and (name != "Reflections" or props == {"items"}):
+        if props == sig:
             return name
-    text = json.dumps(body.get("messages") or [])
-    for name, sig in SIGNATURES:
-        if all(f'\\"{p}\\"' in text or f'"{p}"' in text for p in sig) and name != "Reflections":
-            return name
-    return "Reflections" if '"items"' in text and "candidate" in text else None
+    return None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -112,6 +140,8 @@ class Handler(BaseHTTPRequestHandler):
         if DELAY_S:
             time.sleep(DELAY_S)
         name = schema_for(body)
+        if LOG_DIR is not None:
+            (LOG_DIR / f"{next(_SEQ):04d}-{name or 'chat'}.json").write_text(json.dumps(body, indent=2), encoding="utf-8")
         content = json.dumps(ANSWERS[name]) if name else "Noted."
         self._send(200, {
             "id": f"stub-{int(time.time() * 1000)}", "object": "chat.completion", "created": int(time.time()),
@@ -126,9 +156,13 @@ def main() -> int:
     ap.add_argument("--port", type=int, required=True)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--delay", type=float, default=0.0, help="seconds to wait before each answer")
+    ap.add_argument("--log-requests", type=Path, default=None, help="directory: save every request body there")
     args = ap.parse_args()
-    global DELAY_S
+    global DELAY_S, LOG_DIR
     DELAY_S = max(0.0, float(args.delay))
+    if args.log_requests is not None:
+        args.log_requests.mkdir(parents=True, exist_ok=True)
+        LOG_DIR = args.log_requests
     if not 18800 <= args.port <= 18899:
         raise SystemExit("use a scratch port in 18800-18899")
     ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()

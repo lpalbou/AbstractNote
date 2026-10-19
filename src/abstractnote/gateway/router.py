@@ -471,11 +471,26 @@ def _existing_automation(svc: Any, automation_id: Optional[str]) -> Optional[str
     return automation_id
 
 
+def _after_one_interval(every: str) -> Dict[str, str]:
+    """``{start_at}`` one interval from now: the schedule's first occurrence is its next scheduled
+    time, not the moment it is created (a fixed-interval schedule anchors its grid on ``start_at``)."""
+    from datetime import datetime, timezone
+
+    from abstractruntime.triggers.protocol import format_timestamp, parse_duration
+
+    return {"start_at": format_timestamp(datetime.now(timezone.utc) + parse_duration(every, field="every"))}
+
+
 def ensure_automations(nb: Any, svc: Any, principal: Any) -> Dict[str, Any]:
-    """Create the processor and reflect automations of this notebook when missing (idempotent)."""
+    """Create the processor and reflect automations of this notebook when missing (idempotent).
+
+    The processor's first drain runs at once (an empty queue completes without a model call); the
+    reflect automation's first occurrence is one interval after creation, so opening an empty
+    notebook never starts an answering-model call ("Reflect now" = ``automation.run_now``)."""
     from abstractgateway.routes.automations import CreateAutomationBody, _create
 
     settings = nb.settings()
+    reflect_every = str((settings.get("reflect_schedule") or {}).get("every") or "7d")
     out: Dict[str, Any] = {}
     created: List[str] = []
     plans = (
@@ -484,7 +499,7 @@ def ensure_automations(nb: Any, svc: Any, principal: Any) -> Dict[str, Any]:
          {"kind": "every", "every": "2m"}),
         ("reflect_automation_id", REFLECT_REQUEST_ID, "Reflect on my notes", "note-reflect",
          {"limit": 10, **_model_inputs(settings.get("answering_model"))},
-         {"kind": "every", "every": str((settings.get("reflect_schedule") or {}).get("every") or "7d")}),
+         {"kind": "every", "every": reflect_every, **_after_one_interval(reflect_every)}),
     )
     for meta_key, request_id, title, flow_id, inputs, schedule in plans:
         automation_id = _existing_automation(svc, nb.meta(meta_key))

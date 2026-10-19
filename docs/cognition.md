@@ -125,7 +125,12 @@ flowchart TD
   when it opens and the automations are missing) creates two automations per user, idempotently: the processor
   (trigger `schedule@2` every `2m`, flow `note-drain`, `max_items = 20`, `budget_s = 90`) and the
   reflect automation (every `7d` by default, flow `note-reflect`), each with
-  `_runtime.allowed_tools` listing the note tools.
+  `_runtime.allowed_tools` listing the note tools. The processor's first drain runs at creation
+  (an empty queue completes without a model call); the reflect automation's schedule starts one
+  interval after creation (`start_at = now + every`), so opening an empty notebook never starts an
+  answering-model call. "Reflect now" is the same `run_now` command sent to the reflect automation
+  (`POST /api/gateway/automations/{reflect_id}/commands` with `{"command_id": "<uuid>", "type":
+  "automation.run_now"}`).
   Automations run occurrences serially and coalesce missed ticks, which gives the queue exactly
   the eventual, ordered consistency it needs without a gateway worker. "Process now" sends the
   automation's `run_now` command; a `409 automation_busy` answer means a drain is already running
@@ -174,7 +179,9 @@ citations as links to notes.
 
 ### note-reflect
 
-Runs from a scheduled automation (default weekly, configurable). Deterministic tools produce
+Runs from a scheduled automation (default weekly, configurable); its first occurrence is one
+interval after the automation is created, and "Reflect now" (`automation.run_now`) runs it at once.
+A failed occurrence is retried by the automation (up to 3 attempts). Deterministic tools produce
 candidates; the model judges and writes:
 
 | Tool | Candidates |

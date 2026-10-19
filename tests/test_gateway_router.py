@@ -217,3 +217,28 @@ def test_the_plane_tools_are_the_core_lane_tools(gw):
     tool_map = _executor_chain(host.runtime)[-1]._tool_map
     td = getattr(tool_map["note_capture"], "_tool_definition", None)
     assert td is not None and td.name == "note_capture" and "about" in td.parameters
+
+
+def test_ensure_starts_the_processor_now_and_reflect_only_after_one_interval(gw):
+    """Opening an empty notebook must not start an answering-model call: the reflect automation's
+    first occurrence is its next scheduled time (review 02 M1); the processor drains at once."""
+    from datetime import datetime, timedelta, timezone
+
+    c, h = gw["client"], gw["alice"]
+    before = datetime.now(timezone.utc)
+    r = c.post("/api/gateway/note/processor/ensure", headers=h)
+    assert r.status_code == 200, r.text
+    ids = r.json()
+    assert ids["created"] == ["note-drain", "note-reflect"]
+
+    def config(automation_id):
+        got = c.get(f"/api/gateway/automations/{automation_id}", headers=h)
+        assert got.status_code == 200, got.text
+        return got.json()["definition"]["trigger"]["config"]
+
+    reflect = config(ids["reflect_id"])
+    assert reflect["every"] == "7d"
+    first = datetime.fromisoformat(reflect["start_at"])
+    assert before + timedelta(days=7) - timedelta(minutes=1) <= first <= datetime.now(timezone.utc) + timedelta(days=7)
+    proc = config(ids["processor_id"])
+    assert datetime.fromisoformat(proc["start_at"]) <= datetime.now(timezone.utc)

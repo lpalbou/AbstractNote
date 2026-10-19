@@ -12,7 +12,10 @@ What it checks (exit 1 on the first failure, with the reason):
   - an upload over the limit answers 413;
   - the processor automation is created, ``automation.run_now`` starts a drain, a second one while it
     runs answers 409 ``automation_busy``, and the queue drains;
-  - a note-recall run started with ``prompt`` (the agent contract) answers on ``output.response`` (S3).
+  - a note-recall run started with ``prompt`` (the agent contract) answers on ``output.response`` (S3);
+  - the reflect automation has not run on its own (its first occurrence is one interval away), its
+    "Reflect now" (``automation.run_now``) occurrence completes, every processor occurrence completed,
+    and no run in the account's plane is ``failed`` (review 02 M1).
 
 Every response it sees is written as a fixture ``<name>.json`` = ``{request, status, body}`` with
 credentials removed, for the clients' tests (review 01 S5).
@@ -125,6 +128,45 @@ def wait_drained(gw: str, token: str, timeout_s: float = 180.0) -> Dict[str, Any
     raise SmokeFailure(f"the queue did not drain within {timeout_s:.0f} s: {stats}")
 
 
+def occurrences(gw: str, token: str, automation_id: str) -> list:
+    status, body = call(gw, "GET", f"/api/gateway/automations/{automation_id}/occurrences?limit=100", token=token)
+    check(status == 200, f"occurrences of {automation_id} answered {status}: {body}")
+    return list(body.get("items") or [])
+
+
+def wait_occurrence(gw: str, token: str, automation_id: str, seen: int, timeout_s: float = 300.0) -> Dict[str, Any]:
+    """The newest occurrence once there are more than ``seen`` and it is finished."""
+    deadline = time.time() + timeout_s
+    items: list = []
+    while time.time() < deadline:
+        items = occurrences(gw, token, automation_id)
+        if len(items) > seen and items[0].get("status") in ("completed", "failed", "cancelled"):
+            return items[0]
+        time.sleep(0.5)
+    raise SmokeFailure(f"automation {automation_id} has no finished new occurrence after {timeout_s:.0f} s: {items[:1]}")
+
+
+def run_now(gw: str, token: str, automation_id: str, fixture: Optional[str] = None) -> None:
+    status = None
+    for _ in range(60):
+        status, out = call(gw, "POST", f"/api/gateway/automations/{automation_id}/commands", token=token,
+                           json_body={"command_id": str(uuid.uuid4()), "type": "automation.run_now"})
+        if status == 200:
+            _record(fixture, "POST", f"/api/gateway/automations/{automation_id}/commands",
+                    {"command_id": "<uuid>", "type": "automation.run_now"}, 200, out)
+            return
+        check(status == 409 and (out.get("detail") or {}).get("reason_code") == "automation_busy",
+              f"run_now answered {status}: {out}")
+        time.sleep(1)  # an occurrence is running: "already running", try again
+    raise SmokeFailure(f"run_now of {automation_id} never got through ({status})")
+
+
+def failed_runs(gw: str, token: str) -> list:
+    status, body = call(gw, "GET", "/api/gateway/runs?status=failed&limit=1000&include_ledger_len=false", token=token)
+    check(status == 200, f"GET /runs?status=failed answered {status}: {body}")
+    return [{k: r.get(k) for k in ("run_id", "workflow_id", "parent_run_id")} for r in body.get("items") or []]
+
+
 def ledger(gw: str, token: str, run_id: str) -> list:
     status, body = call(gw, "GET", f"/api/gateway/runs/{run_id}/ledger?limit=100000", token=token)
     check(status == 200, f"ledger of {run_id} answered {status}")
@@ -234,18 +276,7 @@ def main() -> int:
     second = start_run(gw, a, "note-capture", {"text": "Dana moved the Pareto deadline to next week.",
                                                "idempotency_key": str(uuid.uuid4()), "session_id": session}, session)
     wait_run(gw, a, second)
-    rn_status = None
-    for _ in range(60):
-        rn_status, rn = call(gw, "POST", f"/api/gateway/automations/{proc}/commands", token=a,
-                             json_body={"command_id": str(uuid.uuid4()), "type": "automation.run_now"})
-        if rn_status == 200:
-            _record("automation_run_now_200", "POST", f"/api/gateway/automations/{proc}/commands",
-                    {"command_id": "<uuid>", "type": "automation.run_now"}, 200, rn)
-            break
-        check(rn_status == 409 and (rn.get("detail") or {}).get("reason_code") == "automation_busy",
-              f"run_now answered {rn_status}: {rn}")
-        time.sleep(1)  # a scheduled tick is running: "already running", try again
-    check(rn_status == 200, "run_now never got through")
+    run_now(gw, a, proc, fixture="automation_run_now_200")
     busy_status = None
     for _ in range(40):
         busy_status, busy = call(gw, "POST", f"/api/gateway/automations/{proc}/commands", token=a,
@@ -273,6 +304,22 @@ def main() -> int:
     _record("run_recall_completed_200", "GET", f"/api/gateway/runs/{rid}", None, 200, rec)
     check(str((rec.get("output") or {}).get("response") or "").strip(), f"recall output.response is empty: {rec.get('output')}")
     report["recall_response"] = rec["output"]["response"]
+
+    # reflect: nothing on its own at creation; "Reflect now" completes; no failed run anywhere (M1)
+    reflect = ens["reflect_id"]
+    seen = len(occurrences(gw, a, reflect))
+    check(seen == 0 or "note-reflect" not in ens.get("created", []),
+          "the reflect automation ran at creation (its first run is one interval away)")
+    run_now(gw, a, reflect, fixture="automation_reflect_run_now_200")
+    occ = wait_occurrence(gw, a, reflect, seen=seen)
+    check(occ.get("status") == "completed", f"the reflect occurrence ended {occ.get('status')}: {occ.get('failure')}")
+    drains = occurrences(gw, a, proc)
+    check(drains and all(o.get("status") == "completed" for o in drains),
+          f"a processor occurrence did not complete: {[(o.get('index'), o.get('status'), o.get('failure')) for o in drains]}")
+    for who, token in (("alice", a), ("bob", b)):
+        failed = failed_runs(gw, token)
+        check(not failed, f"{who}'s plane has failed runs: {failed}")
+    report["automations"] = {"reflect": occ.get("status"), "processor_occurrences": len(drains), "failed_runs": 0}
     print(json.dumps(report, indent=2))
     return 0
 
