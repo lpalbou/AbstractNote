@@ -39,7 +39,7 @@ struct TodayScreen: View {
         } else {
             ForEach(c.notes) { n in row(n.title ?? "A new note", detail: "New note", symbol: "square.and.pencil", route: .note(id: n.noteId, title: n.title)) }
             ForEach(c.entities) { e in row(e.name, detail: "New in your notes", symbol: "person.crop.circle.badge.plus", route: nil) }
-            ForEach(c.supersededClaims) { cl in row(cl.text ?? "A belief", detail: "No longer true", symbol: "arrow.triangle.2.circlepath", route: nil) }
+            ForEach(c.supersededClaims) { cl in row(cl.text ?? "A belief", detail: cl.isRetraction ? "Withdrawn" : "No longer true", symbol: cl.isRetraction ? "xmark.circle" : "arrow.triangle.2.circlepath", route: nil) }
             ForEach(c.closedLoops) { l in row(l.text, detail: "Done", symbol: "checkmark.circle", route: nil) }
             ForEach(c.failedNotes) { n in row(n.title ?? "A note", detail: "Could not be filed yet", symbol: "exclamationmark.triangle", route: .note(id: n.noteId, title: n.title)) }
         }

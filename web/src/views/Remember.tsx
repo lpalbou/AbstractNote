@@ -77,6 +77,7 @@ function SinceLastLooked() {
                 {c.superseded_claims.map((cl) => (
                   <button key={cl.claim_id} type="button" className="nt-link" onClick={() => openClaim(cl.claim_id)}>
                     <span className="nt-link__title nt-struck">{cl.text}</span>
+                    <span className="nt-link__date">{cl.kind === "retracted" ? "Withdrawn" : "Replaced"}</span>
                   </button>
                 ))}
               </ChangeGroup>

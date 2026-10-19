@@ -91,7 +91,8 @@ export type Changes = {
   cursor: string;
   notes?: NoteRef[];
   entities?: Array<EntityRef & { first_seen: string }>;
-  superseded_claims?: Array<{ claim_id: string; text: string; superseded_by: string | null; note_id: string }>;
+  /** `kind` superseded (replaced by `superseded_by`) or retracted (withdrawn; `superseded_by` null); `text` is plain words. */
+  superseded_claims?: Array<{ claim_id: string; kind: "superseded" | "retracted"; text: string; superseded_by: string | null; note_id: string }>;
   closed_loops?: Array<{ task_id: string; text: string; closed_at: string }>;
   failed_notes?: Array<{ note_id: string; title: string; error: string }>;
   insights?: Insight[];

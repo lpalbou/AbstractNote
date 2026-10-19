@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // @ts-expect-error plain ESM module
 import { MOCK_TOKEN, createMockGateway } from "../mock/server.mjs";
+import { deltaVocabulary } from "./delta_words";
 
 const API_MD_FULL = readFileSync(join(__dirname, "..", "..", "docs", "api.md"), "utf8");
 // Only the "Pinned response shapes" table: the read-API table above it has rows with the same names.
@@ -100,7 +101,11 @@ describe("mock gateway serves the pinned shapes", () => {
     const changes = (await call("/api/gateway/note/changes?since=2026-01-01T00:00:00Z")).body;
     expect(Object.keys(changes.notes[0]).sort()).toEqual(topKeys(pinned("NoteRef")).sort());
     expect(Object.keys(changes.insights[0]).sort()).toEqual(topKeys(pinned("Insight")).sort());
-    expect(Object.keys(changes.superseded_claims[0]).sort()).toEqual(["claim_id", "note_id", "superseded_by", "text"]);
+    const claimShape = shapeOf(pinned("GET /note/changes")).match(/superseded_claims: \[\{([^}]*)\}\]/);
+    if (!claimShape) throw new Error("docs/api.md: the GET /note/changes row has no superseded_claims item shape");
+    expect(Object.keys(changes.superseded_claims[0]).sort()).toEqual(claimShape[1].split(",").map((k) => k.trim()).sort());
+    expect(changes.superseded_claims.map((c: { kind: string }) => c.kind).every((k: string) => k === "superseded" || k === "retracted")).toBe(true);
+    expect(deltaVocabulary(changes)).toEqual([]);
     const cue = (await call("/api/gateway/note/cues")).body.items[0];
     expect(Object.keys(cue).sort()).toEqual(itemKeys(pinned("GET /note/cues")).sort());
     expect(Object.keys(cue.subject).sort()).toEqual(["id", "kind", "title"]);

@@ -107,7 +107,8 @@ Pinned response shapes (clients decode these strictly; absent lists mean empty):
 
 | Endpoint | Shape |
 |---|---|
-| `GET /note/changes` | `{cursor, notes: [NoteRef], entities: [{entity_id, name, kind, first_seen}], superseded_claims: [{claim_id, text, superseded_by, note_id}], closed_loops: [{task_id, text, closed_at}], failed_notes: [{note_id, title, error}], insights: [Insight]}` |
+| `GET /note/changes` | `{cursor, notes: [NoteRef], entities: [{entity_id, name, kind, first_seen}], superseded_claims: [{claim_id, kind, text, superseded_by, note_id}], closed_loops: [{task_id, text, closed_at}], failed_notes: [{note_id, title, error}], insights: [Insight]}` |
+| `superseded_claims[]` | `kind` is `superseded` (a later note replaced the claim; `superseded_by` is the new claim's id) or `retracted` (withdrawn by a note or by you; `superseded_by` is null); `text` is the claim in plain words built from entity names and the predicate's label ("Dana works at Acme"), never ids or vocabulary terms |
 | `NoteRef` | `{note_id, title, kind, occurred_at, excerpt}` |
 | `Insight` | `{note_id, title, body, insight_kind, occurred_at, acked_at, evidence_note_ids, entity_ids}` |
 | `GET /note/overview` | `{recent: [NoteRef], entities: [{entity_id, name, kind, note_count, last_seen}], insights: [Insight], resurfacing: [NoteRef], activity: [{day, notes, revisions}]}` |

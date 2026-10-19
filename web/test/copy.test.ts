@@ -6,6 +6,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { findVerbToggleLabels } from "@abstractframework/ui-kit";
+import { deltaVocabulary } from "./delta_words";
 
 const SRC = join(__dirname, "..", "src");
 const FORBIDDEN = /\b(ledger|gateway|workflow|run ids?|records?|runs?|artifacts?|automations?|entity id|note id|claim id|revision id|http \d{3})\b/i;
@@ -60,6 +61,11 @@ describe("copy rules", () => {
       expect(FORBIDDEN.test(s), s).toBe(false);
       expect(s.replace(/\$\{[^}]+\}/g, "x").split(/[.!?](\s|$)/).filter((x) => x && x.trim()).length, s).toBeLessThanOrEqual(1);
     }
+  });
+
+  it("a vocabulary term in the since-you-last-looked delta fails (guard)", () => {
+    expect(deltaVocabulary({ superseded_claims: [{ text: "Dana schema:participant LUT" }] })).toEqual(["Dana schema:participant LUT"]);
+    expect(deltaVocabulary({ superseded_claims: [{ text: "Dana participant LUT" }], entities: [{ name: "Dana" }] })).toEqual([]);
   });
 
   it("no on/off setting is labelled with a verb", () => {

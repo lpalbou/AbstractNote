@@ -182,6 +182,26 @@ def test_insights_cues_and_ack(nb):
         nb.capture("x", about={"kind": "cue", "id": "nt_nope"})
 
 
+def test_changes_lists_supersessions_and_retractions_in_plain_words(nb):
+    """Review 02 M3: the delta reaches the watch screen verbatim, so its text carries names and the
+    predicate's plain words, never ids or CURIEs; a retraction is its own kind."""
+    import re
+
+    first = nb.changes("")
+    h = history(nb)
+    participant = [c for c in nb.store.q("SELECT claim_id FROM claims WHERE predicate='schema:participant'")][0][0]
+    nb.retract_claim(participant, "user:1", "Dana was never on LUT.")
+    delta = nb.changes(first["cursor"])["superseded_claims"]
+    by_id = {c["claim_id"]: c for c in delta}
+    assert set(by_id) == {h["works"], participant}
+    assert by_id[h["works"]] == {"claim_id": h["works"], "kind": "superseded", "text": "Dana works at Acme",
+                                 "superseded_by": h["beta"], "note_id": h["n2"]}
+    assert by_id[participant]["kind"] == "retracted" and by_id[participant]["superseded_by"] is None
+    assert by_id[participant]["text"] == "Dana participant LUT"
+    curie = re.compile(r"\b[a-z][a-z0-9]*:[A-Za-z]")
+    assert not [c["text"] for c in delta if curie.search(c["text"])]
+
+
 def test_changes_cursor_never_loses_or_repeats(nb):
     first = note_changes(ToolContext(nb=nb), since="", limit=50)
     assert set(first) == {"cursor", "notes", "entities", "superseded_claims", "closed_loops", "failed_notes",

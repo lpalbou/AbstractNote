@@ -473,7 +473,7 @@ export function createMockGateway(options = {}) {
         cursor: nowIso(),
         notes: [...db.notes.values()].filter((n) => fresh(n.received_at) && n.status !== "failed").sort((a, b) => ms(b.received_at) - ms(a.received_at)).map(noteRef),
         entities: [...db.entities.values()].filter((e) => e.created_at && fresh(e.created_at)).map((e) => ({ ...entRef(e.entity_id), first_seen: e.first_seen })),
-        superseded_claims: [...db.claims.values()].filter((c) => c.status !== "active" && fresh(c.valid_until || c.retracted_at || c.recorded_at)).map((c) => ({ claim_id: c.claim_id, text: describe(c), superseded_by: c.superseded_by, note_id: c.note_id })),
+        superseded_claims: [...db.claims.values()].filter((c) => c.status !== "active" && fresh(c.valid_until || c.retracted_at || c.recorded_at)).map((c) => ({ claim_id: c.claim_id, kind: c.status === "superseded" ? "superseded" : "retracted", text: describe(c), superseded_by: c.status === "superseded" ? c.superseded_by : null, note_id: c.note_id })),
         closed_loops: [...db.tasks.values()].filter((tk) => tk.status !== "open" && tk.closed_at && fresh(tk.closed_at)).map((tk) => ({ task_id: tk.task_id, text: tk.text, closed_at: tk.closed_at })),
         failed_notes: [...db.notes.values()].filter((n) => n.status === "failed").map((n) => ({ note_id: n.note_id, title: n.title, error: n.error })),
         insights: [...db.insights.values()].filter((i) => fresh(i.occurred_at)).map(insightView),

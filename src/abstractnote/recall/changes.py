@@ -30,6 +30,10 @@ def _since(since: Optional[str]) -> Tuple[str, set]:
 def changes(nb: Any, since: Optional[str] = None, limit: int = 50) -> Dict[str, Any]:
     """``{cursor, notes, entities, superseded_claims, closed_loops, failed_notes, insights}``.
 
+    ``superseded_claims`` lists every claim that stopped being believed: ``kind`` ``superseded``
+    (a later note replaced it; ``superseded_by`` names the new claim) or ``retracted`` (withdrawn
+    by a note or by the person; ``superseded_by`` is null), with ``text`` in plain words.
+
     ``since`` is a cursor from an earlier call or an ISO time. At most ``limit``
     items in total are returned, earliest first; the returned cursor continues
     exactly after them.
@@ -55,7 +59,8 @@ def changes(nb: Any, since: Optional[str] = None, limit: int = 50) -> Dict[str, 
                " JOIN revisions v ON v.revision_id=c.closed_revision_id WHERE c.status IN ('superseded','retracted')"
                " AND v.recorded_at>=? ORDER BY v.recorded_at, c.claim_id LIMIT ?", (ts, limit + len(seen))):
         add("superseded_claims", "claim", r["claim_id"], r["closed_recorded_at"],
-            {"claim_id": r["claim_id"], "text": _claim_text(nb, r), "superseded_by": r["superseded_by"],
+            {"claim_id": r["claim_id"], "kind": "superseded" if r["status"] == "superseded" else "retracted",
+             "text": claim_text(nb, r), "superseded_by": r["superseded_by"] if r["status"] == "superseded" else None,
              "note_id": r["closing_note_id"] or r["note_id"]})
     for r in q("SELECT * FROM tasks WHERE status='done' AND recorded_closed_at>=? ORDER BY recorded_closed_at,"
                " task_id LIMIT ?", (ts, limit + len(seen))):
@@ -86,10 +91,14 @@ def changes(nb: Any, since: Optional[str] = None, limit: int = 50) -> Dict[str, 
     return {"cursor": encode_cursor("chg", high, sorted(keys)), **out}
 
 
-def _claim_text(nb: Any, r: Any) -> str:
-    subject = nb.store._name(r["subject_id"]) or r["subject_id"]
-    obj = nb.store._name(r["object_id"]) if r["object_id"] else r["object_literal"]
-    return f"{subject} {r['predicate']} {obj}"
+def claim_text(nb: Any, r: Any) -> str:
+    """The claim in words a person reads: entity names and the predicate's plain words, never ids
+    ("Dana participant LUT"; an entity without a name reads "someone")."""
+    from ..process.vocabulary import predicate_words
+
+    subject = nb.store._name(r["subject_id"]) or "someone"
+    obj = (nb.store._name(r["object_id"]) or "something") if r["object_id"] else (r["object_literal"] or "something")
+    return f"{subject} {predicate_words(r['predicate'])} {obj}"
 
 
 def overview(nb: Any, days: int = 30, *, now: Optional[str] = None) -> Dict[str, Any]:

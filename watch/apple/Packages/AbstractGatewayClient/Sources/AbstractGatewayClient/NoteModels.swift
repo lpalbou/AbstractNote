@@ -168,12 +168,19 @@ public struct EntityRef: Codable, Hashable, Sendable, Identifiable {
 }
 
 /// A belief that a newer note replaced.
+/// A claim that stopped being believed (`GET /note/changes` `superseded_claims[]`): `kind` is
+/// `superseded` (a later note replaced it) or `retracted` (withdrawn); `text` is plain words.
 public struct ClaimChange: Codable, Hashable, Sendable, Identifiable {
     public var claimId: String
+    public var kind: String?
     public var text: String?
+    public var supersededBy: String?
     public var id: String { claimId }
-    enum CodingKeys: String, CodingKey { case claimId = "claim_id", text }
-    public init(claimId: String, text: String?) { self.claimId = claimId; self.text = text }
+    public var isRetraction: Bool { kind == "retracted" }
+    enum CodingKeys: String, CodingKey { case claimId = "claim_id", kind, text, supersededBy = "superseded_by" }
+    public init(claimId: String, kind: String? = "superseded", text: String?, supersededBy: String? = nil) {
+        self.claimId = claimId; self.kind = kind; self.text = text; self.supersededBy = supersededBy
+    }
 }
 
 /// A finding of the reflect flow or a deep answer (a note of kind `insight` or `synthesis`).

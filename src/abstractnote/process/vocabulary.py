@@ -25,6 +25,18 @@ def vocabulary() -> List[Dict[str, str]]:
     return out
 
 
+def predicate_words(predicate: str) -> str:
+    """Plain words for a predicate, for text a person reads: the registry label (``schema:worksFor``
+    -> "works for"), else the spelled-out local name (``ex:led_by`` -> "led by"). Never a CURIE."""
+    raw = str(predicate or "").strip()
+    for p in _registry().predicates:
+        if p.id == raw and (p.label or "").strip():
+            return p.label.strip()
+    local = raw.split(":", 1)[1] if ":" in raw else raw
+    words = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", local).replace("_", " ").strip().lower()
+    return " ".join(words.split()) or "related to"
+
+
 def predicate_ids() -> frozenset:
     return frozenset(_registry().predicate_ids())
 

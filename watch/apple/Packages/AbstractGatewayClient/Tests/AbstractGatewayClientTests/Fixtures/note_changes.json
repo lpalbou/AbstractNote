@@ -2,6 +2,7 @@
  "body": {"since": "2026-10-18T06:00:00Z", "cursor": "c-2026-10-19T09:00:00Z",
           "notes": [{"note_id": "n-41", "title": "Pareto by Friday", "kind": "task", "occurred_at": "2026-10-19T09:12:00Z"}],
           "entities": [{"entity_id": "ex:person-dana", "name": "Dana", "kind": "person"}],
-          "superseded_claims": [{"claim_id": "c-9", "text": "The LUT budget is 40k"}],
+          "superseded_claims": [{"claim_id": "c-9", "kind": "superseded", "text": "LUT budget 40k", "superseded_by": "c-12", "note_id": "n-41"},
+                                {"claim_id": "c-4", "kind": "retracted", "text": "Dana participant Orion", "superseded_by": null, "note_id": "n-30"}],
           "closed_loops": [{"task_id": "t-3", "note_id": "n-30", "text": "Send the slides to Marc", "status": "done"}],
           "failed_notes": [], "insights": []}}
