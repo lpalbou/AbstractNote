@@ -257,12 +257,16 @@ class NoteRunner:
 
     @classmethod
     def local(cls, notebook_dir: str | Path, *, provider: Optional[str] = None, model: Optional[str] = None,
-              llm: Any = None, run_dir: Optional[Path] = None, **bind_kwargs: Any) -> "NoteRunner":
-        """Bind the note tools to ``notebook_dir`` and pick the model path (``llm`` wins)."""
+              llm: Any = None, run_dir: Optional[Path] = None, llm_kwargs: Optional[Dict[str, Any]] = None,
+              **bind_kwargs: Any) -> "NoteRunner":
+        """Bind the note tools to ``notebook_dir`` and pick the model path (``llm`` wins).
+
+        ``llm_kwargs`` go to AbstractCore's provider (for example ``base_url``); the rest to
+        ``abstractnote.tools.bind`` (``embedder``, ``allow_paths_under``, ``extractors``, ...)."""
         tools = _bind_note_tools(Path(notebook_dir), **bind_kwargs)
         if llm is not None:
             return cls.with_llm(llm, tools, run_dir=run_dir)
-        return cls.with_model(str(provider or ""), str(model or ""), tools, run_dir=run_dir)
+        return cls.with_model(str(provider or ""), str(model or ""), tools, run_dir=run_dir, llm_kwargs=llm_kwargs)
 
     # -- running
 

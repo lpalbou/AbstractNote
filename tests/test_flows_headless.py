@@ -9,6 +9,7 @@ has not landed.
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
@@ -319,3 +320,48 @@ def test_the_flow_merge_matches_the_core_lane_merge(doubles):
     merged, mentions = merge_extractions([part1, part2])
     assert applied["extraction"] == merged
     assert doubles.args("note_resolve_candidates")[0]["mentions"] == mentions
+
+
+def test_the_real_model_path_through_abstractcore(tmp_path, monkeypatch):
+    """NoteRunner.local with a provider and a model: AbstractCore over HTTP to the scripted
+    OpenAI-compatible server (scripts/stub_llm.py), the core lane's tools, capture -> drain -> recall."""
+    import socket
+    import subprocess
+    import sys
+    import time
+
+    _core_tools()
+    port = None
+    for candidate in range(18860, 18870):
+        with socket.socket() as s:
+            if s.connect_ex(("127.0.0.1", candidate)) != 0:
+                port = candidate
+                break
+    if port is None:
+        pytest.skip("no free scratch port in 18860-18869")
+    home = tmp_path / "home"
+    home.mkdir()
+    dead = "http://127.0.0.1:9/v1"
+    for k, v in {"HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config"), "HF_HOME": str(home / "hf"),
+                 "LMSTUDIO_BASE_URL": dead, "OLLAMA_BASE_URL": dead, "OPENAI_API_KEY": "stub",
+                 "OPENAI_BASE_URL": f"http://127.0.0.1:{port}/v1"}.items():
+        monkeypatch.setenv(k, v)
+    stub = Path(__file__).resolve().parents[1] / "scripts" / "stub_llm.py"
+    proc = subprocess.Popen([sys.executable, str(stub), "--port", str(port)], env={"PATH": "/usr/bin:/bin", "HOME": str(home)},
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(50):
+            with socket.socket() as s:
+                if s.connect_ex(("127.0.0.1", port)) == 0:
+                    break
+            time.sleep(0.1)
+        r = NoteRunner.local(tmp_path / "nb", provider="openai-compatible", model="note-stub",
+                             llm_kwargs={"base_url": f"http://127.0.0.1:{port}/v1"})
+        cap = r.run_capture("Met Dana about the LUT budget; she wants the Pareto by Friday.", idempotency_key="k-1",
+                            source={"client": "cli"})
+        assert cap["status"] == "queued" and cap["response"] == "Saved as event “Dana and the LUT budget”."
+        assert r.run_drain(max_items=5, budget_s=60)["processed"] == 1
+        assert "Pareto" in r.run_recall("What does Dana want?", effort="standard")["response"]
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
