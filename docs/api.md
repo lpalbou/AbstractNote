@@ -51,8 +51,13 @@ Output: `{response, answer, evidence: [{note_id, title, occurred_at, excerpt}], 
 `response` is the answer text, so chat clients using the `abstractcode.agent.v1` contract
 (`prompt` in, `output.response` out) work unchanged: `prompt` is accepted as an alias of `question`.
 
-Run the processor now: `POST /api/gateway/automations/{processor_id}/commands {"type": "run_now"}`
-(the id comes from `GET /api/gateway/note/status`).
+Run the processor now: `POST /api/gateway/automations/{processor_id}/commands
+{"command_id": "<uuid>", "type": "automation.run_now"}` (the id comes from `GET /api/gateway/note/status`;
+a `409 automation_busy` answer means a drain is already running).
+
+Every run start also carries `input_data.session_id` equal to the request's `session_id` (the gateway
+does not forward the run's session to the flow). Run errors appear in `output` as text starting with
+`Runtime error: `; clients strip that prefix before showing the sentence.
 
 ## Note read API
 
