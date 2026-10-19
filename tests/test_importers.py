@@ -104,17 +104,22 @@ def test_claude_sessions_notes_time_and_provenance(claude_project):
     kinds = sorted(d.kind for d in drafts)
     assert kinds == ["away_summary", "compaction_summary", "memory", "prompt", "prompt", "prompt", "session_title", "subagent"]
     first = next(d for d in drafts if d.source_key == "s-1:u1")
-    assert first.text == ("Why does the tray show the wrong speaker?\n\n## Outcome\n\nPortAudio froze the default device.")
+    assert first.text == ("Why does the tray show the wrong speaker?\n\n---\n\n## Assistant answer (claude-opus)\n\n"
+                          "PortAudio froze the default device.")
     assert first.occurred_at == "2026-10-01T08:00:01Z"
     assert first.attachments == [{"data": PNG, "mime": "image/png"}]
     assert first.source["author"] == "me" and first.source["importer"] == "claude-sessions"
     assert first.source["origin"] == {"session_id": "s-1", "uuid": "u1", "prompt_id": "p1", "cwd": "/Users/me/repo",
                                       "git_branch": "main", "model": "claude-opus",
-                                      "file": str(claude_project / "s-1.jsonl"), "line": 3}
+                                      "file": str(claude_project / "s-1.jsonl"), "line": 3,
+                                      "outcome": "PortAudio froze the default device.", "outcome_author": "claude-opus"}
     second = next(d for d in drafts if d.source_key == "s-1:u2")
-    assert second.text == "Ship the fix.\n\n## Outcome\n\nShipped."
+    assert second.text == "Ship the fix.\n\n---\n\n## Assistant answer (claude-opus)\n\nShipped."
+    assert second.source["author"] == "me" and second.source["origin"]["outcome_author"] == "claude-opus"
+    assert second.text.split(claude_sessions.outcome_separator("claude-opus"))[0] == "Ship the fix."
     queued = next(d for d in drafts if d.source_key == "s-1:q1")
     assert queued.text == "also check the watch" and queued.occurred_at == "2026-10-01T08:02:30Z"
+    assert "outcome" not in queued.source["origin"]  # no answer recorded for it: no outcome fields
     sub = next(d for d in drafts if d.kind == "subagent")
     assert sub.title == "Find the selector" and "## Report" in sub.text and sub.source["author"] == "Explore"
     mem = next(d for d in drafts if d.kind == "memory")
@@ -179,6 +184,11 @@ def test_claude_import_is_idempotent_and_bulk(claude_project, notebook):
 
     note = notebook.note(ids.note_id_for_import("claude-sessions", "s-1:u1"))
     assert note["occurred_at"] == "2026-10-01T08:00:01Z" and note["source"]["importer"] == "claude-sessions"
+    import getpass
+
+    assert note["source"]["author"] == getpass.getuser()  # the operator only; the model is the outcome's author
+    assert note["source"]["origin"]["outcome_author"] == "claude-opus"
+    assert note["source"]["origin"]["outcome"] == "PortAudio froze the default device."
 
 
 # --------------------------------------------------------------------------- agora

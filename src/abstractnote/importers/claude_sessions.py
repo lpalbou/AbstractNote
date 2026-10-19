@@ -1,6 +1,9 @@
 """Claude Code session transcripts -> notes (docs/importers.md, recon data-sources.md section A).
 
-One note per human-typed prompt, with the final assistant text of that turn as its outcome; one per
+One note per human-typed prompt: the prompt is the note, by the operator (``source.author``); the
+final assistant text of that turn is its outcome, kept in ``source.origin.outcome`` by
+``source.origin.outcome_author`` (the model id) and appended to the text after a separator that
+names the model, so it stays searchable without being the operator's words. One per
 session title, compaction summary and away summary; one per subagent run (its brief and its last
 report); one per curated memory file. ``occurred_at`` is the record's own timestamp; a memory
 file (no record of its own) takes its origin session's first record (front matter
@@ -42,6 +45,15 @@ _ENVELOPES = {
     "[Request interrupted": "interrupted",
     "Caveat: The messages below were generated": "local_command",
 }
+
+
+def outcome_separator(model: Optional[str]) -> str:
+    """What sits between a typed prompt and the assistant's answer in a prompt note's text.
+
+    The prompt is the operator's; everything after this line is the model's (``source.origin.outcome``,
+    by ``source.origin.outcome_author``), kept in the text so a search finds it.
+    """
+    return "\n\n---\n\n## Assistant answer" + (f" ({model})" if model else "") + "\n\n"
 
 
 def _project_dirs(root: Path) -> List[Path]:
@@ -99,10 +111,12 @@ def _session_drafts(path: Path, report: ImportReport, author: str, since: Option
         if t is None:
             return
         body = t["text"]
-        if t.get("outcome"):
-            body = body + "\n\n## Outcome\n\n" + t["outcome"]
+        outcome = t.get("outcome")
+        if outcome:
+            body = body + outcome_separator(t.get("model")) + outcome
         origin = {"session_id": sid, "uuid": t["uuid"], "prompt_id": t.get("prompt_id"), "cwd": t.get("cwd"),
-                  "git_branch": t.get("git_branch"), "model": t.get("model"), "file": str(path), "line": t["line"]}
+                  "git_branch": t.get("git_branch"), "model": t.get("model"), "file": str(path), "line": t["line"],
+                  "outcome": outcome or None, "outcome_author": (t.get("model") or "assistant") if outcome else None}
         if in_window(t["ts"], since, until):
             yield NoteDraft(IMPORTER, f"{sid}:{t['uuid']}", body, t["ts"], t["kind"], None, _source(origin, author),
                             t["images"])
