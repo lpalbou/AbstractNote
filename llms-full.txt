@@ -1,8 +1,10 @@
 # AbstractNote
 
-> One endpoint for everything you want to remember: notes, files, photos, recordings and logs are filed with their time, place and provenance and grow a temporal semantic knowledge graph you can search by effort (quick, standard, deep) and revisit through time. Part of the AbstractFramework; runs on AbstractGateway, AbstractRuntime, AbstractFlow, AbstractMemory and AbstractCore. Version 0.1.0, installed from source (not yet on PyPI or npm).
+> One endpoint for everything you want to remember: notes, files, photos, recordings and logs are filed with their time,
+> place and provenance, linked to what you already know, and kept as a temporal semantic knowledge graph you can search by
+> effort (quick, standard, deep) and revisit through time.
 
-This file aggregates the core AbstractNote documentation in one place. Each section reproduces one repository file verbatim; links inside them are relative to that file's location in the repository.
+This file aggregates the core AbstractNote documentation in one place. Each section reproduces one repository file verbatim.
 
 ## Document Index
 
@@ -663,14 +665,14 @@ signed-in principal for their own notebook. The few write actions are bookkeepin
 | Method and path | Purpose | Main parameters |
 |---|---|---|
 | `GET /note/status` | notebook health: counts, queue state, processor and reflect automation ids, model settings, store versions, embedding pin | |
-| `GET /note/changes` | since you last looked: new notes, new entities, superseded claims, closed loops, failed notes, insights since a cursor; the default screen for humans and the first call for agents | `since (cursor or ISO), limit` |
+| `GET /note/changes` | since you last looked: new notes, new entities, superseded claims, closed loops, failed notes, insights since a cursor; the default screen for humans and the first call for agents | `since (cursor or ISO), limit, as_received` |
 | `GET /note/overview` | the landing data: recent notes, active entities, unacknowledged insights, today's resurfacing, activity sparkline | `days` |
 | `GET /note/notes` | list notes | `q, since, until, kind, topic, entity, status, cursor, limit` |
 | `GET /note/notes/{note_id}` | a note with attachments, revision, claims, linked entities, revisits | |
 | `GET /note/notes/{note_id}/attachments/{attachment_id}` | attachment bytes (streams the blob) | |
 | `GET /note/search` | quick recall (full-text plus vector), grouped | `q, since, until, kinds, entities, topics, limit` |
-| `GET /note/entities` | list or search entities | `q, kind, sort=recent|frequent|name, cursor, limit` |
-| `GET /note/entities/{entity_id}` | entity card as of a moment: name, aliases, summary history, beliefs at `at`, relations, notes, open tasks | `at` |
+| `GET /note/entities` | list or search entities (entries merged into another are left out unless `include_merged=true`; each item carries `merged_into`) | `q, kind, sort=recent|frequent|name, cursor, limit, include_merged` |
+| `GET /note/entities/{entity_id}` | entity card as of a moment: name, aliases, summary history, beliefs at `at`, relations, notes, open tasks (a merged id answers with the surviving entity and `resolved_from`); with `as_merged=true`, the entry's own record instead, not followed to the survivor | `at, as_received, as_merged` |
 | `GET /note/entities/{entity_id}/timeline` | claims and notes about the entity in history order, with supersessions | `since, until` |
 | `GET /note/entities/{entity_id}/then-now` | the earliest and latest summaries and the turning points (cached synthesis) | |
 | `GET /note/relations/{a}/{b}` | the relationship between two entities through time: claims in history order, supersessions, then-versus-now of the link | `since, until` |
@@ -678,29 +680,53 @@ signed-in principal for their own notebook. The few write actions are bookkeepin
 | `POST /note/claims/{claim_id}/retract` | user action: retract a claim (a revision with the account as source) | `reason` |
 | `POST /note/tasks/{task_id}/close` | user action: close an open loop | `note?` |
 | `POST /note/entities/{entity_id}/unmerge` | user action: undo a merge | `from_id, reason` |
+| `GET /note/review` | to review: matches the notebook proposed or made on its own and disagreements it kept, each with why, the two sides, the notes behind them and the actions you can take | `limit` |
+| `POST /note/review/{review_id}/confirm` | user action: confirm a proposed match (a close match becomes a merge; a merge is kept) | |
+
+The review list (`GET /note/review`) is built from stored records only, never from reading text. Each item has a
+`kind` and the rule that put it there (`why`):
+
+| `kind` | `why` | What it is | `actions` |
+|---|---|---|---|
+| `close_match` | `unsure_match` | processing could not tell whether a name is an existing entity, so it created a new entry and recorded a `skos:closeMatch` claim to the candidate (listed while that claim is active and the two are still separate) | `confirm` (merge the new entry into the candidate and supersede the close match), `keep_apart` (retract the close-match claim) |
+| `merge` | `merged_by_model` | processing joined two entries on its own and the merge is still in force (merges you confirmed here are never listed) | `confirm` (keep it: the item leaves the list), `unmerge` |
+| `contradiction` | `disputed_pair` | a note contradicted an earlier statement and both were kept, marked disputed | `retract` either side (the item leaves the list when one side is no longer active); `confirm` is refused with 400 |
+
+Each action is `{action, method, path, body}` with `path` under `/api/gateway`; a `null` in `body` is for the
+person to fill (the reason of a retraction). `confirm` records a user-action revision with `action = match.confirm`
+and `target` = the review id, with the account from the signed-in principal; confirming an item that is not waiting
+for review is `404`.
 
 A user action's revision carries `source = {account, client}`: `account` is the signed-in
 principal; `client` is `web` when the request came through the Note web app's proxy (which marks
 what it relays with `X-AbstractFramework-App-Proxy: abstractnote`) and `api` otherwise. Request
 bodies cannot set it (an unknown field such as `client` is refused with 422).
 | `GET /note/cues` | cue cards: a few reflect-generated prompts you can answer by adding a note (a person gone quiet, a decision that aged, a task mentioned often and never closed) | `limit` |
-| `GET /note/graph` | nodes and edges for the explorer | `focus (entity ids), at, depth (1..3), since, until, kinds, min_count, limit` |
+| `GET /note/graph` | nodes and edges for the explorer | `focus (entity ids), at, as_received, depth (1..3), since, until, kinds, min_count, limit` |
 | `GET /note/timeline` | activity per bucket: notes, revisions, new entities, superseded claims | `since, until, granularity=day|week|month` |
-| `GET /note/day/{YYYY-MM-DD}` | what happened on a day: notes, revisions with summaries, entities touched | `tz` |
+| `GET /note/day/{YYYY-MM-DD}` | what happened on a day: notes, revisions with summaries, entities touched | `tz, as_received` |
 | `GET /note/revisions` | revision feed | `since, until, entity, cursor, limit` |
 | `GET /note/topics` | topics with counts and date ranges | |
 | `GET /note/tasks` | open loops | `status, entity, limit` |
 | `GET /note/insights` | insights | `kind, acked, limit` |
 | `POST /note/insights/{id}/ack` | acknowledge an insight | |
-| `GET /note/queue` | queue summary and failed notes with errors | |
+| `GET /note/queue` | queue summary, failed notes with errors, and the processor's throughput (`processor: {max_items, interval}`) | `limit` |
 | `POST /note/queue/{note_id}/retry` | re-queue a failed note | |
 | `POST /note/notes/{note_id}/archive` | archive a note (never delete) | |
-| `GET /note/settings` and `PUT /note/settings` | per-notebook settings: filing model, answering model, reflect schedule, inline processing default | |
+| `GET /note/settings` and `PUT /note/settings` | per-notebook settings: filing model, answering model, reflect schedule, processor schedule (`{every, max_items}`, default `2m` and 20; `max_items` 1 to 200), inline processing default; the automations take them when `processor/ensure` creates them | |
 | `POST /note/processor/ensure` | create the processor and reflect automations if missing; returns their ids | |
 
+Three dates (data-model.md "Time"): `at` asks what was true or known as of a moment of history (the
+authored and valid dates); `as_received` (ISO) asks what the archive held on a date: only the notes received
+by then and what they caused, leaving out material imported later even when it was written earlier. They
+compose (`at` and `as_received` together: the graph as of T, from what the archive held on R). With
+`as_received`, the graph, the entity card and the day answer carry `as_received` (normalised); `/changes` keeps
+its pinned keys. An entity the archive did not hold yet is `400` ("That entity was not in your notebook yet on
+that date."), as is a date that cannot be read.
+
 Response envelopes are plain JSON objects; every list (`/notes`, `/entities`, `/revisions`,
-`/tasks`, `/cues`, `/topics`, `/insights`) returns `{items, next_cursor}`, with `next_cursor` null
-when there is no further page (the last four never page; `limit` bounds them). Times are ISO
+`/tasks`, `/cues`, `/topics`, `/insights`, `/review`) returns `{items, next_cursor}`, with `next_cursor` null
+when there is no further page (the last five never page; `limit` bounds them). Times are ISO
 8601 UTC. Errors use the gateway's error shape, `{"detail": "<one sentence>"}`: `401` without a
 valid sign-in, `404` for an id that is not in the caller's notebook, `400` for bad input, `501`
 for a read the installed `abstractnote` does not provide.
@@ -714,9 +740,14 @@ Pinned response shapes (clients decode these strictly; absent lists mean empty):
 | `NoteRef` | `{note_id, title, kind, occurred_at, excerpt}` |
 | `Insight` | `{note_id, title, body, insight_kind, occurred_at, acked_at, evidence_note_ids, entity_ids}` |
 | `GET /note/overview` | `{recent: [NoteRef], entities: [{entity_id, name, kind, note_count, last_seen}], insights: [Insight], resurfacing: [NoteRef], activity: [{day, notes, revisions}]}` |
-| `GET /note/cues` | `{items: [{cue_id, text, kind, subject: {kind, id, title}}]}` (cues are insight notes; `cue_id` is the note id) |
+| `GET /note/cues` | `{items: [{cue_id, text, kind, subject: {kind, id, title}, evidence_note_ids, entity_ids}]}` (cues are insight notes; `cue_id` is the note id; `evidence_note_ids` and `entity_ids` are the insight's own: the notes it rests on and the entities it is about) |
 | `GET /note/tasks` | `{items: [{task_id, note_id, text, status, due, closed_at}]}` |
-| `GET /note/notes/{id}` | `{note_id, title, text, kind, occurred_at, received_at, status, topics, summary, source, location, attachments: [...], revision: {...} or null, entities: [...], claims: [...], revisits: [NoteRef]}` |
+| `GET /note/notes/{id}` | `{note_id, title, text, kind, occurred_at, received_at, status, topics, summary, source, location, attachments: [...], revision: {...} or null, entities: [...], claims: [...], revisits: [NoteRef], insight: {kind, evidence_note_ids, entity_ids, acked_at} or null}` (`insight` is set on an insight note, `kind` being its `insight_kind`, and null on every other note) |
+| `GET /note/review` | `{items: [{review_id, kind, why, reason, at, sides: [ReviewSide], evidence_note_ids, actions: [{action, method, path, body}]}], next_cursor}` (newest first; `kind` `close_match`, `merge` or `contradiction`; `why` the rule; `reason` the processor's stated reason for a merge, else null; `at` when the notebook recorded it; `evidence_note_ids` starts with the note that raised it; `next_cursor` is always null) |
+| `ReviewSide` | `{type, id, name, kind, note_ids}` (`type` `entity`: `name` its display name, `kind` its entity kind, `note_ids` its newest notes; `type` `claim`: `name` the statement in plain words, `kind` null, `note_ids` the note it came from) |
+| `POST /note/review/{id}/confirm` | the revision result (`{revision_id, summary, entities_merged, ...}`) plus `review_id` |
+| `GET /note/entities/{id}?as_merged=true` | `{entity_id, kind, name, aliases, summary, first_seen, last_seen, note_count, merged_into, merged_at, merge: {revision_id, at, recorded_at, reason, summary, note_id} or null, notes: [NoteRef]}` (the entry's own name, aliases, summary and notes; `merge` is the revision that joined it into `merged_into`, null when it is not merged; `at` is refused with 400) |
+| `GET /note/queue` | `{stats: {queued, processing, failed, by_priority, oldest_enqueued_at}, failed: [{note_id, title, occurred_at, last_error, failed_at, failures}], waiting: [{note_id, title, occurred_at, priority, state, attempts, next_attempt_at}], automations: {processor_id, reflect_id}, processor: {max_items, interval}}` (`processor` is what the processor automation was created with while it exists, otherwise the `processor_schedule` setting it will be created with; `interval` is a duration such as `2m`) |
 | `note-capture` output | `{response, note_id, status, revision_summary?}` |
 | `note-recall` output | `{response, answer, evidence: [NoteRef], evolution, open_loops, follow_ups, dossier_note_id?, hits, effort}` |
 
@@ -1321,10 +1352,16 @@ Operations:
 | `entity.mention` | `{entity_id, note_id}` (the note talks about the entity; drives `note_count`, `first_seen`, `last_seen`) |
 | `note.summary` | `{note_id, summary, kind, language}` |
 
-User actions (`close a task`, `retract a claim`, `undo a merge`) produce revisions with
+User actions (`close a task`, `retract a claim`, `undo a merge`, `confirm a match`) produce revisions with
 `source = {client, account}` and no note; they are the human side of an actionable graph. Through
 the gateway, `account` is the signed-in user and `client` is `web` (the Note web app) or `api`
 (any other caller), decided by the server, never by the request body.
+
+Confirming a match from the review list (`POST /note/review/{id}/confirm`) is a revision with `action =
+match.confirm` and `target` = the review id: for a close match (an `unsure` decision, recorded as a `skos:closeMatch`
+claim from the new entry to the candidate) its ops are `entity.merge` (the new entry into the candidate) and
+`claim.supersede` of the close-match claim; for a merge the processor made it has no ops and only records that you
+keep it. Revisions are the truth, so a rebuild keeps what you confirmed.
 
 Reversibility: a merge keeps both records and can be undone by a later revision that re-points
 claims; a supersession keeps the old claim with its window closed.
@@ -1351,16 +1388,27 @@ unacknowledged insights other than dossiers, newest first.
 
 ## Time
 
-AbstractNote is bitemporal.
+AbstractNote is bitemporal, and every note carries three dates that answer three different questions:
 
-| Axis | Field | Question it answers |
+| Date | Field | Question it answers |
 |---|---|---|
-| History time | `occurred_at`, `claim.observed_at`, `revision.at` | "What did I note in July?" "What did the graph look like on day X?" |
-| Validity | `claim.valid_from`, `claim.valid_until` | "What did I believe about X at time T?" |
-| System time | `received_at`, `processed_at`, `revision.recorded_at` | "What has the processor done since I last looked?" |
+| Authored (history time) | `occurred_at`, `claim.observed_at`, `revision.at` | "When was this written or did it happen?" "What did the graph look like on day X?" |
+| Valid | `claim.valid_from`, `claim.valid_until` | "What did I believe about X at time T?" |
+| Archive-accepted (system time) | `received_at` (and `processed_at`, `revision.recorded_at`) | "What did my archive hold on date R?" "What has the processor done since I last looked?" |
+
+The axes are independent: an import received today can hold notes authored years ago, and a note
+written in January can say something stopped being true in March.
 
 Rules:
 
+- The archive **as received at R** (`as_received=R` on `GET /note/graph`, `GET /note/entities/{id}`,
+  `GET /note/changes` and `GET /note/day/{date}`) = only the notes with `received_at <= R`, so material
+  imported later is left out even when it was authored earlier. What derives from notes follows them: a
+  revision belongs when the note that caused it was received by R (a user action without a note: when it was
+  recorded by R); entities exist when such a revision created them or such a note mentions them; merges,
+  names, aliases, summaries and the closing of claims count only when their revision belongs, so a claim a
+  later note superseded reads as it stood before. `at` and `as_received` compose: "the graph as of T, from
+  what the archive held on R".
 - The graph **as of T** = entities first seen at or before T (their creating revision's `at`, or an
   earlier note that mentions them when notes are processed out of history order), not merged away
   by T; edges from claims with `observed_at <= T`.
@@ -1747,21 +1795,33 @@ never blocking: the run starts, the client gets a run id, and the dossier appear
 
 ## The Remember view
 
-The Remember view opens on what changed and lets you dig from there.
+The Remember view opens on what changed and lets you dig from there. Its first screen (since you
+last looked beside the cue cards, then the ask bar) fits a 1280x800 window; the rest follows below.
 
 1. **Since you last looked** (the default screen): what the notebook learned since your last
    visit: new entities, beliefs that were replaced ("Replaced") or withdrawn ("Withdrawn"), loops
    that closed, insights, notes that failed to process. It is a system-time delta from a cursor, so it is the same call an agent
    makes at the start of every session (`GET /note/changes?since=`). Each item opens its subject.
+   The web app shows it as a compact list, one line per change with a word for its kind
+   (Replaced, Withdrawn, Closed, Needs attention, New); new notes fold into one line that opens.
 2. **Cue cards**: a few prompts the reflect flow generated from the graph, each answerable by
    adding a note: a person who went quiet, a decision that is a year old, a task mentioned three
    times and never closed. Answering a cue writes a note linked to its subject; the answered
-   rate is the measure of whether the cards are worth showing.
+   rate is the measure of whether the cards are worth showing. Cue cards are insights, so an
+   insight shown as a cue is not repeated under Revisit or in the delta. Every cue and insight has
+   **Why this surfaced**: its kind in plain words (a reminder, a connection, a contradiction, an
+   evolution, ...) and the notes it is based on.
 3. **The ask bar** with the effort dial and cue chips: *when* (a date, a range, "around" an
    entity's active period), *who/what* (entities), *kind* (idea, decision, task, ...), *topic*.
-   Typing shows quick results immediately; pressing Ask runs standard or deep. Answers show the
-   text with citations; each citation opens the note with its attachments and the revision it
-   caused. "Save this answer" turns it into a note with provenance.
+   Typing shows quick results immediately; with Quick chosen there is no Ask button, the
+   matching notes follow the typing. Ask runs standard or deep and shows its steps as they happen
+   (searched your notes, looked closer at what they connect, wrote the answer). An answer has three
+   layers, each named and drawn differently: the **Synthesis** (what the selected notes suggest,
+   with citations), the **Original** (the notes it rests on, quoted as you wrote them) and the
+   **Interpretation** (what the notebook understood: how it changed, what is still open). Each
+   citation opens the note with its attachments and the revision it caused. "Save this answer"
+   turns it into a note with provenance; the note dialog shows such notes as synthesis, never as
+   something you wrote.
 4. **Then versus now**: for an entity or for a relationship between two entities, the earliest
    and the latest summary side by side, with the turning points between them listed with their
    notes. Cached per revision; the fastest way to see how your understanding of a person, a
@@ -1771,32 +1831,54 @@ The Remember view opens on what changed and lets you dig from there.
    One tap says "this is wrong" and writes a retract revision with your account as the source.
 6. **Revisit**: open loops with a close action, unread insights, "on this day" notes, entities
    that went silent but relate to what you added this week, contradictions awaiting a decision.
+7. **To review** (only when there is something, `GET /note/review`): what the notebook decided
+   on its own, each with why, the two sides, the notes behind them and its own actions. A merge it
+   made: **Keep** (recorded for your account, `POST /note/review/{id}/confirm`) or **Undo the
+   match** (separates them again; the joined entry's own name and notes come from
+   `GET /note/entities/{id}?as_merged=true`). A close match it was unsure about: **Same** (joins
+   them) or **Not the same** (withdraws the close match). Two notes that disagree: say which one is
+   wrong (withdraws that statement).
 
 Each entity card carries a small activity sparkline. A multi-lane time river is a candidate for
 a later version once real notebooks show which lanes deserve a lane; the time scrubber in the
-Graph view already covers "what did this look like then".
+Explore view already covers "what did this look like then".
 
-## The Graph view
+## The Explore view (the graph)
 
 - **Focus and depth**: pick one or several entities; see their neighbourhood up to depth three,
   edges labelled by predicate with first and last seen dates and counts.
-- **Time scrubber**: moving it changes `as_of`: entities and edges that did not exist yet fade
+- **Picture or List**: the same connections drawn, or as a readable table (from, link, to, since,
+  believed or no longer believed); each row opens the link's history or the entity.
+- **Time scrubber and date field**: moving the slider or choosing a date changes `as_of` (the date
+  field reaches any day without dragging). Beside it, **True then** reads the date as what your
+  notes said was true then (`at`); **Saved by then** reads it as what the notebook held on that
+  date (`as_received`: only notes received by then), so a June note imported in October is absent
+  from a September snapshot. The layout stays where it is: entities and edges that did not exist yet fade
   out, superseded claims show as dashed; the entity card shows the beliefs at that moment. An edge
   opens the relation timeline between its two entities.
 - **Day page**: "what happened on day X": notes captured, revisions applied with their one-line
   summaries, entities created or merged, claims superseded.
-- **Entity page**: card, aliases, summary history, claims timeline (active and superseded),
-  relations, notes, open tasks, and then-versus-now.
+- **Entity page** (the topic portrait): name, aliases and activity, then five tabs. **How it
+  evolved** comes first: the first note, the dated views from the summary history (earlier view,
+  refined, latest expressed view) and the changes between them (a belief replaced or withdrawn),
+  oldest first, each opening its note or its evidence; with a date chosen, the milestones after it
+  stay in place, faded. Then **Changes** (what you believe or believed then, then-versus-now),
+  **Open actions**, **Sources** (the notes) and **Links** (relations). An entity that absorbed
+  others names them ("Includes Dana R. (1 note)", from each entry's own record). An entity asked
+  for at a date before it existed says so.
 
 ## The Capture view
 
-A chat. You type or paste, attach files, drop images, or dictate; with your permission the
-browser attaches your location. The answer tells you what was saved, how it was filed, which
-earlier notes and entities it relates to, and when you said the same thing before. With
-"Instant linking" on (Settings) the note is processed right away and the answer includes the
-links the processor made; otherwise it says the note is queued, and the thread updates that
-message when the note is processed (the app re-reads the
-note until it is). Nothing in the answer uses system vocabulary: no run ids, no ledger, no gateway.
+A stream of your notes as you wrote them, with the composer at the bottom. You type or paste,
+attach files (images show a preview), drop images, or dictate; Enter saves and Shift+Enter starts
+a new line; with your permission the browser attaches your location. Under each note one short
+acknowledgement shows one state at a time, as a word and a symbol: **Sending**, **Received**,
+**Organizing**, then **Organized** or **Needs attention**. Organized reads like "Added to #lut ·
+event · 2 links" and opens on what was filed: the note's title, topics, linked entities, when you
+said the same thing before, and what it changed. Until the note is organized the details show
+the notebook's reply. With "Instant linking" on (Settings) the note is processed right away;
+otherwise the app re-reads the note until it is. Nothing uses system vocabulary: no run ids, no
+ledger, no gateway.
 
 ## For agents and entities
 
@@ -1843,12 +1925,22 @@ API, read the note API for views, and never send user, tenant or runtime identif
 - Served by the gateway at `/apps/note/` through the app proxy. The app's Node server answers the
   mount header, relays `/api/*` to the gateway with the session cookie, binds `127.0.0.1`, and
   uses relative URLs and the shared shell, as the app-server contract requires.
-- Three views: **Capture**, **Graph**, **Remember** (see [remembering.md](remembering.md)), plus a
-  small **Settings** drawer (filing model, answering model, inline processing, reflect schedule,
+- Three views, in the tab order **Capture**, **Remember**, **Explore** (the graph; its route stays
+  `#/graph`) (see [remembering.md](remembering.md)), plus a small **Settings** drawer (filing model, answering model, inline processing, reflect schedule,
   location, queue status with retry, appearance, sign-out). Location is off until you turn on the
   Location switch in Settings (kept per browser, and offered only on a secure page); Capture then
   attaches it to notes.
-- Theming uses ui-kit tokens only; tested on default-dark, observer-night and solarized-light.
+- Theming uses ui-kit tokens only, so every kit theme works; tested on default-dark, observer-night
+  and solarized-light at 1280 and 400 px. The framework look comes from derivations of those
+  tokens: on dark themes the page colour is deepened toward near-black (relative colour of
+  `--bg-primary`; light themes keep theirs), fine borders, Inter when installed (else the kit
+  font), and an indigo, cyan and mint accent mixed from `--info`, `--accent` and `--success` used
+  for state and emphasis only. Primary actions keep the theme's `--accent`.
+- Accessibility: text follows the appearance text size (`--font-scale`, graph labels included);
+  focus rings are always visible; every state is a word and a symbol, never colour alone (capture
+  states, believed / no longer believed, the answer's three layers); every graph has a readable
+  relationship list (Explore, List); dates are chosen with a date field, never only by dragging;
+  reduced motion turns animation off.
 - Registered by the AbstractGateway integration in the gateway's app catalog, tray, web console
   and terminal console as `note` (port 3006, cookie prefix `abstractnote`, page title
   `AbstractNote`, command `abstractnote-web`).
@@ -2138,3 +2230,5 @@ The first version. It is installed from source; PyPI, npm and App Store publicat
 
 - An AbstractMemory release with `close_assertion`, and an AbstractGateway release with the
   AbstractNote integration, for the gateway path.
+
+---
