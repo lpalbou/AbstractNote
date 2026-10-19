@@ -30,7 +30,7 @@ export type Claim = {
 
 export type Attachment = { attachment_id: string; filename?: string; mime?: string; size?: number; extracted_by?: string; extracted_chars?: number };
 /** Pinned: GET /note/tasks items {task_id, note_id, text, status, due, closed_at}. */
-export type Task = { task_id: string; note_id: string; text: string; status: string; due: string | null; closed_at: string | null };
+export type Task = { task_id: string; note_id: string; text: string; status: string; due: string | null; closed_at: string | null; age_days?: number; stale?: boolean };
 
 export type Note = NoteRef & {
   text: string;

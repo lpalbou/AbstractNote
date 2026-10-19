@@ -1,19 +1,21 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AfChip, AfChipButton, Icon } from "@abstractframework/ui-kit";
-import { ApiError, errorSentence } from "../lib/api";
+import { ApiError, errorSentence, type Api } from "../lib/api";
 import { splitCitations } from "../lib/citations";
 import { useDebounced, useRead, type ReadState } from "../lib/hooks";
 import { CURSOR_KEY, readLocal, writeLocal } from "../lib/local";
-import { noteAbout, useAt, type Route } from "../lib/nav";
+import { navigate, noteAbout, useAt, type Route } from "../lib/nav";
+import { PANELS, THOUGHT_GROUPS, ageWords, changeCount, groupThoughts, keyAction, panelOf, type PanelId, type Thought } from "../lib/remember";
 import { fetchReview, reviewAction, runReviewAction } from "../lib/review";
 import { followRun, runErrorText, startFlow, stepWords } from "../lib/runs";
-import type { Changes, Cue, EntityListItem, EntityCard, EntityRecord, Insight, ListOf, Note, NoteRef, NoteStatus, Overview, RecallOutput, RelationTimeline, ReviewAction, ReviewItem, ReviewSide, SearchResult, Task, ThenNowRaw, Topic } from "../lib/types";
+import type { Changes, Communities, EntityListItem, EntityCard, EntityRecord, Insight, ListOf, Note, NoteRef, NoteStatus, Overview, RecallOutput, RelationTimeline, ReviewAction, ReviewItem, ReviewSide, SearchResult, Task, ThenNowRaw, Topic } from "../lib/types";
 import { claimsById, thenNowView, uniqueEntities } from "../lib/shapes";
 import { NOTE_KINDS, claimSentence, longDate, relative, shortDate, topicLabel } from "../lib/words";
 import { basisLine, reviewWhy, whyLine } from "../lib/why";
-import { Disclose, EmptyNotebook, EntityChip, KindBadge, NoteLink, ReadView, Section, Sparkline, openClaim, openEntity, openNote, useApp } from "../components/common";
+import { Disclose, EmptyNotebook, EntityChip, KindBadge, NoteLink, ReadView, Sparkline, openClaim, openEntity, openNote, useApp } from "../components/common";
 import { ThenNowCard } from "../components/ThenNow";
 import { TimeScrubber } from "../components/TimeScrubber";
+import { ThemeCards } from "./Overview";
 
 type Effort = "quick" | "standard" | "deep";
 const EFFORTS: Array<[Effort, string, string]> = [
@@ -22,15 +24,53 @@ const EFFORTS: Array<[Effort, string, string]> = [
   ["deep", "Deep", "An investigation across your history, in a few minutes."],
 ];
 
+/**
+ * Remember (operator, 2026-10-19): one screen, no page scroll. A rail of seven panels by what you want to
+ * remember or how (What changed, Ask, Worth a thought, Then and now, Open loops, To review, Themes), one shown
+ * at a time and scrolling inside itself, the ask bar always at the top. Keys: 1–7 choose a panel, "/" the
+ * question. On a phone the rail is a sideways row at the top.
+ */
 export function RememberView({ route }: { route: Route }) {
   const { api } = useApp();
-  // Cue cards are unacknowledged insights (docs/data-model.md): read once here so the other sections
-  // do not show the same insight twice. Each cue carries its evidence (why it surfaced).
-  const cues = useRead<ListOf<Cue>>(() => api.get<ListOf<Cue>>("note/cues", { limit: 3 }), [api]);
-  const insights = useRead<ListOf<Insight>>(() => api.get<ListOf<Insight>>("note/insights", { acked: false, limit: 20 }), [api]);
-  const cueIds = useMemo(() => new Set((cues.data?.items || []).map((c) => c.cue_id)), [cues.data]);
-  // An empty notebook gets one inviting sentence instead of six empty sections.
+  const topic = route.params.get("topic") || "";
+  const panel = panelOf(route.params.get("panel") || (topic ? "ask" : null));
+  const go = (p: PanelId) => navigate("remember", { panel: p, topic: topic || null });
+
+  // Everything the badges count is read once here and handed to its panel.
+  const [mark, setMark] = useState(() => readMark());
+  const changes = useRead<Changes>(() => api.get<Changes>("note/changes", { since: mark.cursor, limit: 50 }), [api, mark.cursor]);
+  const insights = useRead<ListOf<Insight>>(() => api.get<ListOf<Insight>>("note/insights", { acked: false, limit: 50 }), [api]);
+  const review = useRead<ListOf<ReviewItem>>(() => fetchReview(api), [api]);
+  const tasks = useRead<ListOf<Task>>(() => api.get<ListOf<Task>>("note/tasks", { status: "open", limit: 50 }), [api]);
+  const overview = useRead<Overview>(() => api.get<Overview>("note/overview", { days: 30 }), [api]);
+  const communities = useRead<Communities>(() => api.get<Communities>("note/communities"), [api]);
   const status = useRead<NoteStatus>(() => api.get<NoteStatus>("note/status"), [api]);
+  const ask = useAsk(topic);
+  const askInput = useRef<HTMLInputElement>(null);
+
+  const thoughts = useMemo(() => groupThoughts(insights.data?.items || [], review.data?.items || [], overview.data?.resurfacing || []), [insights.data, review.data, overview.data]);
+  const badges: Partial<Record<PanelId, number>> = {
+    changed: changeCount(changes.data),
+    thoughts: thoughts.reduce((a, g) => a + g.items.length, 0),
+    loops: tasks.data?.items.length || 0,
+    review: (review.data?.items || []).filter((r) => r.kind !== "contradiction").length,
+    themes: communities.data?.items.length || 0,
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const a = keyAction(e.key, e.target as HTMLElement, { ctrl: e.ctrlKey, meta: e.metaKey, alt: e.altKey });
+      if (!a) return;
+      e.preventDefault();
+      if ("focusAsk" in a) askInput.current?.focus();
+      else go(a.panel);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topic]);
+
+  // An empty notebook gets one inviting sentence instead of seven empty panels.
   if (status.data && Number(status.data.counts?.notes ?? 1) === 0) {
     return (
       <div className="nt-center">
@@ -38,16 +78,76 @@ export function RememberView({ route }: { route: Route }) {
       </div>
     );
   }
+  const meta = PANELS.find((p) => p.id === panel)!;
+  return <RememberLayout panel={panel} meta={meta} badges={badges} go={go} ask={ask} askInput={askInput} mark={mark} setMark={setMark} changes={changes} insights={insights} review={review} overview={overview} tasks={tasks} communities={communities} thoughts={thoughts} />;
+}
+
+function RememberLayout({ panel, meta, badges, go, ask, askInput, mark, setMark, changes, insights, review, overview, tasks, communities, thoughts }: { panel: PanelId; meta: (typeof PANELS)[number]; badges: Partial<Record<PanelId, number>>; go: (p: PanelId) => void; ask: AskState; askInput: React.RefObject<HTMLInputElement>; mark: { cursor: string; at: string }; setMark: (m: { cursor: string; at: string }) => void; changes: ReadState<Changes>; insights: ReadState<ListOf<Insight>>; review: ReadState<ListOf<ReviewItem>>; overview: ReadState<Overview>; tasks: ReadState<ListOf<Task>>; communities: ReadState<Communities>; thoughts: ReturnType<typeof groupThoughts> }) {
+  // On a phone the rail scrolls sideways: the chosen panel is brought into view.
+  const rail = useRef<HTMLUListElement>(null);
+  useEffect(() => {
+    const box = rail.current;
+    const on = box?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (box && on && box.scrollWidth > box.clientWidth + 1) box.scrollLeft = Math.max(0, on.offsetLeft - 24);
+  }, [panel]);
   return (
-    <div className="nt-remember">
-      <div className="nt-remember__top">
-        <SinceLastLooked hide={cueIds} />
-        <CueCards cues={cues} />
+    <div className="nt-rem">
+      <nav className="nt-rem__rail" aria-label="Remember">
+        <ul ref={rail} role="tablist" aria-orientation="vertical">
+          {PANELS.map((p, i) => {
+            const n = badges[p.id];
+            return (
+              <li key={p.id} role="presentation">
+                <button type="button" role="tab" id={`rem-tab-${p.id}`} aria-selected={panel === p.id} aria-controls="rem-panel" className="nt-rem__tab" onClick={() => go(p.id)} title={`${p.label} (${i + 1})`}>
+                  <Icon name={p.icon} size={16} />
+                  <span className="nt-rem__tab-label">{p.label}</span>
+                  {n ? (
+                    <span className="nt-rem__badge" aria-label={`${n} to see`} data-count={n}>
+                      {n > 99 ? "99+" : n}
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+        <p className="nt-rem__keys">
+          <kbd>1</kbd>–<kbd>7</kbd> switch · <kbd>/</kbd> ask
+        </p>
+      </nav>
+      <div className="nt-rem__content">
+        <AskBar ask={ask} inputRef={askInput} onTyping={() => panel !== "ask" && go("ask")} onAsk={() => go("ask")} />
+        <section id="rem-panel" className="nt-rem__panel" role="tabpanel" aria-labelledby={`rem-tab-${panel}`} data-panel={panel}>
+          <header className="nt-rem__head">
+            <h2>
+              {meta.label}
+              <span className="nt-section__sub">{panel === "changed" ? `since ${longDate(mark.at)}` : meta.sub}</span>
+            </h2>
+            {panel === "changed" && changeCount(changes.data) ? (
+              <button
+                type="button"
+                className="nt-btn nt-btn--quiet nt-btn--sm"
+                onClick={() => {
+                  const next = { cursor: changes.data!.cursor, at: new Date().toISOString() };
+                  writeLocal(CURSOR_KEY, JSON.stringify(next));
+                  setMark(next);
+                }}
+              >
+                Mark as seen
+              </button>
+            ) : null}
+          </header>
+          <div className="nt-rem__body">
+            {panel === "changed" ? <ChangedPanel changes={changes} onThoughts={() => go("thoughts")} /> : null}
+            {panel === "ask" ? <AskPanel ask={ask} /> : null}
+            {panel === "thoughts" ? <ThoughtsPanel read={[insights, review, overview]} groups={thoughts} onChanged={() => (insights.reload(), review.reload())} /> : null}
+            {panel === "thennow" ? <ThenVersusNow /> : null}
+            {panel === "loops" ? <LoopsPanel tasks={tasks} /> : null}
+            {panel === "review" ? <ReviewPanel review={review} /> : null}
+            {panel === "themes" ? <ThemeCards communities={communities} onTheme={(id) => navigate("graph", { view: "picture", community: id })} /> : null}
+          </div>
+        </section>
       </div>
-      <AskPanel initialTopic={route.params.get("topic") || ""} />
-      <ThenVersusNow />
-      <Revisit insights={insights} hide={cueIds} />
-      <ReviewInbox />
     </div>
   );
 }
@@ -82,106 +182,6 @@ function EvidenceLink({ id }: { id: string }) {
   return <NoteLink note={{ note_id: id, title: note.data?.title || (note.loading ? "…" : "A note"), occurred_at: note.data?.occurred_at }} />;
 }
 
-// ---------------------------------------------------------------- since you last looked
-
-function SinceLastLooked({ hide }: { hide: Set<string> }) {
-  const { api } = useApp();
-  // The cursor is opaque (the server's); the moment it was taken is kept beside it for the "Since …" line.
-  const [mark, setMark] = useState(() => readMark());
-  const [allNotes, setAllNotes] = useState(false);
-  const since = mark.cursor;
-  const changes = useRead<Changes>(() => api.get<Changes>("note/changes", { since, limit: 50 }), [api, since]);
-  const shownInsights = (c: Changes) => (c.insights || []).filter((i) => !hide.has(i.note_id));
-  const count = (c: Changes) => (c.notes?.length || 0) + (c.entities?.length || 0) + (c.superseded_claims?.length || 0) + (c.closed_loops?.length || 0) + (c.failed_notes?.length || 0) + shownInsights(c).length;
-  return (
-    <Section
-      id="since"
-      title="Since you last looked"
-      sub={`since ${longDate(mark.at)}`}
-      actions={
-        changes.data && count(changes.data) ? (
-          <button
-            type="button"
-            className="nt-btn nt-btn--quiet nt-btn--sm"
-            onClick={() => {
-              const next = { cursor: changes.data!.cursor, at: new Date().toISOString() };
-              writeLocal(CURSOR_KEY, JSON.stringify(next));
-              setMark(next);
-            }}
-          >
-            Mark as seen
-          </button>
-        ) : null
-      }
-    >
-      <ReadView read={changes} what="what changed" empty={(c) => (count(c) ? false : "Nothing new since then.")}>
-        {(c) => (
-          <ul className="nt-digest">
-            {shownInsights(c).map((i) => (
-              <DigestRow key={i.note_id} mark="insight" icon="sparkle" tag={`Insight · ${shortDate(i.occurred_at)}`}>
-                <NoteLink note={i} showDate={false} />
-              </DigestRow>
-            ))}
-            {(c.superseded_claims || []).map((cl) => (
-              <DigestRow key={cl.claim_id} mark="changed" icon="refresh" tag={cl.kind === "retracted" ? "Withdrawn" : "Replaced"}>
-                <button type="button" className="nt-link" onClick={() => openClaim(cl.claim_id)}>
-                  <span className="nt-link__title nt-struck">{cl.text}</span>
-                </button>
-              </DigestRow>
-            ))}
-            {(c.closed_loops || []).map((t) => (
-              <DigestRow key={t.task_id} mark="done" icon="check" tag="Closed">
-                <span>{t.text}</span>
-              </DigestRow>
-            ))}
-            {(c.failed_notes || []).map((n) => (
-              <DigestRow key={n.note_id} mark="attention" icon="warning" tag="Needs attention">
-                <NoteLink note={n} showDate={false} />
-                {n.error ? <span className="nt-muted">{`${n.error} Retry it from Settings.`}</span> : null}
-              </DigestRow>
-            ))}
-            {(c.entities || []).length ? (
-              <DigestRow mark="new" icon="plus" tag="New">
-                <span className="nt-chips">
-                  {(c.entities || []).map((e) => (
-                    <EntityChip key={e.entity_id} entity={e} />
-                  ))}
-                </span>
-              </DigestRow>
-            ) : null}
-            {(c.notes || []).length ? (
-              <DigestRow mark="new" icon="compose" tag="">
-                <Disclose open={allNotes} onToggle={() => setAllNotes(!allNotes)} controls="since-notes">
-                  {c.notes!.length === 1 ? "1 new note" : `${c.notes!.length} new notes`}
-                </Disclose>
-              </DigestRow>
-            ) : null}
-            {allNotes && (c.notes || []).length ? (
-              <li id="since-notes" className="nt-digest__more">
-                {(c.notes || []).map((n) => (
-                  <NoteLink key={n.note_id} note={n} />
-                ))}
-              </li>
-            ) : null}
-          </ul>
-        )}
-      </ReadView>
-    </Section>
-  );
-}
-
-function DigestRow({ mark, icon, tag, children }: { mark: string; icon: "sparkle" | "refresh" | "check" | "warning" | "plus" | "compose"; tag: string; children: React.ReactNode }) {
-  return (
-    <li className="nt-digest__row">
-      <span className={`nt-digest__mark nt-digest__mark--${mark}`} aria-hidden="true">
-        <Icon name={icon} size={14} />
-      </span>
-      <span className="nt-digest__body">{children}</span>
-      <span className="nt-digest__tag">{tag}</span>
-    </li>
-  );
-}
-
 /** The stored "last looked" mark; first visit = one week back (an ISO moment is a valid `since`). */
 export function readMark(): { cursor: string; at: string } {
   try {
@@ -194,42 +194,361 @@ export function readMark(): { cursor: string; at: string } {
   return { cursor: at, at };
 }
 
-// ---------------------------------------------------------------- cue cards
+// ---------------------------------------------------------------- what changed
 
-function CueCards({ cues }: { cues: ReadState<ListOf<Cue>> }) {
+type RowIcon = "sparkle" | "refresh" | "check" | "warning" | "plus" | "compose";
+
+/** One row per item, each with one action. */
+function ChangedPanel({ changes, onThoughts }: { changes: ReadState<Changes>; onThoughts: () => void }) {
   return (
-    <Section id="cues" title="Worth a thought">
-      <ReadView read={cues} what="your prompts" empty={(c) => (c.items.length ? false : "No prompts right now.")}>
-        {(c) => (
-          <div className="nt-cues">
-            {c.items.map((cue) => (
-              <article key={cue.cue_id} className="nt-card nt-cue">
-                <p className="nt-cue__text">{cue.text}</p>
-                <WhySurfaced id={cue.cue_id} kind={cue.kind} evidence={cue.evidence_note_ids || []} />
-                <div className="nt-actions">
-                  <button type="button" className="nt-btn nt-btn--primary nt-btn--sm" onClick={() => noteAbout("cue", cue.cue_id, cue.text)}>
-                    Answer
-                  </button>
-                  {cue.subject?.kind === "entity" ? (
-                    <button type="button" className="nt-btn nt-btn--quiet nt-btn--sm" onClick={() => openEntity(cue.subject.id)}>
-                      {`Open ${cue.subject.title}`}
-                    </button>
-                  ) : null}
-                </div>
-              </article>
+    <ReadView read={changes} what="what changed" empty={(c) => (changeCount(c) ? false : "Nothing new since then.")}>
+      {(c) => (
+        <ul className="nt-rows">
+          {(c.insights || []).map((i) => (
+            <ChangeRow key={i.note_id} mark="insight" icon="sparkle" tag="Insight" when={i.occurred_at} action={["See it", onThoughts]}>
+              {i.title}
+            </ChangeRow>
+          ))}
+          {(c.superseded_claims || []).map((cl) => (
+            <ChangeRow key={cl.claim_id} mark="changed" icon="refresh" tag={cl.kind === "retracted" ? "Withdrawn" : "Replaced"} action={["Why", () => openClaim(cl.claim_id)]}>
+              <span className="nt-struck">{cl.text}</span>
+            </ChangeRow>
+          ))}
+          {(c.closed_loops || []).map((t) => (
+            <ChangeRow key={t.task_id} mark="done" icon="check" tag="Closed" when={t.closed_at} action={["Add a note", () => noteAbout("task", t.task_id, t.text)]}>
+              {t.text}
+            </ChangeRow>
+          ))}
+          {(c.failed_notes || []).map((n) => (
+            <ChangeRow key={n.note_id} mark="attention" icon="warning" tag="Needs attention" action={["Open", () => openNote(n.note_id)]}>
+              {n.error ? `${n.title}: ${n.error}` : n.title}
+            </ChangeRow>
+          ))}
+          {(c.entities || []).map((e) => (
+            <ChangeRow key={e.entity_id} mark="new" icon="plus" tag={`New ${e.kind}`} when={e.first_seen} action={["Open", () => openEntity(e.entity_id)]}>
+              {e.name}
+            </ChangeRow>
+          ))}
+          {(c.notes || []).map((n) => (
+            <ChangeRow key={n.note_id} mark="note" icon="compose" tag={n.kind} when={n.occurred_at} action={["Open", () => openNote(n.note_id)]}>
+              {n.title}
+            </ChangeRow>
+          ))}
+        </ul>
+      )}
+    </ReadView>
+  );
+}
+
+function ChangeRow({ mark, icon, tag, when, action, children }: { mark: string; icon: RowIcon; tag: string; when?: string | null; action: [string, () => void]; children: React.ReactNode }) {
+  return (
+    <li className="nt-row">
+      <span className={`nt-digest__mark nt-digest__mark--${mark}`} aria-hidden="true">
+        <Icon name={icon} size={14} />
+      </span>
+      <span className="nt-row__text">{children}</span>
+      <span className="nt-row__tag">{when ? `${tag} · ${shortDate(when)}` : tag}</span>
+      <button type="button" className="nt-btn nt-btn--quiet nt-btn--sm nt-row__act" onClick={action[1]}>
+        {action[0]}
+      </button>
+    </li>
+  );
+}
+
+// ---------------------------------------------------------------- worth a thought
+
+/** A compact card (deck slides 18, 26): a kind pill, a one-line title, two lines of body with "More", why it
+ * surfaced on demand, two actions at most. */
+function ThoughtCard({ pill, title, onTitle, body, when, why, actions, children }: { pill: string; title: string; onTitle?: () => void; body?: string; when?: string; why?: React.ReactNode; actions: React.ReactNode; children?: React.ReactNode }) {
+  const [more, setMore] = useState(false);
+  const [long, setLong] = useState(false);
+  const ref = useRef<HTMLParagraphElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && !more) setLong(el.scrollHeight > el.clientHeight + 1);
+  }, [body, more]);
+  return (
+    <article className="nt-thought">
+      <div className="nt-thought__top">
+        <span className="nt-pill">{pill}</span>
+        {when ? <span className="nt-link__date">{shortDate(when)}</span> : null}
+      </div>
+      {onTitle ? (
+        <button type="button" className="nt-thought__title nt-thought__title--link" onClick={onTitle} title={title}>
+          {title}
+        </button>
+      ) : (
+        <p className="nt-thought__title" title={title}>
+          {title}
+        </p>
+      )}
+      {body ? (
+        <p ref={ref} className={`nt-thought__body${more ? " nt-thought__body--open" : ""}`}>
+          {body}
+        </p>
+      ) : null}
+      {body && (long || more) ? (
+        <button type="button" className="nt-disclose" aria-expanded={more} onClick={() => setMore(!more)}>
+          {more ? "Less" : "More"}
+        </button>
+      ) : null}
+      {children}
+      {why}
+      <div className="nt-actions nt-thought__actions">{actions}</div>
+    </article>
+  );
+}
+
+function ThoughtsPanel({ read, groups, onChanged }: { read: [ReadState<ListOf<Insight>>, ReadState<ListOf<ReviewItem>>, ReadState<Overview>]; groups: ReturnType<typeof groupThoughts>; onChanged: () => void }) {
+  const [line, setLine] = useState("");
+  const [insights] = read;
+  if (insights.data === null) return <ReadView read={insights} what="your insights">{() => null}</ReadView>;
+  if (!groups.length) return <p className="nt-muted">Nothing to think about right now.</p>;
+  return (
+    <>
+      {line ? (
+        <p className="nt-muted" role="status">
+          {line}
+        </p>
+      ) : null}
+      {groups.map(({ group, items }) => (
+        <section key={group.id} className="nt-group" aria-labelledby={`thoughts-${group.id}`}>
+          <h3 id={`thoughts-${group.id}`} className="nt-group__head">
+            {group.label}
+            <span className="nt-group__count">{items.length}</span>
+          </h3>
+          <div className="nt-thoughts">
+            {items.map((t) => (
+              <ThoughtItem key={t.id} t={t} pill={THOUGHT_GROUPS.find((g) => g.id === t.group)!.pill} onDone={(w) => (setLine(w), onChanged())} />
             ))}
           </div>
+        </section>
+      ))}
+    </>
+  );
+}
+
+function ThoughtItem({ t, pill, onDone }: { t: Thought; pill: string; onDone: (words: string) => void }) {
+  const { api } = useApp();
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState<{ action: ReviewAction; name: string } | null>(null);
+  const post = async (fn: () => Promise<unknown>, words: string) => {
+    setBusy(true);
+    try {
+      await fn();
+      onDone(words);
+    } catch (e) {
+      onDone(errorSentence(e, "that").replace("could not be loaded", "did not work"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (t.type === "insight") {
+    const i = t.insight;
+    return (
+      <ThoughtCard
+        pill={pill}
+        title={i.title}
+        onTitle={() => openNote(i.note_id)}
+        body={i.body}
+        when={i.occurred_at}
+        why={<WhySurfaced id={i.note_id} kind={i.insight_kind} evidence={i.evidence_note_ids || []} />}
+        actions={
+          <>
+            <button type="button" className="nt-btn nt-btn--primary nt-btn--sm" onClick={() => noteAbout("insight", i.note_id, i.title)}>
+              {t.group === "questions" ? "Answer" : "Add a note"}
+            </button>
+            <button type="button" className="nt-btn nt-btn--sm" disabled={busy} onClick={() => void post(() => api.post(`note/insights/${encodeURIComponent(i.note_id)}/ack`), "Marked as read.")}>
+              {busy ? "Saving…" : "Got it"}
+            </button>
+          </>
+        }
+      />
+    );
+  }
+  if (t.type === "resurface") {
+    const n = t.note;
+    return (
+      <ThoughtCard
+        pill={pill}
+        title={n.title}
+        onTitle={() => openNote(n.note_id)}
+        body={n.excerpt}
+        when={n.occurred_at}
+        why={<WhyLines id={n.note_id} line="An older note close to what you write now: worth another look." evidence={[]} />}
+        actions={
+          <>
+            <button type="button" className="nt-btn nt-btn--primary nt-btn--sm" onClick={() => noteAbout("note", n.note_id, n.title)}>
+              Add a note
+            </button>
+            <button type="button" className="nt-btn nt-btn--sm" onClick={() => openNote(n.note_id)}>
+              Open
+            </button>
+          </>
+        }
+      />
+    );
+  }
+  // A tension: two statements the notebook kept side by side; settle it by withdrawing one.
+  const r = t.item;
+  const retracts = r.actions.filter((x) => x.action === "retract");
+  return (
+    <ThoughtCard
+      pill={pill}
+      title="Two of your notes disagree"
+      when={r.at}
+      why={
+        <WhyLines id={r.review_id} line={reviewWhy(r.why)} evidence={r.evidence_note_ids} />
+      }
+      actions={
+        confirm ? (
+          <span className="nt-confirm" role="group" aria-label="Confirm">
+            <span>{`Withdraw "${confirm.name}"? The note stays.`}</span>
+            <button type="button" className="nt-btn nt-btn--sm" onClick={() => setConfirm(null)} disabled={busy}>
+              Not now
+            </button>
+            <button type="button" className="nt-btn nt-btn--sm nt-btn--danger" disabled={busy} onClick={() => void post(() => runReviewAction(api, confirm.action, "Withdrawn while reviewing a disagreement in the web app."), "Withdrawn.")}>
+              {busy ? "Saving…" : "Withdraw"}
+            </button>
+          </span>
+        ) : (
+          <>
+            {retracts.slice(0, 2).map((x, k) => (
+              <button key={x.path} type="button" className="nt-btn nt-btn--sm" onClick={() => setConfirm({ action: x, name: r.sides[k]?.name || "this" })}>
+                {k === 0 ? "The first is wrong" : "The second is wrong"}
+              </button>
+            ))}
+          </>
+        )
+      }
+    >
+      <ol className="nt-tension">
+        {r.sides.slice(0, 2).map((s) => (
+          <li key={s.id}>
+            <SideChip side={s} />
+          </li>
+        ))}
+      </ol>
+    </ThoughtCard>
+  );
+}
+
+/** "Why this surfaced" for a review item: its rule in words and the notes behind it. */
+function WhyLines({ id, line, evidence }: { id: string; line: string; evidence: string[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <Disclose open={open} onToggle={() => setOpen(!open)} controls={`why-${id}`}>
+        Why this surfaced
+      </Disclose>
+      {open ? (
+        <div id={`why-${id}`} className="nt-why">
+          <span>{line}</span>
+          {evidence.slice(0, 3).map((nid) => (
+            <EvidenceLink key={nid} id={nid} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- open loops
+
+function LoopsPanel({ tasks }: { tasks: ReadState<ListOf<Task>> }) {
+  const { api } = useApp();
+  const [busy, setBusy] = useState("");
+  const [line, setLine] = useState("");
+  const close = async (t: Task) => {
+    setBusy(t.task_id);
+    setLine("");
+    try {
+      await api.post(`note/tasks/${encodeURIComponent(t.task_id)}/close`, {});
+      setLine(`Closed: ${t.text}.`);
+      tasks.reload();
+    } catch (e) {
+      setLine(errorSentence(e, "that").replace("could not be loaded", "did not work"));
+    } finally {
+      setBusy("");
+    }
+  };
+  return (
+    <>
+      {line ? (
+        <p className="nt-muted" role="status">
+          {line}
+        </p>
+      ) : null}
+      <ReadView read={tasks} what="your open loops" empty={(l) => (l.items.length ? false : "No open loops.")}>
+        {(l) => (
+          <ul className="nt-rows">
+            {[...l.items].sort((a, b) => (b.age_days ?? 0) - (a.age_days ?? 0)).map((t) => (
+              <li key={t.task_id} className={`nt-row nt-row--loop${t.stale ? " nt-row--stale" : ""}`}>
+                <span className="nt-digest__mark" aria-hidden="true">
+                  <Icon name="loop" size={14} />
+                </span>
+                <button type="button" className="nt-row__text nt-row__text--link" onClick={() => openNote(t.note_id)} title={t.text}>
+                  {t.text}
+                </button>
+                <span className="nt-row__tag">{`${ageWords(t.age_days)}${t.stale ? " · still relevant?" : ""}${t.due ? ` · due ${shortDate(t.due)}` : ""}`}</span>
+                <span className="nt-row__acts">
+                  <button type="button" className="nt-btn nt-btn--quiet nt-btn--sm" onClick={() => noteAbout("task", t.task_id, t.text)}>
+                    Add a note
+                  </button>
+                  <button type="button" className="nt-btn nt-btn--sm" disabled={busy === t.task_id} onClick={() => void close(t)}>
+                    {busy === t.task_id ? "Closing…" : "Close"}
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
         )}
       </ReadView>
-    </Section>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- to review
+
+/** Close matches and merges the notebook made on its own (disagreements are tensions in "Worth a thought"). */
+function ReviewPanel({ review }: { review: ReadState<ListOf<ReviewItem>> }) {
+  const [line, setLine] = useState("");
+  return (
+    <>
+      {line ? (
+        <p className="nt-muted" role="status">
+          {line}
+        </p>
+      ) : null}
+      <ReadView read={review} what="what to review" empty={(r) => (r.items.some((i) => i.kind !== "contradiction") ? false : "Nothing to review.")}>
+        {(r) => (
+          <ul className="nt-list nt-review nt-thoughts">
+            {r.items
+              .filter((i) => i.kind !== "contradiction")
+              .map((it) => (
+                <ReviewCard
+                  key={it.review_id}
+                  item={it}
+                  onDone={(words) => {
+                    setLine(words);
+                    review.reload();
+                  }}
+                />
+              ))}
+          </ul>
+        )}
+      </ReadView>
+    </>
   );
 }
 
 // ---------------------------------------------------------------- ask
 
 type Asked = { question: string; effort: Effort; state: "asking" | "answered" | "failed"; output?: RecallOutput; error?: string; steps?: string[] };
+type AskState = ReturnType<typeof useAsk>;
 
-function AskPanel({ initialTopic }: { initialTopic: string }) {
+/** The question and its answer live above the panels, so switching panels never loses them. */
+function useAsk(initialTopic: string) {
   const { api, sessionId } = useApp();
   const [at, setAt] = useAt();
   const [q, setQ] = useState("");
@@ -258,10 +577,10 @@ function AskPanel({ initialTopic }: { initialTopic: string }) {
   const filters = { since: since ? `${since}T00:00:00Z` : undefined, until: until ? `${until}T23:59:59Z` : at || undefined, kinds, topics, entities: entities.map((e) => e.entity_id) };
   const hasFilter = Boolean(since || until || kinds.length || topics.length || entities.length);
   // Quick recall needs words (GET /note/search requires q); cue chips alone list the matching notes.
-  const quick = useRead<SearchResult | null>(() => (dq ? api.get<SearchResult>("note/search", { q: dq, ...filters, limit: 12 }) : hasFilter ? listNotes() : Promise.resolve(null)), [api, dq, since, until, at, kinds.join(), topics.join(), entities.map((e) => e.entity_id).join()]);
+  const quick = useRead<SearchResult | null>(() => (dq ? api.get<SearchResult>("note/search", { q: dq, ...filters, limit: 12 }) : hasFilter ? listNotes(api) : Promise.resolve(null)), [api, dq, since, until, at, kinds.join(), topics.join(), entities.map((e) => e.entity_id).join()]);
 
-  async function listNotes(): Promise<SearchResult> {
-    const page = await api.get<ListOf<NoteRef>>("note/notes", { since: filters.since, until: filters.until, kind: kinds[0], topic: topics[0], entity: filters.entities[0], limit: 12 });
+  async function listNotes(a: Api): Promise<SearchResult> {
+    const page = await a.get<ListOf<NoteRef>>("note/notes", { since: filters.since, until: filters.until, kind: kinds[0], topic: topics[0], entity: filters.entities[0], limit: 12 });
     return { notes: page.items, entities: [], claims: [] };
   }
 
@@ -306,80 +625,102 @@ function AskPanel({ initialTopic }: { initialTopic: string }) {
       setSaved("The answer could not be saved.");
     }
   };
+  return { at, setAt, q, setQ, effort, setEffort, since, setSince, until, setUntil, kinds, setKinds, topics, setTopics, entities, setEntities, open, setOpen, asked, saved, quick, ask, saveAnswer };
+}
 
+/** The question, always at the top of the panels: typing opens Ask; Enter asks (Quick needs no button). */
+function AskBar({ ask, inputRef, onTyping, onAsk }: { ask: AskState; inputRef: React.RefObject<HTMLInputElement>; onTyping: () => void; onAsk: () => void }) {
   return (
-    <Section id="ask" title="Ask your notes">
-      <form
-        className="nt-ask"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void ask();
-        }}
-      >
-        <div className="nt-ask__bar">
-          <Icon name="history" size={18} />
-          <input className="nt-input nt-input--bare" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="What did I decide about…" aria-label="Question" />
-          {effort === "quick" ? null : (
-            <button type="submit" className="nt-btn nt-btn--primary" disabled={!q.trim() || asked?.state === "asking"}>
-              {asked?.state === "asking" ? "Asking…" : "Ask"}
+    <form
+      className="nt-rem__ask"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onAsk();
+        void ask.ask();
+      }}
+    >
+      <div className="nt-ask__bar">
+        <Icon name="history" size={18} />
+        <input
+          ref={inputRef}
+          className="nt-input nt-input--bare"
+          type="search"
+          value={ask.q}
+          onChange={(e) => {
+            ask.setQ(e.target.value);
+            onTyping();
+          }}
+          placeholder="What did I decide about…"
+          aria-label="Question"
+        />
+        {ask.effort === "quick" ? null : (
+          <button type="submit" className="nt-btn nt-btn--primary" disabled={!ask.q.trim() || ask.asked?.state === "asking"}>
+            {ask.asked?.state === "asking" ? "Asking…" : "Ask"}
+          </button>
+        )}
+      </div>
+    </form>
+  );
+}
+
+function AskPanel({ ask }: { ask: AskState }) {
+  const { at, setAt, effort, setEffort, since, setSince, until, setUntil, kinds, setKinds, topics, setTopics, entities, setEntities, open, setOpen, asked, saved, quick, q } = ask;
+  return (
+    <div className="nt-ask">
+      <div className="nt-ask__row">
+        <div className="nt-segmented" role="radiogroup" aria-label="Effort">
+          {EFFORTS.map(([v, label, hint]) => (
+            <button key={v} type="button" role="radio" aria-checked={effort === v} className="nt-segmented__opt" title={hint} onClick={() => setEffort(v)}>
+              {label}
             </button>
-          )}
+          ))}
         </div>
-        <div className="nt-ask__row">
-          <div className="nt-segmented" role="radiogroup" aria-label="Effort">
-            {EFFORTS.map(([v, label, hint]) => (
-              <button key={v} type="button" role="radio" aria-checked={effort === v} className="nt-segmented__opt" title={hint} onClick={() => setEffort(v)}>
-                {label}
-              </button>
-            ))}
-          </div>
-          <span className="nt-effort__hint">{EFFORTS.find(([v]) => v === effort)![2]}</span>
-        </div>
-        <div className="nt-chips" aria-label="Narrow down">
-          <AfChipButton size="sm" pressed={Boolean(since || until)} expanded={open === "when"} onClick={() => setOpen(open === "when" ? "" : "when")}>
-            {since || until ? `When: ${since ? shortDate(since) : "…"} – ${until ? shortDate(until) : "now"}` : "When"}
-          </AfChipButton>
-          <AfChipButton size="sm" pressed={entities.length > 0} expanded={open === "who"} onClick={() => setOpen(open === "who" ? "" : "who")}>
-            {entities.length ? `Who or what: ${entities.map((e) => e.name).join(", ")}` : "Who or what"}
-          </AfChipButton>
-          <AfChipButton size="sm" pressed={kinds.length > 0} expanded={open === "kind"} onClick={() => setOpen(open === "kind" ? "" : "kind")}>
-            {kinds.length ? `Kind: ${kinds.join(", ")}` : "Kind"}
-          </AfChipButton>
-          <AfChipButton size="sm" pressed={topics.length > 0} expanded={open === "topic"} onClick={() => setOpen(open === "topic" ? "" : "topic")}>
-            {topics.length ? `Topic: ${topics.map(topicLabel).join(", ")}` : "Topic"}
-          </AfChipButton>
-          {at ? (
-            <AfChip size="sm" tone="info" onRemove={() => setAt(null)} removeLabel="Back to now">
-              {`As of ${shortDate(at)}`}
-            </AfChip>
-          ) : null}
-        </div>
-        {open === "when" ? (
-          <div className="nt-cue-panel">
-            <label className="nt-field nt-field--inline">
-              <span className="nt-field__label">From</span>
-              <input className="nt-input" type="date" value={since} onChange={(e) => setSince(e.target.value)} />
-            </label>
-            <label className="nt-field nt-field--inline">
-              <span className="nt-field__label">To</span>
-              <input className="nt-input" type="date" value={until} onChange={(e) => setUntil(e.target.value)} />
-            </label>
-            <TimeScrubber />
-          </div>
+        <span className="nt-effort__hint">{EFFORTS.find(([v]) => v === effort)![2]}</span>
+      </div>
+      <div className="nt-chips" aria-label="Narrow down">
+        <AfChipButton size="sm" pressed={Boolean(since || until)} expanded={open === "when"} onClick={() => setOpen(open === "when" ? "" : "when")}>
+          {since || until ? `When: ${since ? shortDate(since) : "…"} – ${until ? shortDate(until) : "now"}` : "When"}
+        </AfChipButton>
+        <AfChipButton size="sm" pressed={entities.length > 0} expanded={open === "who"} onClick={() => setOpen(open === "who" ? "" : "who")}>
+          {entities.length ? `Who or what: ${entities.map((e) => e.name).join(", ")}` : "Who or what"}
+        </AfChipButton>
+        <AfChipButton size="sm" pressed={kinds.length > 0} expanded={open === "kind"} onClick={() => setOpen(open === "kind" ? "" : "kind")}>
+          {kinds.length ? `Kind: ${kinds.join(", ")}` : "Kind"}
+        </AfChipButton>
+        <AfChipButton size="sm" pressed={topics.length > 0} expanded={open === "topic"} onClick={() => setOpen(open === "topic" ? "" : "topic")}>
+          {topics.length ? `Topic: ${topics.map(topicLabel).join(", ")}` : "Topic"}
+        </AfChipButton>
+        {at ? (
+          <AfChip size="sm" tone="info" onRemove={() => setAt(null)} removeLabel="Back to now">
+            {`As of ${shortDate(at)}`}
+          </AfChip>
         ) : null}
-        {open === "who" ? <EntityPicker chosen={entities} onChange={setEntities} /> : null}
-        {open === "kind" ? (
-          <div className="nt-cue-panel nt-chips">
-            {NOTE_KINDS.map((k) => (
-              <AfChipButton key={k} size="sm" pressed={kinds.includes(k)} onClick={() => setKinds(kinds.includes(k) ? kinds.filter((x) => x !== k) : [...kinds, k])}>
-                {k}
-              </AfChipButton>
-            ))}
-          </div>
-        ) : null}
-        {open === "topic" ? <TopicPicker chosen={topics} onChange={setTopics} /> : null}
-      </form>
-      {asked ? <AnswerCard asked={asked} onSave={() => void saveAnswer(asked)} saved={saved} onFollowUp={(f) => setQ(f)} /> : null}
+      </div>
+      {open === "when" ? (
+        <div className="nt-cue-panel">
+          <label className="nt-field nt-field--inline">
+            <span className="nt-field__label">From</span>
+            <input className="nt-input" type="date" value={since} onChange={(e) => setSince(e.target.value)} />
+          </label>
+          <label className="nt-field nt-field--inline">
+            <span className="nt-field__label">To</span>
+            <input className="nt-input" type="date" value={until} onChange={(e) => setUntil(e.target.value)} />
+          </label>
+          <TimeScrubber />
+        </div>
+      ) : null}
+      {open === "who" ? <EntityPicker chosen={entities} onChange={setEntities} /> : null}
+      {open === "kind" ? (
+        <div className="nt-cue-panel nt-chips">
+          {NOTE_KINDS.map((k) => (
+            <AfChipButton key={k} size="sm" pressed={kinds.includes(k)} onClick={() => setKinds(kinds.includes(k) ? kinds.filter((x) => x !== k) : [...kinds, k])}>
+              {k}
+            </AfChipButton>
+          ))}
+        </div>
+      ) : null}
+      {open === "topic" ? <TopicPicker chosen={topics} onChange={setTopics} /> : null}
+      {asked ? <AnswerCard asked={asked} onSave={() => void ask.saveAnswer(asked)} saved={saved} onFollowUp={(f) => ask.setQ(f)} /> : null}
       {/* Once an answer to this very question is shown, its originals replace the matching notes. */}
       {(quick.data || quick.loading) && !(asked && asked.state === "answered" && asked.question === q.trim()) ? (
         <div className="nt-quick" aria-live="polite">
@@ -390,7 +731,8 @@ function AskPanel({ initialTopic }: { initialTopic: string }) {
           )}
         </div>
       ) : null}
-    </Section>
+      {!asked && !quick.data && !quick.loading ? <p className="nt-muted nt-block">Type a question above. Quick shows matching notes as you type; Standard and Deep answer with their sources.</p> : null}
+    </div>
   );
 }
 
@@ -606,10 +948,11 @@ function ThenVersusNow() {
   const overview = useRead<Overview>(() => api.get<Overview>("note/overview", { days: 90 }), [api]);
   const [a, setA] = useState("");
   const [b, setB] = useState("");
-  const candidates = uniqueEntities(overview.data?.entities);
+  // The most noted first: the one most likely to have changed.
+  const candidates = [...uniqueEntities(overview.data?.entities)].sort((x, y) => ((y as { note_count?: number }).note_count || 0) - ((x as { note_count?: number }).note_count || 0));
   const first = a || candidates[0]?.entity_id || "";
   return (
-    <Section id="thennow" title="Then and now">
+    <div className="nt-thennow-panel">
       <ReadView read={overview} what="your entities" empty={(o) => ((o.entities || []).length ? false : "Then and now appears once your notes mention someone or something twice.")}>
         {(o) => (
           <>
@@ -643,7 +986,7 @@ function ThenVersusNow() {
           </>
         )}
       </ReadView>
-    </Section>
+    </div>
   );
 }
 
@@ -701,150 +1044,7 @@ function RelationThenNow({ a, b }: { a: string; b: string }) {
   );
 }
 
-// ---------------------------------------------------------------- revisit
-
-function Revisit({ insights, hide }: { insights: ReadState<ListOf<Insight>>; hide: Set<string> }) {
-  const { api } = useApp();
-  const tasks = useRead<ListOf<Task>>(() => api.get<ListOf<Task>>("note/tasks", { status: "open", limit: 20 }), [api]);
-  const overview = useRead<Overview>(() => api.get<Overview>("note/overview", { days: 30 }), [api]);
-  const [busy, setBusy] = useState("");
-  const [line, setLine] = useState("");
-  const act = async (key: string, path: string, done: string, after: () => void, body?: unknown) => {
-    setBusy(key);
-    setLine("");
-    try {
-      await api.post(path, body);
-      setLine(done);
-      after();
-    } catch (e) {
-      setLine(errorSentence(e, "that").replace("could not be loaded", "did not work"));
-    } finally {
-      setBusy("");
-    }
-  };
-  return (
-    <Section id="revisit" title="Revisit">
-      {line ? (
-        <p className="nt-muted" role="status">
-          {line}
-        </p>
-      ) : null}
-      <div className="nt-revisit">
-        <div>
-          <h3>Insights</h3>
-          {/* The prompts above are insights too: each shows once. */}
-          <ReadView read={insights} what="your insights" empty={(l) => (l.items.some((i) => !hide.has(i.note_id)) ? false : "Nothing else to read.")}>
-            {(l) => (
-              <ul className="nt-list">
-                {l.items
-                  .filter((i) => !hide.has(i.note_id))
-                  .map((i) => (
-                    <li key={i.note_id} className="nt-item">
-                      <p className="nt-item__title">{i.title}</p>
-                      {i.body ? <p className="nt-muted">{i.body}</p> : null}
-                      <WhySurfaced id={i.note_id} kind={i.insight_kind} evidence={i.evidence_note_ids || []} />
-                      <div className="nt-actions">
-                        <button type="button" className="nt-btn nt-btn--quiet nt-btn--sm" onClick={() => openNote(i.note_id)}>
-                          Open
-                        </button>
-                        <button type="button" className="nt-btn nt-btn--quiet nt-btn--sm" onClick={() => noteAbout("insight", i.note_id, i.title)}>
-                          Add a note
-                        </button>
-                        <button type="button" className="nt-btn nt-btn--sm" disabled={busy === i.note_id} onClick={() => void act(i.note_id, `note/insights/${encodeURIComponent(i.note_id)}/ack`, "Marked as read.", insights.reload)}>
-                          {busy === i.note_id ? "Saving…" : "Got it"}
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-              </ul>
-            )}
-          </ReadView>
-        </div>
-        <div>
-          <h3>Open loops</h3>
-          <ReadView read={tasks} what="your open loops" empty={(l) => (l.items.length ? false : "No open loops.")}>
-            {(l) => (
-              <ul className="nt-list">
-                {l.items.map((t) => (
-                  <li key={t.task_id} className="nt-item">
-                    <p className="nt-item__title">{t.text}</p>
-                    {t.due ? <p className="nt-muted">Due {longDate(t.due)}</p> : null}
-                    <div className="nt-actions">
-                      <button type="button" className="nt-btn nt-btn--quiet nt-btn--sm" onClick={() => openNote(t.note_id)}>
-                        Open
-                      </button>
-                      <button type="button" className="nt-btn nt-btn--quiet nt-btn--sm" onClick={() => noteAbout("task", t.task_id, t.text)}>
-                        Add a note
-                      </button>
-                      <button type="button" className="nt-btn nt-btn--sm" disabled={busy === t.task_id} onClick={() => void act(t.task_id, `note/tasks/${encodeURIComponent(t.task_id)}/close`, `Closed: ${t.text}.`, tasks.reload, {})}>
-                        {busy === t.task_id ? "Closing…" : "Close"}
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </ReadView>
-        </div>
-        <div>
-          <h3>Worth another look</h3>
-          <ReadView read={overview} what="this" empty={(o) => ((o.resurfacing || []).length ? false : "Nothing to resurface today.")}>
-            {(o) => (
-              <ul className="nt-list">
-                {(o.resurfacing || []).map((n) => (
-                  <li key={n.note_id} className="nt-item">
-                    <NoteLink note={n} />
-                    {n.excerpt ? <p className="nt-muted">{n.excerpt}</p> : null}
-                    <div className="nt-actions">
-                      <button type="button" className="nt-btn nt-btn--quiet nt-btn--sm" onClick={() => noteAbout("note", n.note_id, n.title)}>
-                        Add a note
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </ReadView>
-        </div>
-      </div>
-    </Section>
-  );
-}
-
-// ---------------------------------------------------------------- review
-
-/**
- * What the notebook proposed or did on its own and you may want to check (GET /note/review): close matches,
- * merges it made, disagreements it kept. Each item brings its own actions. Shown only when there is one.
- */
-function ReviewInbox() {
-  const { api } = useApp();
-  const review = useRead<ListOf<ReviewItem>>(() => fetchReview(api), [api]);
-  const [line, setLine] = useState("");
-  const items = review.data?.items || [];
-  if (!items.length && !line) return null;
-  return (
-    <Section id="review" title="To review" sub="what your notebook decided on its own">
-      {line ? (
-        <p className="nt-muted" role="status">
-          {line}
-        </p>
-      ) : null}
-      <ul className="nt-list nt-review nt-revisit">
-        {items.map((it) => (
-          <ReviewCard
-            key={it.review_id}
-            item={it}
-            onDone={(words) => {
-              setLine(words);
-              review.reload();
-            }}
-          />
-        ))}
-      </ul>
-    </Section>
-  );
-}
+// ---------------------------------------------------------------- review cards
 
 function SideChip({ side }: { side: ReviewSide }) {
   if (side.type === "entity") return <EntityChip entity={{ entity_id: side.id, name: side.name, kind: side.kind || "thing" }} />;
@@ -885,7 +1085,7 @@ function ReviewCard({ item, onDone }: { item: ReviewItem; onDone: (words: string
   const head =
     item.kind === "merge" ? "Joined" : item.kind === "close_match" ? "Maybe the same" : "These disagree";
   return (
-    <li className="nt-item" data-kind={item.kind}>
+    <li className="nt-item nt-thought" data-kind={item.kind}>
       <p className="nt-review__pair">
         <span>{head}</span>
         {a ? <SideChip side={a} /> : null}
@@ -893,18 +1093,10 @@ function ReviewCard({ item, onDone }: { item: ReviewItem; onDone: (words: string
         {b ? <SideChip side={b} /> : null}
         <span className="nt-link__date">{shortDate(item.at)}</span>
       </p>
-      <p className="nt-muted">{reviewWhy(item.why)}</p>
       {own.data ? (
-        <p className="nt-muted">{`${own.data.name} on its own: ${own.data.note_count === 1 ? "1 note" : `${own.data.note_count} notes`}${own.data.summary ? `; ${own.data.summary}` : ""}`}</p>
+        <p className="nt-thought__body">{`${own.data.name} on its own: ${own.data.note_count === 1 ? "1 note" : `${own.data.note_count} notes`}${own.data.summary ? `; ${own.data.summary}` : ""}`}</p>
       ) : null}
-      {item.reason ? <p className="nt-muted">{`Why: ${item.reason}`}</p> : null}
-      {item.evidence_note_ids.length ? (
-        <div className="nt-chips">
-          {item.evidence_note_ids.slice(0, 3).map((id) => (
-            <EvidenceLink key={id} id={id} />
-          ))}
-        </div>
-      ) : null}
+      <WhyLines id={item.review_id} line={`${reviewWhy(item.why)}${item.reason ? ` ${item.reason}` : ""}`} evidence={item.evidence_note_ids} />
       {error ? <p className="nt-error-text">{error}</p> : null}
       {pending ? (
         <div className="nt-confirm" role="group" aria-label="Confirm">

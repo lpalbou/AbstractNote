@@ -217,13 +217,12 @@ async function main() {
         await page.waitForTimeout(200);
         await shot("capture", false);
         await page.goto(`${base}#/remember`);
-        await page.locator(".nt-cue").first().waitFor();
-        await page.locator(".nt-thennow").first().waitFor();
-        await page.locator(".nt-revisit .nt-item").first().waitFor();
+        await page.locator(".nt-rem__tab").first().waitFor();
+        await page.locator(".nt-row").first().waitFor();
         await page.waitForTimeout(300);
         await shot("remember", false);
         if (width >= 1280) {
-          // The first screen holds since-you-last-looked, the cue cards and the ask bar.
+          // One screen (W16 redesign): the rail, the ask bar on top, the panel scrolling inside itself.
           const box = await page.locator(".nt-ask__bar").boundingBox();
           check(box && box.y + box.height <= 800, `${theme}: Remember's first screen fits 1280x800 (the ask bar ends at ${Math.round((box?.y || 0) + (box?.height || 0))} px)`);
         }
@@ -257,11 +256,14 @@ async function main() {
     await page.screenshot({ path: join(OUT, "remember-answer-dark-1280.png") });
     await page.getByRole("radio", { name: "Quick" }).click();
     check((await page.getByRole("button", { name: "Ask", exact: true }).count()) === 0, "Quick has no Ask button: matching notes follow the typing");
-    await page.locator(".nt-cue .nt-disclose").first().click();
+    await page.locator("#rem-tab-thoughts").click();
+    await page.locator(".nt-thought .nt-disclose").first().click();
     await page.locator(".nt-why .nt-link").first().waitFor();
     check(true, "a cue says why it surfaced, with the notes it rests on");
-    await page.locator("#review-h").scrollIntoViewIfNeeded();
-    check((await page.locator(".nt-review .nt-item").count()) === 3, "To review lists a merge, a close match and a disagreement from GET /note/review");
+    check((await page.locator(".nt-thought", { hasText: "Two of your notes disagree" }).count()) === 1, "the disagreement from GET /note/review is a tension in Worth a thought");
+    await page.locator("#rem-tab-review").click();
+    await page.locator(".nt-review .nt-item").first().waitFor();
+    check((await page.locator(".nt-review .nt-item").count()) === 2, "To review lists a merge and a close match from GET /note/review");
     await page.getByRole("button", { name: "Undo the match" }).first().click();
     await page.screenshot({ path: join(OUT, "remember-review-dark-1280.png") });
     await page.getByRole("button", { name: "Not now" }).click();
@@ -339,16 +341,16 @@ async function main() {
       await page.setViewportSize({ width: 1280, height: 800 });
       await page.keyboard.press("Escape");
       await page.locator(".af-drawer-backdrop").waitFor({ state: "detached", timeout: 5000 }).catch(() => undefined);
-      await page.request.post(`${gatewayUrl}/__mock/fail`, { data: { path: "/api/gateway/note/cues", count: 3, status: 503 } });
+      await page.request.post(`${gatewayUrl}/__mock/fail`, { data: { path: "/api/gateway/note/insights", count: 3, status: 503 } });
       await page.goto(`${base}#/capture`);
-      await page.goto(`${base}#/remember`);
-      const err = page.locator("#cues-h").locator("xpath=ancestor::section").locator(".nt-error");
+      await page.goto(`${base}#/remember?panel=thoughts`);
+      const err = page.locator(".nt-rem__body .nt-error");
       await err.waitFor({ timeout: 20_000 });
       check((await err.innerText()).includes("Retry"), "a read that failed three times shows one sentence with Retry");
       await err.scrollIntoViewIfNeeded();
       await page.screenshot({ path: join(OUT, "remember-error-dark-1280.png") });
       await err.getByRole("button", { name: "Retry" }).click();
-      await page.locator(".nt-cue").first().waitFor();
+      await page.locator(".nt-thought").first().waitFor();
       check(true, "Retry loads the content");
       // A gateway without AbstractNote: note/status answers 404 once; every view shows one sentence, no retry.
       await page.request.post(`${gatewayUrl}/__mock/fail`, { data: { path: "/api/gateway/note/status", count: 1, status: 404 } });

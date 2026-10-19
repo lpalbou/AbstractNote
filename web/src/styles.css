@@ -393,6 +393,70 @@ p { margin: 0 0 6px; }
 .nt-revisit .nt-list { gap: 8px; }
 .nt-revisit h3 { margin-bottom: 8px; }
 
+/* ---- remember: one screen, a rail of panels, the ask bar on top, each panel scrolls inside itself */
+.nt-rem { display: grid; grid-template-columns: 224px minmax(0, 1fr); height: 100%; min-height: 0; overflow: hidden; }
+.nt-rem__rail { display: flex; flex-direction: column; justify-content: space-between; gap: 12px; min-height: 0; overflow: auto; padding: 14px 10px; border-right: 1px solid var(--nt-line); }
+.nt-rem__rail ul { position: relative; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.nt-rem__tab {
+  position: relative; width: 100%; display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 7px 10px;
+  border: none; border-radius: var(--radius-md); background: transparent; color: var(--text-secondary);
+  font: inherit; font-weight: 550; text-align: left; cursor: pointer; white-space: nowrap;
+}
+.nt-rem__tab:hover { color: var(--text-primary); background: color-mix(in oklab, var(--text-primary) 5%, transparent); }
+.nt-rem__tab[aria-selected="true"] { color: var(--text-primary); font-weight: 650; background: var(--nt-raise-2); }
+.nt-rem__tab[aria-selected="true"]::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; border-radius: 2px; background: var(--nt-spectrum-down); }
+.nt-rem__tab-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.nt-rem__badge {
+  flex: none; min-width: 20px; height: 20px; padding: 0 6px; display: inline-grid; place-items: center; border-radius: 999px;
+  font-size: var(--font-size-xs); font-weight: 700; font-variant-numeric: tabular-nums;
+  color: var(--text-primary); background: color-mix(in oklab, var(--info) 20%, transparent); border: 1px solid color-mix(in oklab, var(--info) 35%, transparent);
+}
+.nt-rem__keys { margin: 0; padding: 0 10px; color: var(--text-muted); font-size: var(--font-size-xs); }
+.nt-rem__keys kbd { font: inherit; padding: 0 4px; border: 1px solid var(--nt-line-strong); border-radius: 4px; color: var(--text-secondary); }
+.nt-rem__content { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.nt-rem__ask { padding: 14px 24px 12px; border-bottom: 1px solid var(--nt-line); }
+.nt-rem__ask .nt-ask__bar { max-width: 900px; }
+.nt-rem__panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.nt-rem__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 14px 24px 8px; }
+.nt-rem__head h2 { font-size: var(--font-size-xl); }
+.nt-rem__body { flex: 1; min-height: 0; overflow: auto; padding: 4px 24px 24px; overscroll-behavior: contain; }
+.nt-rem__body > .nt-ask, .nt-rem__body > .nt-thennow-panel, .nt-rem__body > .nt-rows { max-width: 900px; }
+.nt-rem__body .nt-themecards { max-width: 1100px; }
+
+/* One row per item: mark, one line of text, when, one action. */
+.nt-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.nt-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; min-height: 42px; padding: 4px 0; border-bottom: 1px solid var(--nt-line); }
+.nt-row:last-child { border-bottom: none; }
+.nt-row__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nt-row__text--link { border: none; background: transparent; padding: 0; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; }
+.nt-row__text--link:hover { color: var(--nt-link); text-decoration: underline; text-underline-offset: 2px; }
+.nt-row__tag { color: var(--text-muted); font-size: var(--font-size-sm); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.nt-row__acts { display: inline-flex; gap: 4px; }
+.nt-row--stale .nt-row__tag { color: var(--warning); }
+.nt-digest__mark--note { color: var(--text-muted); }
+.nt-digest__mark--new { color: var(--nt-mint); }
+
+/* Worth a thought: groups of compact cards (deck slides 18, 26). */
+.nt-group + .nt-group { margin-top: 18px; }
+.nt-group__head { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; color: var(--text-secondary); font-size: var(--font-size-md); font-weight: 650; }
+.nt-group__count { min-width: 20px; height: 18px; padding: 0 6px; display: inline-grid; place-items: center; border-radius: 999px; background: var(--nt-raise-2); color: var(--text-secondary); font-size: var(--font-size-xs); font-variant-numeric: tabular-nums; }
+.nt-thoughts { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; align-items: start; }
+.nt-thought { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 12px 14px; border-radius: var(--radius-lg); border: 1px solid var(--nt-line); background: var(--nt-raise); }
+.nt-thought__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.nt-pill {
+  display: inline-flex; align-items: center; padding: 1px 9px; border-radius: 999px; font-size: var(--font-size-xs); font-weight: 650;
+  color: var(--text-primary); background: color-mix(in oklab, var(--nt-indigo) 18%, transparent); border: 1px solid color-mix(in oklab, var(--nt-indigo) 35%, transparent);
+}
+.nt-thought__title { margin: 0; font-size: var(--font-size-base); font-weight: 650; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.nt-thought__title--link { display: block; padding: 0; border: none; background: transparent; color: var(--text-primary); font: inherit; font-weight: 650; text-align: left; cursor: pointer; }
+.nt-thought__title--link:hover { color: var(--nt-link); }
+.nt-thought__body { margin: 0; color: var(--text-secondary); font-size: var(--font-size-md); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.nt-thought__body--open { display: block; }
+.nt-thought__why { font-size: var(--font-size-sm); margin: 0; }
+.nt-thought__actions { margin-top: 2px; }
+.nt-tension { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; font-size: var(--font-size-md); }
+.nt-review .nt-item { list-style: none; }
+
 /* ---- explore (graph) */
 .nt-graph { display: grid; grid-template-columns: minmax(0, 1fr) 440px; height: 100%; min-height: 0; }
 .nt-graph__main { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--nt-line); }
@@ -657,6 +721,26 @@ p { margin: 0 0 6px; }
   .nt-remember__top > .nt-section + .nt-section { border-left: none; border-top: 1px solid var(--nt-line); }
 }
 @media (max-width: 640px) {
+  /* Remember on a phone: the rail is a sideways row at the top. */
+  .nt-rem { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .nt-rem__rail { flex-direction: row; padding: 8px 10px; border-right: none; border-bottom: 1px solid var(--nt-line); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+  .nt-rem__rail ul { flex-direction: row; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+  .nt-rem__rail { overflow: hidden; }
+  .nt-rem__tab { width: auto; min-height: 40px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--nt-line); }
+  .nt-rem__tab[aria-selected="true"]::before { display: none; }
+  .nt-rem__tab[aria-selected="true"] { border-color: var(--nt-line-strong); }
+  .nt-rem__keys { display: none; }
+  .nt-rem__ask { padding: 10px 14px 10px; }
+  .nt-rem__head { padding: 10px 14px 6px; flex-wrap: wrap; }
+  .nt-rem__head .nt-section__sub { display: block; margin: 2px 0 0; }
+  .nt-rem__body { padding: 2px 14px 16px; }
+  .nt-row { grid-template-columns: 22px minmax(0, 1fr) auto; grid-template-areas: "mark text act" "mark tag act"; row-gap: 0; }
+  .nt-row > .nt-digest__mark { grid-area: mark; }
+  .nt-row__text { grid-area: text; }
+  .nt-row__tag { grid-area: tag; }
+  .nt-row__act, .nt-row__acts { grid-area: act; }
+  .nt-row--loop { grid-template-areas: "mark text text" "mark tag act"; }
+  .nt-thoughts { grid-template-columns: minmax(0, 1fr); }
   .nt-header { padding: 8px 12px; gap: 8px; }
   .nt-section { padding: 14px 14px; }
   .nt-tiles { padding: 10px 14px 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }

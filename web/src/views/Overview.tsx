@@ -213,7 +213,7 @@ function WeekTable({ weeks }: { weeks: NoteStats["activity_weekly"] }) {
   );
 }
 
-function ThemeCards({ communities, onTheme }: { communities: ReadState<Communities>; onTheme: (id: string) => void }) {
+export function ThemeCards({ communities, onTheme }: { communities: ReadState<Communities>; onTheme: (id: string) => void }) {
   return (
     <ReadView read={communities} what="the themes" empty={(c) => (c.items.length ? false : "No themes yet: they appear once a few notes connect.")}>
       {(c) => {
