@@ -460,6 +460,12 @@ async def note_communities_recompute(request: Request, body: Optional[RecomputeB
     return await _run(request, lambda nb, svc, p: _call(nb, "recompute_communities", resolution))
 
 
+@router.get("/stats")
+async def note_stats(request: Request) -> Dict[str, Any]:
+    """What the notebook has accumulated; every number counted by the store (docs/api.md)."""
+    return await _run(request, lambda nb, svc, p: _call(nb, "stats"))
+
+
 @router.get("/timeline")
 async def note_timeline(request: Request, since: Optional[str] = None, until: Optional[str] = None,
                         granularity: str = Query("day", pattern="^(day|week|month)$")) -> Dict[str, Any]:

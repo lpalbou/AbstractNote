@@ -40,3 +40,22 @@ def test_communities_over_http(gw):
     assert c.post("/api/gateway/note/communities/recompute", headers=h, json={"client": "x"}).status_code == 422
     assert c.get("/api/gateway/note/communities", headers=gw["bob"]).json()["items"] == []
     assert c.get("/api/gateway/note/communities").status_code == 401
+
+
+def test_stats_over_http(gw):
+    from test_stats import stats_world
+
+    from abstractnote.gateway.router import notebook_for
+
+    c, h = gw["client"], gw["alice"]
+    empty = c.get("/api/gateway/note/stats", headers=h)
+    assert empty.status_code == 200, empty.text
+    assert empty.json()["totals"]["notes"] == 0
+    stats_world(notebook_for(_plane(gw, "alice")))
+    body = c.get("/api/gateway/note/stats", headers=h).json()
+    assert set(body) == {"generated_at", "span", "totals", "activity_weekly", "entities_by_kind", "top_entities",
+                         "claims_by_predicate", "tasks", "insights_by_kind", "communities", "processing",
+                         "growth_monthly", "quiet_entities"}
+    assert body["totals"]["notes"] == 5 and body["tasks"]["open"] == 1
+    assert c.get("/api/gateway/note/stats", headers=gw["bob"]).json()["totals"]["notes"] == 0
+    assert c.get("/api/gateway/note/stats").status_code == 401

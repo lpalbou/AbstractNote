@@ -733,6 +733,12 @@ class Notebook:
 
         return cm.label(self, items)
 
+    def stats(self, *, now: Optional[str] = None) -> Dict[str, Any]:
+        """What the notebook has accumulated (``GET /note/stats``; :func:`abstractnote.recall.stats.stats`)."""
+        from ..recall.stats import stats
+
+        return stats(self, now=now)
+
     def recompute_communities(self, resolution: Optional[float] = None) -> Dict[str, Any]:
         """Run community detection over the entity graph and store the result (no model); returns the counts."""
         from ..recall import communities as cm
