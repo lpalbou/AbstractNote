@@ -87,7 +87,7 @@ class _Builder:
 
     def known_names(self, eid: str) -> set:
         row = self.nb.store.entity_row(eid)
-        names = {ids.fold(row["name"])} if row is not None else set()
+        names = {ids.fold(row["name"]), ids.fold(row["display_name"] or row["name"])} if row is not None else set()
         names |= {ids.fold(a) for a in self.nb.store.aliases(eid)}
         for op in self.ops:  # names added earlier in this revision
             p = op["payload"]

@@ -143,6 +143,38 @@ def closure_id(revision_id: str, assertion_id: str, kind: str) -> str:
 
 # --------------------------------------------------------------------------- entities
 
+def canonical_name(text: Any) -> str:
+    """The one canonical name of an entity (operator rule, docs/data-model.md "Entity").
+
+    Unicode NFKC, trimmed, case-folded, and every run of whitespace, punctuation, underscores and
+    control characters collapsed to a single ``_`` (snake_case for several words), with no ``_`` at
+    either end: ``"  Laurent-Philippe  Albou "`` -> ``laurent_philippe_albou``, ``"Memory"`` and
+    ``"memory."`` -> ``memory``. Letters, digits, marks and symbols are kept (``C++`` -> ``c++``).
+
+    This is deterministic normalisation, not an identity judgement (ADR 0004): two names with the
+    same canonical name are one entity; anything else (``Gateway`` versus ``abstractgateway``) is
+    the model's decision. A name made only of separators keeps its folded, space-joined form.
+    """
+    raw = unicodedata.normalize("NFKC", str(text or "")).strip().casefold()
+    out: list = []
+    gap = False
+    for ch in raw:
+        cat = unicodedata.category(ch)
+        if ch == "_" or cat[0] in ("Z", "P") or cat == "Cc":
+            gap = bool(out)
+            continue
+        if gap:
+            out.append("_")
+            gap = False
+        out.append(ch)
+    return "".join(out) or "_".join(raw.split())
+
+
+def name_key(text: Any) -> str:
+    """The lookup key of a name or alias: its :func:`canonical_name` (entities.name_key, entity_aliases.alias_key)."""
+    return canonical_name(text)
+
+
 def slugify(name: str, *, max_len: int = 48) -> str:
     """ASCII slug of a model-chosen name (formatting only; identity is decided by the model)."""
     folded = unicodedata.normalize("NFKD", str(name or "")).encode("ascii", "ignore").decode("ascii")
@@ -153,9 +185,10 @@ def slugify(name: str, *, max_len: int = 48) -> str:
 
 
 def entity_id_base(kind: str, name: str) -> str:
+    """``ex:<kind>-<canonical name>``, written as ADR 0025's kebab-case ASCII slug (``_`` becomes ``-``)."""
     if kind not in ENTITY_KINDS:
         raise ValueError(f"The entity kind {kind!r} is not one of {', '.join(ENTITY_KINDS)}.")
-    return f"ex:{kind}-{slugify(name)}"
+    return f"ex:{kind}-{slugify(canonical_name(name))}"
 
 
 def mint_entity_id(kind: str, name: str, taken: "set[str] | frozenset[str] | Any") -> str:

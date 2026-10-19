@@ -181,10 +181,10 @@ def test_expand_returns_cards_timelines_relations_neighbours_then_now(nb):
     assert [e["entity_id"] for e in out["entities"][:2]] == ["ex:person-dana", "ex:org-acme"]
     assert {e["entity_id"] for e in out["entities"]} == {"ex:person-dana", "ex:org-acme", "ex:project-lut"}
     dana = out["entities"][0]
-    assert dana["focus"] is True and dana["line"].startswith("Dana (person): Works at Beta since March.")
+    assert dana["focus"] is True and dana["line"].startswith("dana (person): Works at Beta since March.")
     assert {t["entity_id"] for t in out["claims_timeline"]} == {"ex:person-dana", "ex:org-acme"}  # focus only
     works = [c for c in out["claims_timeline"][0]["claims"] if c["claim_id"] == h["works"]][0]
-    assert works["text"] == "Dana works at Acme" and works["closed"]["kind"] == "supersede"
+    assert works["text"] == "dana works at acme" and works["closed"]["kind"] == "supersede"
     assert out["relation_timelines"] and out["then_now"][0]["entity_id"] == "ex:person-dana"
     assert any(n["entity_id"] == "ex:org-beta" for n in out["neighbours"])
     assert [n["note_id"] for n in out["notes"]] == [h["n1"]]
@@ -291,7 +291,7 @@ def test_insights_cues_and_ack(nb):
                         "entity_ids"}
     cues = nb.cues()["items"]
     assert cues == [{"cue_id": out["note_id"], "text": "You promised Dana the Pareto in January.", "kind": "reminder",
-                     "subject": {"kind": "entity", "id": "ex:person-dana", "title": "Dana"},
+                     "subject": {"kind": "entity", "id": "ex:person-dana", "title": "dana"},
                      "evidence_note_ids": [h["n1"]], "entity_ids": ["ex:person-dana"]}]
     # the insight note's own read says what it rests on (W9 gap 5)
     assert nb.note(out["note_id"])["insight"] == {"kind": "reminder", "evidence_note_ids": [h["n1"]],
@@ -323,10 +323,10 @@ def test_changes_lists_supersessions_and_retractions_in_plain_words(nb):
     delta = nb.changes(first["cursor"])["superseded_claims"]
     by_id = {c["claim_id"]: c for c in delta}
     assert set(by_id) == {h["works"], participant}
-    assert by_id[h["works"]] == {"claim_id": h["works"], "kind": "superseded", "text": "Dana works at Acme",
+    assert by_id[h["works"]] == {"claim_id": h["works"], "kind": "superseded", "text": "dana works at acme",
                                  "superseded_by": h["beta"], "note_id": h["n2"]}
     assert by_id[participant]["kind"] == "retracted" and by_id[participant]["superseded_by"] is None
-    assert by_id[participant]["text"] == "Dana participant LUT"
+    assert by_id[participant]["text"] == "dana participant lut"
     curie = re.compile(r"\b[a-z][a-z0-9]*:[A-Za-z]")
     assert not [c["text"] for c in delta if curie.search(c["text"])]
 

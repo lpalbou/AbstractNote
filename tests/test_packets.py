@@ -201,7 +201,7 @@ def test_two_notes_share_every_system_prompt_byte_and_differ_from_the_first_user
         assert calls[0]["prompt"].splitlines()[-1] != calls[1]["prompt"].splitlines()[-1]
     # the extraction prompt is the bounded packet, not the context tool's JSON
     assert "candidate_entities" not in by_schema["Extraction"][1]["prompt"]
-    assert "Dana (person)" in by_schema["Extraction"][1]["prompt"]  # the first note created Dana
+    assert "dana (person)" in by_schema["Extraction"][1]["prompt"]  # the first note created Dana
 
 
 def test_a_prompt_note_labels_the_author_and_the_assistant_answer(tmp_path):

@@ -295,12 +295,33 @@ class NoteStore:
         return out
 
     def aliases(self, entity_id: str, at: Optional[str] = None) -> List[str]:
+        """The entity's other names as shown: one surface form per canonical name (the first seen), none equal
+        to the entity's own canonical name (``Memory`` is not another name of ``memory``)."""
         if at is None:
             rows = self.q("SELECT alias FROM entity_aliases WHERE entity_id=? ORDER BY added_at, alias", (entity_id,))
         else:
             rows = self.q("SELECT alias FROM entity_aliases WHERE entity_id=? AND added_at<=? ORDER BY added_at, alias",
                           (entity_id, at))
-        return [r[0] for r in rows]
+        own = self.q1("SELECT name_key FROM entities WHERE entity_id=?", (entity_id,))
+        return distinct_names([r[0] for r in rows], exclude=[own[0]] if own and own[0] else [])
+
+    def name_key_holder(self, key: str, exclude: Sequence[str] = (), conn: Optional[sqlite3.Connection] = None
+                        ) -> Optional[str]:
+        """The live entity whose canonical name (``name_key``) or one of whose aliases (``alias_key``) is ``key``,
+        the name first and the earliest entity first; merged entries resolve to their surviving entity."""
+        c = conn or self.conn
+        if not key:
+            return None
+        with self.lock:
+            rows = c.execute("SELECT entity_id FROM entities WHERE name_key=? AND merged_into IS NULL"
+                             " ORDER BY key_clash_with IS NOT NULL, created_at, entity_id", (key,)).fetchall()
+            rows += c.execute("SELECT a.entity_id FROM entity_aliases a JOIN entities e ON e.entity_id=a.entity_id"
+                              " WHERE a.alias_key=? ORDER BY e.created_at, e.entity_id", (key,)).fetchall()
+        for r in rows:
+            eid = self.canonical(r[0], c)
+            if eid not in exclude:
+                return eid
+        return None
 
     def entity_brief(self, entity_id: str) -> Optional[Dict[str, Any]]:
         r = self.entity_row(entity_id)
@@ -308,9 +329,47 @@ class NoteStore:
             return None
         return {
             "entity_id": r["entity_id"], "kind": r["kind"], "name": r["name"],
+            "display_name": r["display_name"] or r["name"],
             "aliases": self.aliases(r["entity_id"]), "summary": r["summary"], "first_seen": r["first_seen"],
             "last_seen": r["last_seen"], "note_count": r["note_count"], "merged_into": r["merged_into"],
         }
+
+    def name_key_groups(self) -> List[List[str]]:
+        """Groups of live entities that share a canonical name or an alias key (two or more each), earliest
+        entity first; the groups :meth:`Notebook.normalize_entities` merges."""
+        live = self.q("SELECT entity_id, name_key FROM entities WHERE merged_into IS NULL"
+                      " ORDER BY created_at, recorded_at, entity_id")
+        order = {r[0]: i for i, r in enumerate(live)}
+        parent = {eid: eid for eid in order}
+
+        def find(x: str) -> str:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: str, b: str) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                keep, other = (ra, rb) if order[ra] <= order[rb] else (rb, ra)
+                parent[other] = keep
+
+        by_key: Dict[str, str] = {}
+        keyed = [(r[1], r[0]) for r in live if r[1]]
+        for alias_key, eid in self.q("SELECT alias_key, entity_id FROM entity_aliases WHERE alias_key IS NOT NULL"
+                                     " AND alias_key!=''"):
+            c = self.canonical(eid)
+            if c in parent:
+                keyed.append((alias_key, c))
+        for key, eid in keyed:
+            if key in by_key:
+                union(by_key[key], eid)
+            else:
+                by_key[key] = eid
+        groups: Dict[str, List[str]] = {}
+        for eid in order:
+            groups.setdefault(find(eid), []).append(eid)
+        return [sorted(g, key=order.__getitem__) for g in groups.values() if len(g) > 1]
 
     # ------------------------------------------------------------------ claims helpers
 
@@ -427,14 +486,15 @@ class NoteStore:
                   (first, r[1] or first, int(r[2] or 0), entity_id))
 
     def refresh_entity_fts(self, c: sqlite3.Connection, entity_id: str) -> None:
-        r = c.execute("SELECT name, summary FROM entities WHERE entity_id=?", (entity_id,)).fetchone()
+        r = c.execute("SELECT name, display_name, summary FROM entities WHERE entity_id=?", (entity_id,)).fetchone()
         if r is None:
             return
         aliases = [a[0] for a in c.execute("SELECT alias FROM entity_aliases WHERE entity_id=? ORDER BY alias",
                                            (entity_id,))]
+        name = r["name"] if (r["display_name"] or r["name"]) == r["name"] else f"{r['name']} {r['display_name']}"
         c.execute("DELETE FROM entities_fts WHERE entity_id=?", (entity_id,))
         c.execute("INSERT INTO entities_fts(entity_id, name, aliases, summary) VALUES (?,?,?,?)",
-                  (entity_id, r["name"], " ".join(aliases), r["summary"] or ""))
+                  (entity_id, name, " ".join(aliases), r["summary"] or ""))
 
     def refresh_topic(self, c: sqlite3.Connection, topic: str) -> None:
         r = c.execute(
@@ -908,6 +968,19 @@ class _TakenIds:
         return entity_id in self.extra or self._store.entity_row(str(entity_id)) is not None
 
 
+def distinct_names(names: Iterable[str], exclude: Iterable[str] = ()) -> List[str]:
+    """Names with one surface form per canonical name (the first), leaving out those whose canonical name is in
+    ``exclude`` (names or keys): what a person sees as "also known as"."""
+    seen = {ids.name_key(x) for x in exclude if str(x or "").strip()}
+    out: List[str] = []
+    for n in names:
+        k = ids.name_key(n)
+        if k and k not in seen:
+            seen.add(k)
+            out.append(n)
+    return out
+
+
 def fts_terms(text: str) -> str:
     """FTS5 MATCH string: every word of the query as a quoted term, OR-joined (BM25 ranks)."""
     words = [w for w in "".join(ch if ch.isalnum() else " " for ch in str(text or "")).split() if w]
@@ -939,16 +1012,30 @@ class _OpContext:
         fn(p)
 
     # --- entities
+    def _key_holder(self, key: str, eid: str) -> Optional[str]:
+        """Another live entity holding the canonical name ``key`` (the unique index's view), or None."""
+        r = self.c.execute("SELECT entity_id FROM entities WHERE name_key=? AND merged_into IS NULL AND"
+                           " key_clash_with IS NULL AND entity_id!=?", (key, eid)).fetchone()
+        return r[0] if r else None
+
     def op_entity_create(self, p: Dict[str, Any]) -> None:
         eid = p["entity_id"]
         if self.c.execute("SELECT 1 FROM entities WHERE entity_id=?", (eid,)).fetchone():
             return
+        surface = str(p["name"]).strip()
+        key = ids.canonical_name(surface)
+        # Notebook.apply_revision turns a create of a taken canonical name into a reuse; only a revision recorded
+        # before canonical names (replayed by a rebuild) gets here with a taken key: it is created as a marked
+        # duplicate that normalize_entities merges (its own later merge revision, when it was recorded).
+        clash = self._key_holder(key, eid)
         self.c.execute(
             "INSERT INTO entities(entity_id, kind, name, summary, created_at, created_revision_id, recorded_at,"
-            " first_seen, last_seen, note_count) VALUES (?,?,?,?,?,?,?,?,?,0)",
-            (eid, p["kind"], p["name"], p.get("summary"), self.at, self.rid, self.recorded_at, self.at, self.at))
+            " first_seen, last_seen, note_count, name_key, display_name, key_clash_with)"
+            " VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?)",
+            (eid, p["kind"], key, p.get("summary"), self.at, self.rid, self.recorded_at, self.at, self.at,
+             key, surface, clash))
         self.c.execute("INSERT OR IGNORE INTO entity_names(entity_id, name, at, revision_id) VALUES (?,?,?,?)",
-                       (eid, p["name"], self.at, self.rid))
+                       (eid, key, self.at, self.rid))
         for alias in p.get("aliases") or []:
             self._alias(eid, alias)
         if p.get("summary"):
@@ -962,11 +1049,11 @@ class _OpContext:
         if not alias:
             return
         f = ids.fold(alias)
-        name = self.c.execute("SELECT name FROM entities WHERE entity_id=?", (eid,)).fetchone()
-        if name is not None and ids.fold(name[0]) == f:
+        row = self.c.execute("SELECT name, display_name FROM entities WHERE entity_id=?", (eid,)).fetchone()
+        if row is not None and f in {ids.fold(row[0]), ids.fold(row[1] or row[0])}:
             return
-        self.c.execute("INSERT OR IGNORE INTO entity_aliases(entity_id, alias, alias_fold, added_at, revision_id)"
-                       " VALUES (?,?,?,?,?)", (eid, alias, f, self.at, self.rid))
+        self.c.execute("INSERT OR IGNORE INTO entity_aliases(entity_id, alias, alias_fold, added_at, revision_id,"
+                       " alias_key) VALUES (?,?,?,?,?,?)", (eid, alias, f, self.at, self.rid, ids.name_key(alias)))
         self.dirty_entities.add(eid)
 
     def op_entity_alias(self, p: Dict[str, Any]) -> None:
@@ -976,13 +1063,17 @@ class _OpContext:
     def op_entity_rename(self, p: Dict[str, Any]) -> None:
         eid = p["entity_id"]
         row = self._require_entity(eid)
-        previous = row["name"]
-        if previous == p["name"]:
+        previous = row["display_name"] or row["name"]
+        surface = str(p["name"]).strip()
+        if previous == surface:
             return
-        self.c.execute("UPDATE entities SET name=? WHERE entity_id=?", (p["name"], eid))
+        key = ids.canonical_name(surface)
+        clash = self._key_holder(key, eid) if row["merged_into"] is None else None
+        self.c.execute("UPDATE entities SET name=?, name_key=?, display_name=?, key_clash_with=? WHERE entity_id=?",
+                       (key, key, surface, clash, eid))
         self.c.execute("INSERT OR IGNORE INTO entity_names(entity_id, name, at, revision_id) VALUES (?,?,?,?)",
-                       (eid, p["name"], self.at, self.rid))
-        self.c.execute("DELETE FROM entity_aliases WHERE entity_id=? AND alias_fold=?", (eid, ids.fold(p["name"])))
+                       (eid, key, self.at, self.rid))
+        self.c.execute("DELETE FROM entity_aliases WHERE entity_id=? AND alias_fold=?", (eid, ids.fold(surface)))
         self._alias(eid, previous)
         self.dirty_entities.add(eid)
 
@@ -1006,6 +1097,9 @@ class _OpContext:
         self.c.execute("INSERT OR IGNORE INTO merges(from_id, into_id, at, revision_id, reason, assertion_id)"
                        " VALUES (?,?,?,?,?,?)", (from_id, into_id, self.at, self.rid, p.get("reason"),
                                                  ids.kg_assertion_id(from_id, "schema:sameAs", into_id)))
+        into = self.c.execute("SELECT name_key, key_clash_with FROM entities WHERE entity_id=?", (into_id,)).fetchone()
+        if into["key_clash_with"] and self._key_holder(into["name_key"], into_id) is None:
+            self.c.execute("UPDATE entities SET key_clash_with=NULL WHERE entity_id=?", (into_id,))
         self.stats["entities_merged"].append({"from_id": from_id, "into_id": into_id})
         self.dirty_relation_entities.update({from_id, into_id})
         self.dirty_entities.update({from_id, into_id})
@@ -1018,8 +1112,25 @@ class _OpContext:
         self.c.execute("UPDATE entities SET merged_into=NULL, merged_at=NULL WHERE entity_id=?", (from_id,))
         self.c.execute("UPDATE merges SET undone_at=?, undone_revision_id=? WHERE from_id=? AND into_id=? AND"
                        " undone_at IS NULL", (self.at, self.rid, from_id, into_id))
+        self._separate_name(from_id, row)
         self.dirty_relation_entities.update({from_id, into_id})
         self.dirty_entities.update({from_id, into_id})
+
+    def _separate_name(self, eid: str, row: sqlite3.Row) -> None:
+        """An entity separated again whose canonical name another live entity holds gets the first free
+        ``<name>_2``, ``<name>_3`` ...: two entities a person sees never share a canonical name."""
+        key = row["name_key"] or ids.canonical_name(row["display_name"] or row["name"])
+        if self._key_holder(key, eid) is None:
+            if row["key_clash_with"]:
+                self.c.execute("UPDATE entities SET key_clash_with=NULL WHERE entity_id=?", (eid,))
+            return
+        n = 2
+        while self.c.execute("SELECT 1 FROM entities WHERE name_key=? AND entity_id!=?", (f"{key}_{n}", eid)).fetchone():
+            n += 1
+        new = f"{key}_{n}"
+        self.c.execute("UPDATE entities SET name=?, name_key=?, key_clash_with=NULL WHERE entity_id=?", (new, new, eid))
+        self.c.execute("INSERT OR IGNORE INTO entity_names(entity_id, name, at, revision_id) VALUES (?,?,?,?)",
+                       (eid, new, self.at, self.rid))
 
     def op_entity_mention(self, p: Dict[str, Any]) -> None:
         eid = p["entity_id"]
@@ -1175,10 +1286,11 @@ class _OpContext:
             stat_targets.add(self.s.canonical(eid, self.c))
         for eid in sorted(stat_targets):
             self.s.refresh_entity_stats(self.c, eid)
-            row = self.c.execute("SELECT name, summary FROM entities WHERE entity_id=?", (eid,)).fetchone()
+            row = self.c.execute("SELECT name, display_name, summary FROM entities WHERE entity_id=?", (eid,)).fetchone()
             aliases = [a[0] for a in self.c.execute(
                 "SELECT alias FROM entity_aliases WHERE entity_id=? ORDER BY added_at, alias", (eid,))]
-            key = self.keys.entity(entity_text(row["name"], aliases, row["summary"]))
+            # The embedded text keeps the surface form the notes wrote (a canonical snake_case name reads worse).
+            key = self.keys.entity(entity_text(row["display_name"] or row["name"], aliases, row["summary"]))
             self.c.execute("UPDATE entities SET vector_key=?, revision_count=revision_count+1 WHERE entity_id=?",
                            (key, eid))
             self.s.refresh_entity_fts(self.c, eid)

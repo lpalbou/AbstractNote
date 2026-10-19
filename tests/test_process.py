@@ -341,14 +341,14 @@ def test_a_missing_summary_is_a_warning_never_a_failed_note(nb):
     out = note_apply_revision(ctx, nid, extraction([mention("m1", "Zed", "person", role="called about the budget")]),
                               {"mentions": [ml("m1", "create", name="Zed", kind="person", summary=None)]})
     assert out["revision_id"] and any("No summary was written for Zed" in w for w in out["warnings"])
-    zed = nb.store.q1("SELECT entity_id, summary FROM entities WHERE name='Zed'")
+    zed = nb.store.q1("SELECT entity_id, summary FROM entities WHERE name='zed'")
     assert zed["summary"] == "Called about the budget."
     # blank summary and no role: the placeholder says where it was seen
     nid1 = nb.capture("Yan too.", title="Calls", occurred_at="2026-02-02T11:00:00Z").note_id
     note_context(ctx, nid1)
     note_apply_revision(ctx, nid1, extraction([mention("m1", "Yan", "person")]),
                         {"mentions": [ml("m1", "create", name="Yan", kind="person", summary="  ")]})
-    assert nb.store.q1("SELECT summary FROM entities WHERE name='Yan'")[0] == "Mentioned in \u201cCalls\u201d on 2026-02-02."
+    assert nb.store.q1("SELECT summary FROM entities WHERE name='yan'")[0] == "Mentioned in \u201cCalls\u201d on 2026-02-02."
     # a reused entity the note tells something new about, without a summary: kept, with a warning
     ext = extraction([mention("m1", "Dana", "person"), mention("m2", "LUT", "project")],
                      [stmt("m1", "schema:knowsAbout", "m2")])

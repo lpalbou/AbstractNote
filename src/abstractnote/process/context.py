@@ -99,8 +99,10 @@ def attach_claims(nb: Any, packet: Dict[str, Any], entity_id: str, views: List[D
 def name_index(nb: Any) -> Dict[str, List[str]]:
     """Case-folded entity names and aliases -> canonical entity ids (exact matching only)."""
     out: Dict[str, List[str]] = {}
-    for r in nb.store.q("SELECT entity_id, name FROM entities"):
-        out.setdefault(ids.fold(r[1]), []).append(r[0])
+    for r in nb.store.q("SELECT entity_id, name, display_name FROM entities"):
+        # The surface form as written, and the canonical name read as words (``laurent_philippe_albou``).
+        for form in dict.fromkeys((ids.fold(r[2] or r[1]), ids.fold(r[1].replace("_", " ")))):
+            out.setdefault(form, []).append(r[0])
     for r in nb.store.q("SELECT entity_id, alias_fold FROM entity_aliases"):
         out.setdefault(r[1], []).append(r[0])
     return out

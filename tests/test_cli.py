@@ -47,7 +47,7 @@ def test_entity_and_rebuild(tmp_path, capsys):
     with Notebook.open(nb_dir) as nb:
         nb.apply_revision(rev("rv_1", "2026-01-01T00:00:00Z", create("ex:person-dana", "Dana", summary="A colleague.")))
     code, card, _ = run(capsys, "entity", "ex:person-dana", "--notebook", str(nb_dir))
-    assert code == 0 and card["name"] == "Dana" and card["summary"] == "A colleague."
+    assert code == 0 and card["name"] == "dana" and card["summary"] == "A colleague."
     code, out, _ = run(capsys, "rebuild", "--notebook", str(nb_dir))
     assert code == 0 and out["replayed_revisions"] == 1 and out["after"]["entities"] == 1
     code, _, err = run(capsys, "entity", "ex:person-nobody", "--notebook", str(nb_dir))

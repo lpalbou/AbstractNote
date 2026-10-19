@@ -1,7 +1,8 @@
 """``note_resolve_candidates``: up to three existing entities per mention, with how each matched.
 
-Candidates come from three deterministic lookups: exact case-folded name or
-alias, full-text over entity names, aliases and summaries (BM25), and vector
+Candidates come from three deterministic lookups: the same canonical name
+(``ids.name_key``) as an entity's name or alias, the entity holding the mention's
+own canonical name always first, full-text over entity names, aliases and summaries (BM25), and vector
 neighbours of the mention. The model decides which, if any, is the same thing.
 """
 
@@ -24,15 +25,22 @@ VECTOR_MIN = 0.3
 
 
 def _exact(nb: Any, names: Sequence[str]) -> List[str]:
+    """Entities whose canonical name or an alias has the canonical name (``ids.name_key``) of one of ``names``:
+    the entity holding the mention's own name first, then the other names' holders, then alias matches."""
     out: List[str] = []
-    folds = sorted({ids.fold(n) for n in names if str(n or "").strip()})
-    if not folds:
+    keys = [k for k in dict.fromkeys(ids.name_key(n) for n in names if str(n or "").strip()) if k]
+    if not keys:
         return out
-    q = ",".join("?" for _ in folds)
-    rows = nb.store.q(f"SELECT entity_id FROM entity_aliases WHERE alias_fold IN ({q})", folds)
-    rows += [r for r in nb.store.q("SELECT entity_id, name FROM entities") if ids.fold(r[1]) in set(folds)]
-    for r in rows:
-        c = nb.store.canonical(r[0])
+    q = ",".join("?" for _ in keys)
+    first = nb.store.q(f"SELECT entity_id, name_key FROM entities WHERE name_key IN ({q})"
+                       " ORDER BY merged_into IS NOT NULL, key_clash_with IS NOT NULL, created_at, entity_id", keys)
+    first.sort(key=lambda r: keys.index(r[1]))
+    rows = [r[0] for r in first]
+    rows += [r[0] for r in nb.store.q(f"SELECT a.entity_id FROM entity_aliases a JOIN entities e ON"
+                                      f" e.entity_id=a.entity_id WHERE a.alias_key IN ({q})"
+                                      " ORDER BY e.created_at, e.entity_id", keys)]
+    for eid in rows:
+        c = nb.store.canonical(eid)
         if c not in out:
             out.append(c)
     return out
@@ -84,7 +92,11 @@ def resolve_candidates(nb: Any, note_id: str, mentions: Sequence[Dict[str, Any]]
                 scores[eid] = scores.get(eid, 0.0) + 1.0 / (RRF_K + rank + 1)
                 if label not in matched.setdefault(eid, []):
                     matched[eid].append(label)
-        ordered = sorted(scores, key=lambda e: (0 if "alias" in matched[e] else 1, -scores[e], e))[:MAX_CANDIDATES]
+        # The entity with the mention's own canonical name always comes first (deterministic normalisation,
+        # not an identity judgement: Notebook.apply_revision would file a new entity of that name under it anyway).
+        own = nb.store.name_key_holder(ids.name_key(m["name"]))
+        ordered = sorted(scores, key=lambda e: (0 if e == own else 1, 0 if "alias" in matched[e] else 1,
+                                                -scores[e], e))[:MAX_CANDIDATES]
         cands = []
         for i, eid in enumerate(ordered):
             if nb.store.entity_row(eid) is None:

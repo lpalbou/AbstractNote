@@ -58,7 +58,7 @@ def test_a_merged_entry_reads_as_itself_and_lists_on_request(nb):
     w = merged_world(nb)
     assert nb.entity("ex:person-d-ng")["entity_id"] == "ex:person-dana"  # the card follows the merge
     own = nb.entity_record("ex:person-d-ng")
-    assert (own["entity_id"], own["name"], own["aliases"], own["summary"]) == ("ex:person-d-ng", "D. Ng", ["Ng"],
+    assert (own["entity_id"], own["name"], own["aliases"], own["summary"]) == ("ex:person-d-ng", "d_ng", ["Ng"],
                                                                                 "Called once.")
     assert own["merged_into"] == "ex:person-dana" and own["merged_at"] == own["merge"]["at"]
     assert own["merge"]["revision_id"] == "rv_w3" and own["merge"]["reason"] == "the same person"
@@ -128,19 +128,19 @@ def test_review_lists_unsure_matches_merges_and_disagreements(nb):
         assert all(set(a) == {"action", "method", "path", "body"} for a in it["actions"])
     cm = items["close_match"]
     assert cm["why"] == "unsure_match"
-    assert [(s["id"], s["name"]) for s in cm["sides"]] == [("ex:org-acme-corp", "Acme Corp"), ("ex:org-acme", "Acme")]
+    assert [(s["id"], s["name"]) for s in cm["sides"]] == [("ex:org-acme-corp", "acme_corp"), ("ex:org-acme", "acme")]
     assert cm["evidence_note_ids"][0] == w["unsure_note"]
     assert [a["action"] for a in cm["actions"]] == ["confirm", "keep_apart"]
     assert cm["actions"][1]["path"] == f"/note/claims/{w['close_claim']}/retract"
     mg = items["merge"]
     assert (mg["why"], mg["reason"]) == ("merged_by_model", "test")  # ml()'s scripted reason
-    assert [(s["id"], s["name"]) for s in mg["sides"]] == [("ex:person-d-ng", "D. Ng"), ("ex:person-dana", "Dana")]
+    assert [(s["id"], s["name"]) for s in mg["sides"]] == [("ex:person-d-ng", "d_ng"), ("ex:person-dana", "dana")]
     assert mg["evidence_note_ids"][0] == w["merge_note"]
     assert mg["actions"][1] == {"action": "unmerge", "method": "POST", "path": "/note/entities/ex:person-dana/unmerge",
                                 "body": {"from_id": "ex:person-d-ng", "reason": ""}}
     ct = items["contradiction"]
     assert ct["why"] == "disputed_pair" and [s["id"] for s in ct["sides"]] == [w["budget"], w["budget2"]]
-    assert [s["name"] for s in ct["sides"]] == ["LUT budget 40k", "LUT budget 55k"]
+    assert [s["name"] for s in ct["sides"]] == ["lut budget 40k", "lut budget 55k"]
     assert ct["evidence_note_ids"][0] == w["dispute_note"]
     assert [a["action"] for a in ct["actions"]] == ["retract", "retract"]
     assert [i["at"] for i in out["items"]] == sorted((i["at"] for i in out["items"]), reverse=True)

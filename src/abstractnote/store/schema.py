@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: entities.name_key/display_name/key_clash_with, entity_aliases.alias_key
 
 TRUTH_TABLES = ("meta", "notes", "attachments", "note_links", "queue", "revisions", "vectors", "context_packets")
 
@@ -158,7 +158,10 @@ CREATE TABLE IF NOT EXISTS entities (
   merged_into TEXT,
   merged_at TEXT,
   vector_key TEXT,
-  revision_count INTEGER NOT NULL DEFAULT 0
+  revision_count INTEGER NOT NULL DEFAULT 0,
+  name_key TEXT,
+  display_name TEXT,
+  key_clash_with TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_entities_created ON entities(created_at);
 CREATE INDEX IF NOT EXISTS idx_entities_last_seen ON entities(last_seen);
@@ -169,6 +172,7 @@ CREATE TABLE IF NOT EXISTS entity_aliases (
   alias_fold TEXT NOT NULL,
   added_at TEXT NOT NULL,
   revision_id TEXT NOT NULL,
+  alias_key TEXT,
   PRIMARY KEY (entity_id, alias_fold)
 );
 CREATE INDEX IF NOT EXISTS idx_alias_fold ON entity_aliases(alias_fold);
@@ -325,7 +329,59 @@ def connect(path: str) -> sqlite3.Connection:
 
 
 # Columns added after the first notebooks were created (in-place upgrade on open).
-_ADDED_COLUMNS = {"notes": [("about_json", "TEXT")]}
+_ADDED_COLUMNS = {
+    "notes": [("about_json", "TEXT")],
+    "entities": [("name_key", "TEXT"), ("display_name", "TEXT"), ("key_clash_with", "TEXT")],
+    "entity_aliases": [("alias_key", "TEXT")],
+}
+
+#: Created after the added columns exist. One live entity per canonical name: ``name_key`` is unique among
+#: entities that are not merged away, except a legacy duplicate that a replayed revision created while the key was
+#: already taken (``key_clash_with`` names the holder) until ``Notebook.normalize_entities`` merges it.
+POST_DDL = """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_name_key ON entities(name_key)
+  WHERE merged_into IS NULL AND key_clash_with IS NULL;
+CREATE INDEX IF NOT EXISTS idx_entities_name_key_all ON entities(name_key);
+CREATE INDEX IF NOT EXISTS idx_alias_key ON entity_aliases(alias_key);
+"""
+
+#: Meta key set when a migration found entities written before canonical names: the next write
+#: (``Notebook.recover_pending``) merges the groups that share a canonical name (``normalize_entities``).
+NAME_KEY_REPAIR_META = "name_key_repair"
+
+
+def _backfill_name_keys(conn: sqlite3.Connection) -> None:
+    """Schema 1 -> 2: canonical ``name`` and ``name_key`` for every entity (the surface form kept as
+    ``display_name``), ``alias_key`` for every alias. A later live entity whose key an earlier live one holds is
+    marked ``key_clash_with`` and the notebook is flagged for the merge (``NAME_KEY_REPAIR_META``)."""
+    from .. import ids
+
+    rows = conn.execute("SELECT entity_id, name, merged_into FROM entities WHERE name_key IS NULL"
+                        " ORDER BY created_at, recorded_at, entity_id").fetchall()
+    if not rows and conn.execute("SELECT 1 FROM entity_aliases WHERE alias_key IS NULL LIMIT 1").fetchone() is None:
+        return
+    holders = {r[0]: r[1] for r in conn.execute(
+        "SELECT name_key, entity_id FROM entities WHERE name_key IS NOT NULL AND merged_into IS NULL"
+        " AND key_clash_with IS NULL")}
+    for entity_id, name, merged_into in rows:
+        key = ids.canonical_name(name)
+        clash = None
+        if merged_into is None:
+            clash = holders.get(key)
+            if clash is None:
+                holders[key] = entity_id
+        conn.execute("UPDATE entities SET name=?, name_key=?, display_name=COALESCE(display_name, ?),"
+                     " key_clash_with=? WHERE entity_id=?", (key, key, name, clash, entity_id))
+    for entity_id, revision_id, name in conn.execute("SELECT entity_id, revision_id, name FROM entity_names").fetchall():
+        conn.execute("UPDATE entity_names SET name=? WHERE entity_id=? AND revision_id=?",
+                     (ids.canonical_name(name), entity_id, revision_id))
+    for entity_id, fold, alias in conn.execute(
+            "SELECT entity_id, alias_fold, alias FROM entity_aliases WHERE alias_key IS NULL").fetchall():
+        conn.execute("UPDATE entity_aliases SET alias_key=? WHERE entity_id=? AND alias_fold=?",
+                     (ids.name_key(alias), entity_id, fold))
+    if rows:
+        conn.execute("DELETE FROM then_now_cache")  # cached cards carry the old names
+        conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (NAME_KEY_REPAIR_META, '"pending"'))
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
@@ -335,6 +391,14 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         for name, decl in cols:
             if name not in have:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        _backfill_name_keys(conn)
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    conn.executescript(POST_DDL)
     try:
         conn.executescript(FTS_DDL)
     except sqlite3.OperationalError as exc:  # pragma: no cover - every supported Python ships FTS5
@@ -346,3 +410,5 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         raise RuntimeError(
             f"This notebook was written by a newer AbstractNote (schema {row[0]}); upgrade abstractnote to open it."
         )
+    elif int(row[0]) < SCHEMA_VERSION:
+        conn.execute("UPDATE meta SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),))
