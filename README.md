@@ -49,7 +49,10 @@ Two framework changes that AbstractNote relies on are not in released packages y
   place. AbstractNote's first release waits for the AbstractMemory release that contains it.
 - **The AbstractGateway integration** (the `abstractnote-seam` branch): binds the note tools to
   each user's notebook, serves the note read API and lists the Note app. You need it only for the
-  gateway path; the headless notebook works without a gateway.
+  gateway path; the headless notebook works without a gateway. The gateway must carry this seam
+  (`abstractgateway.abstractnote_seam`; the first gateway release with it is named at
+  AbstractNote's release): the `[gateway]` extra alone does not guarantee it, and
+  `abstractnote.gateway` refuses to import into a gateway without it, with one sentence.
 
 To run models locally on Apple silicon, add `pip install "abstractcore[apple]"` (MLX).
 
