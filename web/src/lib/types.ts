@@ -121,11 +121,13 @@ export type QueueInfo = {
   failed: Array<{ note_id: string; title: string; occurred_at?: string; last_error: string | null; failed_at?: string; failures?: number }>;
   waiting: Array<{ note_id: string; title: string; priority: number; state: string; attempts: number }>;
   automations: Automations;
+  /** The processor's throughput: up to `max_items` notes every `interval` ("2m"). */
+  processor: { max_items: number; interval: string };
 };
 /** null = the default model. */
 export type ModelChoice = { provider: string | null; model: string | null };
 /** GET/PUT /note/settings (W1 DEFAULT_SETTINGS). */
-export type NoteSettings = { filing_model: ModelChoice; answering_model: ModelChoice; reflect_schedule: { every: string }; process_inline_default: boolean };
+export type NoteSettings = { filing_model: ModelChoice; answering_model: ModelChoice; reflect_schedule: { every: string }; processor_schedule: { every: string; max_items: number }; process_inline_default: boolean };
 export type NoteStatus = { counts?: Record<string, number>; queue?: QueueStats; settings?: NoteSettings; automations: Automations };
 export type ListOf<T> = { items: T[]; next_cursor?: string | null };
 

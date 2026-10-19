@@ -97,10 +97,10 @@ bodies cannot set it (an unknown field such as `client` is refused with 422).
 | `GET /note/tasks` | open loops | `status, entity, limit` |
 | `GET /note/insights` | insights | `kind, acked, limit` |
 | `POST /note/insights/{id}/ack` | acknowledge an insight | |
-| `GET /note/queue` | queue summary and failed notes with errors | |
+| `GET /note/queue` | queue summary, failed notes with errors, and the processor's throughput (`processor: {max_items, interval}`) | `limit` |
 | `POST /note/queue/{note_id}/retry` | re-queue a failed note | |
 | `POST /note/notes/{note_id}/archive` | archive a note (never delete) | |
-| `GET /note/settings` and `PUT /note/settings` | per-notebook settings: filing model, answering model, reflect schedule, inline processing default | |
+| `GET /note/settings` and `PUT /note/settings` | per-notebook settings: filing model, answering model, reflect schedule, processor schedule (`{every, max_items}`, default `2m` and 20; `max_items` 1 to 200), inline processing default; the automations take them when `processor/ensure` creates them | |
 | `POST /note/processor/ensure` | create the processor and reflect automations if missing; returns their ids | |
 
 Response envelopes are plain JSON objects; every list (`/notes`, `/entities`, `/revisions`,
@@ -122,6 +122,7 @@ Pinned response shapes (clients decode these strictly; absent lists mean empty):
 | `GET /note/cues` | `{items: [{cue_id, text, kind, subject: {kind, id, title}, evidence_note_ids, entity_ids}]}` (cues are insight notes; `cue_id` is the note id; `evidence_note_ids` and `entity_ids` are the insight's own: the notes it rests on and the entities it is about) |
 | `GET /note/tasks` | `{items: [{task_id, note_id, text, status, due, closed_at}]}` |
 | `GET /note/notes/{id}` | `{note_id, title, text, kind, occurred_at, received_at, status, topics, summary, source, location, attachments: [...], revision: {...} or null, entities: [...], claims: [...], revisits: [NoteRef], insight: {kind, evidence_note_ids, entity_ids, acked_at} or null}` (`insight` is set on an insight note, `kind` being its `insight_kind`, and null on every other note) |
+| `GET /note/queue` | `{stats: {queued, processing, failed, by_priority, oldest_enqueued_at}, failed: [{note_id, title, occurred_at, last_error, failed_at, failures}], waiting: [{note_id, title, occurred_at, priority, state, attempts, next_attempt_at}], automations: {processor_id, reflect_id}, processor: {max_items, interval}}` (`processor` is what the processor automation was created with while it exists, otherwise the `processor_schedule` setting it will be created with; `interval` is a duration such as `2m`) |
 | `note-capture` output | `{response, note_id, status, revision_summary?}` |
 | `note-recall` output | `{response, answer, evidence: [NoteRef], evolution, open_loops, follow_ups, dossier_note_id?, hits, effort}` |
 

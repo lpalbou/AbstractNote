@@ -281,6 +281,7 @@ export function buildSeed() {
     filing_model: { provider: null, model: null },
     answering_model: { provider: null, model: null },
     reflect_schedule: { every: "7d" },
+    processor_schedule: { every: "2m", max_items: 20 },
     process_inline_default: false,
   };
 

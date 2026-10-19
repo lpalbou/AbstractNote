@@ -44,8 +44,25 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "filing_model": {"provider": None, "model": None},
     "answering_model": {"provider": None, "model": None},
     "reflect_schedule": {"every": "7d"},
+    # The processor automation's throughput: up to ``max_items`` notes per drain, one drain ``every``.
+    # Equal to abstractnote.flows.build DRAIN_DEFAULTS / the note-drain trigger (a test keeps them equal).
+    "processor_schedule": {"every": "2m", "max_items": 20},
     "process_inline_default": False,
 }
+PROCESSOR_MAX_ITEMS = 200
+
+
+def _check_processor_schedule(value: Any) -> Dict[str, Any]:
+    """``{every: "<n>s|m|h|d", max_items: 1..200}`` or a plain sentence (ValueError)."""
+    if not isinstance(value, dict) or set(value) - {"every", "max_items"}:
+        raise ValueError("The processor schedule is {every, max_items}.")
+    every = str(value.get("every", DEFAULT_SETTINGS["processor_schedule"]["every"])).strip()
+    if not (every[:-1].isdigit() and every[-1:] in ("s", "m", "h", "d") and int(every[:-1]) > 0):
+        raise ValueError("The processor interval must be a number with s, m, h or d, for example 2m.")
+    max_items = value.get("max_items", DEFAULT_SETTINGS["processor_schedule"]["max_items"])
+    if isinstance(max_items, bool) or not isinstance(max_items, int) or not 1 <= max_items <= PROCESSOR_MAX_ITEMS:
+        raise ValueError(f"The processor takes between 1 and {PROCESSOR_MAX_ITEMS} notes at a time.")
+    return {"every": every, "max_items": max_items}
 
 
 class _Keys:
@@ -577,10 +594,21 @@ class Notebook:
         unknown = sorted(set(changes) - set(DEFAULT_SETTINGS))
         if unknown:
             raise ValueError(f"Unknown setting: {', '.join(unknown)}.")
+        if "processor_schedule" in changes:
+            changes = {**changes, "processor_schedule": _check_processor_schedule(changes["processor_schedule"])}
         current = self.settings()
         current.update(changes)
         self.store.meta_set("settings", current)
         return current
+
+    def processor_throughput(self) -> Dict[str, Any]:
+        """``{max_items, interval}`` of the processor: what its automation was created with (recorded by
+        ``POST /note/processor/ensure`` under ``processor_schedule_applied``) while it exists, else the stored
+        ``processor_schedule`` setting it will be created with."""
+        applied = self.store.meta_get("processor_schedule_applied") if self.store.meta_get(
+            "processor_automation_id") else None
+        sched = applied if isinstance(applied, dict) else self.settings()["processor_schedule"]
+        return {"max_items": int(sched["max_items"]), "interval": str(sched["every"])}
 
     def meta(self, key: str, default: Any = None) -> Any:
         return self.store.meta_get(key, default)

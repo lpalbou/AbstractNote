@@ -437,6 +437,7 @@ async def note_queue(request: Request, limit: int = Query(50, ge=1, le=500)) -> 
     def work(nb, svc, p):
         out = dict(_call(nb.queue, "summary", limit=limit))
         out["automations"] = _automation_ids(nb)
+        out["processor"] = _call(nb, "processor_throughput")
         return out
 
     return await _run(request, work)
@@ -504,12 +505,13 @@ def ensure_automations(nb: Any, svc: Any, principal: Any) -> Dict[str, Any]:
 
     settings = nb.settings()
     reflect_every = str((settings.get("reflect_schedule") or {}).get("every") or "7d")
+    processor = dict(settings["processor_schedule"])
     out: Dict[str, Any] = {}
     created: List[str] = []
     plans = (
         ("processor_automation_id", PROCESSOR_REQUEST_ID, "Process my notes", "note-drain",
-         {**DRAIN_DEFAULTS, **_model_inputs(settings.get("filing_model"))},
-         {"kind": "every", "every": "2m"}),
+         {**DRAIN_DEFAULTS, "max_items": int(processor["max_items"]), **_model_inputs(settings.get("filing_model"))},
+         {"kind": "every", "every": str(processor["every"])}),
         ("reflect_automation_id", REFLECT_REQUEST_ID, "Reflect on my notes", "note-reflect",
          {"limit": 10, **_model_inputs(settings.get("answering_model"))},
          {"kind": "every", "every": reflect_every, **_after_one_interval(reflect_every)}),
@@ -526,6 +528,8 @@ def ensure_automations(nb: Any, svc: Any, principal: Any) -> Dict[str, Any]:
             )
             automation_id = str(_create(svc, principal, body)["automation_id"])
             nb.set_meta(meta_key, automation_id)
+            if flow_id == "note-drain":  # what GET /note/queue reports as the processor's throughput
+                nb.set_meta("processor_schedule_applied", processor)
             created.append(flow_id)
         out[meta_key.replace("_automation_id", "_id")] = automation_id
     out["created"] = created

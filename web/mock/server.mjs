@@ -724,7 +724,9 @@ export function createMockGateway(options = {}) {
       // W1 Queue.summary + W2 automations.
       const failed = [...db.notes.values()].filter((n) => n.status === "failed").map((n) => ({ note_id: n.note_id, last_error: n.error, failed_at: n.received_at, failures: 3, title: n.title, occurred_at: n.occurred_at }));
       const waiting = [...db.notes.values()].filter((n) => n.status === "queued").map((n) => ({ note_id: n.note_id, priority: 1, state: "queued", attempts: 0, next_attempt_at: null, title: n.title, occurred_at: n.occurred_at }));
-      return send(res, 200, { stats: queueStats(), failed, waiting, automations: { processor_id: PROCESSOR_ID, reflect_id: REFLECT_ID } });
+      // W10: the processor's throughput (the processor_schedule setting the automation was created with).
+      const ps = db.settings.processor_schedule;
+      return send(res, 200, { stats: queueStats(), failed, waiting, automations: { processor_id: PROCESSOR_ID, reflect_id: REFLECT_ID }, processor: { max_items: ps.max_items, interval: ps.every } });
     }
     m = np.match(/^\/queue\/([^/]+)\/retry$/);
     if (m && method === "POST") {
