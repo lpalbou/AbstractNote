@@ -5,7 +5,7 @@ import { ApiError } from "../lib/api";
 import { useRead } from "../lib/hooks";
 import { claimsById, thenNowView } from "../lib/shapes";
 import type { Claim, ClaimChain, Note, RelationTimeline } from "../lib/types";
-import { capitalize, claimSentence, longDate, shortDate, topicLabel } from "../lib/words";
+import { capitalize, claimSentence, claimStatusLine, longDate, shortDate, topicLabel } from "../lib/words";
 import { EntityChip, KindBadge, NoteLink, ReadView, openClaim, overlayStore, useApp, useOverlay } from "./common";
 import { ThenNowCard } from "./ThenNow";
 
@@ -146,8 +146,7 @@ function ClaimDialog({ id, onClose }: { id: string; onClose: () => void }) {
               <strong>{claimSentence(chain.claim)}</strong>
             </p>
             <p className="nt-meta">
-              {chain.claim.status === "active" ? "Believed" : chain.claim.status === "retracted" ? "Withdrawn" : "No longer believed"} · since {longDate(chain.claim.valid_from || chain.claim.observed_at)}
-              {chain.claim.valid_until ? ` until ${longDate(chain.claim.valid_until)}` : ""}
+              {claimStatusLine(chain.claim)}
               {chain.claim.certainty && chain.claim.certainty !== "stated" ? ` · ${chain.claim.certainty}` : ""}
             </p>
             {chain.superseded_by && typeof chain.superseded_by === "object" ? (

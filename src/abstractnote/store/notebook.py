@@ -305,9 +305,12 @@ class Notebook:
             raise ValueError("That statement was already retracted.")
         if not str(reason or "").strip():
             raise ValueError("Say why the statement is wrong.")
+        # The person says it was never true: the window closes where it opens (an empty window),
+        # never at the moment they said so, which can be before the claim's start.
+        never = row["valid_from"] or row["observed_at"]
         return self._user_revision("claim.retract", claim_id, [{"op": "claim.retract", "payload": {
-            "claim_id": claim_id, "reason": reason}}], account, f"Retracted a statement: {reason}",
-            client=client, occurred_at=occurred_at)
+            "claim_id": claim_id, "reason": reason, "valid_until": never}}], account,
+            f"Retracted a statement: {reason}", client=client, occurred_at=occurred_at)
 
     def unmerge_entity(self, entity_id: str, from_id: str, account: Optional[str], reason: str, *,
                        client: str = "web", occurred_at: Optional[str] = None) -> Dict[str, Any]:

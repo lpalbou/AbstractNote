@@ -202,6 +202,21 @@ def test_changes_lists_supersessions_and_retractions_in_plain_words(nb):
     assert not [c["text"] for c in delta if curie.search(c["text"])]
 
 
+def test_a_user_retraction_means_never_true(nb):
+    """Review 02 m3: the window closes where it opens, never at the (earlier) system time; beliefs
+    and the AbstractMemory projection agree that it was never active."""
+    history(nb)
+    cid = nb.store.q("SELECT claim_id FROM claims WHERE predicate='schema:participant'")[0][0]
+    assert cid in nb.kg.active_claim_ids("2025-02-01T00:00:00Z")
+    nb.retract_claim(cid, "user:1", "Dana was never on LUT.")
+    row = nb.store.claim_row(cid)
+    assert row["status"] == "retracted" and row["valid_until"] == row["valid_from"] == "2025-01-05T10:00:00Z"
+    assert cid not in {c["claim_id"] for c in nb.beliefs_at("2025-02-01T00:00:00Z")}
+    assert cid not in nb.kg.active_claim_ids("2025-02-01T00:00:00Z")
+    [a] = nb.kg.query(assertion_ids=(cid,))
+    assert a.valid_until == a.valid_from
+
+
 def test_changes_cursor_never_loses_or_repeats(nb):
     first = note_changes(ToolContext(nb=nb), since="", limit=50)
     assert set(first) == {"cursor", "notes", "entities", "superseded_claims", "closed_loops", "failed_notes",

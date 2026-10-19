@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { claimsById, thenNowView } from "../src/lib/shapes";
+import { claimStatusLine } from "../src/lib/words";
 
 const claim = (id: string, obj: string, status = "active") => ({ claim_id: id, subject_id: "ex:person-dana", subject_name: "Dana", predicate: "schema:workLocation", object_id: null, object_literal: obj, observed_at: "2026-09-02T09:05:00Z", status, note_id: "nt_a" });
 
@@ -33,5 +34,18 @@ describe("then versus now forms", () => {
     const v = thenNowView({ earliest: "40k", latest: "25k", turning_points: [{ note_id: "nt_b", occurred_at: "2026-09-14T10:00:00Z", change: "Budget cut" }] })!;
     expect(v.earliest?.lines).toEqual(["40k"]);
     expect(v.turning[0]).toMatchObject({ at: "2026-09-14T10:00:00Z", text: "Budget cut", note_id: "nt_b" });
+  });
+});
+
+describe("the claim card's status line", () => {
+  it("a withdrawn claim shows no window, even when its stored end is before its start (review 02 m3)", () => {
+    const line = claimStatusLine({ status: "retracted", observed_at: "2026-10-19T09:12:00Z", valid_from: "2026-10-19T09:12:00Z", valid_until: "2026-10-19T00:48:40Z" });
+    expect(line.startsWith("Withdrawn · noted ")).toBe(true);
+    expect(line).not.toContain("until");
+  });
+  it("an end is shown only after the start", () => {
+    expect(claimStatusLine({ status: "superseded", observed_at: "2026-01-05T10:00:00Z", valid_from: "2026-01-05T10:00:00Z", valid_until: "2026-03-01T10:00:00Z" })).toContain(" until ");
+    expect(claimStatusLine({ status: "superseded", observed_at: "2026-01-05T10:00:00Z", valid_from: "2026-01-05T10:00:00Z", valid_until: "2026-01-04T10:00:00Z" })).not.toContain("until");
+    expect(claimStatusLine({ status: "active", observed_at: "2026-01-05T10:00:00Z" }).startsWith("Believed · since ")).toBe(true);
   });
 });

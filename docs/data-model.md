@@ -97,7 +97,7 @@ graph.
 | `certainty` | `stated`, `probable`, `possible`, `reported`, `disputed` (tokens, not numbers) |
 | `stance` | `assert`, `revise`, `retract`: what the note does to earlier knowledge |
 | `observed_at` | the note's `occurred_at` |
-| `valid_from`, `valid_until` | the validity window; `valid_from` defaults to `observed_at` for state claims and is null for timeless facts; `valid_until` is set when a later note supersedes the claim |
+| `valid_from`, `valid_until` | the validity window; `valid_from` defaults to `observed_at` for state claims and is null for timeless facts; `valid_until` is set when a later note supersedes or retracts the claim, and equals `valid_from` when you retract it ("never true") |
 | `status` | `active`, `superseded`, `retracted` |
 | `superseded_by` | the claim that replaced it |
 | `evidence` | the verbatim excerpt of the note that supports the claim |
@@ -140,7 +140,7 @@ Operations:
 | `entity.merge` | `{from_id, into_id, reason}` |
 | `claim.add` | the claim |
 | `claim.supersede` | `{claim_id, by_claim_id, reason, valid_until}` |
-| `claim.retract` | `{claim_id, reason}` |
+| `claim.retract` | `{claim_id, reason, valid_until?}` (without `valid_until`, the window closes at the revision's time) |
 | `claim.reinforce` | `{claim_id, note_id}` (the same statement seen again) |
 | `topic.assign` | `{note_id, topic}` |
 | `task.open` / `task.close` / `task.drop` | `{task_id, text, due?, by_note_id?}` |
@@ -190,7 +190,11 @@ Rules:
   earlier note that mentions them when notes are processed out of history order), not merged away
   by T; edges from claims with `observed_at <= T`.
 - **Beliefs at T** = claims with `valid_from <= T` and (`valid_until` is null or `> T`).
-- Supersession sets `valid_until` of the old claim to the `occurred_at` of the superseding note.
+- Supersession sets `valid_until` of the old claim to the `occurred_at` of the superseding note;
+  so does a note whose stance is `retract`.
+- A retraction you make (`POST /note/claims/{id}/retract`) says the claim was never true: its
+  status becomes `retracted` and `valid_until = valid_from` (its `observed_at` when it has no
+  start), an empty window, never the moment you said so. Retracted claims are never beliefs.
 - Importers set `occurred_at` from the source (message timestamp, commit date, file date);
   `received_at` is always the ingest time, so an import is visible as a system-time event while
   history stays truthful.

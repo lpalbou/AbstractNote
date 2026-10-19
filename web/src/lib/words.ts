@@ -21,6 +21,18 @@ export function claimSentence(c: ClaimWords): string {
   return `${c.subject_name || "someone"} ${predicateWords(c.predicate)} ${claimObject(c) || "something"}`.trim();
 }
 
+type ClaimWindow = { status: string; observed_at: string; valid_from?: string | null; valid_until?: string | null };
+
+/** The claim card's status line. A withdrawn claim was never true, so it shows no window; an end
+ * is shown only when it is after the start (never "since 19 October until 18 October"). */
+export function claimStatusLine(c: ClaimWindow): string {
+  if (c.status === "retracted") return `Withdrawn · noted ${longDate(c.observed_at)}`;
+  const start = c.valid_from || c.observed_at;
+  const head = c.status === "active" ? "Believed" : "No longer believed";
+  const end = c.valid_until && start && Date.parse(c.valid_until) > Date.parse(start) ? ` until ${longDate(c.valid_until)}` : "";
+  return `${head} · since ${longDate(start)}${end}`;
+}
+
 export function shortDate(iso: string | null | undefined): string {
   return iso ? formatShortDate(iso, Date.now()) : "";
 }
