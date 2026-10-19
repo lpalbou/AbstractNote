@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AfAppearanceDialog, Icon, randomId, useAppearanceSettings } from "@abstractframework/ui-kit";
+import { AfAppearanceDialog, AfTopBarActions, GatewayConnectModal, Icon, aboutVersionsFromGateway, randomId, useAppearanceSettings, useGatewayConnection, type AfAboutVersions, type AppIdentity, type GatewayAboutPayload } from "@abstractframework/ui-kit";
 import { NOT_INSTALLED, createApi, noteMount, type Mount } from "./lib/api";
-import { useConnection } from "./lib/connection";
 import { useNarrow, useRead } from "./lib/hooks";
 import { captureSessionId } from "./lib/local";
 import { navigate, useRoute, VIEWS, type View } from "./lib/nav";
@@ -10,46 +9,100 @@ import type { NoteSettings, NoteStatus } from "./lib/types";
 import { AppContext, Spinner } from "./components/common";
 import { Dialogs } from "./components/Dialogs";
 import { ViewBoundary } from "./components/ViewBoundary";
-import { SignIn } from "./components/SignIn";
 import { CaptureView } from "./views/Capture";
 import { GraphView } from "./views/Graph";
 import { RememberView } from "./views/Remember";
 import { SettingsDrawer } from "./views/Settings";
+import pkg from "../package.json";
 
 /** The deck's vocabulary: Capture, Remember (recall), Explore (the graph). The routes keep their names. */
 const LABELS: Record<View, string> = { capture: "Capture", graph: "Explore", remember: "Remember" };
 const ICONS: Record<View, "compose" | "branch" | "history"> = { capture: "compose", graph: "branch", remember: "history" };
 
+declare global {
+  interface Window {
+    __ABSTRACT_UI_CONFIG__?: { gateway_url?: string; base_path?: string };
+  }
+}
+
+/**
+ * About AbstractNote. The kit's identity descriptor (ui-kit 0.8.7) does not list abstractnote yet, so
+ * `appIdentity("abstractnote")` throws; these facts come from this package's own package.json (name, version,
+ * repository) and the framework website, never invented (W9 report, seam: add abstractnote to the kit descriptor).
+ */
+export function noteIdentity(): AppIdentity {
+  const repo = String(pkg.repository?.url || "").replace(/^git\+/, "").replace(/\.git$/, "");
+  if (!repo) throw new Error("package.json has no repository url");
+  return { id: "abstractnote", name: "AbstractNote", version: pkg.version, website: "https://abstractframework.ai", repo, docs: `${repo}/tree/main/docs`, issues: `${repo}/issues`, feedback: `${repo}/issues/new?labels=feedback` };
+}
+
 export function App() {
-  const conn = useConnection();
+  // The framework's shared sign-in (ui-kit): gateway address, account, token, remember; the token becomes an
+  // HTTP-only session in the app server and the page never keeps it. Blocking: the app has nothing to show
+  // signed out.
+  const conn = useGatewayConnection({ appName: "AbstractNote", variant: "blocking", defaultGatewayUrl: (typeof window !== "undefined" && window.__ABSTRACT_UI_CONFIG__?.gateway_url) || undefined });
   const [appearance, setAppearance] = useAppearanceSettings("abstractnote", { defaults: { theme: "dark" } });
   const [appearanceOpen, setAppearanceOpen] = useState(false);
-
-  if (conn.phase === "loading") {
-    return (
-      <div className="nt-center">
-        <Spinner label="Connecting…" />
-      </div>
-    );
-  }
-  if (conn.phase === "unreachable") {
-    return (
-      <div className="nt-center">
-        <div className="nt-error" role="alert">
-          <span>Your notebook could not be reached.</span>
-          <button type="button" className="nt-btn nt-btn--quiet" onClick={() => void conn.refresh()}>
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
-  if (conn.phase === "signed_out") return <SignIn onSignIn={conn.signIn} busy={conn.busy} />;
+  const user = conn.status?.gateway?.principal?.user_id || null;
   return (
     <>
-      <Shell user={conn.user} onSignOut={conn.signOut} signingOut={conn.busy} onUnauthorized={() => void conn.refresh()} onAppearance={() => setAppearanceOpen(true)} />
+      {conn.phase === "connected" ? (
+        <Shell key={user || "signed-in"} conn={conn} user={user} onAppearance={() => setAppearanceOpen(true)} />
+      ) : (
+        <div className="nt-app">
+          <Header conn={conn} user={null} onAppearance={() => setAppearanceOpen(true)} tabs={null} />
+          <main className="nt-main">
+            <div className="nt-center">{conn.phase === "loading" ? <Spinner label="Connecting…" /> : <p className="nt-muted">Sign in to open your notebook.</p>}</div>
+          </main>
+        </div>
+      )}
+      <GatewayConnectModal {...conn.modalProps} />
       <AfAppearanceDialog open={appearanceOpen} onClose={() => setAppearanceOpen(false)} value={appearance} onChange={setAppearance} />
     </>
+  );
+}
+
+type Conn = ReturnType<typeof useGatewayConnection>;
+
+/** The header: brand, the three views, and the framework's top-right cluster (appearance, about, account, sign-in pill). */
+function Header({ conn, user, onAppearance, onSettings, tabs }: { conn: Conn; user: string | null; onAppearance: () => void; onSettings?: () => void; tabs: React.ReactNode }) {
+  const [versions, setVersions] = useState<AfAboutVersions | undefined>(undefined);
+  const identity = useMemo(noteIdentity, []);
+  const refreshVersions = useCallback(() => {
+    fetch("api/gateway/about", { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(async (r) => (r.ok ? setVersions(aboutVersionsFromGateway((await r.json()) as GatewayAboutPayload)) : setVersions(aboutVersionsFromGateway(null, `unavailable (HTTP ${r.status})`))))
+      .catch(() => setVersions(aboutVersionsFromGateway(null, "not reachable")));
+  }, []);
+  return (
+    <header className="nt-header">
+      <div className="nt-brand">
+        <img src="icon.svg" alt="" width={20} height={20} />
+        <span>AbstractNote</span>
+      </div>
+      {tabs}
+      <div className="nt-header__actions">
+        <AfTopBarActions
+          appearance={{ onOpen: onAppearance }}
+          about={{ identity, versions, onOpen: refreshVersions }}
+          extraActions={
+            <>
+              {onSettings ? (
+                <button type="button" className="af-topbar__btn" aria-label="Settings" data-af-tip="Settings" onClick={onSettings}>
+                  <Icon name="gear" size={16} />
+                </button>
+              ) : null}
+              {user ? (
+                <span className="nt-account" title={`Signed in as ${user}`}>
+                  <Icon name="user" size={14} />
+                  <span>{user}</span>
+                </span>
+              ) : null}
+            </>
+          }
+          connection={{ phase: conn.phase, signingOut: conn.signingOut, onConnect: () => conn.openModal(), onDisconnect: () => void conn.signOut() }}
+        />
+      </div>
+    </header>
   );
 }
 
@@ -65,27 +118,32 @@ export async function ensureProcessor(api: Api): Promise<boolean> {
   }
 }
 
-function Shell({ user, onSignOut, signingOut, onUnauthorized, onAppearance }: { user: string | null; onSignOut: () => Promise<void>; signingOut: boolean; onUnauthorized: () => void; onAppearance: () => void }) {
+function Shell({ conn, user, onAppearance }: { conn: Conn; user: string | null; onAppearance: () => void }) {
+  const onUnauthorized = useCallback(() => void conn.refresh(), [conn]);
   const api = useMemo(() => createApi({ onUnauthorized }), [onUnauthorized]);
   const sessionId = useMemo(() => captureSessionId(randomId), []);
   const route = useRoute();
   const narrow = useNarrow(640);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const settings = useRead<NoteSettings>(() => api.get<NoteSettings>("note/settings"), [api]);
   const ctx = useMemo(() => ({ api, sessionId }), [api, sessionId]);
 
   useEffect(() => {
     document.title = `${LABELS[route.view]} · AbstractNote`;
   }, [route.view]);
 
-  // First, is AbstractNote on this gateway at all? A 404 from note/status means no view can work: one
-  // sentence instead of every view saying "not in your notebook" (and no retry loop).
+  // Is AbstractNote on this gateway? Decided once: signed out opens the sign-in dialog (never "not
+  // installed"); a 404 while signed in is the one sentence instead of every view saying "not in your notebook".
   const [mount, setMount] = useState<Mount | null>(null);
   useEffect(() => {
     let live = true;
     void noteMount(api).then((m) => {
       if (!live) return;
       setMount(m);
+      if (m === "signed_out") {
+        void conn.refresh();
+        conn.openModal();
+        return;
+      }
       // On first use the app creates the notebook's processor and reflect automations (docs/cognition.md,
       // "The processor automation"): without them queued notes are never processed.
       if (m !== "missing") void ensureProcessor(api);
@@ -93,7 +151,10 @@ function Shell({ user, onSignOut, signingOut, onUnauthorized, onAppearance }: { 
     return () => {
       live = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api]);
+  const ready = mount === "mounted" || mount === "unknown";
+  const settings = useRead<NoteSettings | null>(() => (ready ? api.get<NoteSettings>("note/settings") : Promise.resolve(null)), [api, ready]);
 
   const tabs = (
     <nav className={narrow ? "nt-tabbar" : "nt-tabs"} aria-label="Sections">
@@ -117,21 +178,7 @@ function Shell({ user, onSignOut, signingOut, onUnauthorized, onAppearance }: { 
   return (
     <AppContext.Provider value={ctx}>
       <div className={`nt-app${narrow ? " nt-app--narrow" : ""}`}>
-        <header className="nt-header">
-          <div className="nt-brand">
-            <img src="icon.svg" alt="" width={20} height={20} />
-            <span>AbstractNote</span>
-          </div>
-          {narrow ? null : tabs}
-          <div className="nt-header__actions">
-            <button type="button" className="nt-icon-btn" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}>
-              <Icon name="gear" size={18} />
-            </button>
-            <button type="button" className="nt-icon-btn" aria-label="Appearance" title="Appearance" onClick={onAppearance}>
-              <Icon name="contrast" size={18} />
-            </button>
-          </div>
-        </header>
+        <Header conn={conn} user={user} onAppearance={onAppearance} onSettings={() => setSettingsOpen(true)} tabs={narrow ? null : tabs} />
         <main className="nt-main">
           {mount === "missing" ? (
             <div className="nt-center">
@@ -139,20 +186,18 @@ function Shell({ user, onSignOut, signingOut, onUnauthorized, onAppearance }: { 
                 {NOT_INSTALLED}
               </p>
             </div>
-          ) : mount === null ? (
-            <div className="nt-center">
-              <Spinner label="Opening your notebook…" />
-            </div>
+          ) : !ready ? (
+            <div className="nt-center">{mount === "signed_out" ? <p className="nt-muted">Sign in to open your notebook.</p> : <Spinner label="Opening your notebook…" />}</div>
           ) : (
-          <ViewBoundary key={route.view} name={route.view}>
-            {route.view === "capture" ? <CaptureView route={route} processInline={Boolean(settings.data?.process_inline_default)} /> : null}
-            {route.view === "graph" ? <GraphView route={route} /> : null}
-            {route.view === "remember" ? <RememberView route={route} /> : null}
-          </ViewBoundary>
+            <ViewBoundary key={route.view} name={route.view}>
+              {route.view === "capture" ? <CaptureView route={route} processInline={Boolean(settings.data?.process_inline_default)} /> : null}
+              {route.view === "graph" ? <GraphView route={route} /> : null}
+              {route.view === "remember" ? <RememberView route={route} /> : null}
+            </ViewBoundary>
           )}
         </main>
         {narrow ? tabs : null}
-        <SettingsDrawer notInstalled={mount === "missing"} open={settingsOpen} onClose={() => setSettingsOpen(false)} settings={settings} onSave={saveSettings} user={user} onSignOut={onSignOut} signingOut={signingOut} onAppearance={onAppearance} />
+        <SettingsDrawer notInstalled={mount === "missing"} open={settingsOpen} onClose={() => setSettingsOpen(false)} settings={settings} onSave={saveSettings} onConnection={() => conn.openModal()} />
         <ViewBoundary name="dialog">
           <Dialogs />
         </ViewBoundary>

@@ -192,11 +192,10 @@ p { margin: 0 0 6px; }
 .nt-tabbar .nt-tab[aria-current="page"]::before { content: ""; position: absolute; top: -1px; left: 28%; right: 28%; height: 2px; border-radius: 2px; background: var(--nt-spectrum); }
 .nt-main { flex: 1; min-height: 0; overflow: auto; }
 
-/* ---- sign in */
-.nt-signin {
-  width: min(420px, 100%); display: flex; flex-direction: column; gap: 14px;
-  padding: 28px; border-radius: var(--radius-lg); background: var(--nt-raise); border: 1px solid var(--nt-line);
-}
+/* ---- account (beside the kit's top-right cluster) */
+.nt-account { display: inline-flex; align-items: center; gap: 5px; max-width: 160px; padding: 0 6px; color: var(--text-secondary); font-size: var(--font-size-md); white-space: nowrap; }
+.nt-account span { overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 640px) { .nt-account span { display: none; } }
 
 /* ---- cards, sections, lists */
 .nt-section { padding: 18px 24px; }

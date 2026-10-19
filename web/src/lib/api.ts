@@ -172,19 +172,31 @@ export function createApi(options: ApiOptions = {}) {
  */
 export const NOT_INSTALLED = "AbstractNote is not installed on this gateway.";
 
-export type Mount = "mounted" | "missing" | "unknown";
+export type Mount = "mounted" | "missing" | "signed_out" | "unknown";
 
 /**
- * Whether this gateway serves the note API: `GET /note/status` answered (mounted), answered 404 (missing:
- * every note read would 404, which is not "a note is missing"), or could not be read (unknown: the views
- * load and report their own errors). A 404 is final at once (never retried).
+ * Whether this gateway serves the note API, decided once at start:
+ * - `GET /note/status` answers: mounted;
+ * - it answers 401: signed out (the sign-in dialog opens; never "not installed");
+ * - it answers 404: ask `GET /me`; signed in there means the gateway has no AbstractNote (missing); a 401 there
+ *   means signed out; anything else stays unknown;
+ * - anything else (no answer, 5xx): unknown, the views load and report their own errors.
+ * A 404 or a 401 is final at once (never retried).
  */
 export async function noteMount(api: Pick<Api, "get">): Promise<Mount> {
   try {
     await api.get("note/status");
     return "mounted";
   } catch (e) {
-    return e instanceof ApiError && e.status === 404 ? "missing" : "unknown";
+    if (!(e instanceof ApiError)) return "unknown";
+    if (e.status === 401) return "signed_out";
+    if (e.status !== 404) return "unknown";
+  }
+  try {
+    const me = await api.get<{ ok?: boolean; principal?: unknown }>("me");
+    return me && (me.ok === true || me.principal) ? "missing" : "unknown";
+  } catch (e) {
+    return e instanceof ApiError && e.status === 401 ? "signed_out" : "unknown";
   }
 }
 

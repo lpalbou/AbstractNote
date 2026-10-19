@@ -98,6 +98,16 @@ describe("copy rules", () => {
     expect(app).toContain("{NOT_INSTALLED}");
   });
 
+  it("sign-in and the top-right corner are the kit's (their own labels, Gateway included, are the framework's design)", () => {
+    const app = readFileSync(join(SRC, "App.tsx"), "utf8");
+    // The exception: these kit components carry the framework's sign-in words ("Gateway URL", "Connect to
+    // gateway", "Disconnect"); the scanner reads this app's sources, so the app must not re-spell them itself.
+    for (const kit of ["useGatewayConnection(", "<GatewayConnectModal", "<AfTopBarActions"]) expect(app, kit).toContain(kit);
+    const kitModal = readFileSync(join(__dirname, "..", "node_modules", "@abstractframework", "ui-kit", "dist", "gateway_connect_modal.js"), "utf8");
+    expect(/Gateway/.test(kitModal)).toBe(true); // the allowed words live in the kit, not here
+    for (const f of files(SRC)) expect(readFileSync(f, "utf8").includes("Access token"), `${f} has its own sign-in form`).toBe(false);
+  });
+
   it("no on/off setting is labelled with a verb", () => {
     for (const f of files(SRC)) expect(findVerbToggleLabels(readFileSync(f, "utf8")), f).toEqual([]);
   });

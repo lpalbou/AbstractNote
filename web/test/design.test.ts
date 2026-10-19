@@ -171,20 +171,32 @@ describe("mock gateway shapes the design pass reads", () => {
 import { ApiError, NOT_INSTALLED, errorSentence, noteMount } from "../src/lib/api";
 
 describe("a gateway without AbstractNote", () => {
-  const apiAnswering = (status: number) => {
+  /** A fake gateway: path -> status (200 answers {ok: true, principal}). */
+  const gatewayWith = (routes: Record<string, number>) => {
     const calls: string[] = [];
     const fetch = async (url: RequestInfo | URL) => {
-      calls.push(String(url));
-      return new Response(JSON.stringify({ detail: status === 404 ? "Not Found" : "x" }), { status });
+      const path = String(url).replace(/^api\/gateway\//, "");
+      calls.push(path);
+      const status = routes[path] ?? 404;
+      return new Response(JSON.stringify(status === 200 ? { ok: true, principal: { user_id: "u" } } : { detail: status === 404 ? "Not Found" : "x" }), { status });
     };
     return { calls, api: createApi({ fetch: fetch as unknown as typeof globalThis.fetch, sleep: async () => undefined, csrf: () => "c" }) };
   };
-  it("note/status 404 means not installed, decided on the first answer (no retry loop)", async () => {
-    const missing = apiAnswering(404);
-    expect(await noteMount(missing.api)).toBe("missing");
-    expect(missing.calls).toEqual(["api/gateway/note/status"]);
-    expect(await noteMount(apiAnswering(200).api)).toBe("mounted");
-    expect(await noteMount(apiAnswering(503).api)).toBe("unknown");
+  it("404 on note/status while signed in (GET /me answers) is not installed, decided at once", async () => {
+    const g = gatewayWith({ "note/status": 404, me: 200 });
+    expect(await noteMount(g.api)).toBe("missing");
+    expect(g.calls).toEqual(["note/status", "me"]);
+  });
+  it("401 is signed out, never not installed (the standalone server proxies without a session)", async () => {
+    const g = gatewayWith({ "note/status": 401 });
+    expect(await noteMount(g.api)).toBe("signed_out");
+    expect(g.calls).toEqual(["note/status"]);
+    expect(await noteMount(gatewayWith({ "note/status": 404, me: 401 }).api)).toBe("signed_out");
+  });
+  it("mounted, or unknown when it cannot be told", async () => {
+    expect(await noteMount(gatewayWith({ "note/status": 200 }).api)).toBe("mounted");
+    expect(await noteMount(gatewayWith({ "note/status": 503 }).api)).toBe("unknown");
+    expect(await noteMount(gatewayWith({ "note/status": 404, me: 503 }).api)).toBe("unknown");
   });
   it("is one sentence, distinct from a note that is really missing", () => {
     expect(NOT_INSTALLED).toBe("AbstractNote is not installed on this gateway.");

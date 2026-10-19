@@ -79,8 +79,27 @@ async function main() {
     page.on("console", (m) => {
       if (m.type() === "error") console.log(`console error: ${m.text().slice(0, 300)}`);
     });
-    const signIn = await page.request.post(`${base}api/connection/gateway`, { data: { gateway_user_id: args.user || "demo", gateway_token: args.token || MOCK_TOKEN, persist: false } });
-    check(signIn.ok(), "sign in through the app's connection endpoint");
+    // Signed out: the framework's sign-in dialog (ui-kit GatewayConnectModal), never "not installed".
+    await page.goto(base);
+    await page.evaluate(() => localStorage.setItem("af_appearance_abstractnote_v1", JSON.stringify({ theme: "dark", font_scale: "md", header_density: "standard" })));
+    await page.reload();
+    await page.locator("#gateway-session-url").waitFor({ timeout: 20_000 });
+    check((await page.locator(".nt-notinstalled").count()) === 0, "signed out (401) opens the sign-in dialog, not the not-installed sentence");
+    check((await page.locator("#gateway-session-url").inputValue()).length > 0, "the sign-in dialog offers the gateway address");
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: join(OUT, "connect-dark-1280.png") });
+    await page.setViewportSize({ width: 400, height: 860 });
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: join(OUT, "connect-dark-400.png") });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.locator("#gateway-session-user").fill(args.user || "demo");
+    await page.locator("#gateway-session-token").fill(args.token || MOCK_TOKEN);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await page.locator(".nt-account").waitFor({ timeout: 20_000 });
+    check((await page.locator(".nt-account").innerText()).trim() === (args.user || "demo"), "signed in through the kit dialog: the header names the account");
+    check((await page.locator(".af-topbar__pill").innerText()).trim().length > 0, "the header carries the framework's sign-in pill");
+    await page.locator(".nt-main .nt-section, .nt-main .nt-stream").first().waitFor({ timeout: 20_000 }).catch(() => undefined);
+    await page.screenshot({ path: join(OUT, "header-dark-1280.png"), clip: { x: 0, y: 0, width: 1280, height: 120 } });
 
     // ---- Capture smoke (S3 + M8)
     await page.goto(`${base}#/capture`);

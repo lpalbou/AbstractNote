@@ -30,9 +30,15 @@ API, read the note API for views, and never send user, tenant or runtime identif
   uses relative URLs and the shared shell, as the app-server contract requires.
 - Three views, in the tab order **Capture**, **Remember**, **Explore** (the graph; its route stays
   `#/graph`) (see [remembering.md](remembering.md)), plus a small **Settings** drawer (filing model, answering model, inline processing, reflect schedule,
-  location, queue status with retry, appearance, sign-out). Location is off until you turn on the
+  location, queue status with retry, manage connection). Location is off until you turn on the
   Location switch in Settings (kept per browser, and offered only on a secure page); Capture then
   attaches it to notes.
+- Sign-in and the top-right corner are the framework's (ui-kit): `useGatewayConnection` with the
+  `GatewayConnectModal` (gateway URL, account, token, keep this browser signed in; the app server
+  exchanges the token for an HTTP-only session), and `AfTopBarActions` (appearance, About, Settings,
+  the signed-in account, and the Connect / Disconnect pill). At start the app asks
+  `GET /note/status`: a 401 opens the sign-in dialog; a 404 while `GET /me` answers shows "AbstractNote
+  is not installed on this gateway." instead of the views.
 - Theming uses ui-kit tokens only, so every kit theme works; tested on default-dark, observer-night
   and solarized-light at 1280 and 400 px. The framework look comes from derivations of those
   tokens: on dark themes the page colour is deepened toward near-black (relative colour of

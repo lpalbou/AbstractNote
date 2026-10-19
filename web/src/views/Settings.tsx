@@ -36,12 +36,10 @@ export function queueSentence(q: QueueInfo): string {
 type Props = {
   open: boolean;
   onClose: () => void;
-  settings: ReadState<NoteSettings>;
+  settings: ReadState<NoteSettings | null>;
   onSave: (patch: Partial<NoteSettings>) => Promise<void>;
-  user: string | null;
-  onSignOut: () => Promise<void>;
-  signingOut: boolean;
-  onAppearance: () => void;
+  /** Opens the framework's connection dialog (gateway address, account; sign-in and sign-out live in the header). */
+  onConnection: () => void;
   /** The gateway has no AbstractNote: the notebook settings and the queue cannot be read. */
   notInstalled?: boolean;
 };
@@ -75,7 +73,7 @@ export function SettingsDrawer(props: Props) {
           </p>
         ) : (
         <ReadView read={props.settings} what="your settings">
-          {(s) => (
+          {(s) => !s ? null : (
             <>
               <ModelRow label="Filing model" hint="Files and links each note. A small, fast model works well." value={s.filing_model} busy={saving === "filing"} onChange={(v) => void save("filing", { filing_model: v }, "The filing model is saved.")} />
               <ModelRow label="Answering model" hint="Answers your questions in Remember." value={s.answering_model} busy={saving === "answering"} onChange={(v) => void save("answering", { answering_model: v }, "The answering model is saved.")} />
@@ -120,12 +118,9 @@ export function SettingsDrawer(props: Props) {
           </p>
         ) : null}
         {props.notInstalled ? null : <QueuePanel open={props.open} api={api} />}
-        <div className="nt-actions nt-actions--split">
-          <button type="button" className="nt-btn" onClick={props.onAppearance}>
-            Appearance
-          </button>
-          <button type="button" className="nt-btn" disabled={props.signingOut} onClick={() => void props.onSignOut()}>
-            {props.signingOut ? "Signing out…" : props.user ? `Sign out ${props.user}` : "Sign out"}
+        <div className="nt-actions">
+          <button type="button" className="nt-btn" onClick={props.onConnection}>
+            Manage connection…
           </button>
         </div>
       </div>
