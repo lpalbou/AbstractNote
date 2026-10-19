@@ -5,13 +5,13 @@ Last reconciled: 2026-10-19 (evening pass)
 ## Counts
 | State | Count |
 |---|---|
-| planned | 1 (track `planned/v1/`: 0011) |
+| planned | 2 (track `planned/v1/`: 0011, 0029) |
 | proposed | 10 (0014-0023) |
 | completed | 17 (track `completed/v1/`) |
 | deprecated | 0 |
 | recurrent | 1 (0901) |
 
-Next free id: 0029.
+Next free id: 0030.
 
 ## Priorities and recommended order
 1. 0011 Corpus evaluation (finish grading, feed prompt findings into a tuning item)
@@ -20,6 +20,7 @@ Next free id: 0029.
 
 ## Ledgers
 ### Planned
+- [0029 Ingest the rest of the framework's history](planned/v1/0029_ingest_the_rest_of_the_framework_history.md)
 - [0011 Corpus evaluation: the framework's own history](planned/v1/0011_corpus_evaluation_framework_history.md)
 
 ### Proposed
