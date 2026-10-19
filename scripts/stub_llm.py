@@ -37,9 +37,9 @@ ANSWERS: Dict[str, Dict[str, Any]] = {
     },
     "Linking": {
         "mentions": [{"ref": "m1", "decision": "create", "candidate": None, "merge_candidates": [], "name": "Dana",
-                      "kind": "person", "aliases": ["Dana"], "summary": None, "reason": "first mention"},
+                      "kind": "person", "aliases": ["Dana"], "summary": "Dana owns the LUT budget decisions.", "reason": "first mention"},
                      {"ref": "m2", "decision": "create", "candidate": None, "merge_candidates": [], "name": "LUT",
-                      "kind": "project", "aliases": ["LUT"], "summary": None, "reason": "first mention"}],
+                      "kind": "project", "aliases": ["LUT"], "summary": "The LUT project and its budget.", "reason": "first mention"}],
         "claims": [{"index": 0, "relation_to_existing": "new", "existing": None, "reason": "first statement"}],
         "tasks": [], "revision_summary": "Linked Dana to the LUT project.",
     },

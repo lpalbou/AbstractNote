@@ -35,9 +35,9 @@ EXTRACTION = {
 }
 LINKING = {
     "mentions": [{"ref": "m1", "decision": "create", "candidate": None, "merge_candidates": [], "name": "Dana",
-                  "kind": "person", "aliases": ["Dana"], "summary": None, "reason": "new person"},
+                  "kind": "person", "aliases": ["Dana"], "summary": "Dana owns the LUT budget decisions.", "reason": "new person"},
                  {"ref": "m2", "decision": "create", "candidate": None, "merge_candidates": [], "name": "LUT",
-                  "kind": "project", "aliases": ["LUT"], "summary": None, "reason": "new project"}],
+                  "kind": "project", "aliases": ["LUT"], "summary": "The LUT project and its budget.", "reason": "new project"}],
     "claims": [{"index": 0, "relation_to_existing": "new", "existing": None, "reason": "first mention"}],
     "tasks": [], "revision_summary": "Linked Dana to the LUT project.",
 }
