@@ -7,8 +7,9 @@ public actor MockGatewayClient: GatewayClient {
 
     /// How long a started capture or question takes to answer (`.seconds(3600)`: the spinner stays).
     private let answerDelay: Duration
-    /// Every read and write fails as if the radio were off.
-    private let offline: Bool
+    /// How every call fails, for the error screens: no radio, signed out, or AbstractNote missing.
+    public enum Failure: Sendable { case offline, unauthorized, notSetUp }
+    private let failure: Failure?
     /// Today has nothing new.
     private let quiet: Bool
 
@@ -18,11 +19,18 @@ public actor MockGatewayClient: GatewayClient {
     private var closedLoops: Set<String> = []
     public private(set) var captures: [Capture] = []
 
-    public init(answerDelay: Duration = .milliseconds(800), offline: Bool = false, quiet: Bool = false) {
-        self.answerDelay = answerDelay; self.offline = offline; self.quiet = quiet
+    public init(answerDelay: Duration = .milliseconds(800), failure: Failure? = nil, quiet: Bool = false) {
+        self.answerDelay = answerDelay; self.failure = failure; self.quiet = quiet
     }
 
-    private func check() throws { if offline { throw URLError(.notConnectedToInternet) } }
+    private func check() throws {
+        switch failure {
+        case .offline?: throw URLError(.notConnectedToInternet)
+        case .unauthorized?: throw GatewayError.unauthorized
+        case .notSetUp?: throw GatewayError.http(status: 404, body: #"{"detail":"Not Found"}"#)
+        case nil: return
+        }
+    }
 
     public func health() async throws -> Bool { try check(); return true }
     public func me() async throws -> Principal { try check(); return Principal(userId: "laurent", tenantId: nil, roles: ["user"]) }
@@ -113,6 +121,25 @@ public actor MockGatewayClient: GatewayClient {
     }
 
     public func signOut() async {}
+
+    public func noteStatus() async throws { try check() }
+
+    public func upload(wav: Data, sessionId: String) async throws -> UploadedAttachment {
+        try check()
+        counter += 1
+        let id = "mock-audio-\(counter)"
+        let ref: JSONValue = .object(["$artifact": .string(id), "artifact_id": .string(id), "content_type": .string("audio/wav"),
+                                      "filename": .string("note.wav"), "run_id": .string("session_memory_\(sessionId)")])
+        return UploadedAttachment(reference: ref, artifactId: id, ownerRunId: "session_memory_\(sessionId)")
+    }
+
+    public func transcribe(_ audio: UploadedAttachment) async throws -> String {
+        try check()
+        try await Task.sleep(for: answerDelay)
+        return Self.transcript
+    }
+
+    public static let transcript = "Call Marc about restarting the reading group in November."
 
     public static let filingAnswer = "Saved as idea \u{2018}LUT budget\u{2019}. Related: Dana, LUT."
     public static let recallAnswer = "You settled on 50k on 17 October, after Dana asked for 55k; in September the plan was 40k."

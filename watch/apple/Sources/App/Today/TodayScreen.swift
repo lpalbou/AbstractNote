@@ -1,4 +1,5 @@
 import AbstractGatewayClient
+import AbstractWatchKit
 import SwiftUI
 
 /// What changed since you last looked, what the notebook noticed for you, your open loops, a few
@@ -7,7 +8,7 @@ import SwiftUI
 struct TodayScreen: View {
     @EnvironmentObject private var model: AppModel
     @State private var loading = false
-    @State private var error: String?
+    @State private var problem: Problem?
     @State private var demoPlayed = false
 
     var body: some View {
@@ -15,10 +16,9 @@ struct TodayScreen: View {
             VStack(alignment: .leading, spacing: 6) {
                 if let data = model.today {
                     content(data)
-                } else if let error {
-                    ErrorLine(text: error)
-                    Button("Try again") { Task { await load() } }
-                        .buttonStyle(FilledButtonStyle(fill: Theme.neutralButton)).padding(.top, 6)
+                } else if let problem {
+                    ProblemView(problem: problem, signIn: model.signInAgain, retry: { Task { await load() } })
+                        .padding(.top, 6)
                 } else {
                     // The spinner stays through the client's retries (ADR-0039 in abstractframework).
                     VStack(spacing: 8) { ProgressView(); LoadingText().font(.rounded(.footnote)).foregroundStyle(Theme.muted) }
@@ -60,7 +60,7 @@ struct TodayScreen: View {
             SectionTitle(text: "On this day")
             ForEach(d.onThisDay) { n in row(n.title.shown ?? "A note", detail: When.short(n.occurredAt), symbol: "calendar", route: .note(id: n.noteId, title: n.title)) }
         }
-        if let error { ErrorLine(text: error).padding(.top, 6) }
+        if let problem { ErrorLine(text: problem.sentence).padding(.top, 6) }
         Button { Task { await load() } } label: {
             if loading { ProgressView() } else { Text("Refresh") }
         }
@@ -92,10 +92,10 @@ struct TodayScreen: View {
 
     /// The five reads together. The cursor moves on only once they are in.
     private func load() async {
-        loading = true; error = nil
+        loading = true; problem = nil
         defer { loading = false }
         let client = model.client
-        let cursor = model.signIn?.changesCursor
+        let cursor = model.changesCursor
         do {
             async let changes = client.changes(since: cursor)
             async let insights = client.insights(limit: 5)
@@ -106,7 +106,7 @@ struct TodayScreen: View {
                                  cues: try await cues, onThisDay: try await overview.resurfacing)
             model.keep(data)
         } catch {
-            self.error = model.say(error)
+            problem = await model.problem(error)
         }
     }
 

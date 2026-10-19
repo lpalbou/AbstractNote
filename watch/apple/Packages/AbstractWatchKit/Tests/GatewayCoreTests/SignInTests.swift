@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import AbstractGatewayClient
+@testable import GatewayCore
 
 @Test func credentialsSetTheRightHeaders() {
     var a = URLRequest(url: URL(string: "https://g/x")!)

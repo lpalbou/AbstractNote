@@ -16,7 +16,8 @@ BUNDLE=ai.abstractframework.note.watch
 DERIVED_DATA="${DERIVED_DATA:-$ROOT/build/DerivedData}"
 SPM_SCRATCH="${SPM_SCRATCH:-}"
 SCREENS_DIR="${SCREENS_DIR:-$ROOT/../../untracked/screens/watch}"
-SCREENS=(signin note note-sending note-saved note-error ask ask-thinking ask-answer ask-deeper today today-quiet insight loop cue cue-why note-detail settings about)
+SCREENS=(signin note note-listening note-recording note-sending note-saved note-error ask ask-thinking ask-answer ask-deeper
+         today today-quiet today-signin today-notsetup today-offline insight loop cue cue-why note-detail settings server account about)
 t() { date +%s; }
 
 # Another xcodebuild (another session's UI tests on the same simulator): wait, bounded.
@@ -39,7 +40,8 @@ fi
 T0=$(t)
 cd "$ROOT"
 xcodegen generate --spec project.yml
-(cd Packages/AbstractGatewayClient && swift test ${SPM_SCRATCH:+--scratch-path "$SPM_SCRATCH"})
+(cd Packages/AbstractWatchKit && swift test ${SPM_SCRATCH:+--scratch-path "$SPM_SCRATCH/kit"})
+(cd Packages/AbstractGatewayClient && swift test ${SPM_SCRATCH:+--scratch-path "$SPM_SCRATCH/note"})
 T1=$(t)
 wait_for_xcodebuild
 xcodebuild -project AbstractNoteWatch.xcodeproj -scheme AbstractNoteWatch \

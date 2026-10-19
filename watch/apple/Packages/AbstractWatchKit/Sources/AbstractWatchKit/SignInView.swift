@@ -1,15 +1,22 @@
-import AbstractGatewayClient
+#if os(watchOS)
+import GatewayCore
 import SwiftUI
 import WatchKit
 
 /// First launch, after Sign out, or when a session ends: who you are, then your token or an
 /// emailed one-time code. A user name asks for its token; a registered email gets an 8-digit code
-/// by email. Adapted from the AbstractAssistant watch's sign-in; the result is kept in the sealed
-/// sign-in file (ADR 0006), never in UserDefaults.
-struct SignInView: View {
+/// by email. Adapted from the AbstractAssistant watch's sign-in. `onSignedIn` keeps the result (in
+/// AbstractNote: the sealed sign-in file, ADR 0006, never UserDefaults); it throws when it cannot.
+public struct SignInView<Mark: View>: View {
     enum Step: Equatable { case identify, token(user: String), code(email: String, sentTo: String) }
 
-    @EnvironmentObject private var model: AppModel
+    let appName: String
+    let notice: String?
+    let mark: Mark
+    let newSessionId: () -> String
+    let onSignedIn: (SavedSignIn) throws -> Void
+    @State private var testIdentify: String?
+    @State private var testSecret: String?
     @State private var step: Step = .identify
     @State private var identifier = UserDefaults.standard.string(forKey: SignInDefaults.lastUser) ?? ""
     @State private var secret = ""
@@ -18,15 +25,22 @@ struct SignInView: View {
     @State private var working = false
     @State private var error: String?
 
-    var body: some View {
+    /// `testIdentify` / `testSecret`: sign in without typing (debug builds' launch arguments).
+    public init(appName: String, notice: String?, testIdentify: String? = nil, testSecret: String? = nil,
+                newSessionId: @escaping () -> String, onSignedIn: @escaping (SavedSignIn) throws -> Void, @ViewBuilder mark: () -> Mark) {
+        self.appName = appName; self.notice = notice; self.newSessionId = newSessionId; self.onSignedIn = onSignedIn; self.mark = mark()
+        _testIdentify = State(initialValue: testIdentify); _testSecret = State(initialValue: testSecret)
+    }
+
+    public var body: some View {
         FitScroll {
             VStack(spacing: 6) {
                 Spacer(minLength: 0)
-                NoteMark(size: 40)
-                Text("AbstractNote")
+                mark
+                Text(appName)
                     .font(.rounded(.headline, weight: .bold))
                     .foregroundStyle(LinearGradient(colors: [Theme.cyan, Theme.indigo], startPoint: .leading, endPoint: .trailing))
-                if let notice = model.signInNotice, step == .identify {
+                if let notice, step == .identify {
                     Text(notice).font(.rounded(.caption2)).foregroundStyle(Theme.amber).multilineTextAlignment(.center)
                 }
                 Spacer(minLength: 4)
@@ -132,7 +146,7 @@ struct SignInView: View {
                 error = "No code could be sent. Use your user name."
             }
         } catch {
-            self.error = AppModel.say(error)
+            self.error = Problem.of(error, host: gw.host() ?? gw.absoluteString).sentence
         }
     }
 
@@ -143,9 +157,9 @@ struct SignInView: View {
         defer { working = false }
         do {
             let me = try await GatewaySignIn.verify(gateway: gw, user: user, token: token)
-            finish(SavedSignIn(gateway: gw, user: me.userId ?? user, credential: .token(token)))
+            finish(SavedSignIn(gateway: gw, user: me.userId ?? user, credential: .token(token), sessionId: newSessionId()))
         } catch {
-            self.error = AppModel.say(error)
+            self.error = Problem.of(error, host: gw.host() ?? gw.absoluteString).sentence
             WKInterfaceDevice.current().play(.failure)
         }
     }
@@ -156,16 +170,16 @@ struct SignInView: View {
         defer { working = false }
         do {
             let (cred, me) = try await GatewaySignIn.redeem(gateway: gw, identifier: email, code: secret.filter(\.isNumber))
-            finish(SavedSignIn(gateway: gw, user: me.userId ?? email, credential: cred))
+            finish(SavedSignIn(gateway: gw, user: me.userId ?? email, credential: cred, sessionId: newSessionId()))
         } catch {
-            self.error = AppModel.say(error)
+            self.error = Problem.of(error, host: gw.host() ?? gw.absoluteString).sentence
             WKInterfaceDevice.current().play(.failure)
         }
     }
 
     private func finish(_ s: SavedSignIn) {
         do {
-            try model.connect(s)
+            try onSignedIn(s)
             WKInterfaceDevice.current().play(.success)
         } catch {
             self.error = "Your sign-in could not be saved on the watch."
@@ -175,13 +189,12 @@ struct SignInView: View {
 
     /// Simulator/device checks without typing: `--test-identify <user or email>` then `--test-secret <token or code>`.
     private func runTestHooks() async {
-        #if DEBUG
-        guard let id = model.testIdentify else { return }
-        model.testIdentify = nil
+        guard let id = testIdentify else { return }
+        testIdentify = nil
         identifier = id
         await proceed()
-        if let s = model.testSecret {
-            model.testSecret = nil
+        if let s = testSecret {
+            testSecret = nil
             secret = s
             switch step {
             case .token(let user): await signInWithToken(user)
@@ -189,13 +202,12 @@ struct SignInView: View {
             case .identify: break
             }
         }
-        #endif
     }
 }
 
 /// A field with its send arrow inside, on the right: the label is the placeholder, the arrow is the
 /// only button (enabled when the field is ready; a spinner while working).
-struct InputRow: View {
+public struct InputRow: View {
     let placeholder: String
     @Binding var text: String
     var secure = false
@@ -203,7 +215,11 @@ struct InputRow: View {
     var ready = true
     let send: () -> Void
 
-    var body: some View {
+    public init(placeholder: String, text: Binding<String>, secure: Bool = false, working: Bool = false, ready: Bool = true, send: @escaping () -> Void) {
+        self.placeholder = placeholder; _text = text; self.secure = secure; self.working = working; self.ready = ready; self.send = send
+    }
+
+    public var body: some View {
         HStack(spacing: 4) {
             // A text-field link, not a TextField: the system field draws its own grey capsule inside
             // ours. The link opens the same input (dictation, Scribble, keyboard).
@@ -236,3 +252,15 @@ struct InputRow: View {
         .background(Theme.card, in: Capsule())
     }
 }
+
+/// Not secret: the last server and account typed, as the next sign-in's defaults (the server is
+/// kept on Sign out).
+public enum SignInDefaults {
+    public static let lastGateway = "signin.lastGateway"
+    public static let lastUser = "signin.lastUser"
+    public static func remember(_ s: SavedSignIn) {
+        UserDefaults.standard.set(s.gateway.absoluteString, forKey: lastGateway)
+        UserDefaults.standard.set(s.user, forKey: lastUser)
+    }
+}
+#endif

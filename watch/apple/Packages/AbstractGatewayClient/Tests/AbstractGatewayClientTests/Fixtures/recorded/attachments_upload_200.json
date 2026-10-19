@@ -1,0 +1,100 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/gateway/attachments/upload",
+    "body": {
+      "multipart": {
+        "session_id": "s-smoke-edfde0d3",
+        "file": "budget.txt"
+      }
+    }
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "run_id": "session_memory_s-smoke-edfde0d3",
+    "artifact": {
+      "$artifact": "f82202d00e362f35827cd0f731987a5b",
+      "artifact_id": "f82202d00e362f35827cd0f731987a5b",
+      "content_type": "text/plain",
+      "modality": "text",
+      "run_id": "session_memory_s-smoke-edfde0d3",
+      "filename": "budget.txt",
+      "source_path": "client:budget.txt",
+      "sha256": "59aeb8921a4eae2304f7eaef12a47afd082c697e70070325eb8222bc490edbbd",
+      "target": "client"
+    },
+    "metadata": {
+      "artifact_id": "f82202d00e362f35827cd0f731987a5b",
+      "blob_id": "59aeb8921a4eae2304f7eaef12a47afd082c697e70070325eb8222bc490edbbd",
+      "content_type": "text/plain",
+      "size_bytes": 37,
+      "created_at": "2026-10-19T03:23:21.508604+00:00",
+      "run_id": "session_memory_s-smoke-edfde0d3",
+      "tags": {
+        "kind": "attachment",
+        "target": "client",
+        "source": "upload",
+        "path": "client:budget.txt",
+        "filename": "budget.txt",
+        "session_id": "s-smoke-edfde0d3",
+        "sha256": "59aeb8921a4eae2304f7eaef12a47afd082c697e70070325eb8222bc490edbbd",
+        "modality": "text"
+      },
+      "metadata": {},
+      "descriptor": {
+        "schema": "abstractruntime.artifact_descriptor.v1",
+        "schema_version": 1,
+        "semantic_kind": "text",
+        "render_kind": "text",
+        "modality": "text",
+        "task": "",
+        "classification_source": "runtime_tags",
+        "session_id": "s-smoke-edfde0d3",
+        "workflow_id": null,
+        "node_id": null,
+        "step_id": null,
+        "effect_id": null,
+        "turn_id": null,
+        "ledger_cursor": null,
+        "parent_run_id": null,
+        "actor_id": null,
+        "producer": {},
+        "provenance": {
+          "run_id": "session_memory_s-smoke-edfde0d3",
+          "source": "upload"
+        },
+        "generation": {},
+        "media": {},
+        "source_refs": [],
+        "links": {},
+        "security": {},
+        "actions": {}
+      },
+      "access": {
+        "access_count": 0,
+        "metadata_access_count": 0,
+        "content_access_count": 0,
+        "preview_count": 0,
+        "download_count": 0,
+        "last_accessed_at": null,
+        "last_action": null,
+        "last_actor_id": null,
+        "last_session_id": null,
+        "last_run_id": null,
+        "actions": {}
+      }
+    },
+    "attachment": {
+      "$artifact": "f82202d00e362f35827cd0f731987a5b",
+      "artifact_id": "f82202d00e362f35827cd0f731987a5b",
+      "content_type": "text/plain",
+      "modality": "text",
+      "run_id": "session_memory_s-smoke-edfde0d3",
+      "filename": "budget.txt",
+      "source_path": "client:budget.txt",
+      "sha256": "59aeb8921a4eae2304f7eaef12a47afd082c697e70070325eb8222bc490edbbd",
+      "target": "client"
+    }
+  }
+}

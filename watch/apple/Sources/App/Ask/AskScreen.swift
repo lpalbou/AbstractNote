@@ -1,4 +1,5 @@
 import AbstractGatewayClient
+import AbstractWatchKit
 import SwiftUI
 import WatchKit
 
@@ -11,7 +12,7 @@ struct AskScreen: View {
         case answer(RecallAnswer)
         case late
         case deeper
-        case failed(String)
+        case failed(Problem)
     }
 
     @EnvironmentObject private var model: AppModel
@@ -31,11 +32,10 @@ struct AskScreen: View {
                 case .answer(let a): answer(a)
                 case .late: done("Still thinking. Ask again in a moment.", symbol: "clock", color: Theme.amber)
                 case .deeper: done("Digging deeper. The answer will appear in Today.", symbol: "sparkle.magnifyingglass", color: Theme.cyan)
-                case .failed(let m):
+                case .failed(let p):
                     Text(asked).font(.rounded(.footnote)).foregroundStyle(Theme.text2).lineLimit(3)
-                    ErrorLine(text: m)
                     Spacer(minLength: 6)
-                    Button("Try again") { Task { await ask() } }.buttonStyle(FilledButtonStyle(fill: Theme.indigoButton))
+                    ProblemView(problem: p, signIn: model.signInAgain, retry: { Task { await ask() } })
                     Button("Edit") { phase = .compose }.buttonStyle(FilledButtonStyle(fill: Theme.neutralButton))
                 }
             }
@@ -129,12 +129,12 @@ struct AskScreen: View {
             switch p {
             case .done(let a): phase = .answer(a); WKInterfaceDevice.current().play(.success)
             case .working: phase = .late
-            case .needsPerson: phase = .failed("No answer this time. Try again.")
+            case .needsPerson: phase = .failed(.said("No answer this time. Try again."))
             // The flow's own sentence when it gave one (without the runtime's prefix).
-            case .failed(let why): phase = .failed(why ?? "No answer this time. Try again.")
+            case .failed(let why): phase = .failed(.said(why ?? "No answer this time. Try again."))
             }
         } catch {
-            phase = .failed(model.say(error))
+            phase = .failed(await model.problem(error))
         }
     }
 
@@ -145,7 +145,7 @@ struct AskScreen: View {
             _ = try await model.client.startRecall(question: asked, effort: .deep, sessionId: model.sessionId)
             phase = .deeper
         } catch {
-            deepError = model.say(error)
+            deepError = await model.problem(error).sentence
         }
     }
 

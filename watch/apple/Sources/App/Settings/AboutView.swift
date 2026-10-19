@@ -1,3 +1,4 @@
+import AbstractWatchKit
 import SwiftUI
 
 /// About, as in every AbstractFramework app: this app's version and build, then the framework's

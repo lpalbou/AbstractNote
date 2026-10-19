@@ -10,6 +10,11 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
 packages:
+  # The shared watch parts (gateway core, sign-in, server screen, microphone, theme): candidate
+  # for abstractuic/swift/AbstractWatchKit (Packages/AbstractWatchKit/README.md).
+  AbstractWatchKit:
+    path: Packages/AbstractWatchKit
+  # AbstractNote's calls on top of it.
   AbstractGatewayClient:
     path: Packages/AbstractGatewayClient
 targets:
@@ -20,6 +25,8 @@ targets:
     sources: [Sources/App, Resources]
     dependencies:
       - package: AbstractGatewayClient
+      - package: AbstractWatchKit
+        product: AbstractWatchKit
     info:
       path: Resources/Info.plist
       properties:
@@ -38,7 +45,7 @@ targets:
         # (WKExtendedRuntimeSession; Sources/App/Shared/RuntimeKeeper.swift).
         WKBackgroundModes: [self-care]
         NSLocationWhenInUseUsageDescription: "Note adds where you were to the notes you send, so you can find them by place later."
-        NSMicrophoneUsageDescription: "Note uses the microphone only when you dictate a note or a question."
+        NSMicrophoneUsageDescription: "Note records your voice only when you tap the microphone; the recording is sent to your server to be written down."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.abstractframework.note.watch

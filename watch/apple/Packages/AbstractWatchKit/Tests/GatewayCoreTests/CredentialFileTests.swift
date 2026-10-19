@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import AbstractGatewayClient
+@testable import GatewayCore
 
 /// ADR 0006: one file, Data Protection until first unlock, no backup, owner-only, gone on sign-out,
 /// never in UserDefaults.
@@ -12,7 +12,7 @@ import Testing
     }
 
     private let signIn = SavedSignIn(gateway: URL(string: "https://gateway.example")!, user: "alice",
-                                     credential: .token("agw_secret_\(UUID().uuidString)"), sessionId: "note-watch-1", changesCursor: "c-1")
+                                     credential: .token("agw_secret_\(UUID().uuidString)"), sessionId: "note-watch-1", appState: ["changes_cursor": "c-1"])
 
     static func backupExcluded(_ url: URL) -> Bool {
         getxattr(url.path(percentEncoded: false), "com.apple.metadata:com_apple_backup_excludeItem", nil, 0, 0, 0) > 0

@@ -71,10 +71,39 @@ only the last server address and account typed at sign-in (the next sign-in's de
 Place switch. The operator's ruling on this storage is pending (backlog 0017); the file is the
 only place to change.
 
-## The Swift package
+## Voice
 
-`Packages/AbstractGatewayClient` starts as a snapshot of the AbstractAssistant watch client
-(`SNAPSHOT.json` lists the files, their source hashes and what changed): sign-in (`Auth.swift`,
-unchanged), the request path with read retries and the 401 lockout, the run models. It adds the
-note calls, `CredentialFile`, and a sample notebook (`MockGatewayClient`). The two clients are
-candidates for one shared package once their APIs settle.
+The microphone button beside the note's field records (tap to talk, `Listener` in AbstractWatchKit:
+16 kHz mono WAV, speech told from the room's noise, 3 s of silence or Stop ends it, 60 s at most;
+a waveform and the elapsed time show meanwhile). The WAV is uploaded
+(`POST /api/gateway/attachments/upload`, the watch's session `note-watch-<uuid>`) and written down
+by the server (`POST /api/gateway/runs/{owner}/audio/transcribe {audio_artifact: {"$artifact": id}}`,
+the owner being the upload's `run_id`). The words fill the field, editable. **Send** sends the words;
+**Send as recording** sends them with the upload's `attachment` reference, unchanged, in
+`input_data.context.attachments`, so the original audio stays with the note. Dictation and scribble
+on the field itself still work.
+
+## Errors
+
+Every failure is one specific sentence with one action (`Problem` in AbstractWatchKit, shown by
+`ProblemView`): a 401 says "Sign in to your notebook." with **Sign in** (the sign-in screen, the
+server kept); a 404 is checked against `GET /note/status`, whose own 404 means "AbstractNote isn't
+set up on this server yet."; no answer says "Can't reach <server>." with **Try again**; anything
+else shows the server's own sentence (without "Runtime error: "). Today, Note, Ask, the note and
+Why pages follow it.
+
+## Settings and sign-in
+
+With no saved sign-in the app opens on the sign-in screen (user or email → token or emailed code,
+AbstractWatchKit's `SignInView`). Settings: **Server** opens the server screen (https unless
+`http://` is typed, which the watch allows on the local network only; a different server signs out
+and opens its sign-in), **Account** opens the sign-in to change account, **Sign out** at the bottom
+deletes the sealed file and keeps the server. A sign-in made by launch arguments reads its account
+from `GET /api/gateway/me` and keeps it.
+
+## The Swift packages
+
+`Packages/AbstractWatchKit` holds what any AbstractFramework watch app needs (its README; candidate
+for `abstractuic/swift/AbstractWatchKit`, backlog 0016; `SNAPSHOT.json` lists the AbstractAssistant
+files it came from). `Packages/AbstractGatewayClient` holds AbstractNote's calls, models and the
+sample notebook (`MockGatewayClient`) on top of its `GatewayCore`.

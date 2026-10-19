@@ -36,7 +36,7 @@ enum RecordedFixtures {
     static let notCalledByWatch = ["/api/gateway/note/status", "/api/gateway/note/entities", "/api/gateway/note/graph",
                                    "/api/gateway/note/queue", "/api/gateway/note/settings", "/api/gateway/note/processor/ensure",
                                    "/api/gateway/note/review", "/api/gateway/note/claims", "/api/gateway/note/day",
-                                   "/api/gateway/attachments/upload", "/api/gateway/automations"]
+                                   "/api/gateway/automations"]
 
     /// Decodes one recorded answer with the model the client uses for that path and status.
     static func check(_ f: Fixture) throws {
@@ -57,6 +57,7 @@ enum RecordedFixtures {
         case "/api/gateway/note/tasks": _ = try d.decode(ListPage<OpenLoop>.self, from: f.body)
         case "/api/gateway/note/insights": _ = try d.decode(ListPage<Insight>.self, from: f.body)
         case "/api/gateway/session/logout": break
+        case "/api/gateway/attachments/upload": _ = try GatewayTransport.uploaded(f.body, sessionId: "s")
         case let p where p.hasPrefix("/api/gateway/note/insights/") && p.hasSuffix("/ack"): break
         case let p where p.hasPrefix("/api/gateway/note/tasks/") && p.hasSuffix("/close"): break
         case let p where p.hasPrefix("/api/gateway/note/notes/"): _ = try d.decode(NoteDetail.self, from: f.body)
@@ -207,7 +208,7 @@ func theRepositoryRecordingsMatchTheBundledCopiesAndAreReadable() throws {
 }
 
 @Test func runErrorsLoseTheRuntimePrefix() {
-    #expect(RunProgress<CaptureAnswer>.cleanError("Runtime error: Model is busy.") == "Model is busy.")
-    #expect(RunProgress<CaptureAnswer>.cleanError("Model is busy.") == "Model is busy.")
-    #expect(RunProgress<CaptureAnswer>.cleanError("  ") == nil && RunProgress<CaptureAnswer>.cleanError(nil) == nil)
+    #expect(Problem.sentence("Runtime error: Model is busy.") == "Model is busy.")
+    #expect(Problem.sentence("Model is busy.") == "Model is busy.")
+    #expect(Problem.sentence("  ") == nil && Problem.sentence(nil) == nil)
 }

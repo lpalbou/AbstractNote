@@ -32,18 +32,18 @@ public struct SavedSignIn: Codable, Equatable, Sendable {
     public var gateway: URL
     public var user: String?
     public var credential: GatewayCredential
-    /// The watch's conversation id for its captures and questions (`note-watch-<uuid>`).
+    /// The watch's conversation id for what it starts (`note-watch-<uuid>` in AbstractNote).
     public var sessionId: String
-    /// Today's "since you last looked" cursor, from the last `GET /note/changes`.
-    public var changesCursor: String?
+    /// What the app keeps between visits (AbstractNote: Today's cursor), as plain strings.
+    public var appState: [String: String]
 
     public static let defaultGateway = "https://gateway.abstractframework.ai"
 
-    public init(gateway: URL, user: String?, credential: GatewayCredential, sessionId: String = NoteFlows.newSessionId(), changesCursor: String? = nil) {
-        self.gateway = gateway; self.user = user; self.credential = credential; self.sessionId = sessionId; self.changesCursor = changesCursor
+    public init(gateway: URL, user: String?, credential: GatewayCredential, sessionId: String, appState: [String: String] = [:]) {
+        self.gateway = gateway; self.user = user; self.credential = credential; self.sessionId = sessionId; self.appState = appState
     }
 
-    enum CodingKeys: String, CodingKey { case version, gateway, user, credential, sessionId = "session_id", changesCursor = "changes_cursor" }
+    enum CodingKeys: String, CodingKey { case version, gateway, user, credential, sessionId = "session_id", appState = "app_state" }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -53,7 +53,7 @@ public struct SavedSignIn: Codable, Equatable, Sendable {
         user = try c.decodeIfPresent(String.self, forKey: .user)
         credential = try c.decode(GatewayCredential.self, forKey: .credential)
         sessionId = try c.decode(String.self, forKey: .sessionId)
-        changesCursor = try c.decodeIfPresent(String.self, forKey: .changesCursor)
+        appState = try c.decodeIfPresent([String: String].self, forKey: .appState) ?? [:]
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -63,7 +63,7 @@ public struct SavedSignIn: Codable, Equatable, Sendable {
         try c.encodeIfPresent(user, forKey: .user)
         try c.encode(credential, forKey: .credential)
         try c.encode(sessionId, forKey: .sessionId)
-        try c.encodeIfPresent(changesCursor, forKey: .changesCursor)
+        if !appState.isEmpty { try c.encode(appState, forKey: .appState) }
     }
 
     /// "gateway.example.org" → "https://gateway.example.org"; plain http only when typed.
@@ -96,10 +96,10 @@ public struct CredentialFile: Sendable {
 
     public init(url: URL, writer: Writer = .system) { self.url = url; self.writer = writer }
 
-    /// `Application Support/AbstractNote/signin.json` in the app's own container.
-    public static func standard() throws -> CredentialFile {
+    /// `Application Support/<folder>/signin.json` in the app's own container (AbstractNote: "AbstractNote").
+    public static func standard(folder: String) throws -> CredentialFile {
         let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        return CredentialFile(url: base.appending(path: "AbstractNote", directoryHint: .isDirectory).appending(path: "signin.json"))
+        return CredentialFile(url: base.appending(path: folder, directoryHint: .isDirectory).appending(path: "signin.json"))
     }
 
     /// The saved sign-in; nil when there is none. A file that cannot be read is removed (the person

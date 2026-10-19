@@ -1,4 +1,5 @@
 import AbstractGatewayClient
+import AbstractWatchKit
 import SwiftUI
 import WatchKit
 
@@ -38,7 +39,7 @@ struct InsightView: View {
         } catch GatewayError.conflict {
             // Already acknowledged elsewhere: the same outcome.
         } catch {
-            self.error = model.say(error); return
+            self.error = await model.problem(error).sentence; return
         }
         model.today?.insights.removeAll { $0.noteId == insight.noteId }
         model.today?.changes.insights.removeAll { $0.noteId == insight.noteId }
@@ -89,7 +90,7 @@ struct LoopView: View {
         } catch GatewayError.conflict {
             // Already closed elsewhere: the same outcome.
         } catch {
-            self.error = model.say(error); return
+            self.error = await model.problem(error).sentence; return
         }
         model.today?.loops.removeAll { $0.taskId == loop.taskId }
         WKInterfaceDevice.current().play(.success)
@@ -133,7 +134,7 @@ struct NoteDetailView: View {
     let title: String?
     @EnvironmentObject private var model: AppModel
     @State private var note: NoteDetail?
-    @State private var error: String?
+    @State private var problem: Problem?
 
     var body: some View {
         ScrollView {
@@ -149,9 +150,8 @@ struct NoteDetailView: View {
                         .buttonStyle(.plain).padding(.top, 4)
                         .accessibilityHint("Shows the notes behind this")
                     }
-                } else if let error {
-                    ErrorLine(text: error)
-                    Button("Try again") { Task { await load() } }.buttonStyle(FilledButtonStyle(fill: Theme.neutralButton))
+                } else if let problem {
+                    ProblemView(problem: problem, signIn: model.signInAgain, retry: { Task { await load() } })
                 } else {
                     if let t = title.shown { Text(t).font(.rounded(.headline)).foregroundStyle(Theme.text) }
                     ProgressView().frame(maxWidth: .infinity).padding(.top, 10)
@@ -165,8 +165,8 @@ struct NoteDetailView: View {
     }
 
     private func load() async {
-        error = nil
-        do { note = try await model.client.note(id: noteId) } catch { self.error = model.say(error) }
+        problem = nil
+        do { note = try await model.client.note(id: noteId) } catch { problem = await model.problem(error) }
     }
 }
 
@@ -176,7 +176,7 @@ struct WhyView: View {
     let noteIds: [String]
     @EnvironmentObject private var model: AppModel
     @State private var notes: [NoteDetail]?
-    @State private var error: String?
+    @State private var problem: Problem?
 
     var body: some View {
         ScrollView {
@@ -195,9 +195,8 @@ struct WhyView: View {
                         .buttonStyle(.plain)
                         .accessibilityHint("Opens this note")
                     }
-                } else if let error {
-                    ErrorLine(text: error)
-                    Button("Try again") { Task { await load() } }.buttonStyle(FilledButtonStyle(fill: Theme.neutralButton))
+                } else if let problem {
+                    ProblemView(problem: problem, signIn: model.signInAgain, retry: { Task { await load() } })
                 } else {
                     ProgressView().frame(maxWidth: .infinity).padding(.top, 10)
                 }
@@ -210,7 +209,7 @@ struct WhyView: View {
 
     /// The notes, read together (a cue rests on a few).
     private func load() async {
-        error = nil
+        problem = nil
         let client = model.client
         do {
             notes = try await withThrowingTaskGroup(of: (Int, NoteDetail).self) { group in
@@ -220,7 +219,7 @@ struct WhyView: View {
                 return out.sorted { $0.0 < $1.0 }.map(\.1)
             }
         } catch {
-            self.error = model.say(error)
+            problem = await model.problem(error)
         }
     }
 }

@@ -1,0 +1,65 @@
+{
+  "source": "../../../../../abstractassistant/watch/apple",
+  "source_commit": "cd6bbf3ac737a7d48d11a9407291096b308a2398",
+  "first_snapshot": {
+    "date": "2026-10-19",
+    "source_commit": "15b614f2ad22598f9053d326e772c92da29b3fe7",
+    "source_state": "working tree on 2026-10-19 01:30 CEST: GatewayClient.swift, Models.swift, MockGatewayClient.swift and RetryTests.swift had staged, uncommitted changes on top of source_commit; the sha256 values are of those working-tree files",
+    "sha256": {
+      "Sources/AbstractGatewayClient/Auth.swift": "0e33b58b627eccee82d0133bd9400ac5992d279ac969147cd0c28cec357cad35",
+      "Sources/AbstractGatewayClient/GatewayClient.swift": "70555ec9a73f8cabf52b06aaa11ae3871ffcbb833f68776ad3d6c9653082d19e",
+      "Sources/AbstractGatewayClient/Models.swift": "38a96fe841e2fdfb0ae5414b7d5c1c0fc677e96e833c57d63658c64ae561ff48",
+      "Sources/AbstractGatewayClient/MockGatewayClient.swift": "ab215e4964f395ad4372fb39e73d6071107a04d1c9f457a29f1c8455831cf6d6",
+      "Tests/AbstractGatewayClientTests/SignInTests.swift": "9c897ee948234a03c9236e0ab668e0eb0c74245bf0a4f0247c3ef28d6b52ba7a",
+      "Tests/AbstractGatewayClientTests/RetryTests.swift": "52dcb4ce9b20f1e12c61290c8c5414bd62ed56fb87991734a85bb280c2efaf5c"
+    }
+  },
+  "date": "2026-10-19",
+  "sha256": {
+    "Packages/AbstractGatewayClient/Sources/AbstractGatewayClient/Auth.swift": "0e33b58b627eccee82d0133bd9400ac5992d279ac969147cd0c28cec357cad35",
+    "Packages/AbstractGatewayClient/Sources/AbstractGatewayClient/GatewayClient.swift": "70555ec9a73f8cabf52b06aaa11ae3871ffcbb833f68776ad3d6c9653082d19e",
+    "Packages/AbstractGatewayClient/Sources/AbstractGatewayClient/Models.swift": "38a96fe841e2fdfb0ae5414b7d5c1c0fc677e96e833c57d63658c64ae561ff48",
+    "Sources/App/Shared/Theme.swift": "dd3f1031cb014a05898728d11807c6cabad0fc0889b331393f8cfd704bbeff69",
+    "Sources/App/Shared/RuntimeKeeper.swift": "d7c02a7c57d748fb67c20e225cb74fb22d36becf36f68e694e7dd54fe4dc9c05",
+    "Sources/App/Shared/Listener.swift": "327e948a76a710cdba08d85b8eaba00e42829f70e4514f9fb1d96f1c4771b632",
+    "Sources/App/Settings/SignInView.swift": "82ca160b2488c0e6132722c5e62bdb154ffc3d8fad7fb7268e56385133ffed29",
+    "Packages/AbstractGatewayClient/Tests/AbstractGatewayClientTests/SignInTests.swift": "9c897ee948234a03c9236e0ab668e0eb0c74245bf0a4f0247c3ef28d6b52ba7a"
+  },
+  "local_sha256": {
+    "Sources/GatewayCore/Auth.swift": "0e33b58b627eccee82d0133bd9400ac5992d279ac969147cd0c28cec357cad35",
+    "Sources/GatewayCore/Transport.swift": "a056ff5724abd0bff714a0b258eb2e818918271800d1dbcc558f1cd072827990",
+    "Sources/GatewayCore/Models.swift": "ad30d8e1a759dce8cb1212cf28b6b323987783ee40ec4dc43a6a9bdc68715ede",
+    "Sources/AbstractWatchKit/Theme.swift": "dce3e3df99605e6ea6899293b782b30181b65011546cdf890cab962c4e0ddd88",
+    "Sources/AbstractWatchKit/RuntimeKeeper.swift": "68c177335db0bfd7e19386f75dbb2c41fd6981f835bb4071cf33be9e4a82bf8c",
+    "Sources/AbstractWatchKit/Listener.swift": "2699e95ff11049cb4a367f6b17dde0cce55131af2b4a41f9c9939348aa3e58e1",
+    "Sources/AbstractWatchKit/SignInView.swift": "78887f9c21b2a0f66aa294830bcd2c380a58d43966d70a322fe3d8ff2e0965d7",
+    "Tests/GatewayCoreTests/SignInTests.swift": "a625fcea9bfe1a618abe3f631ddd6eb7a5ed3abed8e66ec47e2631127a21463f"
+  },
+  "from": {
+    "Sources/GatewayCore/Auth.swift": "Packages/AbstractGatewayClient/Sources/AbstractGatewayClient/Auth.swift",
+    "Sources/GatewayCore/Transport.swift": "Packages/AbstractGatewayClient/Sources/AbstractGatewayClient/GatewayClient.swift",
+    "Sources/GatewayCore/Models.swift": "Packages/AbstractGatewayClient/Sources/AbstractGatewayClient/Models.swift",
+    "Sources/AbstractWatchKit/Theme.swift": "Sources/App/Shared/Theme.swift",
+    "Sources/AbstractWatchKit/RuntimeKeeper.swift": "Sources/App/Shared/RuntimeKeeper.swift",
+    "Sources/AbstractWatchKit/Listener.swift": "Sources/App/Shared/Listener.swift",
+    "Sources/AbstractWatchKit/SignInView.swift": "Sources/App/Settings/SignInView.swift",
+    "Tests/GatewayCoreTests/SignInTests.swift": "Packages/AbstractGatewayClient/Tests/AbstractGatewayClientTests/SignInTests.swift"
+  },
+  "how": {
+    "Sources/GatewayCore/Auth.swift": "verbatim",
+    "Sources/GatewayCore/Transport.swift": "the request path (read retries, writes once, 401 lockout) and the attachment upload + transcribe; the assistant's calls dropped; 409/413 added",
+    "Sources/GatewayCore/Models.swift": "JSONValue, Principal, StartRunResponse kept; RunSummary reduced; error body and ISO8601 added",
+    "Sources/AbstractWatchKit/Theme.swift": "trimmed to the palette, cards, buttons, FitScroll; made public",
+    "Sources/AbstractWatchKit/RuntimeKeeper.swift": "made public",
+    "Sources/AbstractWatchKit/Listener.swift": "the orb's spectrum analysis replaced by RMS loudness and a waveform; elapsed time; Stop/Cancel",
+    "Sources/AbstractWatchKit/SignInView.swift": "parameterized (app name, mark, notice, session id, onSignedIn); storage moved to CredentialFile",
+    "Tests/GatewayCoreTests/SignInTests.swift": "verbatim (import changed)"
+  },
+  "added": [
+    "Sources/GatewayCore/CredentialFile.swift (ADR 0006)",
+    "Sources/GatewayCore/Problem.swift (specific error sentences)",
+    "Sources/AbstractWatchKit/ServerView.swift",
+    "Sources/AbstractWatchKit/Voice.swift (MicButton, ListeningView, ProblemView)"
+  ],
+  "notes": "Candidate for abstractuic/swift/AbstractWatchKit (README.md, abstractnote backlog 0016). Re-check sha256 against the source before porting a fix either way."
+}

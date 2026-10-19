@@ -1,7 +1,8 @@
 # Building AbstractNote for Apple Watch
 
-A watch-only watchOS 26+ SwiftUI app and a Swift package, `AbstractGatewayClient`, that talks to
-AbstractGateway. It runs in the simulator with a built-in sample notebook (`--mock`), or live
+A watch-only watchOS 26+ SwiftUI app and two local Swift packages: `AbstractWatchKit` (the shared
+watch parts: gateway core, sign-in, server screen, microphone, theme; see its README) and
+`AbstractGatewayClient` (AbstractNote's calls on top of it). It runs in the simulator with a built-in sample notebook (`--mock`), or live
 against a gateway in the simulator or on a paired watch.
 
 ## Requirements
@@ -22,6 +23,7 @@ scripts/build.sh --no-screens  # generate, test and build only
 
 ```sh
 xcodegen generate --spec project.yml
+(cd Packages/AbstractWatchKit && swift test)
 (cd Packages/AbstractGatewayClient && swift test)
 xcodebuild -project AbstractNoteWatch.xcodeproj -scheme AbstractNoteWatch \
   -destination 'platform=watchOS Simulator,id=<Apple Watch Series 11 (46mm)>' \
@@ -41,7 +43,11 @@ The Xcode project is generated from `project.yml` and is not committed.
 
 ## Tests
 
-- **Package tests**: `swift test --package-path Packages/AbstractGatewayClient`. The live client
+- **AbstractWatchKit tests**: `swift test --package-path Packages/AbstractWatchKit`: sign-in, the
+  sealed sign-in file (Data Protection option, owner-only, excluded from backup, gone on sign-out,
+  never in UserDefaults), the upload and transcription requests (recorded upload answer), the
+  failure sentences.
+- **Note client tests**: `swift test --package-path Packages/AbstractGatewayClient`. The live client
   is driven against fixtures in `Tests/AbstractGatewayClientTests/Fixtures` (status codes
   included: 401 locks the client out, 409 is "already done elsewhere", 413 is "too long"); the
   capture body (idempotency key reused on retry, session id, `process_inline: false`, no
@@ -67,8 +73,8 @@ xcodebuild test -project AbstractNoteWatch.xcodeproj -scheme AbstractNoteWatchUI
 | Argument | Effect |
 |---|---|
 | `--mock` | the sample notebook instead of a gateway (screenshots, UI tests); never asks for Location |
-| `--screen <name>` | with `--mock`, opens a scene: `signin` `note` `note-sending` `note-saved` `note-error` `ask` `ask-thinking` `ask-answer` `ask-deeper` `today` `today-quiet` `insight` `loop` `cue` `cue-why` `note-detail` `settings` `about` |
-| `--gateway <url> --token <token> [--user <id>]` | signs in with that gateway and token and keeps it in the sealed sign-in file, so one launch provisions a simulator or a watch |
+| `--screen <name>` | with `--mock`, opens a scene: `signin` `note` `note-listening` `note-recording` `note-sending` `note-saved` `note-error` `ask` `ask-thinking` `ask-answer` `ask-deeper` `today` `today-quiet` `today-signin` `today-notsetup` `today-offline` `insight` `loop` `cue` `cue-why` `note-detail` `settings` `server` `account` `about` |
+| `--gateway <url> --token <token> [--user <id>]` | signs in with that gateway and token and keeps it in the sealed sign-in file, so one launch provisions a simulator or a watch; the account is then read from `GET /api/gateway/me` and shown in Settings |
 | `--forget-gateway` | deletes the sign-in file (the sign-in screen shows) |
 
 Debug builds also take `--test-identify <user or email>` and `--test-secret <token or code>` to sign

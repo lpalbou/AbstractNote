@@ -7,8 +7,11 @@ let package = Package(
     products: [
         .library(name: "AbstractGatewayClient", targets: ["AbstractGatewayClient"]),
     ],
+    dependencies: [
+        .package(path: "../AbstractWatchKit"),
+    ],
     targets: [
-        .target(name: "AbstractGatewayClient"),
+        .target(name: "AbstractGatewayClient", dependencies: [.product(name: "GatewayCore", package: "AbstractWatchKit")]),
         .testTarget(name: "AbstractGatewayClientTests", dependencies: ["AbstractGatewayClient"],
                     resources: [.copy("Fixtures")]),
     ]

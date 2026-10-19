@@ -26,7 +26,7 @@ final class NoteUITests: XCTestCase {
     @MainActor func testAFailedSendOffersTryAgain() {
         let app = launch("note-error")
         XCTAssertTrue(app.buttons["Try again"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["No connection."].exists || app.otherElements["note.error"].exists)
+        XCTAssertTrue(app.staticTexts["Can't reach notes.example.org."].waitForExistence(timeout: 5))
     }
 
     /// Acknowledging an insight takes a tap and removes it from Today.

@@ -1,4 +1,5 @@
 import AbstractGatewayClient
+import AbstractWatchKit
 import Foundation
 import SwiftUI
 
@@ -13,6 +14,10 @@ enum Route: Hashable {
     /// The notes behind a cue or an insight.
     case why(title: String, noteIds: [String])
     case about
+    /// Settings → Server: the editable address.
+    case server
+    /// Settings → Account: sign in (as someone else).
+    case signIn
 }
 
 /// What Today shows: read together, kept until the next visit's read (the cursor moves on each
@@ -28,6 +33,11 @@ struct TodayData: Equatable {
 /// The app's state: who is signed in where, the client, the open tab, what Today read last.
 @MainActor
 final class AppModel: ObservableObject {
+    static let appName = "AbstractNote"
+    /// The sample notebook's server, as Settings and the error sentences name it.
+    static let mockHost = "notes.example.org"
+    static let cursorKey = "changes_cursor"
+
     @Published private(set) var client: any GatewayClient
     @Published var needsSignIn: Bool
     /// Why the sign-in page is back, when it is not the first launch.
@@ -40,14 +50,14 @@ final class AppModel: ObservableObject {
     @Published var subject: NoteSubject?
     @Published var today: TodayData?
     @Published private(set) var signIn: SavedSignIn?
+    /// The account is being read (`GET /me`) after a sign-in that did not name it.
+    @Published private(set) var checkingAccount = false
     let location: Location
     /// The screenshot or UI-test scene to play (`--screen`), mock runs only.
     var demo: String?
-    #if DEBUG
-    /// `--test-identify` / `--test-secret`: sign in without typing (simulator and device checks).
+    /// `--test-identify` / `--test-secret` (debug builds): sign in without typing.
     var testIdentify: String?
     var testSecret: String?
-    #endif
     private let file: CredentialFile?
 
     init(client: any GatewayClient, signIn: SavedSignIn?, file: CredentialFile?, needsSignIn: Bool, location: Location) {
@@ -55,39 +65,55 @@ final class AppModel: ObservableObject {
     }
 
     var isMock: Bool { client.isMock }
-    var gatewayHost: String { signIn?.gateway.host() ?? (isMock ? "Sample notebook" : "—") }
+    var gatewayHost: String { signIn?.gateway.host() ?? (isMock ? Self.mockHost : "—") }
     var account: String? { signIn?.user ?? (isMock ? "laurent" : nil) }
     /// The watch's conversation for its notes and questions.
     var sessionId: String { signIn?.sessionId ?? "note-watch-mock" }
+    var changesCursor: String? { signIn?.appState[Self.cursorKey] }
 
     /// Signed in (the sign-in page): saves the sealed file, replaces the client, clears what the
     /// last account read.
     func connect(_ s: SavedSignIn) throws {
         try file?.save(s)
-        UserDefaults.standard.set(s.gateway.absoluteString, forKey: SignInDefaults.lastGateway)
-        UserDefaults.standard.set(s.user, forKey: SignInDefaults.lastUser)
+        SignInDefaults.remember(s)
         signIn = s
         client = LiveGatewayClient(baseURL: s.gateway, credential: s.credential)
         today = nil; subject = nil; todayPath = []; settingsPath = []; askPath = []
         needsSignIn = false; signInNotice = nil; tab = .note
+        Task { await ensureAccount() }
     }
 
-    /// Forgets the credential (the file is deleted; ADR 0006) and shows the sign-in page.
+    /// Forgets the credential (the file is deleted; ADR 0006), keeps the server as the next
+    /// sign-in's default, and shows the sign-in page.
     func signOut(notice: String? = nil) {
         let old = client
         Task { await old.signOut() }
+        if let s = signIn { SignInDefaults.remember(s) }
         do { try file?.delete() } catch { signInNotice = "The saved sign-in could not be removed." }
         signIn = nil
-        client = MockGatewayClient(offline: true)
+        client = MockGatewayClient(failure: .unauthorized)
         today = nil; subject = nil; todayPath = []; settingsPath = []; askPath = []
         signInNotice = notice; needsSignIn = true
+    }
+
+    /// A sign-in made by launch arguments (or an older file) may not name the account: read it
+    /// from `GET /api/gateway/me` and keep it, so Settings shows who is signed in.
+    func ensureAccount() async {
+        guard var s = signIn, s.user == nil, !isMock else { return }
+        checkingAccount = true
+        defer { checkingAccount = false }
+        guard let me = try? await client.me(), let id = me.userId else { return }
+        s.user = id
+        try? file?.save(s)
+        SignInDefaults.remember(s)
+        signIn = s
     }
 
     /// Today read: the next visit starts from this cursor.
     func keep(_ data: TodayData) {
         today = data
         guard var s = signIn else { return }
-        s.changesCursor = data.changes.cursor
+        s.appState[Self.cursorKey] = data.changes.cursor
         do { try file?.save(s); signIn = s } catch { /* the cursor stays; the next visit repeats some news */ }
     }
 
@@ -97,38 +123,33 @@ final class AppModel: ObservableObject {
         tab = .note
     }
 
-    /// Any failure, in one sentence; a 401 ends the session at once.
-    func say(_ error: Error) -> String {
-        if case GatewayError.unauthorized = error {
-            signOut(notice: "You were signed out. Please sign in again.")
-        }
-        return Self.say(error)
-    }
-
-    nonisolated static func say(_ error: Error) -> String {
-        switch error {
-        case GatewayError.unauthorized: "You were signed out. Please sign in again."
-        case let e as URLError where [.notConnectedToInternet, .networkConnectionLost, .dataNotAllowed].contains(e.code): "No connection."
-        case is URLError: "Can't reach your notebook."
-        case let e as GatewaySignIn.Failure: e.errorDescription ?? "Sign-in failed. Try again."
-        case let e as GatewayError: e.errorDescription ?? "Something went wrong. Try again."
-        default: "Something went wrong. Try again."
+    /// A failure as one specific sentence (the operator's rule): signed out, AbstractNote not set
+    /// up (a 404 checked against `GET /note/status`), unreachable, or the server's own sentence.
+    func problem(_ error: Error) async -> Problem {
+        let p = Problem.of(error, host: gatewayHost)
+        guard case .notFound = p else { return p }
+        do {
+            try await client.noteStatus()
+            return p
+        } catch GatewayError.http(404, _) {
+            return .notSetUp(app: Self.appName)
+        } catch {
+            return Problem.of(error, host: gatewayHost)
         }
     }
-}
 
-enum SignInDefaults {
-    /// Not secret: the last server and account typed, as the next sign-in's defaults.
-    static let lastGateway = "signin.lastGateway"
-    static let lastUser = "signin.lastUser"
+    /// "Sign in" on a failure: the sign-in page, the server kept.
+    func signInAgain() { signOut(notice: nil) }
 }
 
 /// Launch arguments: `--mock` (sample notebook), `--screen <name>` (open on a screen, for
 /// screenshots), `--gateway URL --token T [--user U]` (provision a sign-in from the Mac with
-/// devicectl), `--forget-gateway` (sign out). See BUILD.md.
+/// devicectl), `--forget-gateway` (sign out). With none, the first screen is the sign-in. See BUILD.md.
 struct LaunchOptions {
-    static let screens = ["signin", "note", "note-sending", "note-saved", "note-error", "ask", "ask-thinking", "ask-answer",
-                          "ask-deeper", "today", "today-quiet", "insight", "loop", "cue", "cue-why", "note-detail", "settings", "about"]
+    static let screens = ["signin", "note", "note-listening", "note-recording", "note-sending", "note-saved", "note-error",
+                          "ask", "ask-thinking", "ask-answer", "ask-deeper",
+                          "today", "today-quiet", "today-signin", "today-notsetup", "today-offline",
+                          "insight", "loop", "cue", "cue-why", "note-detail", "settings", "server", "account", "about"]
 
     var mock: Bool
     var screen: String?
@@ -151,10 +172,16 @@ struct LaunchOptions {
     func makeModel() -> AppModel {
         let location = Location(quiet: mock)
         if mock {
-            // The scene decides how the sample notebook behaves: still answering, unreachable, quiet.
+            // The scene decides how the sample notebook behaves: still answering, failing, quiet.
             let s = screen ?? "note"
+            let failure: MockGatewayClient.Failure? = switch s {
+            case "note-error", "today-offline": .offline
+            case "today-signin": .unauthorized
+            case "today-notsetup": .notSetUp
+            default: nil
+            }
             let client = MockGatewayClient(answerDelay: ["note-sending", "ask-thinking"].contains(s) ? .seconds(3600) : .milliseconds(600),
-                                           offline: s == "note-error", quiet: s == "today-quiet")
+                                           failure: failure, quiet: s == "today-quiet")
             let model = AppModel(client: client, signIn: nil, file: nil, needsSignIn: s == "signin", location: location)
             model.demo = s
             return model
@@ -163,19 +190,23 @@ struct LaunchOptions {
         var saved: SavedSignIn?
         var notice: String?
         do {
-            let f = try CredentialFile.standard()
+            let f = try CredentialFile.standard(folder: AppModel.appName)
             file = f
             if args.contains("--forget-gateway") { try f.delete() }
             // A sign-in passed on the command line is kept: `devicectl device process launch … --gateway U --token T`
-            // provisions a watch once from the Mac, without typing on the wrist.
+            // provisions a watch once from the Mac, without typing on the wrist. The account is read
+            // from GET /me right after (ensureAccount) when --user is not given.
             if let gw = value("--gateway").flatMap(SavedSignIn.normalize), let token = value("--token") {
-                try f.save(SavedSignIn(gateway: gw, user: value("--user"), credential: .token(token)))
+                try f.save(SavedSignIn(gateway: gw, user: value("--user"), credential: .token(token), sessionId: NoteFlows.newSessionId()))
             }
             saved = try f.load()
+            // The sign-in screen (Settings → Account, or after Sign out) starts from this server.
+            if let saved { SignInDefaults.remember(saved) }
         } catch {
             notice = "Your sign-in could not be read. Please sign in again."
         }
-        let client: any GatewayClient = saved.map { LiveGatewayClient(baseURL: $0.gateway, credential: $0.credential) } ?? MockGatewayClient(offline: true)
+        let client: any GatewayClient = saved.map { LiveGatewayClient(baseURL: $0.gateway, credential: $0.credential) }
+            ?? MockGatewayClient(failure: .unauthorized)
         let model = AppModel(client: client, signIn: saved, file: file, needsSignIn: saved == nil, location: location)
         model.signInNotice = notice
         #if DEBUG

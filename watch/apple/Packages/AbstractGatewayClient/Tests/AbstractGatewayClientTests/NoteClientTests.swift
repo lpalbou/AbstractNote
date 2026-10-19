@@ -50,6 +50,19 @@ extension ReplayGroup {
             #expect(about["kind"] as? String == "cue" && about["id"] as? String == "cue-1")
         }
 
+        /// "Send as recording": the uploaded WAV's reference goes unchanged into context.attachments,
+        /// the transcript is the text.
+        @Test func aNoteSentAsRecordingKeepsItsAudioAsAnAttachment() async throws {
+            try load("runs_start")
+            let ref: JSONValue = .object(["$artifact": .string("a1"), "content_type": .string("audio/wav"), "run_id": .string("session_memory_s")])
+            var c = capture; c.attachments = [ref]
+            _ = try await ReplayStub.client().startCapture(c)
+            let input = try #require(ReplayStub.seen.first?.body["input_data"] as? [String: Any])
+            let att = try #require((input["context"] as? [String: Any])?["attachments"] as? [[String: Any]])
+            #expect(att.count == 1 && att[0]["$artifact"] as? String == "a1" && att[0]["content_type"] as? String == "audio/wav")
+            #expect((input["context"] as? [String: Any])?["about"] == nil)
+        }
+
         @Test func aCaptureIsFollowedToItsFilingAnswer() async throws {
             try load("run_capture_running", "run_capture_completed")
             let c = ReplayStub.client()

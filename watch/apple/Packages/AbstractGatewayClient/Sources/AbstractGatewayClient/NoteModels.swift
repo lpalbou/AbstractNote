@@ -30,9 +30,13 @@ public struct Capture: Hashable, Sendable {
     public var idempotencyKey: String
     public var sessionId: String
     public var about: NoteSubject?
-    public init(text: String, occurredAt: Date, location: CaptureLocation?, idempotencyKey: String, sessionId: String, about: NoteSubject? = nil) {
+    /// Uploaded files kept with the note (a recording: "Send as recording"), passed unchanged as
+    /// `context.attachments`.
+    public var attachments: [JSONValue]
+    public init(text: String, occurredAt: Date, location: CaptureLocation?, idempotencyKey: String, sessionId: String,
+                about: NoteSubject? = nil, attachments: [JSONValue] = []) {
         self.text = text; self.occurredAt = occurredAt; self.location = location
-        self.idempotencyKey = idempotencyKey; self.sessionId = sessionId; self.about = about
+        self.idempotencyKey = idempotencyKey; self.sessionId = sessionId; self.about = about; self.attachments = attachments
     }
 }
 
@@ -47,7 +51,10 @@ public enum NoteFlows {
 /// `POST /api/gateway/runs/start` for `note-capture` (api.md "Starting flows").
 struct CaptureStart: Encodable {
     struct Source: Encodable { var client = "watch" }
-    struct About: Encodable { var about: NoteSubject }
+    struct Context: Encodable {
+        var about: NoteSubject?
+        var attachments: [JSONValue]?
+    }
     struct Input: Encodable {
         var text: String
         var occurred_at: String
@@ -57,7 +64,7 @@ struct CaptureStart: Encodable {
         var process_inline = false
         /// The gateway does not hand the request's `session_id` to the flow: it goes here too.
         var session_id: String
-        var context: About?
+        var context: Context?
     }
     var bundle_id = NoteFlows.bundleId
     var flow_id = NoteFlows.capture
@@ -67,7 +74,8 @@ struct CaptureStart: Encodable {
     init(_ c: Capture) {
         session_id = c.sessionId
         input_data = Input(text: c.text, occurred_at: ISO8601.string(c.occurredAt), location: c.location,
-                           idempotency_key: c.idempotencyKey, session_id: c.sessionId, context: c.about.map { About(about: $0) })
+                           idempotency_key: c.idempotencyKey, session_id: c.sessionId,
+                           context: c.about == nil && c.attachments.isEmpty ? nil : Context(about: c.about, attachments: c.attachments.isEmpty ? nil : c.attachments))
     }
 }
 
@@ -126,14 +134,6 @@ public enum RunProgress<Answer: Sendable & Hashable>: Sendable, Hashable {
     /// The run failed or the flow refused the input; the sentence to show when the run gave one
     /// (`output.error` or the run's `error`, without the runtime's "Runtime error: " prefix).
     case failed(String?)
-
-    /// "Runtime error: Local file paths are not accepted here." → "Local file paths are not accepted here."
-    public static func cleanError(_ text: String?) -> String? {
-        guard var t = text?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
-        let prefix = "Runtime error: "
-        if t.hasPrefix(prefix) { t = String(t.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces) }
-        return t.isEmpty ? nil : t
-    }
 }
 
 /// `{items, next_cursor}`: every note API list.

@@ -30,7 +30,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Note adds where you were to the notes you send, so you can find them by place later.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Note uses the microphone only when you dictate a note or a question.</string>
+	<string>Note records your voice only when you tap the microphone; the recording is sent to your server to be written down.</string>
 	<key>WKApplication</key>
 	<true/>
 	<key>WKBackgroundModes</key>

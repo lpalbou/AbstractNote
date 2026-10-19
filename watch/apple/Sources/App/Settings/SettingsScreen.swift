@@ -1,6 +1,8 @@
+import AbstractWatchKit
 import SwiftUI
 
-/// Where the notebook is, who is signed in, the place switch, About, and Sign out at the bottom.
+/// Where the notebook is (tap: change the server), who is signed in (tap: sign in as someone
+/// else), the place switch, About, and Sign out at the bottom.
 struct SettingsScreen: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var location: Location
@@ -8,20 +10,9 @@ struct SettingsScreen: View {
     var body: some View {
         FitScroll {
             VStack(spacing: 6) {
-                Card {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Server").font(.rounded(.caption2)).foregroundStyle(Theme.muted)
-                        Text(model.gatewayHost).font(.rounded(.footnote)).foregroundStyle(Theme.text).lineLimit(1).minimumScaleFactor(0.7)
-                    }
-                }
-                .accessibilityElement(children: .combine)
-                Card {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Account").font(.rounded(.caption2)).foregroundStyle(Theme.muted)
-                        Text(model.account ?? "—").font(.rounded(.footnote)).foregroundStyle(Theme.text).lineLimit(1)
-                    }
-                }
-                .accessibilityElement(children: .combine)
+                row("Server", model.gatewayHost, route: .server, hint: "Change the server", id: "settings.server")
+                row("Account", model.account ?? (model.checkingAccount ? "Checking…" : "Not known"), route: .signIn,
+                    hint: "Sign in as someone else", id: "settings.account")
                 Card {
                     VStack(alignment: .leading, spacing: 2) {
                         // The switch is labelled by its feature and shows its state.
@@ -51,5 +42,24 @@ struct SettingsScreen: View {
             }
         }
         .screen("Settings")
+    }
+
+    private func row(_ label: String, _ value: String, route: Route, hint: String, id: String) -> some View {
+        NavigationLink(value: route) {
+            Card {
+                HStack {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(label).font(.rounded(.caption2)).foregroundStyle(Theme.muted)
+                        Text(value).font(.rounded(.footnote)).foregroundStyle(Theme.text).lineLimit(1).minimumScaleFactor(0.7)
+                    }
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.right").font(.caption2).foregroundStyle(Theme.muted)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint(hint)
+        .accessibilityIdentifier(id)
     }
 }

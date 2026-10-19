@@ -3,7 +3,7 @@ import Foundation
 // Wire models for the AbstractGateway HTTP API (abstractgateway docs/api.md, service.py
 // `run_summary`). A trimmed snapshot of the AbstractAssistant watch client's Models.swift
 // (SNAPSHOT.json): JSONValue, Principal and StartRunResponse are kept as they were; RunSummary
-// keeps only what a note client reads. Field names are snake_case on the wire; every model maps
+// keeps only what every watch app reads. Field names are snake_case on the wire; every model maps
 // them explicitly so a renamed field fails decoding loudly.
 
 /// Any JSON value. Run `output` is free-form.
