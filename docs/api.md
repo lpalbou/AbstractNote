@@ -144,7 +144,7 @@ Pinned response shapes (clients decode these strictly; absent lists mean empty):
 | `Insight` | `{note_id, title, body, insight_kind, occurred_at, acked_at, evidence_note_ids, entity_ids}` |
 | `GET /note/overview` | `{recent: [NoteRef], entities: [{entity_id, name, kind, note_count, last_seen}], insights: [Insight], resurfacing: [NoteRef], activity: [{day, notes, revisions}]}` |
 | `GET /note/cues` | `{items: [{cue_id, text, kind, subject: {kind, id, title}, evidence_note_ids, entity_ids}]}` (cues are insight notes; `cue_id` is the note id; `evidence_note_ids` and `entity_ids` are the insight's own: the notes it rests on and the entities it is about) |
-| `GET /note/tasks` | `{items: [{task_id, note_id, text, status, due, closed_at}]}` |
+| `GET /note/tasks` | `{items: [{task_id, note_id, text, status, due, closed_at, age_days, stale}]}` (`age_days`: whole days since the task opened, until it closed for a closed one; `stale`: still open after 60 days, `STALE_DAYS` in `abstractnote.recall.reflect`) |
 | `GET /note/notes/{id}` | `{note_id, title, text, kind, occurred_at, received_at, status, topics, summary, source, location, attachments: [...], revision: {...} or null, entities: [...], claims: [...], revisits: [NoteRef], insight: {kind, evidence_note_ids, entity_ids, acked_at} or null}` (`insight` is set on an insight note, `kind` being its `insight_kind`, and null on every other note) |
 | `GET /note/review` | `{items: [{review_id, kind, why, reason, at, sides: [ReviewSide], evidence_note_ids, actions: [{action, method, path, body}]}], next_cursor}` (newest first; `kind` `close_match`, `merge` or `contradiction`; `why` the rule; `reason` the processor's stated reason for a merge, else null; `at` when the notebook recorded it; `evidence_note_ids` starts with the note that raised it; `next_cursor` is always null) |
 | `ReviewSide` | `{type, id, name, kind, note_ids}` (`type` `entity`: `name` its display name, `kind` its entity kind, `note_ids` its newest notes; `type` `claim`: `name` the statement in plain words, `kind` null, `note_ids` the note it came from) |
@@ -188,7 +188,7 @@ Flows call them through `tool_calls` nodes; agents may list them in `allowed_too
 | `note_changes` | `since, limit` | the since-you-last-looked delta (same shape as `GET /note/changes`) |
 | `note_entity` | `entity_id, at?` | the entity card |
 | `note_timeline` | `since, until, granularity` | buckets |
-| `note_open_loops`, `note_contradictions`, `note_resurface`, `note_anniversaries` | `limit, since?` | candidate lists for the reflect flow |
+| `note_open_loops`, `note_contradictions`, `note_resurface`, `note_anniversaries` | `limit, since?` | candidate lists for the reflect flow (`{items}`, each with its `rule`, `note_ids` and `entity_ids`; an open loop also carries `age_days` and `stale`, as `GET /note/tasks` does; contradictions are only the disputed pairs a note's linking marked) |
 | `note_insight_write` | `kind, title, body, evidence_note_ids, entity_ids, run_id?` | `{note_id}` |
 
 All tools are read-and-write on the caller's own notebook only and are auto-approved. Every

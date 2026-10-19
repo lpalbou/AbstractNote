@@ -171,6 +171,24 @@ def test_contradictions_are_disputed_pairs_never_several_objects(nb):
     assert item["rule"] == "disputed_pair" and {c["claim_id"] for c in item["claims"]} == {"cl_c", "cl_d"}
 
 
+def test_open_loops_and_tasks_carry_age_and_stale(nb):
+    from abstractnote.recall.reflect import STALE_DAYS
+
+    h = history(nb)  # the task opened 2025-01-05
+    [young] = nb.tasks(now="2025-01-20T10:00:00Z")["items"]
+    assert young["age_days"] == 15 and young["stale"] is False
+    [old] = nb.tasks(now="2025-06-01T10:00:00Z")["items"]
+    assert old["age_days"] == 147 >= STALE_DAYS and old["stale"] is True
+    loops = note_open_loops(ToolContext(nb=nb), limit=10)["items"]
+    assert loops[0]["stale"] is True and loops[0]["age_days"] >= STALE_DAYS
+    [fresh] = [i for i in nb.open_loops(now="2025-01-20T10:00:00Z")["items"] if i["kind"] == "task"]
+    assert fresh["stale"] is False and fresh["age_days"] == 15
+    nb.close_task(old["task_id"], "me", occurred_at="2025-07-01T10:00:00Z")
+    [done] = nb.tasks(status="done", now="2026-01-01T00:00:00Z")["items"]
+    assert done["age_days"] == 177 and done["stale"] is False
+    assert h["n1"] == done["note_id"]
+
+
 def test_insights_cues_and_ack(nb):
     h = history(nb)
     ctx = ToolContext(nb=nb)
@@ -289,7 +307,7 @@ def test_pinned_shapes_of_note_tasks_overview(nb):
     assert note["revision"]["note_id"] == h["n1"] and note["revisits"] == [] and note["insight"] is None
     assert nb.note(nb.capture("unprocessed").note_id)["revision"] is None
     [task] = nb.tasks()["items"]
-    assert set(task) == {"task_id", "note_id", "text", "status", "due", "closed_at"}
+    assert set(task) == {"task_id", "note_id", "text", "status", "due", "closed_at", "age_days", "stale"}
     ov = nb.overview(days=7, now="2025-03-03T00:00:00Z")
     assert set(ov) == {"recent", "entities", "insights", "resurfacing", "activity"}
     assert len(ov["activity"]) == 8 and set(ov["activity"][0]) == {"day", "notes", "revisions"}

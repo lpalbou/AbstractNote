@@ -488,12 +488,17 @@ class Notebook:
     def topics(self) -> Dict[str, Any]:
         return {"items": self.store.topics()}
 
-    def tasks(self, status: Optional[str] = "open", entity: Optional[str] = None, limit: int = 100
-              ) -> Dict[str, Any]:
-        """``{items: [{task_id, note_id, text, status, due, closed_at}]}`` (``status=None`` for all)."""
+    def tasks(self, status: Optional[str] = "open", entity: Optional[str] = None, limit: int = 100, *,
+              now: Optional[str] = None) -> Dict[str, Any]:
+        """``{items: [{task_id, note_id, text, status, due, closed_at, age_days, stale}]}`` (``status=None`` for
+        all). ``age_days`` counts whole days since the task opened (until it closed); ``stale`` marks an open task
+        older than :data:`abstractnote.recall.reflect.STALE_DAYS`."""
+        from ..recall.reflect import loop_age
+
+        now_n = ids.normalize_time(now) if now else ids.utc_now()
         keys = ("task_id", "note_id", "text", "status", "due", "closed_at")
-        return {"items": [{k: t[k] for k in keys} for t in self.store.tasks(status=status, entity=entity,
-                                                                           limit=limit)]}
+        return {"items": [{**{k: t[k] for k in keys}, **loop_age(t["opened_at"], now_n, t["closed_at"])}
+                          for t in self.store.tasks(status=status, entity=entity, limit=limit)]}
 
     def insights(self, kind: Optional[str] = None, acked: Optional[bool] = None, limit: int = 50
                  ) -> Dict[str, Any]:

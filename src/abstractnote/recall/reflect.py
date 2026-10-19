@@ -20,6 +20,7 @@ QUESTION_AGE_DAYS = 14
 TASK_MENTIONS_MIN = 2          # an open task whose note was revisited this many times
 SILENT_DAYS = 60               # an entity or topic with no note for this long has gone quiet
 RECENT_DAYS = 7                # "recent" notes for resurfacing
+STALE_DAYS = 60                # an open loop open this long is ``stale``: close it or let it age out
 
 
 def _now(now: Optional[str]) -> str:
@@ -36,6 +37,15 @@ def _days(a: str, b: str) -> int:
 
 def _since(since: Optional[str]) -> Optional[str]:
     return ids.optional_time(since, field="since")
+
+
+def loop_age(opened_at: Optional[str], now: str, closed_at: Optional[str] = None) -> Dict[str, Any]:
+    """``{age_days, stale}`` of an open loop: whole days since it opened (until it closed, for a closed
+    one); ``stale`` when it is still open after :data:`STALE_DAYS`."""
+    if not opened_at:
+        return {"age_days": None, "stale": False}
+    age = max(0, _days(opened_at, closed_at or now))
+    return {"age_days": age, "stale": closed_at is None and age >= STALE_DAYS}
 
 
 def _entities_of_note(nb: Any, note_id: Optional[str]) -> List[str]:
@@ -64,7 +74,7 @@ def open_loops(nb: Any, limit: int = 20, since: Optional[str] = None, *, now: Op
                          (r["note_id"],))[0][0]
         rule = "task_mentioned_repeatedly" if mentions >= TASK_MENTIONS_MIN else f"open_task_older_than_{OPEN_TASK_AGE_DAYS}_days"
         items.append({"rule": rule, "kind": "task", "task_id": r["task_id"], "text": r["text"],
-                      "opened_at": r["opened_at"], "age_days": _days(r["opened_at"], now), "mentions": mentions + 1,
+                      "opened_at": r["opened_at"], **loop_age(r["opened_at"], now), "mentions": mentions + 1,
                       "note_ids": [r["note_id"]] if r["note_id"] else [], "entity_ids": _entities_of_note(nb, r["note_id"])})
     sql = ("SELECT * FROM notes n WHERE n.kind='question' AND n.archived_at IS NULL AND n.occurred_at<=? AND NOT"
            " EXISTS (SELECT 1 FROM note_links l WHERE l.dst_note_id=n.note_id AND l.predicate IN"
@@ -76,7 +86,7 @@ def open_loops(nb: Any, limit: int = 20, since: Optional[str] = None, *, now: Op
     for r in q(sql + " ORDER BY n.occurred_at, n.note_id", params):
         items.append({"rule": "question_without_followup", "kind": "question", "text": r["title"] or
                       shapes.excerpt(r["text"], 160), "opened_at": r["occurred_at"],
-                      "age_days": _days(r["occurred_at"], now), "note_ids": [r["note_id"]],
+                      **loop_age(r["occurred_at"], now), "note_ids": [r["note_id"]],
                       "entity_ids": _entities_of_note(nb, r["note_id"])})
     items.sort(key=lambda it: (0 if it["rule"] == "task_mentioned_repeatedly" else 1, it["opened_at"]))
     return {"items": items[:limit]}

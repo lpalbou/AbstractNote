@@ -71,7 +71,8 @@ last looked beside the cue cards, then the ask bar) fits a 1280x800 window; the 
 5. **Why do I believe this**: every claim, and every sentence of an answer, opens its evidence
    chain: the claim, what it superseded or was superseded by, the notes, the attachment excerpt.
    One tap says "this is wrong" and writes a retract revision with your account as the source.
-6. **Revisit**: open loops with a close action, unread insights, "on this day" notes, entities
+6. **Revisit**: open loops with a close action and their age (an open loop still open after 60
+   days is marked stale, so it can be closed or left to age out), unread insights, "on this day" notes, entities
    that went silent but relate to what you added this week, contradictions awaiting a decision.
 7. **To review** (only when there is something, `GET /note/review`): what the notebook decided
    on its own, each with why, the two sides, the notes behind them and its own actions. A merge it
