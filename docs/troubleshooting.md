@@ -116,12 +116,13 @@ commit the regenerated `src/abstractnote/flows/json/*.json`; see [CONTRIBUTING.m
 
 ### Every /api/gateway/note call answers 404, or the bundle is unknown
 
-- **Cause**: the gateway does not have AbstractNote. Its log says
-  `AbstractNote is not installed (...): the note integration is off`.
+- **Cause**: the gateway does not have AbstractNote, or it is a gateway release without the
+  AbstractNote seam (`abstractgateway.abstractnote_seam`). In that environment
+  `python -c "import abstractnote.gateway"` fails with one sentence that names the missing seam.
 - **Fix**: install `abstractnote` and the AbstractGateway checkout with the integration in the
   gateway's own environment, then restart the gateway
-  ([getting-started.md](getting-started.md#3-the-gateway-path)). The log then says
-  `AbstractNote is installed: note tools, /api/gateway/note and its workflows are enabled`.
+  ([getting-started.md](getting-started.md#3-the-gateway-path)). A signed-in
+  `GET /api/gateway/note/status` then answers `200`.
 
 ### Your notebook is not available: ...
 
