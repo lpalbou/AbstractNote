@@ -17,6 +17,10 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional
 
 BULK_PRIORITY = 0
+# ``source.origin.date_basis`` values whose ``occurred_at`` is an approximation of when the thing
+# happened (a session start, a last edit, a commit, a file date) rather than its own timestamp.
+APPROXIMATE_BASES = frozenset({"origin_session", "front_matter_modified", "git_added", "file_mtime",
+                               "store_updated", "last_record"})
 
 
 @dataclass
@@ -42,6 +46,7 @@ class ImportReport:
     skipped: Dict[str, int] = field(default_factory=dict)  # noise and filtered records, by reason
     attachments: int = 0
     by_kind: Dict[str, int] = field(default_factory=dict)
+    date_basis: Dict[str, int] = field(default_factory=dict)  # how each occurred_at was found, by basis
     earliest: Optional[str] = None
     latest: Optional[str] = None
     errors: List[Dict[str, str]] = field(default_factory=list)
@@ -51,6 +56,8 @@ class ImportReport:
 
     def seen(self, draft: NoteDraft) -> None:
         self.by_kind[draft.kind] = self.by_kind.get(draft.kind, 0) + 1
+        basis = str((draft.source.get("origin") or {}).get("date_basis") or "unrecorded")
+        self.date_basis[basis] = self.date_basis.get(basis, 0) + 1
         if self.earliest is None or draft.occurred_at < self.earliest:
             self.earliest = draft.occurred_at
         if self.latest is None or draft.occurred_at > self.latest:
@@ -60,6 +67,8 @@ class ImportReport:
         return {
             "importer": self.importer, "dry_run": self.dry_run, "created": self.created,
             "duplicates": self.duplicates, "attachments": self.attachments, "by_kind": dict(sorted(self.by_kind.items())),
+            "date_basis": dict(sorted(self.date_basis.items())),
+            "approximate_dates": sum(n for b, n in self.date_basis.items() if b in APPROXIMATE_BASES or b == "unrecorded"),
             "skipped": dict(sorted(self.skipped.items())), "range": {"earliest": self.earliest, "latest": self.latest},
             "errors": list(self.errors),
         }
@@ -139,4 +148,4 @@ def run(importer: str, nb: Any, *, dry_run: bool = False, **options: Any) -> Imp
     return write_drafts(nb, makers[importer](report=report, **options), report, dry_run=dry_run)
 
 
-__all__ = ["BULK_PRIORITY", "ImportReport", "NoteDraft", "in_window", "iso_from_epoch", "iso_utc", "run", "write_drafts"]
+__all__ = ["APPROXIMATE_BASES", "BULK_PRIORITY", "ImportReport", "NoteDraft", "in_window", "iso_from_epoch", "iso_utc", "run", "write_drafts"]

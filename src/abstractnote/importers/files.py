@@ -3,7 +3,7 @@
 The bytes are stored directly in the notebook (no upload limit applies: this runs on the machine
 that holds the files) and their text is extracted by the core lane's extractors at capture.
 ``occurred_at`` = the photo's EXIF date when Pillow is installed and the file has one, else the
-file's modification time. ``source.origin`` = ``{path, sha256}``; the source key is the content
+file's modification time. ``source.origin`` = ``{path, sha256, date_basis}``; the source key is the content
 hash, so the same file imported again (from anywhere) is a duplicate.
 """
 
@@ -61,12 +61,14 @@ def drafts(*, report: ImportReport, paths: Sequence[str | Path], since: Optional
         if not data:
             report.skip("empty")
             continue
-        occurred = _exif_date(path) or iso_from_epoch(path.stat().st_mtime)
+        exif = _exif_date(path)
+        occurred, basis = (exif, "exif") if exif else (iso_from_epoch(path.stat().st_mtime), "file_mtime")
         if not in_window(occurred, since, until):
             report.skip("outside_window")
             continue
         digest = hashlib.sha256(data).hexdigest()
         mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        source = {"client": "importer", "importer": IMPORTER, "origin": {"path": str(path.resolve()), "sha256": digest}}
+        source = {"client": "importer", "importer": IMPORTER, "origin": {"path": str(path.resolve()), "sha256": digest,
+                                                                         "date_basis": basis}}
         yield NoteDraft(IMPORTER, digest, "", occurred, "file", path.name, source,
                         [{"data": data, "mime": mime, "filename": path.name}])

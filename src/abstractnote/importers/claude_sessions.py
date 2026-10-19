@@ -115,7 +115,7 @@ def _session_drafts(path: Path, report: ImportReport, author: str, since: Option
         if outcome:
             body = body + outcome_separator(t.get("model")) + outcome
         origin = {"session_id": sid, "uuid": t["uuid"], "prompt_id": t.get("prompt_id"), "cwd": t.get("cwd"),
-                  "git_branch": t.get("git_branch"), "model": t.get("model"), "file": str(path), "line": t["line"],
+                  "git_branch": t.get("git_branch"), "model": t.get("model"), "file": str(path), "line": t["line"], "date_basis": "record",
                   "outcome": outcome or None, "outcome_author": (t.get("model") or "assistant") if outcome else None}
         if in_window(t["ts"], since, until):
             yield NoteDraft(IMPORTER, f"{sid}:{t['uuid']}", body, t["ts"], t["kind"], None, _source(origin, author),
@@ -139,7 +139,7 @@ def _session_drafts(path: Path, report: ImportReport, author: str, since: Option
             if kind == "system":
                 if r.get("subtype") == "away_summary" and isinstance(r.get("content"), str) and ts:
                     origin = {"session_id": sid, "uuid": r.get("uuid"), "cwd": r.get("cwd"), "git_branch": r.get("gitBranch"),
-                              "file": str(path), "line": line_no}
+                              "file": str(path), "line": line_no, "date_basis": "record"}
                     if in_window(ts, since, until):
                         yield NoteDraft(IMPORTER, f"{sid}:{r.get('uuid')}", r["content"], ts, "away_summary",
                                         "While you were away", _source(origin, "claude-code"))
@@ -156,7 +156,8 @@ def _session_drafts(path: Path, report: ImportReport, author: str, since: Option
                 if att.get("type") == "queued_command" and att.get("commandMode") == "prompt" and (qtext.strip() or qimages):
                     qts = iso_utc(att["timestamp"]) if isinstance(att.get("timestamp"), str) else ts
                     origin = {"session_id": sid, "uuid": att.get("source_uuid") or r.get("uuid"), "cwd": r.get("cwd"),
-                              "git_branch": r.get("gitBranch"), "file": str(path), "line": line_no, "queued": True}
+                              "git_branch": r.get("gitBranch"), "file": str(path), "line": line_no, "queued": True,
+                              "date_basis": "record"}
                     if qts and in_window(qts, since, until):
                         yield NoteDraft(IMPORTER, f"{sid}:{origin['uuid']}", qtext.strip(), qts, "prompt", None,
                                         _source(origin, author), qimages)
@@ -191,7 +192,7 @@ def _session_drafts(path: Path, report: ImportReport, author: str, since: Option
             if r.get("isCompactSummary"):
                 if ts and text.strip():
                     origin = {"session_id": sid, "uuid": r.get("uuid"), "cwd": r.get("cwd"), "git_branch": r.get("gitBranch"),
-                              "file": str(path), "line": line_no}
+                              "file": str(path), "line": line_no, "date_basis": "record"}
                     if in_window(ts, since, until):
                         yield NoteDraft(IMPORTER, f"{sid}:{r.get('uuid')}", text, ts, "compaction_summary",
                                         "Session summary", _source(origin, "claude-code"))
@@ -220,7 +221,7 @@ def _session_drafts(path: Path, report: ImportReport, author: str, since: Option
                     "text": text.strip(), "images": images, "ts": ts, "line": line_no, "kind": "prompt"}
     yield from finish(turn)
     if title and last_ts:
-        origin = {"session_id": sid, "file": str(path), "line": title["line"]}
+        origin = {"session_id": sid, "file": str(path), "line": title["line"], "date_basis": "last_record"}
         if in_window(last_ts, since, until):
             yield NoteDraft(IMPORTER, f"{sid}:title", title["text"], last_ts, "session_title", title["text"],
                             _source(origin, "claude-code"))
@@ -271,7 +272,7 @@ def _subagent_drafts(session_dir: Path, report: ImportReport, since: Optional[st
         body = "## Brief\n\n" + brief + ("\n\n## Report\n\n" + last if last else "")
         origin = {"session_id": sid, "agent_id": agent_id, "agent_type": meta.get("agentType"),
                   "description": meta.get("description"), "model": model or meta.get("model"),
-                  "finished": meta.get("finished"), "file": str(path)}
+                  "finished": meta.get("finished"), "file": str(path), "date_basis": "first_record"}
         yield NoteDraft(IMPORTER, f"{sid}:agent:{agent_id}", body, ts, "subagent", meta.get("description"),
                         _source(origin, str(meta.get("agentType") or "subagent")))
 

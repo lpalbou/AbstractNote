@@ -79,7 +79,8 @@ def _data(raw: Any) -> Dict[str, Any]:
 def _source(row: sqlite3.Row, *, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     origin = {"message_id": row["id"], "channel": row["channel"], "seq": row["seq"], "sender": row["sender"],
               "reply_to": row["reply_to"], "status": row["status"], "hash": row["hash"],
-              "retracted_at": iso_from_epoch(row["retracted_at"]) if row["retracted_at"] is not None else None}
+              "retracted_at": iso_from_epoch(row["retracted_at"]) if row["retracted_at"] is not None else None,
+              "date_basis": "message"}
     origin.update(extra or {})
     return {"client": "importer", "importer": IMPORTER, "author": row["sender"],
             "origin": {k: v for k, v in origin.items() if v is not None}}
@@ -181,6 +182,7 @@ def _store_drafts(conn: sqlite3.Connection, report: ImportReport, chans: _Channe
             report.skip("outside_window")
             continue
         origin = {"channel": row["channel"], "store_key": row["key"], "version": row["version"],
+                  "date_basis": "message" if message is not None else "store_updated",
                   "updated_by": row["updated_by"], "message_id": message["id"] if message is not None else None}
         source = {"client": "importer", "importer": IMPORTER, "author": row["updated_by"],
                   "origin": {k: v for k, v in origin.items() if v is not None}}

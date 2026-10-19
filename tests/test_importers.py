@@ -111,7 +111,7 @@ def test_claude_sessions_notes_time_and_provenance(claude_project):
     assert first.source["author"] == "me" and first.source["importer"] == "claude-sessions"
     assert first.source["origin"] == {"session_id": "s-1", "uuid": "u1", "prompt_id": "p1", "cwd": "/Users/me/repo",
                                       "git_branch": "main", "model": "claude-opus",
-                                      "file": str(claude_project / "s-1.jsonl"), "line": 3,
+                                      "file": str(claude_project / "s-1.jsonl"), "line": 3, "date_basis": "record",
                                       "outcome": "PortAudio froze the default device.", "outcome_author": "claude-opus"}
     second = next(d for d in drafts if d.source_key == "s-1:u2")
     assert second.text == "Ship the fix.\n\n---\n\n## Assistant answer (claude-opus)\n\nShipped."
@@ -405,6 +405,26 @@ def test_cli_dry_run_writes_nothing(tmp_path, capsys, claude_project):
                  "--exclude-session", "s-live"]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["dry_run"] is True and out["created"] == 8 and not nb_dir.exists()
+    # how each date was found, so a user sees how many are approximate before writing anything
+    assert out["date_basis"] == {"file_mtime": 1, "first_record": 1, "last_record": 1, "record": 5}
+    assert out["approximate_dates"] == 2
+
+
+def test_every_importer_records_its_date_basis(tmp_path, claude_project):
+    db = _agora_db(tmp_path / "agora.db")
+    md = tmp_path / "md"
+    md.mkdir()
+    (md / "a.md").write_text("# A\n- Created: 2026-01-01\n")
+    (md / "b.md").write_text("# B\n")
+    reports = [importers.run("claude-sessions", None, dry_run=True, path=claude_project),
+               importers.run("agora", None, dry_run=True, path=db),
+               importers.run("markdown", None, dry_run=True, path=md),
+               importers.run("files", None, dry_run=True, paths=[md])]
+    for r in reports:
+        assert "unrecorded" not in r.date_basis and sum(r.date_basis.values()) == sum(r.by_kind.values()), r.importer
+    md_report = reports[2].as_dict()
+    assert md_report["date_basis"] == {"created_line": 1, "file_mtime": 1} and md_report["approximate_dates"] == 1
+    assert reports[1].date_basis == {"message": 4, "store_updated": 1}
 
 
 def test_a_queued_prompt_with_a_pasted_image_stores_text_and_an_attachment(tmp_path, notebook):
