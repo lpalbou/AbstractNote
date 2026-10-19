@@ -37,21 +37,33 @@ never blocking: the run starts, the client gets a run id, and the dossier appear
 
 ## The Remember view
 
-The Remember view opens on what changed and lets you dig from there.
+The Remember view opens on what changed and lets you dig from there. Its first screen (since you
+last looked beside the cue cards, then the ask bar) fits a 1280x800 window; the rest follows below.
 
 1. **Since you last looked** (the default screen): what the notebook learned since your last
    visit: new entities, beliefs that were replaced ("Replaced") or withdrawn ("Withdrawn"), loops
    that closed, insights, notes that failed to process. It is a system-time delta from a cursor, so it is the same call an agent
    makes at the start of every session (`GET /note/changes?since=`). Each item opens its subject.
+   The web app shows it as a compact list, one line per change with a word for its kind
+   (Replaced, Withdrawn, Closed, Needs attention, New); new notes fold into one line that opens.
 2. **Cue cards**: a few prompts the reflect flow generated from the graph, each answerable by
    adding a note: a person who went quiet, a decision that is a year old, a task mentioned three
    times and never closed. Answering a cue writes a note linked to its subject; the answered
-   rate is the measure of whether the cards are worth showing.
+   rate is the measure of whether the cards are worth showing. Cue cards are insights, so an
+   insight shown as a cue is not repeated under Revisit or in the delta. Every cue and insight has
+   **Why this surfaced**: its kind in plain words (a reminder, a connection, a contradiction, an
+   evolution, ...) and the notes it is based on.
 3. **The ask bar** with the effort dial and cue chips: *when* (a date, a range, "around" an
    entity's active period), *who/what* (entities), *kind* (idea, decision, task, ...), *topic*.
-   Typing shows quick results immediately; pressing Ask runs standard or deep. Answers show the
-   text with citations; each citation opens the note with its attachments and the revision it
-   caused. "Save this answer" turns it into a note with provenance.
+   Typing shows quick results immediately; with Quick chosen there is no Ask button, the
+   matching notes follow the typing. Ask runs standard or deep and shows its steps as they happen
+   (searched your notes, looked closer at what they connect, wrote the answer). An answer has three
+   layers, each named and drawn differently: the **Synthesis** (what the selected notes suggest,
+   with citations), the **Original** (the notes it rests on, quoted as you wrote them) and the
+   **Interpretation** (what the notebook understood: how it changed, what is still open). Each
+   citation opens the note with its attachments and the revision it caused. "Save this answer"
+   turns it into a note with provenance; the note dialog shows such notes as synthesis, never as
+   something you wrote.
 4. **Then versus now**: for an entity or for a relationship between two entities, the earliest
    and the latest summary side by side, with the turning points between them listed with their
    notes. Cached per revision; the fastest way to see how your understanding of a person, a
@@ -61,32 +73,48 @@ The Remember view opens on what changed and lets you dig from there.
    One tap says "this is wrong" and writes a retract revision with your account as the source.
 6. **Revisit**: open loops with a close action, unread insights, "on this day" notes, entities
    that went silent but relate to what you added this week, contradictions awaiting a decision.
+7. **To review** (only when there is something): matches the notebook made on its own, two
+   entries joined as one (`entity.merge` in the revision feed, `GET /note/revisions`), each with
+   the note behind it and the reason. **Undo the match** separates them again
+   (`POST /note/entities/{id}/unmerge`); **Keep** hides it in this browser (the note API has no
+   confirm action yet).
 
 Each entity card carries a small activity sparkline. A multi-lane time river is a candidate for
 a later version once real notebooks show which lanes deserve a lane; the time scrubber in the
-Graph view already covers "what did this look like then".
+Explore view already covers "what did this look like then".
 
-## The Graph view
+## The Explore view (the graph)
 
 - **Focus and depth**: pick one or several entities; see their neighbourhood up to depth three,
   edges labelled by predicate with first and last seen dates and counts.
-- **Time scrubber**: moving it changes `as_of`: entities and edges that did not exist yet fade
+- **Picture or List**: the same connections drawn, or as a readable table (from, link, to, since,
+  believed or no longer believed); each row opens the link's history or the entity.
+- **Time scrubber and date field**: moving the slider or choosing a date changes `as_of` (the date
+  field reaches any day without dragging); the layout stays where it is: entities and edges that did not exist yet fade
   out, superseded claims show as dashed; the entity card shows the beliefs at that moment. An edge
   opens the relation timeline between its two entities.
 - **Day page**: "what happened on day X": notes captured, revisions applied with their one-line
   summaries, entities created or merged, claims superseded.
-- **Entity page**: card, aliases, summary history, claims timeline (active and superseded),
-  relations, notes, open tasks, and then-versus-now.
+- **Entity page** (the topic portrait): name, aliases and activity, then five tabs. **How it
+  evolved** comes first: the first note, the dated views from the summary history (earlier view,
+  refined, latest expressed view) and the changes between them (a belief replaced or withdrawn),
+  oldest first, each opening its note or its evidence; with a date chosen, the milestones after it
+  stay in place, faded. Then **Changes** (what you believe or believed then, then-versus-now),
+  **Open actions**, **Sources** (the notes) and **Links** (relations). An entity asked for at a
+  date before it existed says so.
 
 ## The Capture view
 
-A chat. You type or paste, attach files, drop images, or dictate; with your permission the
-browser attaches your location. The answer tells you what was saved, how it was filed, which
-earlier notes and entities it relates to, and when you said the same thing before. With
-"Instant linking" on (Settings) the note is processed right away and the answer includes the
-links the processor made; otherwise it says the note is queued, and the thread updates that
-message when the note is processed (the app re-reads the
-note until it is). Nothing in the answer uses system vocabulary: no run ids, no ledger, no gateway.
+A stream of your notes as you wrote them, with the composer at the bottom. You type or paste,
+attach files (images show a preview), drop images, or dictate; Enter saves and Shift+Enter starts
+a new line; with your permission the browser attaches your location. Under each note one short
+acknowledgement shows one state at a time, as a word and a symbol: **Sending**, **Received**,
+**Organizing**, then **Organized** or **Needs attention**. Organized reads like "Added to #lut ·
+event · 2 links" and opens on what was filed: the note's title, topics, linked entities, when you
+said the same thing before, and what it changed. Until the note is organized the details show
+the notebook's reply. With "Instant linking" on (Settings) the note is processed right away;
+otherwise the app re-reads the note until it is. Nothing uses system vocabulary: no run ids, no
+ledger, no gateway.
 
 ## For agents and entities
 

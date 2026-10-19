@@ -28,12 +28,22 @@ API, read the note API for views, and never send user, tenant or runtime identif
 - Served by the gateway at `/apps/note/` through the app proxy. The app's Node server answers the
   mount header, relays `/api/*` to the gateway with the session cookie, binds `127.0.0.1`, and
   uses relative URLs and the shared shell, as the app-server contract requires.
-- Three views: **Capture**, **Graph**, **Remember** (see [remembering.md](remembering.md)), plus a
-  small **Settings** drawer (filing model, answering model, inline processing, reflect schedule,
+- Three views, in the tab order **Capture**, **Remember**, **Explore** (the graph; its route stays
+  `#/graph`) (see [remembering.md](remembering.md)), plus a small **Settings** drawer (filing model, answering model, inline processing, reflect schedule,
   location, queue status with retry, appearance, sign-out). Location is off until you turn on the
   Location switch in Settings (kept per browser, and offered only on a secure page); Capture then
   attaches it to notes.
-- Theming uses ui-kit tokens only; tested on default-dark, observer-night and solarized-light.
+- Theming uses ui-kit tokens only, so every kit theme works; tested on default-dark, observer-night
+  and solarized-light at 1280 and 400 px. The framework look comes from derivations of those
+  tokens: on dark themes the page colour is deepened toward near-black (relative colour of
+  `--bg-primary`; light themes keep theirs), fine borders, Inter when installed (else the kit
+  font), and an indigo, cyan and mint accent mixed from `--info`, `--accent` and `--success` used
+  for state and emphasis only. Primary actions keep the theme's `--accent`.
+- Accessibility: text follows the appearance text size (`--font-scale`, graph labels included);
+  focus rings are always visible; every state is a word and a symbol, never colour alone (capture
+  states, believed / no longer believed, the answer's three layers); every graph has a readable
+  relationship list (Explore, List); dates are chosen with a date field, never only by dragging;
+  reduced motion turns animation off.
 - Registered by the AbstractGateway integration in the gateway's app catalog, tray, web console
   and terminal console as `note` (port 3006, cookie prefix `abstractnote`, page title
   `AbstractNote`, command `abstractnote-web`).
