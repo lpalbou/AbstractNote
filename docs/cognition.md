@@ -137,7 +137,7 @@ flowchart TD
   same three failures, so a note whose processing is cut off three times (three restarts during
   the same long note) becomes `failed` and waits for a manual retry.
 - **The processor automation.** `POST /api/gateway/note/processor/ensure` (the web app calls it
-  when it opens and the automations are missing) creates two automations per user, idempotently: the processor
+  when it opens and an automation is missing or unhealthy) creates two automations per user, idempotently: the processor
   (trigger `schedule@2` every `2m`, flow `note-drain`, `max_items = 20`, `budget_s = 90`) and the
   reflect automation (every `7d` by default, flow `note-reflect`), each with
   `_runtime.allowed_tools` listing the note tools. The processor's first drain runs at creation
@@ -150,6 +150,25 @@ flowchart TD
   the eventual, ordered consistency it needs without a gateway worker. "Process now" sends the
   automation's `run_now` command; a `409 automation_busy` answer means a drain is already running
   and the queue panel says so. Steady-state throughput is at most `max_items` per interval.
+- **Surviving an upgrade.** An automation runs one concrete workflow version: the gateway resolves
+  `bundle_ref: "abstractnote"` to the latest loaded version when the automation is created and
+  stores `abstractnote@<version>:note-drain` in its definition, and the runtime starts exactly that
+  id at every occurrence. There is no "latest" target (AbstractGateway 0.15.11,
+  `routes/automations.py` `_resolve_target`), and the gateway serves only the installed version of
+  the note workflows, so after an upgrade and a restart the old automation's next occurrence fails
+  ("Workflow 'abstractnote@0.1.0:note-drain' not found in registry") and the queue stops draining. A
+  revision of the target cannot fix it either: a failed automation accepts only `archive`.
+  So `processor/ensure` repairs: it keeps an automation that is active or paused on the served
+  version; any other one (another version, failed, completed, archived, gone) is archived (its
+  history stays) and replaced by a new automation built from the current settings
+  (`processor_schedule`, `reflect_schedule`, the models), under the next request generation
+  (`abstractnote-processor-<n>`) so the replacement is a new automation, never the failed one. A
+  paused automation's replacement is paused again (its first tick one interval out, so no drain
+  runs before the pause lands). `GET /note/status` and `GET /note/queue` report each automation's
+  health (`automations.processor` and `.reflect`: `{id, state, target, healthy, reason, paused}`);
+  the web app repairs on load when one is unhealthy, and its queue panel shows "Processor needs
+  repair." with a Repair button. Without the note workflows loaded, `ensure` answers 503 and
+  archives nothing.
 - **No approval waits.** Inside the gateway the note tools are added to the tool approval
   auto-approve set when the runtime is built, so a capture never parks on a tool-approval wait.
 - **Priority**: `3` urgent and `2` high come from the quick filing step (tasks with deadlines,
