@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "re
 import { createPortal } from "react-dom";
 import { AfChip, AfChipButton, AfTabs, Icon } from "@abstractframework/ui-kit";
 import { ApiError, errorSentence } from "../lib/api";
-import { CARD_DELAY_MS, communitySlots, themeName, edgeKey, edgeLabelShown, firstSentence, litBy, placeCard, radiusScale, strongestLinks, type Hover } from "../lib/graph_focus";
+import { CARD_DELAY_MS, communitySlots, placeAway, themeName, edgeKey, edgeLabelShown, firstSentence, litBy, placeCard, radiusScale, strongestLinks, type Hover } from "../lib/graph_focus";
 import { useDebounced, useRead, type ReadState } from "../lib/hooks";
 import { boundsOf, fitView, layoutGraph, settleFrames, toWorld, zoomAt, type Positioned, type ViewTransform } from "../lib/graph_layout";
 import { milestones } from "../lib/milestones";
@@ -573,7 +573,7 @@ function GraphCanvas({ graph, then, selected, focus, onSelect, communities, isol
           })}
         </g>
       </svg>
-      {card && cardNode ? <HoverCard node={cardNode} at={card} edges={graph.edges} names={names} community={cardNode.community_id ? communityOf.get(cardNode.community_id) || null : null} slot={(cardNode.community_id && slots.get(cardNode.community_id)) || 0} /> : null}
+      {card && cardNode ? <HoverCard node={cardNode} at={card} edges={graph.edges} names={names} community={cardNode.community_id ? communityOf.get(cardNode.community_id) || null : null} slot={(cardNode.community_id && slots.get(cardNode.community_id)) || 0} avoidIds={[...(litBy({ kind: "node", id: cardNode.id }, graph.edges)?.nodes || [])]} /> : null}
       <p className="nt-legend">
         <span className="nt-legend__item">
           <svg width="26" height="8" aria-hidden="true">
@@ -638,15 +638,21 @@ function CommunityLegend({ communities, present, slots, isolated, onIsolate }: {
 }
 
 /** The card a resting pointer (or keyboard focus) opens beside a node; kept inside the window. */
-function HoverCard({ node, at, edges, names, community, slot }: { node: GraphNode; at: { x: number; y: number }; edges: Graph["edges"]; names: Map<string, string>; community: Community | null; slot: number }) {
+function HoverCard({ node, at, edges, names, community, slot, avoidIds }: { node: GraphNode; at: { x: number; y: number }; edges: Graph["edges"]; names: Map<string, string>; community: Community | null; slot: number; avoidIds: string[] }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    setPos(placeCard(at.x, at.y, r.width, r.height, { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight }));
-  }, [at.x, at.y, node.id]);
+    // Never over the hovered node or its neighbours: their circles (with their names) are what it avoids.
+    const rects = [node.id, ...avoidIds.filter((id) => id !== node.id)]
+      .map((id) => document.querySelector(`[data-node="${CSS.escape(id)}"]`)?.getBoundingClientRect())
+      .filter((b): b is DOMRect => Boolean(b))
+      .map((b) => ({ left: b.left, top: b.top, width: b.width, height: b.height }));
+    const area = { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+    setPos(rects.length ? placeAway(rects, r.width, r.height, area) : placeCard(at.x, at.y, r.width, r.height, area));
+  }, [at.x, at.y, node.id, avoidIds.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
   const links = strongestLinks(node.id, node.name, edges, names, 3);
   const summary = firstSentence(node.summary);
   const count = node.note_count || 0;

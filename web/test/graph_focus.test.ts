@@ -144,3 +144,39 @@ describe("the community palette in styles.css", () => {
     expect(css).not.toMatch(new RegExp(`--nt-c${COMMUNITY_SLOTS + 1}:`));
   });
 });
+
+describe("the hover card keeps clear of what it describes", () => {
+  const area = { left: 0, top: 0, width: 1280, height: 800 };
+  const hits = (p: { x: number; y: number }, w: number, h: number, r: { left: number; top: number; width: number; height: number }) => p.x < r.left + r.width && p.x + w > r.left && p.y < r.top + r.height && p.y + h > r.top;
+  it("beside the node and its neighbours, on the right when there is room", async () => {
+    const { placeAway } = await import("../src/lib/graph_focus");
+    const node = { left: 300, top: 350, width: 40, height: 50 };
+    const nbrs = [{ left: 440, top: 360, width: 40, height: 50 }, { left: 360, top: 470, width: 60, height: 60 }];
+    const p = placeAway([node, ...nbrs], 320, 230, area);
+    for (const r of [node, ...nbrs]) expect(hits(p, 320, 230, r)).toBe(false);
+    expect(p.x).toBeGreaterThanOrEqual(480);
+  });
+  it("flips to the left at the right edge of the window", async () => {
+    const { placeAway } = await import("../src/lib/graph_focus");
+    const node = { left: 1100, top: 300, width: 40, height: 50 };
+    const p = placeAway([node, { left: 1180, top: 320, width: 40, height: 40 }], 320, 230, area);
+    expect(p.x + 320).toBeLessThanOrEqual(1100);
+    expect(hits(p, 320, 230, node)).toBe(false);
+  });
+  it("on a phone it goes below or above, never over the node", async () => {
+    const { placeAway } = await import("../src/lib/graph_focus");
+    const phone = { left: 0, top: 0, width: 400, height: 860 };
+    const node = { left: 140, top: 320, width: 30, height: 40 };
+    const p = placeAway([node, { left: 210, top: 330, width: 30, height: 30 }, { left: 100, top: 380, width: 40, height: 40 }], 320, 230, phone);
+    expect(hits(p, 320, 230, node)).toBe(false);
+    expect(p.x).toBeGreaterThanOrEqual(8);
+    expect(p.x + 320).toBeLessThanOrEqual(392);
+  });
+  it("when nothing is free, it may cover a neighbour but not the node", async () => {
+    const { placeAway } = await import("../src/lib/graph_focus");
+    const small = { left: 0, top: 0, width: 360, height: 300 };
+    const node = { left: 160, top: 130, width: 40, height: 40 };
+    const p = placeAway([node, { left: 10, top: 10, width: 340, height: 280 }], 150, 100, small);
+    expect(hits(p, 150, 100, node)).toBe(false);
+  });
+});

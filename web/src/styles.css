@@ -467,19 +467,20 @@ p { margin: 0 0 6px; }
 
 /* The hover card: beside the pointer, inside the window, never in the way of the pointer. */
 .nt-hovercard {
-  position: fixed; z-index: 60; width: max-content; max-width: min(320px, calc(100vw - 16px));
+  position: fixed; z-index: 1000; width: max-content; max-width: min(320px, calc(100vw - 16px));
   padding: 12px 14px; border-radius: var(--radius-lg); border: 1px solid var(--nt-line-strong);
-  background: var(--bg-secondary); color: var(--text-primary); box-shadow: var(--ui-shadow-1, none);
-  font-family: var(--nt-font); font-size: var(--font-size-md); line-height: 1.45; pointer-events: none;
-  animation: nt-card-in 140ms ease-out;
+  /* Opaque: the theme's raised surface laid on its page colour (some themes' surfaces are translucent). */
+  background: linear-gradient(var(--bg-secondary), var(--bg-secondary)), var(--nt-bg); background-color: var(--nt-bg);
+  color: var(--text-primary); box-shadow: var(--ui-shadow-1, 0 10px 30px rgba(0, 0, 0, 0.35));
+  font-family: var(--nt-font); font-size: var(--font-size-md); line-height: 1.45;
+  opacity: 1; isolation: isolate;
 }
-@keyframes nt-card-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
 .nt-hovercard__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
 .nt-hovercard__name { font-size: var(--font-size-lg); font-weight: 650; letter-spacing: -0.01em; }
 .nt-hovercard__summary { margin: 0 0 6px; color: var(--text-primary); }
 .nt-hovercard__meta { margin: 0 0 6px; color: var(--text-muted); font-size: var(--font-size-sm); font-variant-numeric: tabular-nums; }
 .nt-hovercard__theme { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; color: var(--text-secondary); font-size: var(--font-size-sm); font-weight: 550; }
-.nt-hovercard__links { list-style: none; margin: 6px 0 0; padding: 6px 0 0; border-top: 1px solid var(--nt-line); display: flex; flex-direction: column; gap: 2px; color: var(--text-secondary); }
+.nt-hovercard__links { list-style: none; margin: 6px 0 0; padding: 6px 0 0; border-top: 1px solid var(--nt-line); display: flex; flex-direction: column; gap: 2px; color: var(--text-primary); }
 .nt-hovercard__links li::before { content: "→"; margin-right: 6px; color: var(--text-muted); }
 .nt-legend { position: absolute; left: 0; right: 0; bottom: 4px; display: flex; flex-wrap: wrap; gap: 4px 14px; justify-content: center; color: var(--text-muted); font-size: var(--font-size-sm); margin: 0; padding: 0 56px; pointer-events: none; }
 .nt-legend__item { display: inline-flex; align-items: center; gap: 6px; }

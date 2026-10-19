@@ -92,6 +92,27 @@ async function main() {
           check(card && card.x >= 0 && card.y >= 0 && card.x + card.width <= vp.width && card.y + card.height <= vp.height, `${theme} ${width}: the card is inside the window (${Math.round(card?.x)},${Math.round(card?.y)} ${Math.round(card?.width)}x${Math.round(card?.height)})`);
           const text = await page.locator(".nt-hovercard").innerText();
           check(/LUT/.test(text) && /notes/.test(text) && /LUT prefill/.test(text) && (await page.locator(".nt-hovercard__links li").count()) >= 2, `${theme} ${width}: the card names the theme, the notes and the strongest links`);
+          // The card is on top (the topmost element at its centre is inside it) and covers neither the hovered
+          // node nor its neighbours.
+          const onTop = await page.evaluate(() => {
+            const c = document.querySelector(".nt-hovercard");
+            const r = c.getBoundingClientRect();
+            const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            return Boolean(hit && c.contains(hit));
+          });
+          check(onTop, `${theme} ${width}: the card is drawn on top of the picture`);
+          const covered = await page.evaluate(() => {
+            const c = document.querySelector(".nt-hovercard").getBoundingClientRect();
+            const hit = (b) => b.left < c.right && b.right > c.left && b.top < c.bottom && b.bottom > c.top;
+            return [...document.querySelectorAll(".nt-node--lit")].filter((n) => hit(n.querySelector(".nt-node__dot").getBoundingClientRect())).map((n) => n.getAttribute("data-node"));
+          });
+          const nodeBox = await page.locator('[data-node="ex:project-lut"]').boundingBox();
+          const apart = card.x >= nodeBox.x + nodeBox.width || card.x + card.width <= nodeBox.x || card.y >= nodeBox.y + nodeBox.height || card.y + card.height <= nodeBox.y;
+          check(apart, `${theme} ${width}: the card does not overlap the hovered node`);
+          check(covered.length === 0, `${theme} ${width}: the card covers none of its neighbours (${covered.join(", ") || "none"})`);
+          const bg = await page.locator(".nt-hovercard").evaluate((el) => getComputedStyle(el).backgroundColor);
+          check(!/rgba\(.*, 0(\.\d+)?\)$/.test(bg), `${theme} ${width}: the card's surface is opaque (${bg})`);
+          await page.screenshot({ path: name("explore-hover") });
           if (theme === THEMES[0] && width === WIDTHS[0]) {
             check(labelsAtFit === 0, `edge words hidden at the fitted zoom (${labelsAtFit})`);
             const dur = await page.locator(".nt-node").first().evaluate((el) => getComputedStyle(el).transitionDuration);
@@ -101,7 +122,6 @@ async function main() {
             check(still === "0s", `with reduced motion the fade is immediate (${still})`);
             await page.emulateMedia({ reducedMotion: "no-preference" });
           }
-          await page.screenshot({ path: name("explore-hover") });
           // A node at the right edge: the card flips to stay inside.
           await page.mouse.move(2, 2);
           await page.waitForTimeout(250);

@@ -58,6 +58,46 @@ export function placeCard(px: number, py: number, cw: number, ch: number, area: 
   return { x: Math.round(x), y: Math.round(y) };
 }
 
+export type Rect = { left: number; top: number; width: number; height: number };
+const overlap = (a: Rect, b: Rect) => Math.max(0, Math.min(a.left + a.width, b.left + b.width) - Math.max(a.left, b.left)) * Math.max(0, Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top));
+const union = (rs: Rect[]): Rect => {
+  const l = Math.min(...rs.map((r) => r.left));
+  const t = Math.min(...rs.map((r) => r.top));
+  return { left: l, top: t, width: Math.max(...rs.map((r) => r.left + r.width)) - l, height: Math.max(...rs.map((r) => r.top + r.height)) - t };
+};
+
+/**
+ * Where the hover card goes so it never covers what it describes: beside the box around the hovered node and
+ * its neighbours (`avoid`, the node first): right, left, below, above; then the same around the node alone.
+ * Each place is kept inside `area` with a margin; the first that covers none of `avoid` wins, else the one
+ * covering least of it.
+ */
+export function placeAway(avoid: Rect[], cw: number, ch: number, area: Rect, gap = 16, margin = 8): { x: number; y: number } {
+  if (!avoid.length) return { x: area.left + margin, y: area.top + margin };
+  const clampX = (x: number) => Math.max(area.left + margin, Math.min(x, area.left + area.width - margin - cw));
+  const clampY = (y: number) => Math.max(area.top + margin, Math.min(y, area.top + area.height - margin - ch));
+  const node = avoid[0];
+  const cx = node.left + node.width / 2;
+  const cy = node.top + node.height / 2;
+  const around = (b: Rect) => [
+    { x: b.left + b.width + gap, y: cy - ch / 2 },
+    { x: b.left - gap - cw, y: cy - ch / 2 },
+    { x: cx - cw / 2, y: b.top + b.height + gap },
+    { x: cx - cw / 2, y: b.top - gap - ch },
+  ];
+  let best = { x: 0, y: 0, cost: Infinity };
+  for (const c of [...around(union(avoid)), ...around(node)]) {
+    const x = clampX(c.x);
+    const y = clampY(c.y);
+    const box = { left: x, top: y, width: cw, height: ch };
+    // Covering the hovered node itself costs most; a neighbour less.
+    const cost = avoid.reduce((sum, r, i) => sum + overlap(box, r) * (i === 0 ? 10 : 1), 0);
+    if (cost === 0) return { x: Math.round(x), y: Math.round(y) };
+    if (cost < best.cost) best = { x, y, cost };
+  }
+  return { x: Math.round(best.x), y: Math.round(best.y) };
+}
+
 /**
  * The two or three strongest links of a node in words, strongest first: believed before no longer believed,
  * then how often it was said, then the most recent. "led by Dana" (out), "Dana leads it" is not invented:
