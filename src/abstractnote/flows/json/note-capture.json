@@ -397,7 +397,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_capture returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_capture failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_capture returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_capture returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_capture failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_capture returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
       }
     },
     {
@@ -1050,7 +1050,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_file returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_file failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_file returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_file returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_file failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_file returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
       }
     },
     {
@@ -1313,10 +1313,61 @@
       }
     },
     {
-      "id": "inline_ack_args",
+      "id": "process_ok",
       "type": "code",
       "position": {
         "x": 6240.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Understood?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "output",
+            "label": "output",
+            "type": "object"
+          },
+          {
+            "id": "child_output",
+            "label": "child_output",
+            "type": "object"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "checked",
+            "label": "checked",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "o = output if isinstance(output, dict) else {}\nc = child_output if isinstance(child_output, dict) else {}\nif c.get(\"success\") is False or o.get(\"success\") is False:\n    err = str(c.get(\"error\") or o.get(\"error\") or \"The step could not finish.\")\n    for prefix in (\"Runtime error: \", \"Execution error: \"):\n        if err.startswith(prefix):\n            err = err[len(prefix):]\n    raise ValueError(err)\nreturn {\"checked\": True}\n"
+      }
+    },
+    {
+      "id": "inline_ack_args",
+      "type": "code",
+      "position": {
+        "x": 6720.0,
         "y": 0.0
       },
       "data": {
@@ -1373,7 +1424,7 @@
       "id": "inline_ack",
       "type": "tool_calls",
       "position": {
-        "x": 6720.0,
+        "x": 7200.0,
         "y": 0.0
       },
       "data": {
@@ -1429,7 +1480,7 @@
       "id": "inline_ack_out",
       "type": "code",
       "position": {
-        "x": 7200.0,
+        "x": 7680.0,
         "y": 0.0
       },
       "data": {
@@ -1473,14 +1524,14 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_queue_ack returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_queue_ack failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_queue_ack returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_queue_ack returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_queue_ack failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_queue_ack returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
       }
     },
     {
       "id": "processed_msg",
       "type": "code",
       "position": {
-        "x": 7680.0,
+        "x": 8160.0,
         "y": 0.0
       },
       "data": {
@@ -1531,7 +1582,7 @@
       "id": "end_processed",
       "type": "on_flow_end",
       "position": {
-        "x": 8160.0,
+        "x": 8640.0,
         "y": 0.0
       },
       "data": {
@@ -2040,6 +2091,27 @@
       "targetHandle": "exec-in"
     },
     {
+      "id": "e-process-output-process_ok-output",
+      "source": "process",
+      "sourceHandle": "output",
+      "target": "process_ok",
+      "targetHandle": "output"
+    },
+    {
+      "id": "e-process-child_output-process_ok-child_output",
+      "source": "process",
+      "sourceHandle": "child_output",
+      "target": "process_ok",
+      "targetHandle": "child_output"
+    },
+    {
+      "id": "e-process-exec-out-process_ok-exec-in",
+      "source": "process",
+      "sourceHandle": "exec-out",
+      "target": "process_ok",
+      "targetHandle": "exec-in"
+    },
+    {
       "id": "e-capture_out-note_id-inline_ack_args-note_id",
       "source": "capture_out",
       "sourceHandle": "note_id",
@@ -2054,8 +2126,8 @@
       "targetHandle": "revision_id"
     },
     {
-      "id": "e-process-exec-out-inline_ack_args-exec-in",
-      "source": "process",
+      "id": "e-process_ok-exec-out-inline_ack_args-exec-in",
+      "source": "process_ok",
       "sourceHandle": "exec-out",
       "target": "inline_ack_args",
       "targetHandle": "exec-in"

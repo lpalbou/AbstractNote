@@ -365,3 +365,108 @@ def test_the_real_model_path_through_abstractcore(tmp_path, monkeypatch):
     finally:
         proc.terminate()
         proc.wait(timeout=10)
+
+
+PINNED = "This notebook is pinned to the embedding model x; rebuild with reembed to change models."
+
+
+def _failing_after(doubles, tools, name, *, calls_before_failing=0, give_up_after=5, fallback=None):
+    """Make tool `name` raise PINNED; after `give_up_after` calls answer `fallback` instead, so a
+    flow that swallows the error and loops on ends quickly (and the test can see it looped)."""
+    real = tools[name]
+    count = {"n": 0}
+
+    def tool(**kw):
+        count["n"] += 1
+        doubles.calls.append((name, kw))
+        if count["n"] <= calls_before_failing:
+            return real(**kw)
+        if count["n"] > give_up_after:
+            return fallback if fallback is not None else real(**kw)
+        raise ValueError(PINNED)
+
+    tool.__name__ = name
+    tools[name] = tool
+    return count
+
+
+def test_a_tool_failure_inside_the_drain_loop_ends_the_run(doubles):
+    # Lead gate finding: inside a while body a raising node does not end the run (the runtime turns
+    # it into "branch complete" and loops); the drain must stop with the tool's sentence.
+    tools = doubles.tools()
+    count = _failing_after(doubles, tools, "note_queue_lease", fallback={"items": []})
+    r = NoteRunner.with_llm(ScriptedLLM(SCRIPT), tools)
+    with pytest.raises(FlowRunError, match=r"^This notebook is pinned to the embedding model x"):
+        r.run_drain(max_items=20, budget_s=60)
+    assert count["n"] == 1
+
+
+def test_an_ack_failure_inside_the_drain_loop_ends_the_run(doubles):
+    doubles.queue[:] = ["nt_a", "nt_b"]
+    tools = doubles.tools()
+    count = _failing_after(doubles, tools, "note_queue_ack", fallback={"note_id": "x", "status": "processed"})
+    r = NoteRunner.with_llm(ScriptedLLM(SCRIPT), tools)
+    with pytest.raises(FlowRunError, match=r"^This notebook is pinned"):
+        r.run_drain(max_items=20, budget_s=60)
+    assert count["n"] == 1 and doubles.queue == ["nt_b"]
+
+
+def test_a_tool_failure_inside_the_mining_loop_ends_the_run(doubles):
+    tools = doubles.tools()
+    # the recall search and mine's first search succeed; the first plan-step search fails
+    count = _failing_after(doubles, tools, "note_search", calls_before_failing=2, give_up_after=4)
+    r = NoteRunner.with_llm(ScriptedLLM(SCRIPT), tools)
+    with pytest.raises(FlowRunError, match=r"^This notebook is pinned"):
+        r.run_recall("Dana", effort="deep")
+    assert count["n"] == 3 and doubles.args("note_insight_write") == []
+
+
+def test_a_tool_failure_inside_the_reflect_loop_ends_the_run(doubles):
+    tools = doubles.tools()
+    count = _failing_after(doubles, tools, "note_insight_write", fallback={"note_id": "nt_x"})
+    r = NoteRunner.with_llm(ScriptedLLM(SCRIPT), tools)
+    with pytest.raises(FlowRunError, match=r"^This notebook is pinned"):
+        r.run_reflect(limit=5)
+    assert count["n"] == 1
+
+
+def test_a_model_failure_inside_the_section_loop_ends_the_run(doubles):
+    def boom(prompt):
+        raise RuntimeError("The model is not reachable.")
+
+    r = NoteRunner.with_llm(ScriptedLLM(dict(SCRIPT, Extraction=boom)), doubles.tools())
+    with pytest.raises(FlowRunError, match="The model is not reachable"):
+        r.run("note-process", {"note_id": "nt_1"})
+    assert doubles.args("note_apply_revision") == []
+
+
+def test_inline_processing_that_fails_ends_the_capture_with_its_sentence(runner, doubles):
+    doubles.fail_apply_for = {"nt_1"}
+    with pytest.raises(FlowRunError, match=r"^The revision could not be applied\.$"):
+        runner.run_capture("Met Dana", process_inline=True)
+    assert doubles.args("note_queue_ack") == []  # never acked as processed
+
+
+def test_cli_capture_pins_the_embedder_and_says_so(tmp_path, capsys):
+    """A notebook created by `capture` without embedder flags is pinned to the hashing embedder;
+    a later command with another embedder is refused with the plain sentence, and --help says so."""
+    try:
+        from abstractnote.cli import build_parser, main
+    except ImportError as e:
+        pytest.skip(f"abstractnote.cli is not importable yet ({e})")
+    nb = tmp_path / "nb"
+    assert main(["capture", "Met Dana", "--notebook", str(nb)]) == 0
+    capsys.readouterr()
+    help_text = build_parser()._subparsers._group_actions[0].choices["capture"].format_help()
+    assert "pinned to its embedding model when it is created" in " ".join(help_text.split())
+    from abstractnote.store.notebook import Notebook
+
+    class Other:
+        model_id = "other-embedder"
+        dimension = 8
+
+        def embed_texts(self, texts):
+            return [[1.0] * 8 for _ in texts]
+
+    with pytest.raises(ValueError, match="pinned to the embedding model"):
+        Notebook.open(nb, embedder=Other())

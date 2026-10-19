@@ -178,6 +178,35 @@ class Flow:
         self.wire(calls, nid, "tool_calls")
         return nid
 
+    def loop_tool_step(
+        self,
+        step_id: str,
+        label: str,
+        tool_name: str,
+        args: Dict[str, Tuple[str, Any]],
+        outputs: Sequence[Pin],
+        after: Tuple[str, str],
+    ) -> Tuple[str, Tuple[str, str]]:
+        """A tool step INSIDE a loop body (while / ForEach): it never raises.
+
+        Inside a control block the runtime turns a node exception into "branch complete" and runs
+        the next iteration (compiler ``wrapped``: ``plan.complete_output`` -> return to the active
+        control node), so a raising result node would make a drain spin until the while guard. Here
+        the result node reports ``failed`` / ``failure`` instead, an ``if`` routes a failure to its
+        own ``on_flow_end`` (an end node terminates the run even inside a loop) with
+        ``{success: false, error, response}`` = the tool's sentence. Returns ``(out node id, the
+        (node, handle) the loop body continues from)``.
+        """
+        out_id = self._tool_nodes(step_id, label, tool_name, args, outputs, after, raising=False)
+        check = self.if_(f"{step_id}_failed", f"{label}: failed?", (out_id, "failed"))
+        self.then(out_id, check)
+        self.end(f"{step_id}_stopped", f"Stopped: {label.lower()} failed", {
+            "response": ("string", (out_id, "failure")), "error": ("string", (out_id, "failure")),
+            "success": ("boolean", False),
+        })
+        self.then(check, f"{step_id}_stopped", "true")
+        return out_id, (check, "false")
+
     def tool_step(
         self,
         step_id: str,
@@ -196,7 +225,12 @@ class Flow:
         result object spread onto named pins, plus ``tool_output`` = the whole object; a
         failed call raises its own plain sentence and ends the run with that error).
         Returns the ``_out`` node id; the exec chain continues from its ``exec-out``.
+        Never use it inside a loop body: use ``loop_tool_step``.
         """
+        return self._tool_nodes(step_id, label, tool_name, args, outputs, after, raising=True)
+
+    def _tool_nodes(self, step_id: str, label: str, tool_name: str, args: Dict[str, Tuple[str, Any]],
+                    outputs: Sequence[Pin], after: Tuple[str, str], *, raising: bool) -> str:
         arg_names = list(args)
         lines = ["arguments = {}"]
         for a in arg_names:
@@ -216,19 +250,35 @@ class Flow:
         self.then(args_id, call_id)
         out_body = (
             "r = results[0] if isinstance(results, list) and results else None\n"
+            "failure = None\n"
+            "out = None\n"
             "if not isinstance(r, dict):\n"
-            f"    raise ValueError({json.dumps(tool_name + ' returned no result.')})\n"
-            "if not r.get(\"success\"):\n"
-            "    raise ValueError(str(r.get(\"error\") or " + json.dumps(tool_name + " failed.") + "))\n"
-            "out = r.get(\"output\")\n"
-            "if not isinstance(out, dict):\n"
-            f"    raise ValueError({json.dumps(tool_name + ' returned something other than an object.')})\n"
-            "return dict(out, tool_output=out)\n"
+            f"    failure = {json.dumps(tool_name + ' returned no result.')}\n"
+            "elif not r.get(\"success\"):\n"
+            "    failure = str(r.get(\"error\") or " + json.dumps(tool_name + " failed.") + ")\n"
+            "else:\n"
+            "    out = r.get(\"output\")\n"
+            "    if not isinstance(out, dict):\n"
+            f"        failure = {json.dumps(tool_name + ' returned something other than an object.')}\n"
         )
+        if raising:
+            out_body += (
+                "if failure is not None:\n"
+                "    raise ValueError(failure)\n"
+                "return dict(out, tool_output=out)\n"
+            )
+            extra_out: List[Pin] = [("tool_output", "object")]
+        else:
+            out_body += (
+                "if failure is not None:\n"
+                "    return {\"failed\": True, \"failure\": failure}\n"
+                "return dict(out, tool_output=out, failed=False, failure=None)\n"
+            )
+            extra_out = [("tool_output", "object"), ("failed", "boolean"), ("failure", "string")]
         out_id = self.code(
             f"{step_id}_out", f"{label}: result", out_body,
             inputs={"results": ("array", (call_id, "results"))},
-            outputs=[*outputs, ("tool_output", "object")],
+            outputs=[*outputs, *extra_out],
         )
         self.then(call_id, out_id)
         return out_id
@@ -323,6 +373,26 @@ class Flow:
         )
         for p, (_, src) in inputs.items():
             self.wire(src, nid, p)
+        return nid
+
+    def child_check(self, node_id: str, label: str, subflow_id: str) -> str:
+        """After a subflow (NOT inside a loop body): end the run with the child's own sentence when
+        the child failed (a child that dies or whose node raised returns ``success: false``)."""
+        nid = self.code(
+            node_id, label,
+            "o = output if isinstance(output, dict) else {}\n"
+            "c = child_output if isinstance(child_output, dict) else {}\n"
+            "if c.get(\"success\") is False or o.get(\"success\") is False:\n"
+            "    err = str(c.get(\"error\") or o.get(\"error\") or \"The step could not finish.\")\n"
+            "    for prefix in (\"Runtime error: \", \"Execution error: \"):\n"
+            "        if err.startswith(prefix):\n"
+            "            err = err[len(prefix):]\n"
+            "    raise ValueError(err)\n"
+            "return {\"checked\": True}",
+            inputs={"output": ("object", (subflow_id, "output")), "child_output": ("object", (subflow_id, "child_output"))},
+            outputs=[("checked", "boolean")],
+        )
+        self.then(subflow_id, nid)
         return nid
 
     def get_var(self, node_id: str, name: str, default: Any) -> str:

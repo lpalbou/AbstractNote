@@ -405,21 +405,105 @@
             "id": "tool_output",
             "label": "tool_output",
             "type": "object"
+          },
+          {
+            "id": "failed",
+            "label": "failed",
+            "type": "boolean"
+          },
+          {
+            "id": "failure",
+            "label": "failure",
+            "type": "string"
           }
         ],
         "pinDefaults": {
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_queue_lease returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_queue_lease failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_queue_lease returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_queue_lease returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_queue_lease failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_queue_lease returned something other than an object.\"\nif failure is not None:\n    return {\"failed\": True, \"failure\": failure}\nreturn dict(out, tool_output=out, failed=False, failure=None)\n"
+      }
+    },
+    {
+      "id": "lease_failed",
+      "type": "if",
+      "position": {
+        "x": 3360.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Take the next note: failed?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "lease_stopped",
+      "type": "on_flow_end",
+      "position": {
+        "x": 3840.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "on_flow_end",
+        "label": "Stopped: take the next note failed",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "error",
+            "label": "error",
+            "type": "string"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [],
+        "pinDefaults": {
+          "success": false
+        }
       }
     },
     {
       "id": "pick",
       "type": "code",
       "position": {
-        "x": 3360.0,
-        "y": 0.0
+        "x": 3840.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "code",
@@ -469,7 +553,7 @@
       "id": "has_item",
       "type": "if",
       "position": {
-        "x": 3840.0,
+        "x": 4320.0,
         "y": 0.0
       },
       "data": {
@@ -505,7 +589,7 @@
       "id": "stop",
       "type": "set_var",
       "position": {
-        "x": 4320.0,
+        "x": 4800.0,
         "y": 0.0
       },
       "data": {
@@ -550,7 +634,7 @@
       "id": "process",
       "type": "subflow",
       "position": {
-        "x": 4320.0,
+        "x": 4800.0,
         "y": 320.0
       },
       "data": {
@@ -615,7 +699,7 @@
       "id": "outcome",
       "type": "code",
       "position": {
-        "x": 4800.0,
+        "x": 5280.0,
         "y": 0.0
       },
       "data": {
@@ -676,7 +760,7 @@
       "id": "ack_args",
       "type": "code",
       "position": {
-        "x": 5280.0,
+        "x": 5760.0,
         "y": 0.0
       },
       "data": {
@@ -737,7 +821,7 @@
       "id": "ack",
       "type": "tool_calls",
       "position": {
-        "x": 5760.0,
+        "x": 6240.0,
         "y": 0.0
       },
       "data": {
@@ -793,7 +877,7 @@
       "id": "ack_out",
       "type": "code",
       "position": {
-        "x": 6240.0,
+        "x": 6720.0,
         "y": 0.0
       },
       "data": {
@@ -831,20 +915,104 @@
             "id": "tool_output",
             "label": "tool_output",
             "type": "object"
+          },
+          {
+            "id": "failed",
+            "label": "failed",
+            "type": "boolean"
+          },
+          {
+            "id": "failure",
+            "label": "failure",
+            "type": "string"
           }
         ],
         "pinDefaults": {
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_queue_ack returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_queue_ack failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_queue_ack returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_queue_ack returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_queue_ack failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_queue_ack returned something other than an object.\"\nif failure is not None:\n    return {\"failed\": True, \"failure\": failure}\nreturn dict(out, tool_output=out, failed=False, failure=None)\n"
+      }
+    },
+    {
+      "id": "ack_failed",
+      "type": "if",
+      "position": {
+        "x": 7200.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Record the outcome: failed?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "ack_stopped",
+      "type": "on_flow_end",
+      "position": {
+        "x": 7680.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "on_flow_end",
+        "label": "Stopped: record the outcome failed",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "error",
+            "label": "error",
+            "type": "string"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [],
+        "pinDefaults": {
+          "success": false
+        }
       }
     },
     {
       "id": "left",
       "type": "get_var",
       "position": {
-        "x": 6240.0,
+        "x": 7200.0,
         "y": 320.0
       },
       "data": {
@@ -879,7 +1047,7 @@
       "id": "deadline",
       "type": "get_var",
       "position": {
-        "x": 6240.0,
+        "x": 7200.0,
         "y": 640.0
       },
       "data": {
@@ -914,7 +1082,7 @@
       "id": "processed",
       "type": "get_var",
       "position": {
-        "x": 6240.0,
+        "x": 7200.0,
         "y": 960.0
       },
       "data": {
@@ -949,7 +1117,7 @@
       "id": "failed",
       "type": "get_var",
       "position": {
-        "x": 6240.0,
+        "x": 7200.0,
         "y": 1280.0
       },
       "data": {
@@ -984,7 +1152,7 @@
       "id": "errors",
       "type": "get_var",
       "position": {
-        "x": 6240.0,
+        "x": 7200.0,
         "y": 1600.0
       },
       "data": {
@@ -1019,8 +1187,8 @@
       "id": "budget",
       "type": "code",
       "position": {
-        "x": 6720.0,
-        "y": 0.0
+        "x": 7680.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "code",
@@ -1100,7 +1268,7 @@
       "id": "budget_vars",
       "type": "set_vars",
       "position": {
-        "x": 7200.0,
+        "x": 8160.0,
         "y": 0.0
       },
       "data": {
@@ -1442,6 +1610,41 @@
       "targetHandle": "exec-in"
     },
     {
+      "id": "e-lease_out-failed-lease_failed-condition",
+      "source": "lease_out",
+      "sourceHandle": "failed",
+      "target": "lease_failed",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-lease_out-exec-out-lease_failed-exec-in",
+      "source": "lease_out",
+      "sourceHandle": "exec-out",
+      "target": "lease_failed",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-lease_out-failure-lease_stopped-response",
+      "source": "lease_out",
+      "sourceHandle": "failure",
+      "target": "lease_stopped",
+      "targetHandle": "response"
+    },
+    {
+      "id": "e-lease_out-failure-lease_stopped-error",
+      "source": "lease_out",
+      "sourceHandle": "failure",
+      "target": "lease_stopped",
+      "targetHandle": "error"
+    },
+    {
+      "id": "e-lease_failed-true-lease_stopped-exec-in",
+      "source": "lease_failed",
+      "sourceHandle": "true",
+      "target": "lease_stopped",
+      "targetHandle": "exec-in"
+    },
+    {
       "id": "e-lease_out-items-pick-items",
       "source": "lease_out",
       "sourceHandle": "items",
@@ -1449,9 +1652,9 @@
       "targetHandle": "items"
     },
     {
-      "id": "e-lease_out-exec-out-pick-exec-in",
-      "source": "lease_out",
-      "sourceHandle": "exec-out",
+      "id": "e-lease_failed-false-pick-exec-in",
+      "source": "lease_failed",
+      "sourceHandle": "false",
       "target": "pick",
       "targetHandle": "exec-in"
     },
@@ -1589,6 +1792,41 @@
       "targetHandle": "exec-in"
     },
     {
+      "id": "e-ack_out-failed-ack_failed-condition",
+      "source": "ack_out",
+      "sourceHandle": "failed",
+      "target": "ack_failed",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-ack_out-exec-out-ack_failed-exec-in",
+      "source": "ack_out",
+      "sourceHandle": "exec-out",
+      "target": "ack_failed",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-ack_out-failure-ack_stopped-response",
+      "source": "ack_out",
+      "sourceHandle": "failure",
+      "target": "ack_stopped",
+      "targetHandle": "response"
+    },
+    {
+      "id": "e-ack_out-failure-ack_stopped-error",
+      "source": "ack_out",
+      "sourceHandle": "failure",
+      "target": "ack_stopped",
+      "targetHandle": "error"
+    },
+    {
+      "id": "e-ack_failed-true-ack_stopped-exec-in",
+      "source": "ack_failed",
+      "sourceHandle": "true",
+      "target": "ack_stopped",
+      "targetHandle": "exec-in"
+    },
+    {
       "id": "e-outcome-outcome-budget-outcome",
       "source": "outcome",
       "sourceHandle": "outcome",
@@ -1645,9 +1883,9 @@
       "targetHandle": "errors"
     },
     {
-      "id": "e-ack_out-exec-out-budget-exec-in",
-      "source": "ack_out",
-      "sourceHandle": "exec-out",
+      "id": "e-ack_failed-false-budget-exec-in",
+      "source": "ack_failed",
+      "sourceHandle": "false",
       "target": "budget",
       "targetHandle": "exec-in"
     },

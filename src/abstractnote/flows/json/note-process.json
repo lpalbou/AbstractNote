@@ -224,7 +224,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_context returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_context failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_context returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_context returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_context failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_context returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
       }
     },
     {
@@ -957,7 +957,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_resolve_candidates returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_resolve_candidates failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_resolve_candidates returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_resolve_candidates returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_resolve_candidates failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_resolve_candidates returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
       }
     },
     {
@@ -1423,7 +1423,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_apply_revision returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_apply_revision failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_apply_revision returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_apply_revision returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_apply_revision failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_apply_revision returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
       }
     },
     {

@@ -266,6 +266,7 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
         "model": ("model", S("model")),
     }, [("response", "string"), ("revision_id", "string"), ("revision", "object")])
     f.then("inline_branch", "process", "true")
+    f.child_check("process_ok", "Understood?", "process")
     ack = f.tool_step(
         "inline_ack", "Mark it processed", "note_queue_ack",
         {
@@ -273,7 +274,7 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
             "revision_id": ("string", ("process", "revision_id")),
         },
         [("status", "string")],
-        after=("process", "exec-out"),
+        after=("process_ok", "exec-out"),
     )
     f.code(
         "processed_msg", "Processed answer",
@@ -435,7 +436,7 @@ def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, A
     f.while_("drain_loop", "While there is budget", ("continue", "value"))
     f.then("init_vars", "drain_loop")
     f.get_var("worker", "drain_worker", "")
-    lease = f.tool_step(
+    lease, lease_ok = f.loop_tool_step(
         "lease", "Take the next note", "note_queue_lease",
         {"worker_id": ("string", ("worker", "value")), "max_items": ("number", 1)},
         [("items", "array")],
@@ -447,7 +448,7 @@ def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, A
         "return {\"has_item\": isinstance(first, dict), \"note_id\": first.get(\"note_id\") if isinstance(first, dict) else None}",
         inputs={"items": ("array", (lease, "items"))}, outputs=[("has_item", "boolean"), ("note_id", "string")],
     )
-    f.then(lease, "pick")
+    f.then(lease_ok[0], "pick", lease_ok[1])
     f.if_("has_item", "Anything queued?", ("pick", "has_item"))
     f.then("pick", "has_item")
     f.set_var("stop", "Stop: queue empty", "drain_continue", False)
@@ -473,7 +474,7 @@ def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, A
         outputs=[("outcome", "string"), ("failure", "string"), ("revision_id", "string")],
     )
     f.then("process", "outcome")
-    ack = f.tool_step(
+    ack, ack_ok = f.loop_tool_step(
         "ack", "Record the outcome", "note_queue_ack",
         {"note_id": ("string", ("pick", "note_id")), "outcome": ("string", ("outcome", "outcome")),
          "error": ("string", ("outcome", "failure")), "revision_id": ("string", ("outcome", "revision_id"))},
@@ -504,7 +505,7 @@ def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, A
         },
         outputs=[("updates", "object")],
     )
-    f.then(ack, "budget")
+    f.then(ack_ok[0], "budget", ack_ok[1])
     f.set_vars("budget_vars", "Remember the budget", ("budget", "updates"))
     f.then("budget", "budget_vars")
     for vid, name, default in (("r_processed", "drain_processed", 0), ("r_failed", "drain_failed", 0),
@@ -656,8 +657,9 @@ def build_recall(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, 
         "until": ("string", S("until")), "provider": ("provider_text", S("provider")), "model": ("model", S("model")),
     }, [(p, t) for p, t in RECALL_OUT_PINS if p != "hits"])
     f.then("by_effort", "mine", "case:deep")
+    f.child_check("mine_ok", "Dug through?", "mine")
     _recall_end(f, "end_deep", "Done (deep)", "mine", "deep", (hits, "tool_output"))
-    f.then("mine", "end_deep")
+    f.then("mine_ok", "end_deep")
     return f.finish()
 
 
@@ -708,7 +710,7 @@ def build_mine(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, An
         outputs=[("query", "string"), ("step_since", "string"), ("step_until", "string")],
     )
     f.then("each_step", "step_query", "loop")
-    step_hits = f.tool_step(
+    step_hits, step_ok = f.loop_tool_step(
         "step_search", "Search this slice", "note_search",
         {"query": ("string", ("step_query", "query")), "since": ("string", ("step_query", "step_since")),
          "until": ("string", ("step_query", "step_until")), "limit": ("number", 20)},
@@ -720,7 +722,7 @@ def build_mine(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, An
     })
     f.llm("findings", "Read this slice", schema=schemas["SliceFindings"], prompt=("findings_prompt", "result"),
           provider=S("provider"), model=S("model"), system=SYSTEM_JSON)
-    f.then(step_hits, "findings")
+    f.then(step_ok[0], "findings", step_ok[1])
     f.code(
         "finding", "Keep the findings",
         "return {\"entry\": {\"step\": item, \"findings\": data if isinstance(data, dict) else {},\n"
@@ -869,7 +871,7 @@ def build_reflect(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
         ("kind", "string"), ("title", "string"), ("body", "string"), ("evidence_note_ids", "array"),
         ("entity_ids", "array"),
     ])
-    wrote = f.tool_step(
+    wrote, wrote_ok = f.loop_tool_step(
         "write", "Write the insight", "note_insight_write",
         {"kind": ("string", ("insight", "kind")), "title": ("string", ("insight", "title")),
          "body": ("string", ("insight", "body")), "evidence_note_ids": ("array", ("insight", "evidence_note_ids")),
@@ -878,7 +880,7 @@ def build_reflect(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
         after=("each_insight", "loop"),
     )
     f.add_to_list("keep_written", "Remember it", "reflect_written", (wrote, "note_id"))
-    f.then(wrote, "keep_written")
+    f.then(wrote_ok[0], "keep_written", wrote_ok[1])
     f.get_var("written", "reflect_written", [])
     f.code(
         "report", "Report",

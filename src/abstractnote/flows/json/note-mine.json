@@ -225,7 +225,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_search returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_search failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_search returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_search returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_search failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_search returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
       }
     },
     {
@@ -751,20 +751,104 @@
             "id": "tool_output",
             "label": "tool_output",
             "type": "object"
+          },
+          {
+            "id": "failed",
+            "label": "failed",
+            "type": "boolean"
+          },
+          {
+            "id": "failure",
+            "label": "failure",
+            "type": "string"
           }
         ],
         "pinDefaults": {
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_search returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_search failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_search returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_search returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_search failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_search returned something other than an object.\"\nif failure is not None:\n    return {\"failed\": True, \"failure\": failure}\nreturn dict(out, tool_output=out, failed=False, failure=None)\n"
+      }
+    },
+    {
+      "id": "step_search_failed",
+      "type": "if",
+      "position": {
+        "x": 5280.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Search this slice: failed?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_search_stopped",
+      "type": "on_flow_end",
+      "position": {
+        "x": 5760.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "on_flow_end",
+        "label": "Stopped: search this slice failed",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "error",
+            "label": "error",
+            "type": "string"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [],
+        "pinDefaults": {
+          "success": false
+        }
       }
     },
     {
       "id": "findings_prompt",
       "type": "string_template",
       "position": {
-        "x": 4800.0,
+        "x": 5280.0,
         "y": 320.0
       },
       "data": {
@@ -808,8 +892,8 @@
       "id": "findings",
       "type": "llm_call",
       "position": {
-        "x": 5280.0,
-        "y": 0.0
+        "x": 5760.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "llm_call",
@@ -943,7 +1027,7 @@
       "id": "finding",
       "type": "code",
       "position": {
-        "x": 5760.0,
+        "x": 6240.0,
         "y": 0.0
       },
       "data": {
@@ -999,7 +1083,7 @@
       "id": "keep_finding",
       "type": "add_to_list",
       "position": {
-        "x": 6240.0,
+        "x": 6720.0,
         "y": 0.0
       },
       "data": {
@@ -1451,7 +1535,7 @@
       "type": "tool_calls",
       "position": {
         "x": 4800.0,
-        "y": 640.0
+        "y": 320.0
       },
       "data": {
         "nodeType": "tool_calls",
@@ -1507,7 +1591,7 @@
       "type": "code",
       "position": {
         "x": 5280.0,
-        "y": 372.0
+        "y": 640.0
       },
       "data": {
         "nodeType": "code",
@@ -1550,7 +1634,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_insight_write returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_insight_write failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_insight_write returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_insight_write returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_insight_write failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_insight_write returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
       }
     },
     {
@@ -1558,7 +1642,7 @@
       "type": "code",
       "position": {
         "x": 5760.0,
-        "y": 320.0
+        "y": 692.0
       },
       "data": {
         "nodeType": "code",
@@ -1933,6 +2017,41 @@
       "targetHandle": "exec-in"
     },
     {
+      "id": "e-step_search_out-failed-step_search_failed-condition",
+      "source": "step_search_out",
+      "sourceHandle": "failed",
+      "target": "step_search_failed",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-step_search_out-exec-out-step_search_failed-exec-in",
+      "source": "step_search_out",
+      "sourceHandle": "exec-out",
+      "target": "step_search_failed",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-step_search_out-failure-step_search_stopped-response",
+      "source": "step_search_out",
+      "sourceHandle": "failure",
+      "target": "step_search_stopped",
+      "targetHandle": "response"
+    },
+    {
+      "id": "e-step_search_out-failure-step_search_stopped-error",
+      "source": "step_search_out",
+      "sourceHandle": "failure",
+      "target": "step_search_stopped",
+      "targetHandle": "error"
+    },
+    {
+      "id": "e-step_search_failed-true-step_search_stopped-exec-in",
+      "source": "step_search_failed",
+      "sourceHandle": "true",
+      "target": "step_search_stopped",
+      "targetHandle": "exec-in"
+    },
+    {
       "id": "e-start-question-findings_prompt-question",
       "source": "start",
       "sourceHandle": "question",
@@ -1975,9 +2094,9 @@
       "targetHandle": "model"
     },
     {
-      "id": "e-step_search_out-exec-out-findings-exec-in",
-      "source": "step_search_out",
-      "sourceHandle": "exec-out",
+      "id": "e-step_search_failed-false-findings-exec-in",
+      "source": "step_search_failed",
+      "sourceHandle": "false",
       "target": "findings",
       "targetHandle": "exec-in"
     },

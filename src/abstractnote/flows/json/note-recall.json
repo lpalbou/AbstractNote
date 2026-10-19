@@ -324,7 +324,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_search returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_search failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_search returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_search returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_search failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_search returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
       }
     },
     {
@@ -734,7 +734,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_expand returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_expand failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_expand returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_expand returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_expand failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_expand returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
       }
     },
     {
@@ -1226,11 +1226,62 @@
       }
     },
     {
-      "id": "end_deep",
-      "type": "on_flow_end",
+      "id": "mine_ok",
+      "type": "code",
       "position": {
         "x": 3360.0,
         "y": 744.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Dug through?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "output",
+            "label": "output",
+            "type": "object"
+          },
+          {
+            "id": "child_output",
+            "label": "child_output",
+            "type": "object"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "checked",
+            "label": "checked",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "o = output if isinstance(output, dict) else {}\nc = child_output if isinstance(child_output, dict) else {}\nif c.get(\"success\") is False or o.get(\"success\") is False:\n    err = str(c.get(\"error\") or o.get(\"error\") or \"The step could not finish.\")\n    for prefix in (\"Runtime error: \", \"Execution error: \"):\n        if err.startswith(prefix):\n            err = err[len(prefix):]\n    raise ValueError(err)\nreturn {\"checked\": True}\n"
+      }
+    },
+    {
+      "id": "end_deep",
+      "type": "on_flow_end",
+      "position": {
+        "x": 3840.0,
+        "y": 640.0
       },
       "data": {
         "nodeType": "on_flow_end",
@@ -1737,6 +1788,27 @@
       "targetHandle": "exec-in"
     },
     {
+      "id": "e-mine-output-mine_ok-output",
+      "source": "mine",
+      "sourceHandle": "output",
+      "target": "mine_ok",
+      "targetHandle": "output"
+    },
+    {
+      "id": "e-mine-child_output-mine_ok-child_output",
+      "source": "mine",
+      "sourceHandle": "child_output",
+      "target": "mine_ok",
+      "targetHandle": "child_output"
+    },
+    {
+      "id": "e-mine-exec-out-mine_ok-exec-in",
+      "source": "mine",
+      "sourceHandle": "exec-out",
+      "target": "mine_ok",
+      "targetHandle": "exec-in"
+    },
+    {
       "id": "e-mine-response-end_deep-response",
       "source": "mine",
       "sourceHandle": "response",
@@ -1793,8 +1865,8 @@
       "targetHandle": "hits"
     },
     {
-      "id": "e-mine-exec-out-end_deep-exec-in",
-      "source": "mine",
+      "id": "e-mine_ok-exec-out-end_deep-exec-in",
+      "source": "mine_ok",
       "sourceHandle": "exec-out",
       "target": "end_deep",
       "targetHandle": "exec-in"

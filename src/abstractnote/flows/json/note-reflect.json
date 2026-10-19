@@ -206,7 +206,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_open_loops returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_open_loops failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_open_loops returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_open_loops returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_open_loops failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_open_loops returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
       }
     },
     {
@@ -364,7 +364,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_contradictions returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_contradictions failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_contradictions returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_contradictions returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_contradictions failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_contradictions returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
       }
     },
     {
@@ -522,7 +522,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_resurface returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_resurface failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_resurface returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_resurface returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_resurface failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_resurface returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
       }
     },
     {
@@ -680,7 +680,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_anniversaries returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_anniversaries failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_anniversaries returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_anniversaries returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_anniversaries failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_anniversaries returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
       }
     },
     {
@@ -1247,21 +1247,105 @@
             "id": "tool_output",
             "label": "tool_output",
             "type": "object"
+          },
+          {
+            "id": "failed",
+            "label": "failed",
+            "type": "boolean"
+          },
+          {
+            "id": "failure",
+            "label": "failure",
+            "type": "string"
           }
         ],
         "pinDefaults": {
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nif not isinstance(r, dict):\n    raise ValueError(\"note_insight_write returned no result.\")\nif not r.get(\"success\"):\n    raise ValueError(str(r.get(\"error\") or \"note_insight_write failed.\"))\nout = r.get(\"output\")\nif not isinstance(out, dict):\n    raise ValueError(\"note_insight_write returned something other than an object.\")\nreturn dict(out, tool_output=out)\n"
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_insight_write returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_insight_write failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_insight_write returned something other than an object.\"\nif failure is not None:\n    return {\"failed\": True, \"failure\": failure}\nreturn dict(out, tool_output=out, failed=False, failure=None)\n"
+      }
+    },
+    {
+      "id": "write_failed",
+      "type": "if",
+      "position": {
+        "x": 9600.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Write the insight: failed?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "write_stopped",
+      "type": "on_flow_end",
+      "position": {
+        "x": 10080.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "on_flow_end",
+        "label": "Stopped: write the insight failed",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "error",
+            "label": "error",
+            "type": "string"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [],
+        "pinDefaults": {
+          "success": false
+        }
       }
     },
     {
       "id": "keep_written",
       "type": "add_to_list",
       "position": {
-        "x": 9600.0,
-        "y": 0.0
+        "x": 10080.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "add_to_list",
@@ -1831,6 +1915,41 @@
       "targetHandle": "exec-in"
     },
     {
+      "id": "e-write_out-failed-write_failed-condition",
+      "source": "write_out",
+      "sourceHandle": "failed",
+      "target": "write_failed",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-write_out-exec-out-write_failed-exec-in",
+      "source": "write_out",
+      "sourceHandle": "exec-out",
+      "target": "write_failed",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-write_out-failure-write_stopped-response",
+      "source": "write_out",
+      "sourceHandle": "failure",
+      "target": "write_stopped",
+      "targetHandle": "response"
+    },
+    {
+      "id": "e-write_out-failure-write_stopped-error",
+      "source": "write_out",
+      "sourceHandle": "failure",
+      "target": "write_stopped",
+      "targetHandle": "error"
+    },
+    {
+      "id": "e-write_failed-true-write_stopped-exec-in",
+      "source": "write_failed",
+      "sourceHandle": "true",
+      "target": "write_stopped",
+      "targetHandle": "exec-in"
+    },
+    {
       "id": "e-write_out-note_id-keep_written-item",
       "source": "write_out",
       "sourceHandle": "note_id",
@@ -1838,9 +1957,9 @@
       "targetHandle": "item"
     },
     {
-      "id": "e-write_out-exec-out-keep_written-exec-in",
-      "source": "write_out",
-      "sourceHandle": "exec-out",
+      "id": "e-write_failed-false-keep_written-exec-in",
+      "source": "write_failed",
+      "sourceHandle": "false",
       "target": "keep_written",
       "targetHandle": "exec-in"
     },

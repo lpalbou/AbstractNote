@@ -31,8 +31,11 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--notebook", type=Path, help="notebook directory (created when missing)")
     p.add_argument("--gateway", help="gateway URL (client mode)")
     p.add_argument("--token", help="gateway token, passed directly")
-    p.add_argument("--embed-base-url", help="OpenAI-compatible embeddings URL (for example http://127.0.0.1:1234/v1)")
-    p.add_argument("--embed-model", help="embedding model id at that URL")
+    p.add_argument("--embed-base-url", help="OpenAI-compatible embeddings URL (for example http://127.0.0.1:1234/v1). "
+                   "A notebook is pinned to its embedding model when it is created (by the first command that "
+                   "opens it, capture included; without these flags: the built-in hashing embedder); every later "
+                   "command must give the same model, or run rebuild --reembed to change it")
+    p.add_argument("--embed-model", help="embedding model id at that URL (pinned at notebook creation, see --embed-base-url)")
 
 
 def build_parser() -> argparse.ArgumentParser:
