@@ -7,7 +7,7 @@
 import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, type SimulationLinkDatum, type SimulationNodeDatum } from "d3-force";
 
 export type LayoutNode = SimulationNodeDatum & { id: string; r: number };
-export type LayoutInput = { nodes: Array<{ id: string; weight?: number }>; edges: Array<{ source: string; target: string }>; width: number; height: number; ticks?: number; focus?: string[] };
+export type LayoutInput = { nodes: Array<{ id: string; weight?: number; r?: number }>; edges: Array<{ source: string; target: string }>; width: number; height: number; ticks?: number; focus?: string[] };
 export type Positioned = { id: string; x: number; y: number; r: number };
 
 export function nodeRadius(weight = 1): number {
@@ -25,7 +25,7 @@ export function layoutGraph(input: LayoutInput): Positioned[] {
     const i = order.get(n.id) || 0;
     const angle = (i / Math.max(1, ids.length)) * Math.PI * 2;
     const ring = Math.min(width, height) * 0.32;
-    return { id: n.id, r: nodeRadius(n.weight), x: focus.has(n.id) ? cx : cx + Math.cos(angle) * ring, y: focus.has(n.id) ? cy : cy + Math.sin(angle) * ring };
+    return { id: n.id, r: n.r ?? nodeRadius(n.weight), x: focus.has(n.id) ? cx : cx + Math.cos(angle) * ring, y: focus.has(n.id) ? cy : cy + Math.sin(angle) * ring };
   });
   const known = new Set(nodes.map((n) => n.id));
   const links: Array<SimulationLinkDatum<LayoutNode>> = input.edges.filter((e) => known.has(e.source) && known.has(e.target) && e.source !== e.target).map((e) => ({ source: e.source, target: e.target }));

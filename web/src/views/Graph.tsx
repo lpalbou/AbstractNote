@@ -1,12 +1,14 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AfChip, AfChipButton, AfTabs, Icon } from "@abstractframework/ui-kit";
-import { ApiError } from "../lib/api";
-import { useDebounced, useRead } from "../lib/hooks";
+import { ApiError, errorSentence } from "../lib/api";
+import { CARD_DELAY_MS, communitySlots, edgeKey, edgeLabelShown, firstSentence, litBy, placeCard, radiusScale, strongestLinks, type Hover } from "../lib/graph_focus";
+import { useDebounced, useRead, type ReadState } from "../lib/hooks";
 import { boundsOf, fitView, layoutGraph, settleFrames, toWorld, zoomAt, type Positioned, type ViewTransform } from "../lib/graph_layout";
 import { milestones } from "../lib/milestones";
 import { momentParams, navigate, noteAbout, useAt, useByReceived, type Route } from "../lib/nav";
 import { thenNowView } from "../lib/shapes";
-import type { Day, EntityCard, EntityListItem, EntityRecord, Graph, ListOf, ThenNowRaw, TimelineItem } from "../lib/types";
+import type { Communities, Community, Day, EntityCard, EntityListItem, EntityRecord, Graph, GraphNode, ListOf, ThenNowRaw, TimelineItem } from "../lib/types";
 import { capitalize, claimSentence, longDate, predicateWords, shortDate } from "../lib/words";
 import { EmptyNotebook, EntityChip, KindBadge, NoteLink, ReadView, Section, Sparkline, openClaim, openNote, openRelation, useApp } from "../components/common";
 import { ThenNowCard } from "../components/ThenNow";
@@ -22,11 +24,15 @@ export function GraphView({ route }: { route: Route }) {
   const selected = route.params.get("entity") || "";
   const day = DAY_RE.test(route.params.get("day") || "") ? route.params.get("day")! : "";
   const asList = route.params.get("view") === "list";
+  // One theme shown alone (a click in the legend or on a theme card in the overview).
+  const isolated = route.params.get("community") || "";
 
   const go = (patch: Record<string, string | number | null>) => {
-    const cur: Record<string, string | number | null> = { focus: focus.join(","), depth, entity: selected, day, view: asList ? "list" : null };
+    const cur: Record<string, string | number | null> = { focus: focus.join(","), depth, entity: selected, day, view: route.params.get("view"), community: isolated };
     navigate("graph", { ...cur, ...patch });
   };
+  // Read once for the legend, the colours and the hover card.
+  const communities = useRead<Communities>(() => api.get<Communities>("note/communities"), [api]);
 
   const now = useRead<Graph>(() => api.get<Graph>("note/graph", { focus, depth, limit: 80 }), [api, focus.join(","), depth]);
   const [byReceived] = useByReceived();
@@ -46,7 +52,7 @@ export function GraphView({ route }: { route: Route }) {
               ) : asList ? (
                 <RelationList graph={g} then={at ? then.data : null} onSelect={(id) => go({ entity: id, day: "" })} />
               ) : (
-                <GraphCanvas graph={g} then={at ? then.data : null} selected={selected} focus={focus} onSelect={(id) => go({ entity: id, day: "" })} />
+                <GraphCanvas graph={g} then={at ? then.data : null} selected={selected} focus={focus} onSelect={(id) => go({ entity: id, day: "" })} communities={communities} isolated={isolated} onIsolate={(id) => go({ community: id })} />
               )
             }
           </ReadView>
@@ -54,7 +60,7 @@ export function GraphView({ route }: { route: Route }) {
         <TimeScrubber archive onDay={(d) => go({ day: d, entity: "" })} />
       </div>
       <aside className="nt-graph__side" aria-label="Details">
-        {day ? <DayPanel date={day} onClose={() => go({ day: "" })} /> : selected ? <EntityPanel id={selected} at={at} onFocus={() => go({ focus: selected, entity: selected })} /> : <p className="nt-muted nt-pad">Pick a person, project or idea to see how it evolved, then choose a date to see what you knew then.</p>}
+        {day ? <DayPanel date={day} onClose={() => go({ day: "" })} /> : selected ? <EntityPanel id={selected} at={at} onFocus={() => go({ focus: selected, entity: selected })} slots={communitySlots(communities.data?.items || [])} onTheme={(cid) => go({ community: isolated === cid ? null : cid, view: asList ? "list" : "picture" })} /> : <p className="nt-muted nt-pad">Pick a person, project or idea to see how it evolved, then choose a date to see what you knew then.</p>}
       </aside>
     </div>
   );
@@ -232,6 +238,8 @@ function useSize<T extends HTMLElement>(): [React.RefObject<T>, { w: number; h: 
 
 /** The layout's own space: fixed, so a graph lands the same way at every window size (the view fits it). */
 const WORLD = { w: 1000, h: 700 };
+/** The closest a theme shown alone is fitted. */
+const ISOLATE_MAX_ZOOM = 1.5;
 
 function reducedMotion(): boolean {
   try {
@@ -243,28 +251,89 @@ function reducedMotion(): boolean {
 
 type Drag = { kind: "pan"; sx: number; sy: number; vx: number; vy: number } | { kind: "node"; id: string; sx: number; sy: number; moved: boolean } | null;
 
-function GraphCanvas({ graph, then, selected, focus, onSelect }: { graph: Graph; then: Graph | null; selected: string; focus: string[]; onSelect: (id: string) => void }) {
+function GraphCanvas({ graph, then, selected, focus, onSelect, communities, isolated, onIsolate }: { graph: Graph; then: Graph | null; selected: string; focus: string[]; onSelect: (id: string) => void; communities: ReadState<Communities>; isolated: string; onIsolate: (id: string | null) => void }) {
   const [ref, size] = useSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
+  // Node size by note count, square-root scale (area grows with the count).
+  const radius = useMemo(() => radiusScale(Math.max(1, ...graph.nodes.map((n) => n.note_count || 0))), [graph]);
   // Laid out once per graph (not per date: the picture stays where it is when the date changes).
-  const laid = useMemo(() => layoutGraph({ nodes: graph.nodes.map((n) => ({ id: n.id, weight: n.note_count })), edges: graph.edges, width: WORLD.w, height: WORLD.h, focus }), [graph, focus]);
+  const laid = useMemo(() => layoutGraph({ nodes: graph.nodes.map((n) => ({ id: n.id, weight: n.note_count, r: radius(n.note_count) })), edges: graph.edges, width: WORLD.w, height: WORLD.h, focus }), [graph, focus, radius]);
   const [placed, setPlaced] = useState<Positioned[]>(laid);
   const [view, setView] = useState<ViewTransform>({ k: 1, x: 0, y: 0 });
   const drag = useRef<Drag>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ d: number } | null>(null);
+  const slots = useMemo(() => communitySlots(communities.data?.items || []), [communities.data]);
+  const communityOf = useMemo(() => new Map((communities.data?.items || []).map((c) => [c.community_id, c])), [communities.data]);
+  // The communities in this picture, in colour order (the legend lists them; a click isolates one).
+  const present = useMemo(() => {
+    const ids = new Set(graph.nodes.map((n) => n.community_id).filter(Boolean) as string[]);
+    return (communities.data?.items || []).filter((c) => ids.has(c.community_id)).sort((a, b) => (slots.get(a.community_id) || 99) - (slots.get(b.community_id) || 99));
+  }, [graph, communities.data, slots]);
+  const inIsolated = (id: string) => !isolated || graph.nodes.find((n) => n.id === id)?.community_id === isolated;
   // The legend sits along the bottom edge: the fit leaves it its strip.
-  const LEGEND = 34;
-  const fitNow = (nodes: Positioned[] = placed) => setView(fitView(boundsOf(nodes), size.w, size.h - LEGEND));
-  // Fit on load and whenever the data or the space changes.
+  const LEGEND = size.w < 600 ? 52 : 34;
+  const fitNodes = (nodes: Positioned[]) => {
+    // A theme alone is brought closer, never so close its circles fill the view.
+    const iso = isolated ? nodes.filter((p) => inIsolated(p.id)) : [];
+    return iso.length ? fitView(boundsOf(iso), size.w, size.h - LEGEND, 48, ISOLATE_MAX_ZOOM) : fitView(boundsOf(nodes), size.w, size.h - LEGEND);
+  };
+  const fitNow = (nodes: Positioned[] = placed) => setView(fitNodes(nodes));
+  // Fit on load and whenever the data, the space or the isolated community changes.
   useEffect(() => {
     setPlaced(laid);
-    setView(fitView(boundsOf(laid), size.w, size.h - LEGEND));
-  }, [laid, size.w, size.h]);
+    setView(fitNodes(laid));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [laid, size.w, size.h, isolated]);
   const pos = useMemo(() => new Map(placed.map((p) => [p.id, p])), [placed]);
+  const names = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n.name])), [graph]);
   const thenNodes = useMemo(() => (then ? new Set(then.nodes.map((n) => n.id)) : null), [then]);
-  const thenEdges = useMemo(() => (then ? new Map(then.edges.map((e) => [`${e.source}|${e.target}|${e.predicate}`, e])) : null), [then]);
+  const thenEdges = useMemo(() => (then ? new Map(then.edges.map((e) => [edgeKey(e), e])) : null), [then]);
   const pairs = new Map<string, number>();
+
+  // Hover: everything but the hovered node, its links and its neighbours fades; after a rest, a card.
+  const [hover, setHover] = useState<Hover>(null);
+  const [card, setCard] = useState<{ id: string; x: number; y: number } | null>(null);
+  const cardTimer = useRef<number | null>(null);
+  const lastPointer = useRef({ x: 0, y: 0 });
+  const lit = useMemo(() => litBy(hover, graph.edges), [hover, graph.edges]);
+  const clearCard = () => {
+    if (cardTimer.current !== null) window.clearTimeout(cardTimer.current);
+    cardTimer.current = null;
+    setCard(null);
+  };
+  useEffect(() => () => clearCard(), []);
+  const hoverNode = (id: string | null, at?: { x: number; y: number }) => {
+    if (id === (hover?.kind === "node" ? hover.id : null) && id) return;
+    clearCard();
+    setHover(id ? { kind: "node", id } : null);
+    if (!id) return;
+    cardTimer.current = window.setTimeout(() => {
+      const p = at || lastPointer.current;
+      setCard({ id, x: p.x, y: p.y });
+    }, CARD_DELAY_MS);
+  };
+  const hoverEdge = (key: string | null) => {
+    if (!key) return;
+    const [source, target] = key.split("|");
+    if (hover?.kind === "edge" && hover.key === key) return;
+    clearCard();
+    setHover({ kind: "edge", key, source, target });
+  };
+  /** Pointer over the picture (a mouse or pen, never a finger): what is under it lights up. */
+  const trackHover = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (e.pointerType === "touch" || drag.current || pointers.current.size) return;
+    lastPointer.current = { x: e.clientX, y: e.clientY };
+    const t = e.target as Element;
+    const node = t.closest?.("[data-node]");
+    if (node) return hoverNode(node.getAttribute("data-node"));
+    const edge = t.closest?.("[data-edge]");
+    if (edge) return hoverEdge(edge.getAttribute("data-edge"));
+    if (hover) {
+      clearCard();
+      setHover(null);
+    }
+  };
 
   const local = (e: { clientX: number; clientY: number }) => {
     const r = svgRef.current?.getBoundingClientRect();
@@ -304,6 +373,7 @@ function GraphCanvas({ graph, then, selected, focus, onSelect }: { graph: Graph;
     const p = local(e);
     pointers.current.set(e.pointerId, p);
     svgRef.current?.setPointerCapture?.(e.pointerId);
+    clearCard();
     if (pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()];
       pinch.current = { d: Math.hypot(a.x - b.x, a.y - b.y) };
@@ -316,7 +386,7 @@ function GraphCanvas({ graph, then, selected, focus, onSelect }: { graph: Graph;
     else drag.current = { kind: "pan", sx: p.x, sy: p.y, vx: view.x, vy: view.y };
   };
   const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (!pointers.current.has(e.pointerId)) return;
+    if (!pointers.current.has(e.pointerId)) return trackHover(e);
     const p = local(e);
     pointers.current.set(e.pointerId, p);
     if (pinch.current && pointers.current.size === 2) {
@@ -350,8 +420,12 @@ function GraphCanvas({ graph, then, selected, focus, onSelect }: { graph: Graph;
   };
   // Labels and their halo keep their screen size whatever the zoom.
   const fontPx = (px: number) => ({ fontSize: `calc(${px}px * var(--font-scale, 1) / ${view.k.toFixed(3)})`, strokeWidth: 3 / view.k });
+  const slotClass = (cid: string | null | undefined) => ` nt-c${(cid && slots.get(cid)) || 0}`;
+  const cardNode = card ? graph.nodes.find((n) => n.id === card.id) : null;
 
   return (
+    <>
+    <CommunityLegend communities={communities} present={present} slots={slots} isolated={isolated} onIsolate={onIsolate} />
     <div ref={ref} className="nt-canvas">
       <div className="nt-canvas__tools" role="group" aria-label="Zoom">
         <button type="button" className="nt-icon-btn" aria-label="Zoom in" title="Zoom in" onClick={() => setView((v) => zoomAt(v, 1.25, size.w / 2, size.h / 2))}>
@@ -371,11 +445,17 @@ function GraphCanvas({ graph, then, selected, focus, onSelect }: { graph: Graph;
         viewBox={`0 0 ${size.w} ${size.h}`}
         role="img"
         aria-label={`Graph of ${graph.nodes.length} entities and ${graph.edges.length} links; drag to move, scroll or pinch to zoom`}
-        className="nt-canvas__svg"
+        className={`nt-canvas__svg${lit ? " nt-canvas__svg--hover" : ""}`}
+        data-zoom={view.k.toFixed(2)}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        onPointerLeave={() => {
+          if (drag.current) return;
+          clearCard();
+          setHover(null);
+        }}
         onDoubleClick={(e) => {
           if (!(e.target as Element).closest?.("[data-node], [data-edge]")) fitNow();
         }}
@@ -391,7 +471,7 @@ function GraphCanvas({ graph, then, selected, focus, onSelect }: { graph: Graph;
             const a = pos.get(e.source);
             const b = pos.get(e.target);
             if (!a || !b) return null;
-            const key = `${e.source}|${e.target}|${e.predicate}`;
+            const key = edgeKey(e);
             const te = thenEdges ? thenEdges.get(key) : e;
             const existed = Boolean(te);
             const active = te ? te.active : false;
@@ -411,16 +491,21 @@ function GraphCanvas({ graph, then, selected, focus, onSelect }: { graph: Graph;
             const mx = (sx + tx) / 2 - uy * off;
             const my = (sy + ty) / 2 + ux * off;
             const count = te ? te.count : e.count;
+            const isLit = Boolean(lit?.edges.has(key));
+            const faded = lit ? !isLit : false;
+            const out = !lit && Boolean(isolated) && !(inIsolated(e.source) && inIsolated(e.target));
             return (
-              <g key={key} data-edge="" className={`nt-edge${existed ? "" : " nt-edge--future"}${existed && !active ? " nt-edge--old" : ""}`}>
+              <g key={key} data-edge={key} className={`nt-edge${existed ? "" : " nt-edge--future"}${existed && !active ? " nt-edge--old" : ""}${isLit ? " nt-edge--lit" : ""}${faded ? " nt-fade" : ""}${out ? " nt-out" : ""}`}>
                 <line x1={sx} y1={sy} x2={tx} y2={ty} markerEnd="url(#nt-arrow)" vectorEffect="non-scaling-stroke" />
                 <line x1={sx} y1={sy} x2={tx} y2={ty} className="nt-edge__hit" onClick={() => openRelation(e.source, e.target)}>
                   <title>{`${predicateWords(e.predicate)}${count > 1 ? ` · ${count} times` : ""} · since ${shortDate(e.first_seen)}, open how this link changed`}</title>
                 </line>
-                <text x={mx} y={my - 4 / view.k} textAnchor="middle" className="nt-edge__label" style={fontPx(10.5)} onClick={() => openRelation(e.source, e.target)}>
-                  {predicateWords(e.predicate)}
-                  {count > 1 ? ` ×${count}` : ""}
-                </text>
+                {edgeLabelShown(view.k, isLit, faded || out, Math.hypot(tx - sx, ty - sy) * view.k) ? (
+                  <text x={mx} y={my - 4 / view.k} textAnchor="middle" className="nt-edge__label" style={fontPx(10.5)} onClick={() => openRelation(e.source, e.target)}>
+                    {predicateWords(e.predicate)}
+                    {count > 1 ? ` ×${count}` : ""}
+                  </text>
+                ) : null}
               </g>
             );
           })}
@@ -428,20 +513,32 @@ function GraphCanvas({ graph, then, selected, focus, onSelect }: { graph: Graph;
             const p = pos.get(n.id);
             if (!p) return null;
             const existed = !thenNodes || thenNodes.has(n.id);
+            const faded = lit ? !lit.nodes.has(n.id) : false;
+            const out = !lit && !inIsolated(n.id);
+            const community = n.community_id ? communityOf.get(n.community_id) : null;
             return (
               <g
                 key={n.id}
                 data-node={n.id}
-                className={`nt-node nt-node--${n.kind}${existed ? "" : " nt-node--future"}${selected === n.id ? " nt-node--selected" : ""}${focus.includes(n.id) ? " nt-node--focus" : ""}`}
+                className={`nt-node nt-node--${n.kind}${slotClass(n.community_id)}${existed ? "" : " nt-node--future"}${selected === n.id ? " nt-node--selected" : ""}${focus.includes(n.id) ? " nt-node--focus" : ""}${faded ? " nt-fade" : ""}${out ? " nt-out" : ""}${lit?.nodes.has(n.id) ? " nt-node--lit" : ""}`}
                 transform={`translate(${p.x},${p.y})`}
                 tabIndex={0}
                 role="button"
-                aria-label={`${n.name}, ${n.kind}${existed ? "" : ", not known yet at that time"}`}
+                aria-label={`${n.name}, ${n.kind}${community ? `, in ${community.label}` : ""}${existed ? "" : ", not known yet at that time"}`}
+                onFocus={(ev) => {
+                  const r = (ev.currentTarget as Element).getBoundingClientRect();
+                  hoverNode(n.id, { x: r.left + r.width / 2, y: r.top + r.height / 2 });
+                }}
+                onBlur={() => {
+                  clearCard();
+                  setHover(null);
+                }}
                 onKeyDown={(ev) => {
                   if (ev.key === "Enter" || ev.key === " ") {
                     ev.preventDefault();
                     onSelect(n.id);
                   }
+                  if (ev.key === "Escape") clearCard();
                 }}
               >
                 <title>{`${n.name} · ${n.kind}${n.note_count ? ` · ${n.note_count} ${n.note_count === 1 ? "note" : "notes"}` : ""}`}</title>
@@ -456,6 +553,7 @@ function GraphCanvas({ graph, then, selected, focus, onSelect }: { graph: Graph;
           })}
         </g>
       </svg>
+      {card && cardNode ? <HoverCard node={cardNode} at={card} edges={graph.edges} names={names} community={cardNode.community_id ? communityOf.get(cardNode.community_id) || null : null} slot={(cardNode.community_id && slots.get(cardNode.community_id)) || 0} /> : null}
       <p className="nt-legend">
         <span className="nt-legend__item">
           <svg width="26" height="8" aria-hidden="true">
@@ -469,17 +567,103 @@ function GraphCanvas({ graph, then, selected, focus, onSelect }: { graph: Graph;
           </svg>
           no longer believed
         </span>
+        <span className="nt-legend__item">size: how often you noted it</span>
         {then ? <span className="nt-legend__item nt-legend__item--faded">faded: not known yet</span> : null}
-        <span className="nt-legend__item nt-legend__hint">drag to move · scroll or pinch to zoom · double-click to fit</span>
+        <span className="nt-legend__item nt-legend__hint">hover to see links · zoom in for their words · double-click to fit</span>
       </p>
     </div>
+    </>
+  );
+}
+
+/** The themes in the picture, each with its colour: a click shows that theme alone (and again, everything). */
+function CommunityLegend({ communities, present, slots, isolated, onIsolate }: { communities: ReadState<Communities>; present: Community[]; slots: Map<string, number>; isolated: string; onIsolate: (id: string | null) => void }) {
+  const row = useRef<HTMLDivElement>(null);
+  // On a phone the row scrolls sideways: the theme shown alone is brought into view.
+  useEffect(() => {
+    const on = row.current?.querySelector<HTMLElement>("[aria-pressed=true]");
+    const box = row.current;
+    if (on && box) box.scrollLeft = Math.max(0, on.offsetLeft - 12);
+  }, [isolated, present.length]);
+  if (communities.loading && !communities.data) return null;
+  if (!communities.data) {
+    return (
+      <div className="nt-themes">
+        <span className="nt-error-text">{communities.error instanceof ApiError && (communities.error.status === 404 || communities.error.status === 501) ? "Your notebook cannot show themes yet." : errorSentence(communities.error, "the themes")}</span>
+        <button type="button" className="nt-btn nt-btn--quiet nt-btn--sm" onClick={communities.reload}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+  if (!present.length) return null;
+  return (
+    <div ref={row} className="nt-themes" role="group" aria-label="Themes: choose one to show it alone">
+      {present.map((c) => {
+        const on = isolated === c.community_id;
+        return (
+          <button key={c.community_id} type="button" className={`nt-theme nt-c${slots.get(c.community_id) || 0}`} aria-pressed={on} title={on ? "Show every theme" : `Show ${c.label} alone`} onClick={() => onIsolate(on ? null : c.community_id)}>
+            <span className="nt-theme__dot" aria-hidden="true" />
+            <span className="nt-theme__label">{c.label}</span>
+          </button>
+        );
+      })}
+      {isolated ? (
+        <button type="button" className="nt-btn nt-btn--quiet nt-btn--sm" onClick={() => onIsolate(null)}>
+          Show all
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** The card a resting pointer (or keyboard focus) opens beside a node; kept inside the window. */
+function HoverCard({ node, at, edges, names, community, slot }: { node: GraphNode; at: { x: number; y: number }; edges: Graph["edges"]; names: Map<string, string>; community: Community | null; slot: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setPos(placeCard(at.x, at.y, r.width, r.height, { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight }));
+  }, [at.x, at.y, node.id]);
+  const links = strongestLinks(node.id, node.name, edges, names, 3);
+  const summary = firstSentence(node.summary);
+  const count = node.note_count || 0;
+  return createPortal(
+    <div ref={ref} className="nt-hovercard" role="tooltip" style={pos ? { left: pos.x, top: pos.y } : { left: -9999, top: 0, visibility: "hidden" }}>
+      <div className="nt-hovercard__head">
+        <span className="nt-hovercard__name">{node.name}</span>
+        <span className="nt-kind">{node.kind}</span>
+      </div>
+      {summary ? <p className="nt-hovercard__summary">{summary}</p> : null}
+      <p className="nt-hovercard__meta">
+        {`${count} ${count === 1 ? "note" : "notes"}`}
+        {node.first_seen ? ` · first ${shortDate(node.first_seen)}` : ""}
+        {node.last_seen ? ` · latest ${shortDate(node.last_seen)}` : ""}
+      </p>
+      {community ? (
+        <p className={`nt-hovercard__theme nt-c${slot}`}>
+          <span className="nt-theme__dot" aria-hidden="true" />
+          <span>{community.label}</span>
+        </p>
+      ) : null}
+      {links.length ? (
+        <ul className="nt-hovercard__links" aria-label="Strongest links">
+          {links.map((l) => (
+            <li key={l}>{l}</li>
+          ))}
+        </ul>
+      ) : null}
+    </div>,
+    document.body,
   );
 }
 
 type PanelTab = "evolved" | "changes" | "actions" | "sources" | "links";
 
 /** The topic portrait: how it evolved (first), changes, open actions, sources and links. */
-export function EntityPanel({ id, at, onFocus }: { id: string; at: string | null; onFocus?: () => void }) {
+export function EntityPanel({ id, at, onFocus, slots, onTheme }: { id: string; at: string | null; onFocus?: () => void; slots?: Map<string, number>; onTheme?: (communityId: string) => void }) {
   const { api } = useApp();
   const [, setAt] = useAt();
   const [tab, setTab] = useState<PanelTab>("evolved");
@@ -533,6 +717,12 @@ export function EntityPanel({ id, at, onFocus }: { id: string; at: string | null
                     {e.aliases?.length ? ` · also ${e.aliases.join(", ")}` : ""}
                     {at ? (byReceived ? ` · as held on ${longDate(at)}` : ` · as of ${longDate(at)}`) : ""}
                   </p>
+                  {e.community && onTheme ? (
+                    <button type="button" className={`nt-theme nt-theme--inline nt-c${slots?.get(e.community.community_id) || 0}`} title={`Show ${e.community.label} in the picture`} onClick={() => onTheme(e.community!.community_id)}>
+                      <span className="nt-theme__dot" aria-hidden="true" />
+                      <span className="nt-theme__label">{e.community.label}</span>
+                    </button>
+                  ) : null}
                   {(e.merged_from || []).length ? <MergedFrom ids={e.merged_from || []} /> : null}
                 </div>
                 {timeline.data ? <Sparkline dates={noteDates} from={range.from} to={range.to} label={`${e.name} activity`} /> : null}

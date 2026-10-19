@@ -26,6 +26,15 @@
   --nt-focus: color-mix(in oklab, var(--info) 70%, var(--text-primary));
   --nt-soft: color-mix(in oklab, var(--info) 10%, var(--nt-bg));
   --nt-shadow: 0 1px 0 color-mix(in oklab, var(--text-primary) 4%, transparent) inset;
+  /* Community colours (categorical, fixed order, six slots; slot 0 = other): kit tokens where relative
+   * colour is missing, else six hues turned from the theme's info hue at its lightness (below). */
+  --nt-c0: var(--text-muted);
+  --nt-c1: var(--nt-indigo);
+  --nt-c2: var(--entity-identity, var(--accent));
+  --nt-c3: var(--nt-mint);
+  --nt-c4: var(--warning);
+  --nt-c5: var(--entity-standing, var(--accent));
+  --nt-c6: var(--nt-cyan);
 }
 
 /* Near-black: a dark theme's page colour at about three quarters of its lightness; a light theme
@@ -33,6 +42,14 @@
 @supports (color: oklch(from red l c h)) {
   :root {
     --nt-bg: oklch(from var(--bg-primary) max(calc(l * 0.74), min(l, calc((l - 0.6) * 100))) calc(c * 0.85) h);
+    /* Blue, orange, aqua, yellow, magenta, violet: the order keeps neighbours apart for colour-blind readers
+     * (dataviz reference order); lightness and chroma follow the theme's info colour, bounded. */
+    --nt-c1: oklch(from var(--info) clamp(0.52, l, 0.74) clamp(0.11, c, 0.16) h);
+    --nt-c2: oklch(from var(--info) clamp(0.56, calc(l + 0.02), 0.76) clamp(0.12, c, 0.16) calc(h + 155));
+    --nt-c3: oklch(from var(--info) clamp(0.56, calc(l + 0.03), 0.78) clamp(0.1, c, 0.14) calc(h - 80));
+    --nt-c4: oklch(from var(--info) clamp(0.62, calc(l + 0.1), 0.84) clamp(0.11, c, 0.15) calc(h + 205));
+    --nt-c5: oklch(from var(--info) clamp(0.54, l, 0.74) clamp(0.12, c, 0.17) calc(h + 105));
+    --nt-c6: oklch(from var(--info) clamp(0.5, calc(l - 0.04), 0.7) clamp(0.11, c, 0.17) calc(h + 50));
   }
 }
 
@@ -405,24 +422,68 @@ p { margin: 0 0 6px; }
 .nt-canvas__svg :focus, .nt-canvas__svg :focus-visible { outline: none; }
 .nt-node__ring { fill: none; stroke: transparent; stroke-width: 2.5; pointer-events: none; }
 .nt-node:focus-visible .nt-node__ring { stroke: var(--nt-focus); }
-.nt-node { cursor: pointer; transition: opacity 120ms ease; }
-.nt-node .nt-node__dot { fill: color-mix(in oklab, var(--info) 22%, var(--nt-bg)); stroke: color-mix(in oklab, var(--info) 70%, var(--text-primary)); stroke-width: 1.25; }
-.nt-node--person .nt-node__dot { fill: color-mix(in oklab, var(--nt-indigo) 26%, var(--nt-bg)); stroke: var(--nt-indigo); }
-.nt-node--project .nt-node__dot { fill: color-mix(in oklab, var(--nt-mint) 22%, var(--nt-bg)); stroke: var(--nt-mint); }
-.nt-node--concept .nt-node__dot { fill: color-mix(in oklab, var(--nt-cyan) 22%, var(--nt-bg)); stroke: var(--nt-cyan); }
-.nt-node--place .nt-node__dot, .nt-node--event .nt-node__dot { fill: color-mix(in oklab, var(--text-muted) 22%, var(--nt-bg)); stroke: var(--text-secondary); }
+/* Colour by community (a slot class sets --nt-cc); the kind is in words (card, label, list). */
+.nt-c0 { --nt-cc: var(--nt-c0); }
+.nt-c1 { --nt-cc: var(--nt-c1); }
+.nt-c2 { --nt-cc: var(--nt-c2); }
+.nt-c3 { --nt-cc: var(--nt-c3); }
+.nt-c4 { --nt-cc: var(--nt-c4); }
+.nt-c5 { --nt-cc: var(--nt-c5); }
+.nt-c6 { --nt-cc: var(--nt-c6); }
+/* Hover: what is not the hovered node, its links and neighbours fades (160 ms; none with reduced motion). */
+.nt-node { cursor: pointer; transition: opacity 160ms ease; }
+.nt-node .nt-node__dot { fill: color-mix(in oklab, var(--nt-cc, var(--info)) 30%, var(--nt-bg)); stroke: var(--nt-cc, var(--info)); stroke-width: 1.5; }
 .nt-node text { fill: var(--text-primary); font-weight: 550; paint-order: stroke; stroke: var(--nt-bg); stroke-width: 3px; stroke-linejoin: round; }
 .nt-node--focus .nt-node__dot { stroke-width: 2.5; }
 .nt-node--selected .nt-node__dot { stroke: var(--text-primary); stroke-width: 2.5; }
-.nt-node--future { opacity: 0.18; }
-.nt-edge line { stroke: color-mix(in oklab, var(--text-secondary) 55%, transparent); stroke-width: 1.2; }
+.nt-node--lit .nt-node__dot { fill: color-mix(in oklab, var(--nt-cc, var(--info)) 42%, var(--nt-bg)); }
+.nt-node--future > circle, .nt-node--future > text { opacity: 0.2; }
+.nt-node.nt-fade { opacity: 0.13; }
+/* Outside the theme shown alone: present for context, quieter than a hover fade. */
+.nt-node.nt-out { opacity: 0.24; }
+.nt-edge.nt-out { opacity: 0.12; }
+.nt-edge { opacity: 0.5; transition: opacity 160ms ease; }
+.nt-edge--lit { opacity: 1; }
+.nt-edge.nt-fade { opacity: 0.07; }
+.nt-edge line { stroke: var(--text-secondary); stroke-width: 1.2; }
 .nt-edge .nt-edge__hit { stroke: transparent; stroke-width: 14; cursor: pointer; }
 .nt-edge--old line:first-child { stroke-dasharray: 5 4; stroke: var(--text-muted); }
-.nt-edge--future { opacity: 0.12; }
+.nt-edge--future > * { opacity: 0.25; }
 .nt-edge__label { fill: var(--text-secondary); cursor: pointer; paint-order: stroke; stroke: var(--nt-bg); stroke-width: 3px; }
-.nt-edge:hover line:first-child { stroke: var(--nt-link); }
-.nt-edge:hover .nt-edge__label { fill: var(--nt-link); }
-.nt-arrow { fill: color-mix(in oklab, var(--text-secondary) 55%, transparent); }
+.nt-edge--lit line:first-child { stroke: var(--nt-link); stroke-width: 1.6; }
+.nt-edge--lit .nt-edge__label { fill: var(--text-primary); font-weight: 550; }
+.nt-arrow { fill: var(--text-secondary); }
+.nt-canvas__svg--hover .nt-node:not(.nt-fade) text { font-weight: 650; }
+
+/* Themes (communities) above the picture: a colour dot and the label in text ink; pressed = shown alone. */
+.nt-themes { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 12px 8px; }
+.nt-theme {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 2px 10px 2px 8px; max-width: 100%;
+  border-radius: 999px; border: 1px solid var(--nt-line); background: transparent; color: var(--text-secondary);
+  font: inherit; font-size: var(--font-size-sm); font-weight: 550; cursor: pointer;
+}
+.nt-theme:hover { color: var(--text-primary); border-color: var(--nt-line-strong); }
+.nt-theme[aria-pressed="true"] { color: var(--text-primary); border-color: var(--nt-cc); background: color-mix(in oklab, var(--nt-cc) 14%, transparent); }
+.nt-theme--inline { margin: 0 0 6px; }
+.nt-theme__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nt-theme__dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: color-mix(in oklab, var(--nt-cc) 30%, var(--nt-bg)); box-shadow: 0 0 0 1.5px var(--nt-cc) inset; }
+
+/* The hover card: beside the pointer, inside the window, never in the way of the pointer. */
+.nt-hovercard {
+  position: fixed; z-index: 60; width: max-content; max-width: min(320px, calc(100vw - 16px));
+  padding: 12px 14px; border-radius: var(--radius-lg); border: 1px solid var(--nt-line-strong);
+  background: var(--bg-secondary); color: var(--text-primary); box-shadow: var(--ui-shadow-1, none);
+  font-family: var(--nt-font); font-size: var(--font-size-md); line-height: 1.45; pointer-events: none;
+  animation: nt-card-in 140ms ease-out;
+}
+@keyframes nt-card-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+.nt-hovercard__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.nt-hovercard__name { font-size: var(--font-size-lg); font-weight: 650; letter-spacing: -0.01em; }
+.nt-hovercard__summary { margin: 0 0 6px; color: var(--text-primary); }
+.nt-hovercard__meta { margin: 0 0 6px; color: var(--text-muted); font-size: var(--font-size-sm); font-variant-numeric: tabular-nums; }
+.nt-hovercard__theme { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; color: var(--text-secondary); font-size: var(--font-size-sm); font-weight: 550; }
+.nt-hovercard__links { list-style: none; margin: 6px 0 0; padding: 6px 0 0; border-top: 1px solid var(--nt-line); display: flex; flex-direction: column; gap: 2px; color: var(--text-secondary); }
+.nt-hovercard__links li::before { content: "→"; margin-right: 6px; color: var(--text-muted); }
 .nt-legend { position: absolute; left: 0; right: 0; bottom: 4px; display: flex; flex-wrap: wrap; gap: 4px 14px; justify-content: center; color: var(--text-muted); font-size: var(--font-size-sm); margin: 0; padding: 0 56px; pointer-events: none; }
 .nt-legend__item { display: inline-flex; align-items: center; gap: 6px; }
 .nt-legend__solid { stroke: var(--text-secondary); stroke-width: 1.5; }
@@ -511,6 +572,8 @@ p { margin: 0 0 6px; }
   .nt-icon-btn { width: 44px; }
   .nt-file__name { max-width: 150px; }
   .nt-legend__hint { display: none; }
+  .nt-themes { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .nt-themes > * { flex: none; }
   .nt-focusbar__end { margin-left: 0; }
 }
 
