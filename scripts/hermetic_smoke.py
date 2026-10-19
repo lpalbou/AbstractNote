@@ -12,6 +12,8 @@ What it checks (exit 1 on the first failure, with the reason):
   - an upload over the limit answers 413;
   - the processor automation is created, ``automation.run_now`` starts a drain, a second one while it
     runs answers 409 ``automation_busy``, and the queue drains;
+  - after the first drain ``GET /note/status`` reports both automations ``healthy`` on the served
+    workflows and a further ``processor/ensure`` answers ``kept`` for both (W14);
   - a note-recall run started with ``prompt`` (the agent contract) answers on ``output.response`` (S3);
   - a retraction through the API closes the statement's window where it opens and is listed in the
     delta as ``kind: retracted`` in plain words (no vocabulary term);
@@ -271,11 +273,25 @@ def main() -> int:
     status, ens = call(gw, "POST", "/api/gateway/note/processor/ensure", token=a, fixture="note_processor_ensure_200")
     check(status == 200 and ens.get("processor_id"), f"processor ensure answered {status}: {ens}")
     proc = ens["processor_id"]
+    check(all((ens.get(k) or {}).get("action") in ("created", "kept") for k in ("processor", "reflect")),
+          f"the first ensure did not say what it did: {ens}")
     status, again = call(gw, "POST", "/api/gateway/note/processor/ensure", token=a)
     check(status == 200 and again.get("processor_id") == proc and again.get("created") == [], "ensure is not idempotent")
     # The schedule's first tick starts a drain at once; wait for it to empty the queue.
     stats = wait_drained(gw, a)
     check(stats.get("failed", 0) == 0 and stats.get("done", 0) >= 1, f"the first drain did not process the note: {stats}")
+    # After that drain both automations run the served workflows (a version change would show here as
+    # healthy: false with the reason), and one more ensure keeps them (W14).
+    status, st = call(gw, "GET", "/api/gateway/note/status", token=a, fixture="note_status_automations_200")
+    autos = (st or {}).get("automations") or {}
+    for kind in ("processor", "reflect"):
+        health = autos.get(kind) or {}
+        check(status == 200 and health.get("healthy") is True and health.get("state") == "active"
+              and health.get("id") == ens[f"{kind}_id"], f"the {kind} automation is not healthy: {health}")
+    status, kept = call(gw, "POST", "/api/gateway/note/processor/ensure", token=a, fixture="note_processor_ensure_kept_200")
+    check(status == 200 and [(kept.get(k) or {}).get("action") for k in ("processor", "reflect")] == ["kept", "kept"]
+          and kept.get("processor_id") == proc and kept.get("created") == [], f"a second ensure did not keep both: {kept}")
+    report["automations_health"] = {k: autos[k]["target"] for k in ("processor", "reflect")}
     # A second note, then "Process now": 200, and a repeat while it runs is 409 automation_busy.
     second = start_run(gw, a, "note-capture", {"text": "Dana moved the Pareto deadline to next week.",
                                                "idempotency_key": str(uuid.uuid4()), "session_id": session}, session)
