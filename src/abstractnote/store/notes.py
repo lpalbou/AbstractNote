@@ -500,6 +500,8 @@ class NoteStore:
         for r in claims:
             s = self.canonical_at(r["subject_id"], at_n)
             o = self.canonical_at(r["object_id"], at_n)
+            if s == o:
+                continue  # both ends are one entity by then (a confirmed close match): no edge to draw
             key = (s, o, r["predicate"])
             e = edges.setdefault(key, {"source": s, "target": o, "predicate": r["predicate"], "first_seen": None,
                                        "last_seen": None, "count": 0, "active": False, "claim_ids": []})

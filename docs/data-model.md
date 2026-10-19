@@ -148,10 +148,16 @@ Operations:
 | `entity.mention` | `{entity_id, note_id}` (the note talks about the entity; drives `note_count`, `first_seen`, `last_seen`) |
 | `note.summary` | `{note_id, summary, kind, language}` |
 
-User actions (`close a task`, `retract a claim`, `undo a merge`) produce revisions with
+User actions (`close a task`, `retract a claim`, `undo a merge`, `confirm a match`) produce revisions with
 `source = {client, account}` and no note; they are the human side of an actionable graph. Through
 the gateway, `account` is the signed-in user and `client` is `web` (the Note web app) or `api`
 (any other caller), decided by the server, never by the request body.
+
+Confirming a match from the review list (`POST /note/review/{id}/confirm`) is a revision with `action =
+match.confirm` and `target` = the review id: for a close match (an `unsure` decision, recorded as a `skos:closeMatch`
+claim from the new entry to the candidate) its ops are `entity.merge` (the new entry into the candidate) and
+`claim.supersede` of the close-match claim; for a merge the processor made it has no ops and only records that you
+keep it. Revisions are the truth, so a rebuild keeps what you confirmed.
 
 Reversibility: a merge keeps both records and can be undone by a later revision that re-points
 claims; a supersession keeps the old claim with its window closed.

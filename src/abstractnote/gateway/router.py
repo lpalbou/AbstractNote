@@ -326,6 +326,28 @@ async def note_unmerge(request: Request, entity_id: str, body: UnmergeBody) -> D
     return await _run(request, work)
 
 
+# --------------------------------------------------------------------------- review
+
+
+@router.get("/review")
+async def note_review(request: Request, limit: int = Query(50, ge=1, le=500)) -> Dict[str, Any]:
+    return await _run(request, lambda nb, svc, p: _items(_call(nb, "review", limit=limit)))
+
+
+class ConfirmBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+@router.post("/review/{review_id}/confirm")
+async def note_review_confirm(request: Request, review_id: str, body: Optional[ConfirmBody] = None) -> Dict[str, Any]:
+    def work(nb, svc, p):
+        if _call(nb, "review_item", review_id) is None:
+            raise HTTPException(status_code=404, detail="That match is not waiting for review.")
+        return _call(nb, "confirm_match", review_id, _account(p), client=action_client(request))
+
+    return await _run(request, work)
+
+
 # --------------------------------------------------------------------------- claims, tasks, cues
 
 

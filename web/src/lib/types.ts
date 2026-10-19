@@ -143,6 +143,22 @@ export type NoteSettings = { filing_model: ModelChoice; answering_model: ModelCh
 export type NoteStatus = { counts?: Record<string, number>; queue?: QueueStats; settings?: NoteSettings; automations: Automations };
 export type ListOf<T> = { items: T[]; next_cursor?: string | null };
 
+/** Pinned: ReviewSide {type, id, name, kind, note_ids}: an entity (kind = entity kind) or a statement (kind null). */
+export type ReviewSide = { type: "entity" | "claim"; id: string; name: string; kind: string | null; note_ids: string[] };
+/** An action on a review item: POST `path` (under /api/gateway) with `body`; a null in `body` is for the person to fill. */
+export type ReviewAction = { action: "confirm" | "keep_apart" | "unmerge" | "retract" | string; method: "POST"; path: string; body: Record<string, unknown> };
+/** Pinned: GET /note/review items. `why` is the rule: unsure_match, merged_by_model, disputed_pair. */
+export type ReviewItem = {
+  review_id: string;
+  kind: "close_match" | "merge" | "contradiction";
+  why: "unsure_match" | "merged_by_model" | "disputed_pair";
+  reason: string | null;
+  at: string;
+  sides: ReviewSide[];
+  evidence_note_ids: string[];
+  actions: ReviewAction[];
+};
+
 /** Pinned: note-capture output. */
 export type CaptureOutput = { response: string; note_id: string; status: string; revision_summary?: string };
 /** Pinned: note-recall output. */

@@ -510,6 +510,26 @@ class Notebook:
 
         return cues(self, limit)
 
+    def review(self, limit: int = 50) -> Dict[str, Any]:
+        """Proposed matches and disagreements for a person (``GET /note/review``); see :mod:`abstractnote.recall.review`."""
+        from ..recall.review import review
+
+        return review(self, limit)
+
+    def review_item(self, review_id: str) -> Optional[Dict[str, Any]]:
+        """One item of :meth:`review` by id (None when it is not waiting for review)."""
+        from ..recall.review import _public, review_item
+
+        item = review_item(self, review_id)
+        return _public(item) if item else None
+
+    def confirm_match(self, review_id: str, account: Optional[str], *, client: str = "web",
+                      occurred_at: Optional[str] = None) -> Dict[str, Any]:
+        """Confirm a proposed match: a user-action revision ``match.confirm`` (see :mod:`abstractnote.recall.review`)."""
+        from ..recall.review import confirm
+
+        return confirm(self, review_id, account, client=client, occurred_at=occurred_at)
+
     # ------------------------------------------------------------------ recall (0006)
 
     def search(self, query: str = "", **kwargs: Any) -> Dict[str, Any]:

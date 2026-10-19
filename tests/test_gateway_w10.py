@@ -50,3 +50,36 @@ def test_merged_entries_list_and_read_as_themselves(gw):
                  headers=h)
     assert both.status_code == 400
     assert c.get("/api/gateway/note/entities/ex:nobody", params={"as_merged": "true"}, headers=h).status_code == 404
+
+
+def test_the_review_list_and_confirm_over_http(gw):
+    from test_review_and_archive import review_world
+
+    from abstractnote.gateway.router import notebook_for
+
+    c, h = gw["client"], gw["alice"]
+    nb = notebook_for(_plane(gw, "alice"))
+    review_world(nb)
+    r = c.get("/api/gateway/note/review", headers=h)
+    assert r.status_code == 200, r.text
+    assert set(r.json()) == {"items", "next_cursor"} and r.json()["next_cursor"] is None
+    items = {i["kind"]: i for i in r.json()["items"]}
+    assert set(items) == {"close_match", "merge", "contradiction"}
+    assert c.get("/api/gateway/note/review", headers=gw["bob"]).json()["items"] == []  # bob's own notebook
+    cm = items["close_match"]
+    assert c.post(f"/api/gateway/note/review/{cm['review_id']}/confirm", headers=h, json={"client": "watch"}
+                  ).status_code == 422
+    ok = c.post(f"/api/gateway/note/review/{cm['review_id']}/confirm",
+                headers={**h, "X-AbstractFramework-App-Proxy": "abstractnote"})
+    assert ok.status_code == 200, ok.text
+    assert nb.revision(ok.json()["revision_id"])["source"] == {"client": "web", "account": "alice"}
+    again = c.post(f"/api/gateway/note/review/{cm['review_id']}/confirm", headers=h, json={})
+    assert again.status_code == 404 and again.json()["detail"] == "That match is not waiting for review."
+    ct = items["contradiction"]
+    refused = c.post(f"/api/gateway/note/review/{ct['review_id']}/confirm", headers=h, json={})
+    assert refused.status_code == 400
+    mg = items["merge"]
+    undo = c.post(mg["actions"][1]["path"].replace("/note/", "/api/gateway/note/", 1), headers=h,
+                  json=mg["actions"][1]["body"])
+    assert undo.status_code == 200, undo.text
+    assert {i["kind"] for i in c.get("/api/gateway/note/review", headers=h).json()["items"]} == {"contradiction"}

@@ -83,6 +83,22 @@ signed-in principal for their own notebook. The few write actions are bookkeepin
 | `POST /note/claims/{claim_id}/retract` | user action: retract a claim (a revision with the account as source) | `reason` |
 | `POST /note/tasks/{task_id}/close` | user action: close an open loop | `note?` |
 | `POST /note/entities/{entity_id}/unmerge` | user action: undo a merge | `from_id, reason` |
+| `GET /note/review` | to review: matches the notebook proposed or made on its own and disagreements it kept, each with why, the two sides, the notes behind them and the actions you can take | `limit` |
+| `POST /note/review/{review_id}/confirm` | user action: confirm a proposed match (a close match becomes a merge; a merge is kept) | |
+
+The review list (`GET /note/review`) is built from stored records only, never from reading text. Each item has a
+`kind` and the rule that put it there (`why`):
+
+| `kind` | `why` | What it is | `actions` |
+|---|---|---|---|
+| `close_match` | `unsure_match` | processing could not tell whether a name is an existing entity, so it created a new entry and recorded a `skos:closeMatch` claim to the candidate (listed while that claim is active and the two are still separate) | `confirm` (merge the new entry into the candidate and supersede the close match), `keep_apart` (retract the close-match claim) |
+| `merge` | `merged_by_model` | processing joined two entries on its own and the merge is still in force (merges you confirmed here are never listed) | `confirm` (keep it: the item leaves the list), `unmerge` |
+| `contradiction` | `disputed_pair` | a note contradicted an earlier statement and both were kept, marked disputed | `retract` either side (the item leaves the list when one side is no longer active); `confirm` is refused with 400 |
+
+Each action is `{action, method, path, body}` with `path` under `/api/gateway`; a `null` in `body` is for the
+person to fill (the reason of a retraction). `confirm` records a user-action revision with `action = match.confirm`
+and `target` = the review id, with the account from the signed-in principal; confirming an item that is not waiting
+for review is `404`.
 
 A user action's revision carries `source = {account, client}`: `account` is the signed-in
 principal; `client` is `web` when the request came through the Note web app's proxy (which marks
@@ -104,8 +120,8 @@ bodies cannot set it (an unknown field such as `client` is refused with 422).
 | `POST /note/processor/ensure` | create the processor and reflect automations if missing; returns their ids | |
 
 Response envelopes are plain JSON objects; every list (`/notes`, `/entities`, `/revisions`,
-`/tasks`, `/cues`, `/topics`, `/insights`) returns `{items, next_cursor}`, with `next_cursor` null
-when there is no further page (the last four never page; `limit` bounds them). Times are ISO
+`/tasks`, `/cues`, `/topics`, `/insights`, `/review`) returns `{items, next_cursor}`, with `next_cursor` null
+when there is no further page (the last five never page; `limit` bounds them). Times are ISO
 8601 UTC. Errors use the gateway's error shape, `{"detail": "<one sentence>"}`: `401` without a
 valid sign-in, `404` for an id that is not in the caller's notebook, `400` for bad input, `501`
 for a read the installed `abstractnote` does not provide.
@@ -122,6 +138,9 @@ Pinned response shapes (clients decode these strictly; absent lists mean empty):
 | `GET /note/cues` | `{items: [{cue_id, text, kind, subject: {kind, id, title}, evidence_note_ids, entity_ids}]}` (cues are insight notes; `cue_id` is the note id; `evidence_note_ids` and `entity_ids` are the insight's own: the notes it rests on and the entities it is about) |
 | `GET /note/tasks` | `{items: [{task_id, note_id, text, status, due, closed_at}]}` |
 | `GET /note/notes/{id}` | `{note_id, title, text, kind, occurred_at, received_at, status, topics, summary, source, location, attachments: [...], revision: {...} or null, entities: [...], claims: [...], revisits: [NoteRef], insight: {kind, evidence_note_ids, entity_ids, acked_at} or null}` (`insight` is set on an insight note, `kind` being its `insight_kind`, and null on every other note) |
+| `GET /note/review` | `{items: [{review_id, kind, why, reason, at, sides: [ReviewSide], evidence_note_ids, actions: [{action, method, path, body}]}], next_cursor}` (newest first; `kind` `close_match`, `merge` or `contradiction`; `why` the rule; `reason` the processor's stated reason for a merge, else null; `at` when the notebook recorded it; `evidence_note_ids` starts with the note that raised it; `next_cursor` is always null) |
+| `ReviewSide` | `{type, id, name, kind, note_ids}` (`type` `entity`: `name` its display name, `kind` its entity kind, `note_ids` its newest notes; `type` `claim`: `name` the statement in plain words, `kind` null, `note_ids` the note it came from) |
+| `POST /note/review/{id}/confirm` | the revision result (`{revision_id, summary, entities_merged, ...}`) plus `review_id` |
 | `GET /note/entities/{id}?as_merged=true` | `{entity_id, kind, name, aliases, summary, first_seen, last_seen, note_count, merged_into, merged_at, merge: {revision_id, at, recorded_at, reason, summary, note_id} or null, notes: [NoteRef]}` (the entry's own name, aliases, summary and notes; `merge` is the revision that joined it into `merged_into`, null when it is not merged; `at` is refused with 400) |
 | `GET /note/queue` | `{stats: {queued, processing, failed, by_priority, oldest_enqueued_at}, failed: [{note_id, title, occurred_at, last_error, failed_at, failures}], waiting: [{note_id, title, occurred_at, priority, state, attempts, next_attempt_at}], automations: {processor_id, reflect_id}, processor: {max_items, interval}}` (`processor` is what the processor automation was created with while it exists, otherwise the `processor_schedule` setting it will be created with; `interval` is a duration such as `2m`) |
 | `note-capture` output | `{response, note_id, status, revision_summary?}` |

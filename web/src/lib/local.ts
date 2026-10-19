@@ -5,7 +5,7 @@ export const CURSOR_KEY = "abstractnote.changes_cursor.v1";
 export const LOCATION_KEY = "abstractnote.location.v1";
 export const THREAD_KEY = "abstractnote.thread.v1";
 export const LOCATION_CACHE_KEY = "abstractnote.location_cache.v1";
-/** Matches kept from the review inbox (this browser only: the note API has no confirm action yet). */
+/** Matches kept from the review inbox before the server's confirm action (`POST /note/review/{id}/confirm`) existed. */
 export const REVIEW_KEPT_KEY = "abstractnote.review_kept.v1";
 
 type Store = { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void };

@@ -673,6 +673,29 @@ export function createMockGateway(options = {}) {
       });
       return send(res, 200, { items });
     }
+    if (np === "/review") return send(res, 200, { items: reviewItems().slice(0, Number(q.get("limit") || 50)).map(({ _target, ...it }) => it), next_cursor: null });
+    m = np.match(/^\/review\/([^/]+)\/confirm$/);
+    if (m && method === "POST") {
+      // W10 recall/review.confirm: a user-action revision match.confirm targeting the review id.
+      const it = reviewItems().find((x) => x.review_id === m[1]);
+      if (!it) return fail(res, 404, "That match is not waiting for review.");
+      if (it.kind === "contradiction") return fail(res, 400, "A disagreement is settled by retracting one of its two statements.");
+      const when = nowIso();
+      const revision_id = makeId("rv", `confirm:${it.review_id}:${when}`);
+      const ops = [];
+      let entities_merged = [];
+      if (it.kind === "close_match") {
+        ent(it._target.from_id).merged_into = it._target.into_id;
+        const c = db.claims.get(it._target.claim_id);
+        c.status = "superseded";
+        c.valid_until = when;
+        ops.push({ op: "entity.merge", from_id: it._target.from_id, into_id: it._target.into_id, reason: "You confirmed they are the same." }, { op: "claim.supersede", claim_id: c.claim_id, by_claim_id: null });
+        entities_merged = [{ from_id: it._target.from_id, into_id: it._target.into_id }];
+      }
+      const summary = it.kind === "close_match" ? `Joined ${it.sides[0].name} into ${it.sides[1].name}: you confirmed they are the same.` : `You confirmed that ${it.sides[0].name} and ${it.sides[1].name} are the same.`;
+      db.revisions.push({ revision_id, note_id: null, at: when, recorded_at: when, summary, ops, action: "match.confirm", target: it.review_id, source: { client: "web", account: who.user_id } });
+      return send(res, 200, { revision_id, summary, entities_merged, review_id: it.review_id });
+    }
     if (np === "/graph") return send(res, 200, graph(list("focus"), at, Number(q.get("depth") || 1), Number(q.get("limit") || 60)));
     if (np === "/timeline") {
       const gran = q.get("granularity") || "week";
@@ -764,6 +787,46 @@ export function createMockGateway(options = {}) {
     }
     if (np === "/processor/ensure" && method === "POST") return send(res, 200, { processor_id: PROCESSOR_ID, reflect_id: REFLECT_ID, created: [] });
     return fail(res, 404, "Not found.");
+  }
+
+  // W10 recall/review: close matches (active skos:closeMatch claims between separate entries), merges the
+  // notebook made on its own and not yet confirmed or undone, and disputed pairs; newest first.
+  function reviewItems() {
+    const side = (id) => {
+      const e = ent(id);
+      return { type: "entity", id, name: e.name, kind: e.kind, note_ids: notesOf(id).map((n) => n.note_id).reverse().slice(0, 3) };
+    };
+    const claimSide = (c) => ({ type: "claim", id: c.claim_id, name: describe(c), kind: null, note_ids: c.note_id ? [c.note_id] : [] });
+    const evidence = (first, sides) => [...new Set([first, ...sides.flatMap((x) => x.note_ids)].filter(Boolean))];
+    const act = (action, path, body) => ({ action, method: "POST", path, body });
+    const confirmed = new Set(db.revisions.filter((r) => r.action === "match.confirm").map((r) => r.target));
+    const items = [];
+    const canon = (id) => ent(id)?.merged_into || id;
+    for (const c of db.claims.values()) {
+      if (c.predicate !== "skos:closeMatch" || c.status !== "active" || !c.object_id || canon(c.subject_id) === canon(c.object_id)) continue;
+      const review_id = makeId("rq", `close_match:${c.claim_id}`);
+      const sides = [side(canon(c.subject_id)), side(canon(c.object_id))];
+      items.push({ review_id, kind: "close_match", why: "unsure_match", reason: null, at: c.recorded_at, sides, evidence_note_ids: evidence(c.note_id, sides), actions: [act("confirm", `/note/review/${review_id}/confirm`, {}), act("keep_apart", `/note/claims/${c.claim_id}/retract`, { reason: null })], _target: { claim_id: c.claim_id, from_id: canon(c.subject_id), into_id: canon(c.object_id) } });
+    }
+    for (const r of db.revisions) {
+      if (r.action === "match.confirm") continue;
+      for (const op of r.ops || []) {
+        if (op.op !== "entity.merge" || ent(op.from_id)?.merged_into !== op.into_id) continue;
+        const review_id = makeId("rq", `merge:${op.from_id}|${op.into_id}|${r.revision_id}`);
+        if (confirmed.has(review_id)) continue;
+        const sides = [side(op.from_id), side(op.into_id)];
+        items.push({ review_id, kind: "merge", why: "merged_by_model", reason: op.reason || null, at: r.recorded_at, sides, evidence_note_ids: evidence(r.note_id, sides), actions: [act("confirm", `/note/review/${review_id}/confirm`, {}), act("unmerge", `/note/entities/${op.into_id}/unmerge`, { from_id: op.from_id, reason: "" })], _target: { from_id: op.from_id, into_id: op.into_id } });
+      }
+    }
+    for (const c of db.claims.values()) {
+      const o = c.disputes ? db.claims.get(c.disputes) : null;
+      if (!o || c.status !== "active" || o.status !== "active") continue;
+      const pair = [o, c].sort((a, b) => ms(a.observed_at) - ms(b.observed_at));
+      const review_id = makeId("rq", `contradiction:${pair.map((x) => x.claim_id).sort().join("|")}`);
+      const sides = pair.map(claimSide);
+      items.push({ review_id, kind: "contradiction", why: "disputed_pair", reason: null, at: c.recorded_at, sides, evidence_note_ids: evidence(pair[1].note_id, sides), actions: sides.map((x) => act("retract", `/note/claims/${x.id}/retract`, { reason: null })), _target: {} });
+    }
+    return items.sort((a, b) => ms(b.at) - ms(a.at));
   }
 
   function queueStats() {
