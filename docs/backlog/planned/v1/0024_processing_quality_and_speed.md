@@ -32,7 +32,19 @@ thinking off, and the required-summary rule failing 4 of 8 notes. At that speed 
 - Median under 40 s per note of at most 3k characters; supersession test and revision quality unchanged.
 
 ## Current code reality
-See the completion report below when done (before/after tables live in untracked/reports/W8.md).
+Landed in three steps: fc74fa7 (thinking and output budget pinned per node, 6000-character sections, retry once
+on an empty extraction, soft summary rule), 937fe41 (static-prefix prompts, constant envelope with the note's id
+and date last, bounded packets and linking parts, optional default fields, junk and mention-in-text rules,
+prompt-note labelling), ec6e843 (remaining eval 4.1 wording rules). 259 tests on main.
+
+Completion report (measurements in untracked/reports/W8.md): on the 30 eval notes, old code 29 of 30 processed
+(42 attempts, 8 empty, median 81 s per attempt); the bounded prompts on the prompted lane with thinking off 30 of
+30 on the first attempt, median 32 s (29.7 s up to 3k characters), link prompt median 13.2k characters (was
+63.7k, max 245.8k). The thinking-off empties came from the Outlines lane on the old prompts (reproduced 2 of 2);
+the new prompts carry the output shape and gave non-empty answers there. The prompt cache cannot apply on the
+MLX Outlines lane the gateway uses (no cache key, no metadata); on the prompted lane 88 of 136 calls reused the
+cached system prompt, but with thinking on that lane reasons 160-181 s per extraction, so the flows stay on the
+Outlines lane. Open: AbstractCore's truncation retry and the Outlines double template (seams in the report).
 
 ## Validation
 `pytest -q tests` green; regenerated flow JSON (`python -m abstractnote.flows.build --check`); measurements on the
@@ -40,5 +52,5 @@ same 100-note sample before and after.
 
 ## Metadata
 - Created: 2026-10-19
-- Status: planned
+- Status: completed (2026-10-19)
 - Area: processing
