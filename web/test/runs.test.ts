@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createApi } from "../src/lib/api";
-import { answerFromRecord, followRun, recordFromFrame, type EventSourceLike } from "../src/lib/runs";
+import { answerFromRecord, followRun, recordFromFrame, runErrorText, startFlow, type EventSourceLike } from "../src/lib/runs";
 
 const answerRecord = (message: string) => ({ effect: { type: "answer_user", payload: { message } }, status: "completed", result: { message, level: "message" } });
 
@@ -81,5 +81,26 @@ describe("followRun", () => {
       },
     });
     expect(urls).toEqual(["api/gateway/runs/r3/ledger/stream?after=0"]);
+  });
+});
+
+describe("run start and run errors (docs/api.md e3f4317)", () => {
+  it("every start carries input_data.session_id equal to the request session", async () => {
+    let sent: { session_id?: string; input_data?: Record<string, unknown> } = {};
+    const fetch = vi.fn(async (_u: RequestInfo | URL, init?: RequestInit) => {
+      sent = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ run_id: "r9" }));
+    });
+    const api = createApi({ fetch: fetch as unknown as typeof globalThis.fetch, csrf: () => "c" });
+    await expect(startFlow(api, "note-recall", "note-web-1", { question: "q" })).resolves.toBe("r9");
+    expect(sent.session_id).toBe("note-web-1");
+    expect(sent.input_data).toMatchObject({ question: "q", session_id: "note-web-1" });
+  });
+
+  it("reads a refusal from output.success=false and strips the runtime prefix", () => {
+    const refused = { status: "completed", output: { success: false, error: "Runtime error: Local file paths are not accepted here; upload the file as an attachment instead." } };
+    expect(runErrorText(refused)).toBe("Local file paths are not accepted here; upload the file as an attachment instead.");
+    expect(runErrorText({ status: "failed", error: "Runtime error: boom." })).toBe("boom.");
+    expect(runErrorText({ status: "completed", output: { response: "Saved.", success: true } })).toBeNull();
   });
 });

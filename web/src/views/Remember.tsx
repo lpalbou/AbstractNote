@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AfChip, AfChipButton, Icon } from "@abstractframework/ui-kit";
-import { errorSentence } from "../lib/api";
+import { ApiError, errorSentence } from "../lib/api";
 import { splitCitations } from "../lib/citations";
 import { useDebounced, useRead } from "../lib/hooks";
 import { CURSOR_KEY, readLocal, writeLocal } from "../lib/local";
 import { noteAbout, useAt, type Route } from "../lib/nav";
-import { followRun, startFlow } from "../lib/runs";
+import { followRun, runErrorText, startFlow } from "../lib/runs";
 import type { Changes, Cue, EntityCard, EntityListItem, Insight, ListOf, NoteRef, Overview, RecallOutput, RelationTimeline, SearchResult, Task, ThenNow, Topic } from "../lib/types";
 import { NOTE_KINDS, claimSentence, longDate, relative, shortDate, topicLabel } from "../lib/words";
 import { EntityChip, NoteLink, ReadView, Section, Sparkline, openClaim, openEntity, openNote, useApp } from "../components/common";
@@ -35,7 +35,9 @@ export function RememberView({ route }: { route: Route }) {
 
 function SinceLastLooked() {
   const { api } = useApp();
-  const [since, setSince] = useState(() => readLocal(CURSOR_KEY) || new Date(Date.now() - 7 * 86400_000).toISOString().replace(/\.\d{3}Z$/, "Z"));
+  // The cursor is opaque (the server's); the moment it was taken is kept beside it for the "Since …" line.
+  const [mark, setMark] = useState(() => readMark());
+  const since = mark.cursor;
   const changes = useRead<Changes>(() => api.get<Changes>("note/changes", { since, limit: 50 }), [api, since]);
   const count = (c: Changes) => (c.notes?.length || 0) + (c.entities?.length || 0) + (c.superseded_claims?.length || 0) + (c.closed_loops?.length || 0) + (c.failed_notes?.length || 0) + (c.insights?.length || 0);
   return (
@@ -48,8 +50,9 @@ function SinceLastLooked() {
             type="button"
             className="nt-btn nt-btn--quiet"
             onClick={() => {
-              writeLocal(CURSOR_KEY, changes.data!.cursor);
-              setSince(changes.data!.cursor);
+              const next = { cursor: changes.data!.cursor, at: new Date().toISOString() };
+              writeLocal(CURSOR_KEY, JSON.stringify(next));
+              setMark(next);
             }}
           >
             Mark as seen
@@ -57,7 +60,7 @@ function SinceLastLooked() {
         ) : null
       }
     >
-      <p className="nt-muted">Since {longDate(since)}.</p>
+      <p className="nt-muted">Since {longDate(mark.at)}.</p>
       <ReadView read={changes} what="what changed" empty={(c) => (count(c) ? false : "Nothing new since then.")}>
         {(c) => (
           <div className="nt-changes">
@@ -118,6 +121,18 @@ function SinceLastLooked() {
       </ReadView>
     </Section>
   );
+}
+
+/** The stored "last looked" mark; first visit = one week back (an ISO moment is a valid `since`). */
+export function readMark(): { cursor: string; at: string } {
+  try {
+    const m = JSON.parse(readLocal(CURSOR_KEY) || "null");
+    if (m && typeof m.cursor === "string" && typeof m.at === "string") return m;
+  } catch {
+    // an older or broken value: start one week back
+  }
+  const at = new Date(Date.now() - 7 * 86400_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+  return { cursor: at, at };
 }
 
 function ChangeGroup({ title, children }: { title: string; children: React.ReactNode }) {
@@ -209,10 +224,11 @@ function AskPanel({ initialTopic }: { initialTopic: string }) {
       const runId = await startFlow(api, "note-recall", sessionId, { question, effort, as_of: at, since: filters.since ?? null, until: filters.until ?? null, entities: filters.entities, topics });
       const run = await followRun(api, runId);
       if (!alive.current) return;
-      if (run.status !== "completed") throw new Error("not completed");
+      const refused = runErrorText(run);
+      if (refused !== null) throw new Error(refused || "not completed");
       setAsked({ question, effort, state: "answered", output: (run.output || {}) as RecallOutput });
     } catch (e) {
-      if (alive.current) setAsked({ question, effort, state: "failed", error: e instanceof Error && e.message === "not completed" ? "This question could not be answered." : errorSentence(e, "the answer") });
+      if (alive.current) setAsked({ question, effort, state: "failed", error: e instanceof ApiError ? errorSentence(e, "the answer") : e instanceof Error && e.message !== "not completed" ? e.message : "This question could not be answered." });
     }
   };
 
@@ -229,7 +245,7 @@ function AskPanel({ initialTopic }: { initialTopic: string }) {
         context: { attachments: [], answer: { question: a.question, evidence_note_ids: (a.output?.evidence || []).map((e) => e.note_id) } },
       });
       const run = await followRun(api, runId);
-      setSaved(run.status === "completed" ? "Saved as a note." : "The answer could not be saved.");
+      setSaved(runErrorText(run) === null ? "Saved as a note." : "The answer could not be saved.");
     } catch {
       setSaved("The answer could not be saved.");
     }
@@ -411,6 +427,7 @@ function AnswerCard({ asked, onSave, saved, onFollowUp }: { asked: Asked; onSave
     );
   }
   const out = asked.output || {};
+  const evolution = normalizeEvolution(out.evolution);
   const text = out.answer || out.response || "";
   const { segments, cited } = splitCitations(text);
   const evidence = out.evidence || [];
@@ -443,7 +460,7 @@ function AnswerCard({ asked, onSave, saved, onFollowUp }: { asked: Asked; onSave
           </ol>
         </div>
       ) : null}
-      {out.evolution && (out.evolution.earliest || out.evolution.turning_points?.length) ? <ThenNowCard data={{ earliest: out.evolution.earliest || null, latest: out.evolution.latest || null, turning_points: out.evolution.turning_points || [] }} title="How it changed" /> : null}
+      {evolution && (evolution.earliest || evolution.latest || evolution.turning_points.length) ? <ThenNowCard data={evolution} title="How it changed" /> : null}
       {(out.open_loops || []).length ? (
         <div className="nt-block">
           <h3>Still open</h3>
@@ -480,6 +497,16 @@ function AnswerCard({ asked, onSave, saved, onFollowUp }: { asked: Asked; onSave
       </div>
     </article>
   );
+}
+
+/** The recall `evolution` (api.md leaves it open; the flow answers strings or {at, summary} points). */
+export function normalizeEvolution(e: unknown): ThenNow | null {
+  if (!e || typeof e !== "object") return null;
+  const r = e as Record<string, unknown>;
+  const point = (v: unknown) => (typeof v === "string" ? (v.trim() ? { at: "", summary: v } : null) : v && typeof v === "object" && typeof (v as { summary?: unknown }).summary === "string" ? (v as ThenNow["earliest"]) : null);
+  const tps = Array.isArray(r.turning_points) ? r.turning_points : [];
+  const turning_points = tps.map((t) => (typeof t === "string" ? { at: "", summary: t } : (t as ThenNow["turning_points"][number]))).filter((t) => t && typeof t.summary === "string");
+  return { earliest: point(r.earliest), latest: point(r.latest), turning_points };
 }
 
 // ---------------------------------------------------------------- then versus now

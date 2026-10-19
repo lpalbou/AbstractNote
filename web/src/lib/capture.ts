@@ -6,7 +6,7 @@
  */
 
 import { ApiError, MAX_UPLOAD_BYTES, errorSentence, type Api } from "./api";
-import { followRun, startFlow, type FollowOptions } from "./runs";
+import { followRun, runErrorText, startFlow, type FollowOptions } from "./runs";
 import type { About, Note } from "./types";
 
 export type CaptureState = "uploading" | "saving" | "queued" | "processed" | "duplicate" | "failed";
@@ -43,9 +43,11 @@ export function tooLarge(files: Array<{ size: number }>): boolean {
 }
 
 /** The `input_data` of a `note-capture` start (docs/api.md "Capture a note"). */
-export function captureInput(item: CaptureItem, processInline: boolean): Record<string, unknown> {
+export function captureInput(item: CaptureItem, processInline: boolean, sessionId: string): Record<string, unknown> {
   const input: Record<string, unknown> = {
     text: item.text,
+    // Also added by startFlow for every run (docs/api.md); kept here so the capture input is complete on its own.
+    session_id: sessionId,
     title: null,
     occurred_at: item.occurred_at,
     source: { client: "web" },
@@ -88,7 +90,7 @@ export async function runCapture(item: CaptureItem, files: File[], deps: Capture
       update(item.id, { artifacts });
     }
     update(item.id, { state: "saving", error: undefined });
-    const runId = await startFlow(api, "note-capture", deps.sessionId, captureInput({ ...item, artifacts }, deps.processInline()));
+    const runId = await startFlow(api, "note-capture", deps.sessionId, captureInput({ ...item, artifacts }, deps.processInline(), deps.sessionId));
     update(item.id, { runId });
     let answered = false;
     const run = await followRun(api, runId, {
@@ -99,8 +101,9 @@ export async function runCapture(item: CaptureItem, files: File[], deps: Capture
       },
     });
     const out = (run.output || {}) as Record<string, unknown>;
-    if (run.status !== "completed") {
-      update(item.id, { state: "failed", error: "This note could not be saved." });
+    const refused = runErrorText(run);
+    if (refused !== null) {
+      update(item.id, { state: "failed", error: refused || "This note could not be saved." });
       return;
     }
     if (!answered && typeof out.response === "string") update(item.id, { answer: out.response, answerSource: "output" });

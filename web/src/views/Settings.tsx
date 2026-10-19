@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AfDrawer, AfSwitch, ProviderModelSelect, type ProviderOption } from "@abstractframework/ui-kit";
+import { AfDrawer, AfSwitch, ProviderModelSelect, randomId, type ProviderOption } from "@abstractframework/ui-kit";
 import { ApiError, errorSentence } from "../lib/api";
 import { useRead, type ReadState } from "../lib/hooks";
 import { locationEnabled, setLocationEnabled } from "../lib/location";
@@ -213,7 +213,7 @@ function QueuePanel({ open, api }: { open: boolean; api: ReturnType<typeof useAp
         id = ensured.processor_id || "";
       }
       if (!id) throw new ApiError(500, "no processor", "no_processor");
-      await api.post(`automations/${encodeURIComponent(id)}/commands`, { type: "run_now" });
+      await api.post(`automations/${encodeURIComponent(id)}/commands`, { command_id: randomId(), type: "automation.run_now" });
       setLine("Processing started.");
       queue.reload();
     } catch (e) {

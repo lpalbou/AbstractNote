@@ -115,7 +115,7 @@ describe("mock gateway serves the pinned shapes", () => {
   });
 
   it("note-capture answers through answer_user and output.response, and links context.about", async () => {
-    const start = await call("/api/gateway/runs/start", "POST", { bundle_id: "abstractnote", flow_id: "note-capture", session_id: "note-web-t", input_data: { text: "A thought", idempotency_key: "k1", context: { attachments: [], about: { kind: "entity", id: "ex:person-dana", title: "Dana" } } } });
+    const start = await call("/api/gateway/runs/start", "POST", { bundle_id: "abstractnote", flow_id: "note-capture", session_id: "note-web-t", input_data: { text: "A thought", session_id: "note-web-t", idempotency_key: "k1", context: { attachments: [], about: { kind: "entity", id: "ex:person-dana", title: "Dana" } } } });
     const runId = start.body.run_id;
     let run;
     for (let i = 0; i < 50; i++) {
@@ -130,7 +130,7 @@ describe("mock gateway serves the pinned shapes", () => {
     await new Promise((r) => setTimeout(r, 200));
     const note = (await call(`/api/gateway/note/notes/${run.output.note_id}`)).body;
     expect(note.entities.map((e: { entity_id: string }) => e.entity_id)).toContain("ex:person-dana");
-    const again = await call("/api/gateway/runs/start", "POST", { bundle_id: "abstractnote", flow_id: "note-capture", session_id: "note-web-t", input_data: { text: "A thought", idempotency_key: "k1" } });
+    const again = await call("/api/gateway/runs/start", "POST", { bundle_id: "abstractnote", flow_id: "note-capture", session_id: "note-web-t", input_data: { text: "A thought", session_id: "note-web-t", idempotency_key: "k1" } });
     let dup;
     for (let i = 0; i < 30; i++) {
       dup = (await call(`/api/gateway/runs/${again.body.run_id}`)).body;

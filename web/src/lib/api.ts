@@ -79,11 +79,13 @@ async function parse(resp: Response): Promise<unknown> {
   }
 }
 
+/** The gateway's error shape: `{detail: "..."}` or `{detail: {reason_code, message}}` (automations 409). */
 function errorFrom(status: number, body: unknown): ApiError {
   const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
-  const detail = typeof b.detail === "string" ? b.detail : typeof b.error === "string" ? b.error : `HTTP ${status}`;
-  const code = typeof b.reason_code === "string" ? b.reason_code : typeof b.code === "string" ? b.code : null;
-  return new ApiError(status, detail, code);
+  const d = (b.detail && typeof b.detail === "object" ? b.detail : {}) as Record<string, unknown>;
+  const detail = typeof b.detail === "string" ? b.detail : typeof d.message === "string" ? d.message : typeof b.error === "string" ? b.error : `HTTP ${status}`;
+  const codeOf = (o: Record<string, unknown>) => (typeof o.reason_code === "string" ? o.reason_code : typeof o.code === "string" ? o.code : null);
+  return new ApiError(status, detail, codeOf(b) ?? codeOf(d));
 }
 
 export type Api = ReturnType<typeof createApi>;

@@ -39,10 +39,27 @@ export function recordFromFrame(data: string): { cursor: number; record: unknown
   }
 }
 
+/** Start a note flow. `input_data.session_id` always equals the request's session (docs/api.md: the gateway does not forward it). */
 export async function startFlow(api: Api, flowId: string, sessionId: string, inputData: Record<string, unknown>): Promise<string> {
-  const out = await api.post<{ run_id?: string }>("runs/start", { bundle_id: "abstractnote", flow_id: flowId, session_id: sessionId, input_data: inputData });
+  const out = await api.post<{ run_id?: string }>("runs/start", { bundle_id: "abstractnote", flow_id: flowId, session_id: sessionId, input_data: { ...inputData, session_id: sessionId } });
   if (!out || typeof out.run_id !== "string") throw new Error("The start answer has no run id.");
   return out.run_id;
+}
+
+const RUNTIME_PREFIX = "Runtime error: ";
+
+/**
+ * The sentence of a run that ended without its result: a failed run's `error`, or a completed run whose
+ * `output` says `success: false` with an `error` (a tool refusal). The "Runtime error: " prefix is stripped
+ * (docs/api.md). Null when the run succeeded.
+ */
+export function runErrorText(run: RunState): string | null {
+  const out = (run.output && typeof run.output === "object" ? run.output : {}) as Record<string, unknown>;
+  const failed = run.status !== "completed" || out.success === false;
+  if (!failed) return null;
+  const raw = typeof out.error === "string" ? out.error : typeof run.error === "string" ? run.error : "";
+  const text = raw.startsWith(RUNTIME_PREFIX) ? raw.slice(RUNTIME_PREFIX.length) : raw;
+  return text.trim() || "";
 }
 
 export type EventSourceLike = {

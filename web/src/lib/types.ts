@@ -118,7 +118,7 @@ export type RecallOutput = {
   response?: string;
   answer?: string;
   evidence?: NoteRef[];
-  evolution?: ThenNow;
+  evolution?: unknown;
   open_loops?: Task[];
   follow_ups?: string[];
   dossier_note_id?: string;

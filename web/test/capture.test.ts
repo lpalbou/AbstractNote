@@ -7,9 +7,10 @@ const base: CaptureItem = { id: "i1", key: "k-123", text: "Met Dana", files: [],
 
 describe("capture input", () => {
   it("matches the note-capture contract (docs/api.md)", () => {
-    const input = captureInput({ ...base, artifacts: [{ $artifact: "a1" }], location: { lat: 48.85, lon: 2.35 }, about: { kind: "cue", id: "nt_cue", title: "Priya?" } }, true);
+    const input = captureInput({ ...base, artifacts: [{ $artifact: "a1" }], location: { lat: 48.85, lon: 2.35 }, about: { kind: "cue", id: "nt_cue", title: "Priya?" } }, true, "note-web-s");
     expect(input).toMatchObject({
       text: "Met Dana",
+      session_id: "note-web-s",
       occurred_at: "2026-10-19T09:12:00Z",
       source: { client: "web" },
       idempotency_key: "k-123",
@@ -17,7 +18,7 @@ describe("capture input", () => {
       location: { lat: 48.85, lon: 2.35 },
       context: { attachments: [{ $artifact: "a1" }], about: { kind: "cue", id: "nt_cue", title: "Priya?" } },
     });
-    expect("location" in captureInput(base, false)).toBe(false);
+    expect("location" in captureInput(base, false, "note-web-s")).toBe(false);
   });
 
   it("backs off 2 s, 4 s, 8 s ... up to a minute", () => {
@@ -61,12 +62,25 @@ describe("runCapture", () => {
     await runCapture({ ...base, files: [{ name: "a.txt", size: 5, type: "text/plain" }], state: "uploading" }, [file], h.deps);
     const start = h.bodies.find((b) => b.url.endsWith("runs/start"))!.body as { input_data: Record<string, unknown>; flow_id: string; bundle_id: string; session_id: string };
     expect(start).toMatchObject({ bundle_id: "abstractnote", flow_id: "note-capture", session_id: "note-web-s" });
-    expect(start.input_data).toMatchObject({ idempotency_key: "k-123", context: { attachments: [{ $artifact: "art-1" }] } });
+    expect(start.input_data).toMatchObject({ session_id: "note-web-s", idempotency_key: "k-123", context: { attachments: [{ $artifact: "art-1" }] } });
     expect(h.states.find((s) => s.answer)).toMatchObject({ answerSource: "stream" });
     expect(h.bodies.filter((b) => b.url.includes("note/notes/nt_x"))).toHaveLength(3);
     const last = h.states[h.states.length - 1];
     expect(last.state).toBe("processed");
     expect(last.note?.entities?.[0].name).toBe("Dana");
+  });
+
+  it("shows the flow's refusal sentence without the runtime prefix", async () => {
+    const fetch = vi.fn(async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.endsWith("runs/start")) return new Response(JSON.stringify({ run_id: "r1" }));
+      if (u.endsWith("runs/r1")) return new Response(JSON.stringify({ status: "completed", output: { success: false, error: "Runtime error: Local file paths are not accepted here; upload the file as an attachment instead." } }));
+      return new Response(JSON.stringify({ items: [], next_after: 0 }));
+    });
+    const api = createApi({ fetch: fetch as unknown as typeof globalThis.fetch, sleep: async () => undefined, csrf: () => "c" });
+    const states: Array<Partial<CaptureItem>> = [];
+    await runCapture(base, [], { api, sessionId: "s", processInline: () => false, update: (_i, p) => void states.push(p), follow: { eventSource: undefined, pollMs: [0] } });
+    expect(states[states.length - 1]).toMatchObject({ state: "failed", error: "Local file paths are not accepted here; upload the file as an attachment instead." });
   });
 
   it("a retry after a failed start reuses the same key and the uploaded files", async () => {

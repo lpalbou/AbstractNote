@@ -73,6 +73,14 @@ describe("api client (ADR-0039 retry rule)", () => {
     for (const st of [0, 401, 403, 404, 500, 418]) expect(errorSentence(new ApiError(st, "x"), "the queue")).not.toMatch(/\d{3}|HTTP/);
   });
 
+  it("reads the automations error shape {detail: {reason_code, message}}", async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ detail: { reason_code: "automation_busy", message: "An occurrence is already running." } }), { status: 409 }));
+    const api = createApi({ fetch: fetch as unknown as typeof globalThis.fetch, csrf: () => "c" });
+    const err = await api.post("automations/a/commands", { command_id: "x", type: "automation.run_now" }).catch((e) => e);
+    expect(err).toMatchObject({ status: 409, code: "automation_busy" });
+    expect(errorSentence(err)).toBe("Already running.");
+  });
+
   it("classifies retryable statuses", () => {
     expect([0, 408, 429, 500, 503].every(retryable)).toBe(true);
     expect([400, 401, 403, 404, 409, 413, 501].some(retryable)).toBe(false);

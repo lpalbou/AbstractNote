@@ -245,6 +245,14 @@ export function createMockGateway(options = {}) {
       }, 200);
       return;
     }
+    if ((input.context?.attachments || []).some((a) => a && typeof a === "object" && "path" in a)) {
+      later(() => finish(run, { success: false, output: null, result: null, error: "Runtime error: Local file paths are not accepted here; upload the file as an attachment instead." }), 200);
+      return;
+    }
+    if (input.session_id !== run.session_id) {
+      later(() => finish(run, { success: false, output: null, error: "Runtime error: input_data.session_id must equal the run's session." }), 100);
+      return;
+    }
     const text = String(input.text || "").trim();
     const occurred = String(input.occurred_at || nowIso());
     const note_id = makeId("nt", key || `${norm(text)}|${occurred.slice(0, 16)}|web`);
@@ -426,8 +434,8 @@ export function createMockGateway(options = {}) {
     if (m && method === "POST") {
       const body = await readJson(req);
       if (m[1] !== PROCESSOR_ID) return fail(res, 404, "Not found.");
-      if (body.type !== "run_now") return fail(res, 400, "Unknown command.");
-      if (drainRunning) return fail(res, 409, "An occurrence is already running.", "automation_busy");
+      if (body.type !== "automation.run_now" || typeof body.command_id !== "string") return fail(res, 400, "Unknown command.");
+      if (drainRunning) return send(res, 409, { detail: { reason_code: "automation_busy", message: "An occurrence is already running or waiting to run.", command_id: body.command_id } });
       drainRunning = true;
       setTimeout(() => {
         for (const item of db.queue.values()) {
@@ -436,7 +444,7 @@ export function createMockGateway(options = {}) {
         }
         drainRunning = false;
       }, 4000);
-      return send(res, 200, { ok: true, accepted: true });
+      return send(res, 200, { command_id: body.command_id, accepted: true, duplicate: false, seq: 1 });
     }
 
     if (!p.startsWith("/api/gateway/note/")) return fail(res, 404, "Not found.");
