@@ -1,0 +1,211 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, with or without the leading v (example: 0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate version, changelog and tests
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release-meta.outputs.version }}
+      tag: ${{ steps.release-meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate tag, package versions and changelog
+        id: release-meta
+        env:
+          RELEASE_INPUT_VERSION: ${{ github.event.inputs.version || '' }}
+        run: |
+          python - <<'PY'
+          import json, os, re, tomllib
+          from pathlib import Path
+          raw = (os.environ.get("RELEASE_INPUT_VERSION") or os.environ["GITHUB_REF_NAME"]).strip()
+          version = raw[1:] if raw.startswith("v") else raw
+          if not re.fullmatch(r"\d+\.\d+\.\d+(?:[a-zA-Z0-9.-]+)?", version):
+              raise SystemExit(f"Invalid release version: {raw!r}")
+          py = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+          if py != version:
+              raise SystemExit(f"Tag version {version!r} does not match pyproject.toml version {py!r}")
+          web = json.loads(Path("web/package.json").read_text(encoding="utf-8"))["version"]
+          if web != version:
+              raise SystemExit(f"Tag version {version!r} does not match web/package.json version {web!r}")
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          header = re.search(rf"^## \[{re.escape(version)}\] - .+$", changelog, re.MULTILINE)
+          if not header:
+              raise SystemExit(f"CHANGELOG.md has no entry for {version}")
+          rest = changelog[header.end():]
+          nxt = re.search(r"^## \[", rest, re.MULTILINE)
+          body = rest[: nxt.start()] if nxt else rest
+          if not body.strip():
+              raise SystemExit(f"CHANGELOG.md entry for {version} is empty")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"version={version}\ntag=v{version}\n")
+          PY
+      - name: Install (Python)
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e ".[dev]"
+      - name: Pytest
+        run: python -m pytest -q tests
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install, test and build (web)
+        working-directory: web
+        run: |
+          npm ci
+          npm test
+          npm run build
+          npm pack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-pack
+          path: "web/*.tgz"
+
+  build-python:
+    name: Build Python distributions
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          python -m pip install -U pip build twine
+          python -m build
+          python -m twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: dist/*
+
+  ensure-tag:
+    name: Ensure release tag
+    runs-on: ubuntu-latest
+    needs: validate
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create annotated tag for manual releases
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          tag="${{ needs.validate.outputs.tag }}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            remote_sha="$(git ls-remote --tags origin "refs/tags/${tag}^{}" | awk '{print $1}')"
+            if [ "${remote_sha}" != "$(git rev-parse HEAD)" ]; then
+              echo "Tag ${tag} already exists at ${remote_sha}, but the current commit is $(git rev-parse HEAD)."
+              exit 1
+            fi
+            echo "Tag ${tag} already exists for this commit. Reusing it."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${tag}" -m "AbstractNote ${tag}"
+          git push origin "${tag}"
+      - name: Tag already supplied by push trigger
+        if: github.event_name != 'workflow_dispatch'
+        run: echo "Using existing tag ${{ needs.validate.outputs.tag }}"
+
+  publish-npm:
+    name: Publish @abstractframework/note to npm
+    runs-on: ubuntu-latest
+    needs: [validate, ensure-tag]
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@abstractframework/note
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install and build
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - name: Publish
+        working-directory: web
+        run: |
+          PKG_NAME="$(node -p "require('./package.json').name")"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if npm view "${PKG_NAME}@${PKG_VERSION}" version >/dev/null 2>&1; then
+            echo "${PKG_NAME}@${PKG_VERSION} is already published; skipping."
+          else
+            npm publish --access public --provenance
+          fi
+
+  publish-pypi:
+    name: Publish abstractnote to PyPI
+    runs-on: ubuntu-latest
+    needs: [validate, build-python, ensure-tag]
+    environment:
+      name: pypi
+      url: https://pypi.org/project/abstractnote/
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
+  github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [validate, ensure-tag, publish-npm, publish-pypi]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-pack
+          path: dist-release
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist-release
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.validate.outputs.tag }}
+          name: AbstractNote ${{ needs.validate.outputs.tag }}
+          generate_release_notes: true
+          files: dist-release/*

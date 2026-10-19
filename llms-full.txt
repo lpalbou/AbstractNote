@@ -2189,9 +2189,11 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-10-19
 
-The first version. It is installed from source; PyPI, npm and App Store publication are pending.
+The first version: the `abstractnote` package on PyPI and the `@abstractframework/note` web app on npm;
+it needs AbstractMemory 0.3.1 and, for the gateway seam, AbstractGateway 0.15.11. The App Store
+publication of the phone app is pending.
 
 ### Added
 
