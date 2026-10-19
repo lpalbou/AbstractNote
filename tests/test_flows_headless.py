@@ -222,7 +222,8 @@ def test_recall_every_effort_answers_on_response(runner, doubles, effort):
         assert doubles.names("note_expand") == [] and "nt_1" in out["response"]
     if effort == "standard":
         (exp,) = doubles.args("note_expand")
-        assert exp == {"note_ids": ["nt_1"], "entity_ids": ["ex:person-dana"]}
+        assert exp == {"note_ids": ["nt_1"], "entity_ids": ["ex:person-dana"],
+                       "query": "What did I decide about the LUT budget?"}  # the packet is scored by the question
         # evidence is NoteRef-shaped and limited to notes the search returned (no invented ids)
         assert out["evidence"] == [{"note_id": "nt_1", "title": "Dana and the LUT budget", "kind": "event",
                                     "occurred_at": "2026-10-19T09:12:00Z", "excerpt": "she wants the Pareto"}]
@@ -294,6 +295,27 @@ def test_core_tools_capture_then_drain_then_recall(tmp_path):
     assert cap["note_id"] in hits["response"]
 
 
+def test_standard_recall_packet_stays_within_the_expand_budget(tmp_path):
+    """The note-recall flow passes the question to note_expand, which spends a bounded budget on the
+    best-scored notes (W12); the Answer prompt carries that packet, never the unscored results."""
+    from abstractnote.recall.expand import EXPAND_BUDGET_CHARS
+
+    bind = _core_tools()
+    llm = ScriptedLLM(SCRIPT)
+    runner = NoteRunner.with_llm(llm, bind(tmp_path / "notebook"))
+    for i in range(30):
+        runner.run_capture(f"Met Dana about the LUT budget, round {i}; she wants the Pareto by Friday. " + "x " * 400,
+                           occurred_at=f"2026-10-{1 + i % 28:02d}T09:12:00Z")
+    runner.run_drain(max_items=30, budget_s=600)
+    runner.run_recall("What did Dana want about the LUT budget?", effort="standard")
+    (answer,) = [c for c in llm.calls if c["schema"] == "Answer"]
+    expansion = answer["prompt"].split("then-versus-now pairs:\n", 1)[1]
+    import json as _json
+
+    packet = _json.loads(expansion)
+    assert len(expansion) <= EXPAND_BUDGET_CHARS + 2000 and packet["used_chars"] <= EXPAND_BUDGET_CHARS
+
+
 def test_the_flow_merge_matches_the_core_lane_merge(doubles):
     """note-process merges section extractions in a code node; the core lane has the same rule
     (abstractnote.process.merge). Two sections, overlapping mentions: both must agree exactly."""
@@ -347,7 +369,9 @@ def test_the_real_model_path_through_abstractcore(tmp_path, monkeypatch):
                  "OPENAI_BASE_URL": f"http://127.0.0.1:{port}/v1"}.items():
         monkeypatch.setenv(k, v)
     stub = Path(__file__).resolve().parents[1] / "scripts" / "stub_llm.py"
-    proc = subprocess.Popen([sys.executable, str(stub), "--port", str(port)], env={"PATH": "/usr/bin:/bin", "HOME": str(home)},
+    logs = tmp_path / "requests"
+    proc = subprocess.Popen([sys.executable, str(stub), "--port", str(port), "--log-requests", str(logs)],
+                            env={"PATH": "/usr/bin:/bin", "HOME": str(home)},
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         for _ in range(50):
@@ -365,6 +389,30 @@ def test_the_real_model_path_through_abstractcore(tmp_path, monkeypatch):
     finally:
         proc.terminate()
         proc.wait(timeout=10)
+    # Backlog 0024, through the real client: every request carries the step's static system prompt,
+    # and the note steps' user message starts with the note's own envelope (kept byte for byte).
+    import json as _json
+
+    from abstractnote.process import prompts as _prompts
+
+    steps = {"QuickFiling": "quick_filing", "Extraction": "extract", "Linking": "link", "Answer": "synthesize"}
+    seen = set()
+    for f in sorted(logs.glob("*.json")):
+        body = _json.loads(f.read_text())
+        schema = f.stem.split("-", 1)[1]
+        if schema not in steps:
+            continue
+        seen.add(schema)
+        msgs = body["messages"]
+        assert msgs[0]["role"] == "system", f.name
+        assert msgs[0]["content"].startswith(_prompts.system_prompt(steps[schema]).strip()), f.name
+        if schema != "Answer":
+            from abstractnote.process.packets import note_envelope
+
+            user = msgs[-1]["content"]
+            assert user.startswith(note_envelope() + "\n"), (f.name, user[:80])  # kept byte for byte
+            assert "About this note (not part of its text): nt_" in user, f.name
+    assert seen == set(steps)
 
 
 PINNED = "This notebook is pinned to the embedding model x; rebuild with reembed to change models."

@@ -375,7 +375,54 @@ def test_a_missing_summary_is_a_warning_never_a_failed_note(nb):
 
 
 def test_extraction_prompt_steers_facts_to_literal_ex_claims():
-    text = prompts.load("extract")
+    text = prompts.load_system("extract")
     assert "ex:budget_cap" in text and "ex:deadline" in text and "ex:decided" in text
     assert "{{vocabulary}}" in text
-    assert "one sentence" in prompts.load("link")
+    assert "one sentence" in prompts.load_system("link")
+
+
+def test_system_prompts_are_static_and_carry_the_vocabulary():
+    """Backlog 0024: the instructions, the vocabulary and the output shape live in the system prompt
+    (identical bytes for every note); the user templates carry only the note and its packet."""
+    for name in prompts.NAMES:
+        system = prompts.system_prompt(name)
+        assert "{{" not in system and "Output JSON only" in system, name
+        assert "Output JSON only" not in prompts.load(name), name
+    system = prompts.system_prompt("extract")
+    for v in vocabulary():
+        assert f"- {v['predicate']}" in system
+    assert system == prompts.system_prompt("extract")
+
+
+def test_a_mention_the_note_never_writes_is_left_out(nb):
+    """Eval 4.1 item 6: a name taken from the context (or the header), not written in the note's own
+    text, is refused with a warning; its statements are skipped (subject) or kept as text (object)."""
+    seed(nb)
+    ctx = ToolContext(nb=nb)
+    nid = nb.capture("Dana-Ng sent the budget.", title="About LUT", occurred_at="2026-03-01T10:00:00Z").note_id
+    note_context(ctx, nid)
+    ext = extraction([mention("m1", "Dana Ng", "person"), mention("m2", "LUT", "project"),
+                      mention("m3", "budget", "concept")],
+                     [stmt("m2", "schema:knowsAbout", "m3"), stmt("m1", "schema:knowsAbout", "m2")])
+    out = note_apply_revision(ctx, nid, ext, {"mentions": [ml("m1", "create", name="Dana Ng", kind="person"),
+                                                            ml("m2", "create", name="LUT", kind="project"),
+                                                            ml("m3", "create", name="budget", kind="concept")]})
+    assert "LUT is not written in the note; it was left out." in out["warnings"]  # only in the title
+    rev = nb.store.revision_row(out["revision_id"])
+    ops = __import__("json").loads(rev["ops_json"])
+    created = {o["payload"]["name"] for o in ops if o["op"] == "entity.create"}
+    assert created == {"Dana Ng", "budget"}  # "Dana-Ng" is the same words as "Dana Ng"
+    claims = [o["payload"] for o in ops if o["op"] == "claim.add"]
+    assert len(claims) == 1 and claims[0]["object_literal"] == "LUT"
+
+
+def test_flow_flags_about_a_part_reach_the_revision(nb):
+    ctx = ToolContext(nb=nb)
+    nid = nb.capture("Zed called.", occurred_at="2026-02-02T10:00:00Z").note_id
+    note_context(ctx, nid)
+    flag = "A part of this note names nothing although it has text, even when read a second time."
+    ext = dict(extraction([mention("m1", "Zed", "person")]), warnings=[flag])
+    out = note_apply_revision(ctx, nid, ext, {"mentions": [ml("m1", "create", name="Zed", kind="person")]})
+    assert flag in out["warnings"]
+    merged, _ = merge_extractions([ext, dict(extraction([]), warnings=[flag])])
+    assert merged["warnings"] == [flag]

@@ -1,4 +1,4 @@
-"""``note_resolve_candidates``: up to five existing entities per mention, with how each matched.
+"""``note_resolve_candidates``: up to three existing entities per mention, with how each matched.
 
 Candidates come from three deterministic lookups: exact case-folded name or
 alias, full-text over entity names, aliases and summaries (BM25), and vector
@@ -13,8 +13,12 @@ from .. import ids
 from ..store.embeddings import top_k
 from ..store.notes import entity_text, fts_terms
 from .context import attach_claims, empty_packet, entity_view, load_packet, save_packet
+from .packets import CANDIDATES_PER_MENTION
 
-MAX_CANDIDATES = 5
+MAX_CANDIDATES = CANDIDATES_PER_MENTION
+#: Active claims returned per candidate; the linking prompt shows at most
+#: ``packets.CLAIMS_PER_CANDIDATE`` of them, those about the note's own predicates first.
+CLAIMS_PER_CANDIDATE_RETURNED = 8
 RRF_K = 60
 VECTOR_MIN = 0.3
 
@@ -88,7 +92,8 @@ def resolve_candidates(nb: Any, note_id: str, mentions: Sequence[Dict[str, Any]]
             view = entity_view(nb, eid)
             score = 1.0 if "alias" in matched[eid] else round(vec_score.get(eid, scores[eid]), 4)
             view.update({"index": len(cands), "score": score, "matched_by": matched[eid],
-                         "active_claims": attach_claims(nb, packet, eid, added_claims)})
+                         "active_claims": attach_claims(nb, packet, eid, added_claims,
+                                                           CLAIMS_PER_CANDIDATE_RETURNED)})
             cands.append(view)
         packet["mentions"][str(m["ref"])] = [c["entity_id"] for c in cands]
         out.append({"ref": str(m["ref"]), "candidates": cands})

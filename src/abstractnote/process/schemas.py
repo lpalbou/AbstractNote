@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 ENTITY_KINDS = ["person", "org", "project", "concept", "place", "event", "artifact", "software", "thing"]
 NOTE_KINDS = ["idea", "task", "decision", "fact", "event", "question", "reflection", "reference", "log",
@@ -50,8 +50,13 @@ def _a(items: Dict[str, Any], description: str = "") -> Dict[str, Any]:
     return out
 
 
-def _o(properties: Dict[str, Any]) -> Dict[str, Any]:
-    return {"type": "object", "properties": properties, "required": list(properties)}
+def _o(properties: Dict[str, Any], defaults: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """An object schema. Every property is required unless ``defaults`` gives it a default: the
+    model may then leave it out (backlog 0024: default-valued fields were a quarter of the output
+    tokens), and the runtime's model fills the default."""
+    defaults = defaults or {}
+    props = {k: (dict(v, default=defaults[k]) if k in defaults else v) for k, v in properties.items()}
+    return {"type": "object", "properties": props, "required": [k for k in properties if k not in defaults]}
 
 
 QUICK_FILING: Dict[str, Any] = _o({
@@ -71,7 +76,7 @@ EXTRACTION: Dict[str, Any] = _o({
         "kind": _e(ENTITY_KINDS),
         "aliases": _a(_s(), "other names as written in the note"),
         "role": _s("what the note says about it, one phrase"),
-    })),
+    }, {"aliases": []})),
     "claims": _a(_o({
         "subject": _s("a mention ref"),
         "predicate": _s("a CURIE from the vocabulary, or ex:snake_case"),
@@ -82,13 +87,14 @@ EXTRACTION: Dict[str, Any] = _o({
         "evidence": _s("verbatim excerpt of the note"),
         "valid_from": _ns("ISO date or null"),
         "valid_until": _ns("ISO date or null"),
-    })),
+    }, {"object_is_literal": False, "certainty": "stated", "stance": "assert", "valid_from": None,
+        "valid_until": None})),
     "tasks": _a(_o({
         "text": _s(),
         "status": _e(["open", "done"]),
         "due": _ns("ISO date or null"),
-    })),
-    "time_refs": _a(_o({"text": _s(), "iso": _ns("ISO or null")})),
+    }, {"due": None})),
+    "time_refs": _a(_o({"text": _s(), "iso": _ns("ISO or null")}, {"iso": None})),
     "topics": _a(_s()),
 })
 
@@ -106,17 +112,17 @@ LINKING: Dict[str, Any] = _o({
                                    "reused or merged entity this note tells something new about; null only for a "
                                    "reused entity the note adds nothing to"},
         "reason": _s("short"),
-    })),
+    }, {"candidate": None, "merge_candidates": [], "name": "", "kind": None, "aliases": [], "reason": ""})),
     "claims": _a(_o({
         "index": {"type": "integer", "description": "index of the claim in the extraction"},
         "relation_to_existing": _e(CLAIM_RELATIONS),
         "existing": {"type": ["integer", "null"], "description": "index of the existing claim in the packet"},
         "reason": _s("short"),
-    })),
+    }, {"existing": None, "reason": ""})),
     "tasks": _a(_o({
         "index": {"type": "integer", "description": "index of the task in the extraction"},
         "closes_open_task": {"type": ["integer", "null"], "description": "index of the open task it closes"},
-    })),
+    }, {"closes_open_task": None})),
     "revision_summary": _s("one sentence"),
 })
 
@@ -185,6 +191,18 @@ SCHEMAS: Dict[str, Dict[str, Any]] = {
 
 class _M(BaseModel):
     model_config = ConfigDict(extra="ignore")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _null_means_default(cls, data: Any) -> Any:
+        """An explicit null for a field whose default is not null means "the default"."""
+        if isinstance(data, dict):
+            out = dict(data)
+            for name, field in cls.model_fields.items():
+                if out.get(name, 0) is None and field.default is not None and not field.is_required():
+                    out.pop(name)
+            return out
+        return data
 
 
 class QuickFiling(_M):

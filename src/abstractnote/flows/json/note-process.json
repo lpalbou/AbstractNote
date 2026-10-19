@@ -270,13 +270,18 @@
             "id": "items",
             "label": "items",
             "type": "array"
+          },
+          {
+            "id": "count",
+            "label": "count",
+            "type": "number"
           }
         ],
         "pinDefaults": {
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "if not isinstance(sections, list) or not sections:\n    raise ValueError(\"The note has no text to read.\")\nreturn {\"items\": sections}\n"
+        "codeBody": "if not isinstance(sections, list) or not sections:\n    raise ValueError(\"The note has no text to read.\")\nreturn {\"items\": sections, \"count\": len(sections)}\n"
       }
     },
     {
@@ -326,11 +331,87 @@
       }
     },
     {
+      "id": "extract_packet",
+      "type": "code",
+      "position": {
+        "x": 2880.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "What extraction sees",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note",
+            "label": "note",
+            "type": "object"
+          },
+          {
+            "id": "item",
+            "label": "item",
+            "type": "object"
+          },
+          {
+            "id": "parts",
+            "label": "parts",
+            "type": "number"
+          },
+          {
+            "id": "similar_notes",
+            "label": "similar_notes",
+            "type": "array"
+          },
+          {
+            "id": "candidate_entities",
+            "label": "candidate_entities",
+            "type": "array"
+          },
+          {
+            "id": "open_tasks",
+            "label": "open_tasks",
+            "type": "array"
+          },
+          {
+            "id": "topics",
+            "label": "topics",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "packet",
+            "label": "packet",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "CANDIDATES_PER_MENTION = 3\nCLAIMS_PER_CANDIDATE = 3\nEVIDENCE_CHARS = 200\nKNOWN_NAMES = 15\nLINK_MENTIONS_PER_CALL = 15\nOPEN_TASKS = 8\nSIMILAR_NOTES = 5\nSUMMARY_CHARS = 240\nTOPICS = 40\ndef clip(text, limit):\n    \"\"\"One line of at most ``limit`` characters, cut at a word boundary (packet views only).\"\"\"\n    s = ' '.join(str(text or '').split())\n    if len(s) <= limit:\n        return s\n    cut = s[:limit].rsplit(' ', 1)[0]\n    return (cut or s[:limit]).rstrip(' ,;:') + '…'\ndef note_envelope():\n    \"\"\"The user message's head ``<runtime_metadata>`` envelope: the SAME bytes for every call.\n\n    The runtime keeps an envelope that is already at the head of a message byte for byte and\n    stamps a fresh per-second one only on a message without one; a per-call timestamp there would\n    end the shared prefix after a few tokens. The note's own time and id go at the END of the\n    message (``note_header``), where they cannot break the cached prefix.\"\"\"\n    return '<runtime_metadata>{\"time\": \"the note\\'s own date is on the last line of this message\"}</runtime_metadata>'\ndef note_header(note, part=0, parts=1):\n    \"\"\"The message's LAST line: which note this is (id, title, when it was written, its kind, where\n    it came from). It identifies the note and dates it (\"now\" for the note); it is not content.\"\"\"\n    n = note if isinstance(note, dict) else {}\n    bits = ['About this note (not part of its text): ' + str(n.get('note_id') or '')]\n    if str(n.get('title') or '').strip():\n        bits.append('“' + clip(n.get('title'), 160) + '”')\n    when = str(n.get('occurred_at') or '')[:16].replace('T', ' ')\n    if when:\n        bits.append('written ' + when + ' (now, for this note)')\n    extra = []\n    if n.get('kind'):\n        extra.append('kind ' + str(n.get('kind')))\n    src = n.get('source') if isinstance(n.get('source'), dict) else {}\n    origin = [str(src.get(k)) for k in ('importer', 'client', 'author') if src.get(k)]\n    if origin:\n        extra.append('from ' + '/'.join(origin))\n    if n.get('location'):\n        extra.append('at ' + clip(n.get('location'), 60))\n    if extra:\n        bits.append('(' + '; '.join(extra) + ')')\n    if parts and int(parts) > 1:\n        bits.append('[part ' + str(int(part) + 1) + ' of ' + str(int(parts)) + ']')\n    return ' '.join(bits)\ndef extraction_packet(note, section, parts, similar_notes, candidate_entities, open_tasks, topics):\n    \"\"\"The dynamic half of an extraction prompt: ``{envelope, header, known, text}``.\"\"\"\n    n = note if isinstance(note, dict) else {}\n    sec = section if isinstance(section, dict) else {'text': str(section or '')}\n    lines = []\n    names = []\n    for e in (candidate_entities or [])[:KNOWN_NAMES]:\n        if isinstance(e, dict) and str(e.get('name') or '').strip():\n            names.append(clip(e.get('name'), 80) + ' (' + str(e.get('kind') or 'thing') + ')')\n    if names:\n        lines.append('Names already in the notebook that this text may use: ' + '; '.join(names) + '.')\n    own = [str(t) for t in n.get('topics') or [] if str(t).strip()]\n    rest = [str(t) for t in topics or [] if str(t).strip() and str(t) not in own]\n    shown = (own + rest)[:TOPICS]\n    if shown:\n        lines.append('Existing topics: ' + ', '.join(shown) + '.')\n    sims = []\n    for s in (similar_notes or [])[:SIMILAR_NOTES]:\n        if isinstance(s, dict):\n            sims.append('“' + clip(s.get('title') or s.get('summary') or 'untitled', 100) + '” (' + str(s.get('occurred_at') or '')[:10] + ')')\n    if sims:\n        lines.append('Similar earlier notes: ' + '; '.join(sims) + '.')\n    tasks = []\n    for t in (open_tasks or [])[:OPEN_TASKS]:\n        if isinstance(t, dict) and str(t.get('text') or '').strip():\n            tasks.append('- ' + clip(t.get('text'), 140) + (' (due ' + str(t.get('due'))[:10] + ')' if t.get('due') else ''))\n    if tasks:\n        lines.append('Open tasks:\\n' + '\\n'.join(tasks))\n    src = str(sec.get('source') or 'note')\n    who = str(sec.get('author') or '').strip()\n    if src == 'answer':\n        label = 'Answer by ' + (who or 'an assistant') + \" (what they said; not written by the note's author)\"\n    elif src == 'note':\n        label = 'Text written by ' + who if who else 'Text'\n    else:\n        label = 'Text (' + src.replace('attachment:', 'attached file ') + ')'\n    try:\n        part = int(sec.get('index') or 0)\n    except (TypeError, ValueError):\n        part = 0\n    return {'envelope': note_envelope(), 'header': note_header(n, part, parts), 'known': '\\n'.join(lines) if lines else 'The notebook knows nothing related yet.', 'text': label + ':\\n' + str(sec.get('text') or '').rstrip()}\nreturn {\"packet\": extraction_packet(note, item, parts, similar_notes, candidate_entities, open_tasks, topics)}\n"
+      }
+    },
+    {
       "id": "extract_prompt",
       "type": "string_template",
       "position": {
-        "x": 2400.0,
-        "y": 320.0
+        "x": 2880.0,
+        "y": 398.0
       },
       "data": {
         "nodeType": "string_template",
@@ -342,38 +423,8 @@
             "type": "string"
           },
           {
-            "id": "note",
-            "label": "note",
-            "type": "any"
-          },
-          {
-            "id": "section",
-            "label": "section",
-            "type": "any"
-          },
-          {
-            "id": "similar_notes",
-            "label": "similar_notes",
-            "type": "any"
-          },
-          {
-            "id": "candidate_entities",
-            "label": "candidate_entities",
-            "type": "any"
-          },
-          {
-            "id": "open_tasks",
-            "label": "open_tasks",
-            "type": "any"
-          },
-          {
-            "id": "topics",
-            "label": "topics",
-            "type": "any"
-          },
-          {
-            "id": "vocabulary",
-            "label": "vocabulary",
+            "id": "packet",
+            "label": "packet",
             "type": "any"
           }
         ],
@@ -385,7 +436,7 @@
           }
         ],
         "pinDefaults": {
-          "template": "You read one section of a person's note and write down what it says, so it can be linked to what they already know.\n\nThe note: {{note}}\n\nSection to read:\n{{section}}\n\nWhat the notebook already knows (for orientation only; do not copy it into the output):\n- similar notes: {{similar_notes}}\n- entities that may be mentioned: {{candidate_entities}}\n- open tasks: {{open_tasks}}\n- existing topics: {{topics}}\n\nPredicate vocabulary (use one of these CURIEs when it fits; otherwise write `ex:snake_case`):\n{{vocabulary}}\n\nReturn:\n- `summary`: one to three sentences about this section;\n- `mentions`: every person, organisation, project, concept, place, event, artifact (document, dataset, repository), piece of software or other thing the section talks about, each with a `ref` (m1, m2, ...), the `name` exactly as written, its `kind`, other names used for it in the note (`aliases`), and its `role` in one phrase;\n- `claims`: one per statement, with `subject` a mention ref, a `predicate`, and an `object` that is a mention ref, or a literal value with `object_is_literal: true`; `certainty` (stated, probable, possible, reported, disputed), `stance` (assert; revise when the note corrects earlier knowledge; retract when it says something is no longer true), `evidence` (a verbatim excerpt), and `valid_from` / `valid_until` only when the note gives or implies those dates from its own date;\n  Quantities, amounts, dates, deadlines and decisions are facts about their subject: write them as literal-object claims with an explicit `ex:` predicate rather than forcing a vocabulary predicate that does not mean the same thing. For example, \"We capped the LUT budget at 25k; Dana needs the Pareto by 24 October\" gives `{\"subject\": \"m1\", \"predicate\": \"ex:budget_cap\", \"object\": \"25k\", \"object_is_literal\": true}`, `{\"subject\": \"m1\", \"predicate\": \"ex:deadline\", \"object\": \"2026-10-24\", \"object_is_literal\": true}` and `{\"subject\": \"m1\", \"predicate\": \"ex:decided\", \"object\": \"cap the budget at 25k\", \"object_is_literal\": true}` (with m1 = LUT), not `schema:nextItem` or `schema:knowsAbout`;\n- `tasks`: things to do (`open`) and things reported done (`done`), with a due date when one is given;\n- `time_refs`: explicit time references (\"last Tuesday\", \"in 2024\") with their ISO date when the note's own date resolves them;\n- `topics`: the topics the section belongs to, preferring existing ones.\n\nRules:\n- Use only the note and the provided context; never invent entities or dates.\n- Keep names as written by the author; put variants in aliases.\n- Quote evidence verbatim; one claim per statement; no inferred hierarchy.\n- Output JSON only, matching the schema.\n"
+          "template": "{{packet.envelope}}\n{{packet.text}}\n\nWhat the notebook already knows (orientation only; never copy it into the answer):\n{{packet.known}}\n\n{{packet.header}}"
         }
       }
     },
@@ -393,7 +444,7 @@
       "id": "extract",
       "type": "llm_call",
       "position": {
-        "x": 2880.0,
+        "x": 3360.0,
         "y": 0.0
       },
       "data": {
@@ -485,7 +536,7 @@
         ],
         "pinDefaults": {
           "tools": [],
-          "system": "You file and connect a person's notes. Output JSON only, matching the schema.",
+          "system": "You read one part of a person's note and write down what it says, so it can be linked to what they already know. The message gives the text to read, what the notebook already knows (for orientation only; never copy it into the answer), and on its last line which note this is and when it was written. That last line identifies the note; it is not part of what the note says: never extract the note itself, its title, author, importer or date as mentions or statements.\n\nReturn one JSON object with these fields:\n- `summary`: one to three sentences about this text;\n- `mentions`: the things a person would look up again that the text itself names: people, organisations, projects, concepts, places, events, artifacts (documents, datasets, repositories), pieces of software. Each mention's name is written in this text (never only in the context); give a `ref` (m1, m2, ...), the `name` exactly as written, its `kind` (person, org, project, concept, place, event, artifact, software or thing), other names this text uses for it (`aliases`), and its `role` in one phrase. Message numbers, ids, field values, variable and constant names, version numbers, amounts, dates and generic words are never mentions: they are literal objects of statements;\n- `claims`: one per statement, with `subject` a mention ref, a `predicate`, and an `object` that is a mention ref, or a literal value with `object_is_literal: true`; `certainty` (stated, probable, possible, reported, disputed), `stance` (assert; revise when the note corrects earlier knowledge; retract when it says something is no longer true), `evidence` (a short verbatim excerpt, at most about 15 words), and `valid_from` / `valid_until` (ISO dates, or null) only when the note gives or implies those dates from its own date.;\n  Quantities, amounts, dates, deadlines and decisions are facts about their subject: write them as literal-object claims with an explicit `ex:` predicate rather than forcing a vocabulary predicate that does not mean the same thing. For example, \"We capped the LUT budget at 25k; Dana needs the Pareto by 24 October\" gives `{\"subject\": \"m1\", \"predicate\": \"ex:budget_cap\", \"object\": \"25k\", \"object_is_literal\": true}`, `{\"subject\": \"m1\", \"predicate\": \"ex:deadline\", \"object\": \"2026-10-24\", \"object_is_literal\": true}` and `{\"subject\": \"m1\", \"predicate\": \"ex:decided\", \"object\": \"cap the budget at 25k\", \"object_is_literal\": true}` (with m1 = LUT), not `schema:nextItem` or `schema:knowsAbout`.;\n- `tasks`: things to do (`open`) and things reported done (`done`), with a `due` date when one is given, else null;\n- `time_refs`: explicit time references (\"last Tuesday\", \"in 2024\") with their `iso` date when the note's own date resolves them, else null;\n- `topics`: the topics the text belongs to, preferring existing ones.\n\nLeave out a field that has its default: `object_is_literal` false, `certainty` stated, `stance` assert, `valid_from`, `valid_until`, `due` and `iso` null, `aliases` empty.\n\nPredicate vocabulary (use one of these CURIEs when it fits; otherwise write `ex:snake_case`):\n- rdf:type: Class membership (entity -> class).\n- dcterms:hasPart: has part\n- dcterms:isPartOf: is part of\n- schema:nextItem: next item\n- schema:previousItem: previous item\n- dcterms:identifier: identifier\n- dcterms:title: title\n- schema:name: Primary label for non-document entities (agents, events, places, etc.).\n- dcterms:description: description\n- dcterms:abstract: abstract\n- dcterms:created: created\n- dcterms:modified: modified\n- dcterms:creator: creator\n- dcterms:publisher: publisher\n- dcterms:subject: subject\n- schema:genre: genre\n- schema:about: about\n- schema:mentions: mentions\n- schema:knowsAbout: An agent's knowledge/awareness about a topic or entity (stronger than incidental mentions).\n- dcterms:references: references\n- schema:sameAs: same as\n- schema:location: location\n- schema:temporalCoverage: temporal coverage\n- schema:participant: participant\n- schema:organizer: organizer\n- schema:result: result\n- schema:instrument: instrument\n- schema:startDate: start date\n- schema:endDate: end date\n- skos:definition: definition\n- skos:prefLabel: preferred label\n- skos:altLabel: alternative label\n- skos:broader: broader\n- skos:narrower: narrower\n- skos:related: related\n- skos:exactMatch: exact match\n- skos:closeMatch: close match\n- cito:supports: supports\n- cito:disagreesWith: disagrees with\n- cito:usesDataFrom: uses data from\n- cito:providesDataFor: provides data for\n- cito:extends: extends\n- cito:discusses: discusses\n- cito:confirms: confirms\n\nRules:\n- Use only the note and the context given; never invent entities or dates. The note's own date is \"now\".\n- Keep names as written by the author; put variants in aliases.\n- Quote evidence verbatim; one claim per statement; no inferred hierarchy.\n- A text that names things always has mentions; empty lists are only for a text that names nothing.\n- A text labelled \"Answer by …\" is what that author (usually an assistant) said in reply to the note's author: write its statements with `certainty: reported`, never as the note author's own.\n\nThe answer has this shape (values are illustrations):\n{\"summary\": \"Dana asked for the LUT Pareto by Friday.\", \"mentions\": [{\"ref\": \"m1\", \"name\": \"Dana\", \"kind\": \"person\", \"role\": \"asks for the Pareto\"}, {\"ref\": \"m2\", \"name\": \"LUT\", \"kind\": \"project\", \"aliases\": [\"the LUT work\"], \"role\": \"the project the Pareto is for\"}], \"claims\": [{\"subject\": \"m1\", \"predicate\": \"schema:participant\", \"object\": \"m2\", \"evidence\": \"Dana wants the Pareto\"}, {\"subject\": \"m2\", \"predicate\": \"ex:deadline\", \"object\": \"2026-10-23\", \"object_is_literal\": true, \"certainty\": \"probable\", \"evidence\": \"by Friday, I think\"}], \"tasks\": [{\"text\": \"Send Dana the LUT Pareto\", \"status\": \"open\", \"due\": \"2026-10-23\"}], \"time_refs\": [{\"text\": \"Friday\", \"iso\": \"2026-10-23\"}], \"topics\": [\"lut\"]}\n\nOutput JSON only, matching the schema, written compactly on one line (no indentation).\n",
           "temperature": 0.2,
           "resp_schema": {
             "type": "object",
@@ -526,7 +577,8 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "other names as written in the note"
+                      "description": "other names as written in the note",
+                      "default": []
                     },
                     "role": {
                       "type": "string",
@@ -537,7 +589,6 @@
                     "ref",
                     "name",
                     "kind",
-                    "aliases",
                     "role"
                   ]
                 }
@@ -560,7 +611,8 @@
                       "description": "a mention ref, or a literal value"
                     },
                     "object_is_literal": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "default": false
                     },
                     "certainty": {
                       "type": "string",
@@ -570,7 +622,8 @@
                         "possible",
                         "reported",
                         "disputed"
-                      ]
+                      ],
+                      "default": "stated"
                     },
                     "stance": {
                       "type": "string",
@@ -578,7 +631,8 @@
                         "assert",
                         "revise",
                         "retract"
-                      ]
+                      ],
+                      "default": "assert"
                     },
                     "evidence": {
                       "type": "string",
@@ -589,26 +643,23 @@
                         "string",
                         "null"
                       ],
-                      "description": "ISO date or null"
+                      "description": "ISO date or null",
+                      "default": null
                     },
                     "valid_until": {
                       "type": [
                         "string",
                         "null"
                       ],
-                      "description": "ISO date or null"
+                      "description": "ISO date or null",
+                      "default": null
                     }
                   },
                   "required": [
                     "subject",
                     "predicate",
                     "object",
-                    "object_is_literal",
-                    "certainty",
-                    "stance",
-                    "evidence",
-                    "valid_from",
-                    "valid_until"
+                    "evidence"
                   ]
                 }
               },
@@ -632,13 +683,13 @@
                         "string",
                         "null"
                       ],
-                      "description": "ISO date or null"
+                      "description": "ISO date or null",
+                      "default": null
                     }
                   },
                   "required": [
                     "text",
-                    "status",
-                    "due"
+                    "status"
                   ]
                 }
               },
@@ -655,12 +706,12 @@
                         "string",
                         "null"
                       ],
-                      "description": "ISO or null"
+                      "description": "ISO or null",
+                      "default": null
                     }
                   },
                   "required": [
-                    "text",
-                    "iso"
+                    "text"
                   ]
                 }
               },
@@ -689,7 +740,7 @@
       "id": "nothing_named",
       "type": "code",
       "position": {
-        "x": 3360.0,
+        "x": 3840.0,
         "y": 0.0
       },
       "data": {
@@ -740,7 +791,7 @@
       "id": "read_again",
       "type": "if",
       "position": {
-        "x": 3840.0,
+        "x": 4320.0,
         "y": 0.0
       },
       "data": {
@@ -776,7 +827,7 @@
       "id": "keep_extraction",
       "type": "add_to_list",
       "position": {
-        "x": 4320.0,
+        "x": 4800.0,
         "y": 0.0
       },
       "data": {
@@ -825,7 +876,7 @@
       "id": "extract_again",
       "type": "llm_call",
       "position": {
-        "x": 4320.0,
+        "x": 4800.0,
         "y": 320.0
       },
       "data": {
@@ -917,7 +968,7 @@
         ],
         "pinDefaults": {
           "tools": [],
-          "system": "You file and connect a person's notes. Output JSON only, matching the schema.",
+          "system": "You read one part of a person's note and write down what it says, so it can be linked to what they already know. The message gives the text to read, what the notebook already knows (for orientation only; never copy it into the answer), and on its last line which note this is and when it was written. That last line identifies the note; it is not part of what the note says: never extract the note itself, its title, author, importer or date as mentions or statements.\n\nReturn one JSON object with these fields:\n- `summary`: one to three sentences about this text;\n- `mentions`: the things a person would look up again that the text itself names: people, organisations, projects, concepts, places, events, artifacts (documents, datasets, repositories), pieces of software. Each mention's name is written in this text (never only in the context); give a `ref` (m1, m2, ...), the `name` exactly as written, its `kind` (person, org, project, concept, place, event, artifact, software or thing), other names this text uses for it (`aliases`), and its `role` in one phrase. Message numbers, ids, field values, variable and constant names, version numbers, amounts, dates and generic words are never mentions: they are literal objects of statements;\n- `claims`: one per statement, with `subject` a mention ref, a `predicate`, and an `object` that is a mention ref, or a literal value with `object_is_literal: true`; `certainty` (stated, probable, possible, reported, disputed), `stance` (assert; revise when the note corrects earlier knowledge; retract when it says something is no longer true), `evidence` (a short verbatim excerpt, at most about 15 words), and `valid_from` / `valid_until` (ISO dates, or null) only when the note gives or implies those dates from its own date.;\n  Quantities, amounts, dates, deadlines and decisions are facts about their subject: write them as literal-object claims with an explicit `ex:` predicate rather than forcing a vocabulary predicate that does not mean the same thing. For example, \"We capped the LUT budget at 25k; Dana needs the Pareto by 24 October\" gives `{\"subject\": \"m1\", \"predicate\": \"ex:budget_cap\", \"object\": \"25k\", \"object_is_literal\": true}`, `{\"subject\": \"m1\", \"predicate\": \"ex:deadline\", \"object\": \"2026-10-24\", \"object_is_literal\": true}` and `{\"subject\": \"m1\", \"predicate\": \"ex:decided\", \"object\": \"cap the budget at 25k\", \"object_is_literal\": true}` (with m1 = LUT), not `schema:nextItem` or `schema:knowsAbout`.;\n- `tasks`: things to do (`open`) and things reported done (`done`), with a `due` date when one is given, else null;\n- `time_refs`: explicit time references (\"last Tuesday\", \"in 2024\") with their `iso` date when the note's own date resolves them, else null;\n- `topics`: the topics the text belongs to, preferring existing ones.\n\nLeave out a field that has its default: `object_is_literal` false, `certainty` stated, `stance` assert, `valid_from`, `valid_until`, `due` and `iso` null, `aliases` empty.\n\nPredicate vocabulary (use one of these CURIEs when it fits; otherwise write `ex:snake_case`):\n- rdf:type: Class membership (entity -> class).\n- dcterms:hasPart: has part\n- dcterms:isPartOf: is part of\n- schema:nextItem: next item\n- schema:previousItem: previous item\n- dcterms:identifier: identifier\n- dcterms:title: title\n- schema:name: Primary label for non-document entities (agents, events, places, etc.).\n- dcterms:description: description\n- dcterms:abstract: abstract\n- dcterms:created: created\n- dcterms:modified: modified\n- dcterms:creator: creator\n- dcterms:publisher: publisher\n- dcterms:subject: subject\n- schema:genre: genre\n- schema:about: about\n- schema:mentions: mentions\n- schema:knowsAbout: An agent's knowledge/awareness about a topic or entity (stronger than incidental mentions).\n- dcterms:references: references\n- schema:sameAs: same as\n- schema:location: location\n- schema:temporalCoverage: temporal coverage\n- schema:participant: participant\n- schema:organizer: organizer\n- schema:result: result\n- schema:instrument: instrument\n- schema:startDate: start date\n- schema:endDate: end date\n- skos:definition: definition\n- skos:prefLabel: preferred label\n- skos:altLabel: alternative label\n- skos:broader: broader\n- skos:narrower: narrower\n- skos:related: related\n- skos:exactMatch: exact match\n- skos:closeMatch: close match\n- cito:supports: supports\n- cito:disagreesWith: disagrees with\n- cito:usesDataFrom: uses data from\n- cito:providesDataFor: provides data for\n- cito:extends: extends\n- cito:discusses: discusses\n- cito:confirms: confirms\n\nRules:\n- Use only the note and the context given; never invent entities or dates. The note's own date is \"now\".\n- Keep names as written by the author; put variants in aliases.\n- Quote evidence verbatim; one claim per statement; no inferred hierarchy.\n- A text that names things always has mentions; empty lists are only for a text that names nothing.\n- A text labelled \"Answer by …\" is what that author (usually an assistant) said in reply to the note's author: write its statements with `certainty: reported`, never as the note author's own.\n\nThe answer has this shape (values are illustrations):\n{\"summary\": \"Dana asked for the LUT Pareto by Friday.\", \"mentions\": [{\"ref\": \"m1\", \"name\": \"Dana\", \"kind\": \"person\", \"role\": \"asks for the Pareto\"}, {\"ref\": \"m2\", \"name\": \"LUT\", \"kind\": \"project\", \"aliases\": [\"the LUT work\"], \"role\": \"the project the Pareto is for\"}], \"claims\": [{\"subject\": \"m1\", \"predicate\": \"schema:participant\", \"object\": \"m2\", \"evidence\": \"Dana wants the Pareto\"}, {\"subject\": \"m2\", \"predicate\": \"ex:deadline\", \"object\": \"2026-10-23\", \"object_is_literal\": true, \"certainty\": \"probable\", \"evidence\": \"by Friday, I think\"}], \"tasks\": [{\"text\": \"Send Dana the LUT Pareto\", \"status\": \"open\", \"due\": \"2026-10-23\"}], \"time_refs\": [{\"text\": \"Friday\", \"iso\": \"2026-10-23\"}], \"topics\": [\"lut\"]}\n\nOutput JSON only, matching the schema, written compactly on one line (no indentation).\n",
           "temperature": 0.2,
           "resp_schema": {
             "type": "object",
@@ -958,7 +1009,8 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "other names as written in the note"
+                      "description": "other names as written in the note",
+                      "default": []
                     },
                     "role": {
                       "type": "string",
@@ -969,7 +1021,6 @@
                     "ref",
                     "name",
                     "kind",
-                    "aliases",
                     "role"
                   ]
                 }
@@ -992,7 +1043,8 @@
                       "description": "a mention ref, or a literal value"
                     },
                     "object_is_literal": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "default": false
                     },
                     "certainty": {
                       "type": "string",
@@ -1002,7 +1054,8 @@
                         "possible",
                         "reported",
                         "disputed"
-                      ]
+                      ],
+                      "default": "stated"
                     },
                     "stance": {
                       "type": "string",
@@ -1010,7 +1063,8 @@
                         "assert",
                         "revise",
                         "retract"
-                      ]
+                      ],
+                      "default": "assert"
                     },
                     "evidence": {
                       "type": "string",
@@ -1021,26 +1075,23 @@
                         "string",
                         "null"
                       ],
-                      "description": "ISO date or null"
+                      "description": "ISO date or null",
+                      "default": null
                     },
                     "valid_until": {
                       "type": [
                         "string",
                         "null"
                       ],
-                      "description": "ISO date or null"
+                      "description": "ISO date or null",
+                      "default": null
                     }
                   },
                   "required": [
                     "subject",
                     "predicate",
                     "object",
-                    "object_is_literal",
-                    "certainty",
-                    "stance",
-                    "evidence",
-                    "valid_from",
-                    "valid_until"
+                    "evidence"
                   ]
                 }
               },
@@ -1064,13 +1115,13 @@
                         "string",
                         "null"
                       ],
-                      "description": "ISO date or null"
+                      "description": "ISO date or null",
+                      "default": null
                     }
                   },
                   "required": [
                     "text",
-                    "status",
-                    "due"
+                    "status"
                   ]
                 }
               },
@@ -1087,12 +1138,12 @@
                         "string",
                         "null"
                       ],
-                      "description": "ISO or null"
+                      "description": "ISO or null",
+                      "default": null
                     }
                   },
                   "required": [
-                    "text",
-                    "iso"
+                    "text"
                   ]
                 }
               },
@@ -1121,7 +1172,7 @@
       "id": "flag_empty",
       "type": "code",
       "position": {
-        "x": 4800.0,
+        "x": 5280.0,
         "y": 0.0
       },
       "data": {
@@ -1167,7 +1218,7 @@
       "id": "keep_retry",
       "type": "add_to_list",
       "position": {
-        "x": 5280.0,
+        "x": 5760.0,
         "y": 0.0
       },
       "data": {
@@ -1217,7 +1268,7 @@
       "type": "get_var",
       "position": {
         "x": 2400.0,
-        "y": 718.0
+        "y": 320.0
       },
       "data": {
         "nodeType": "get_var",
@@ -1252,7 +1303,7 @@
       "type": "code",
       "position": {
         "x": 2880.0,
-        "y": 424.0
+        "y": 718.0
       },
       "data": {
         "nodeType": "code",
@@ -1303,7 +1354,7 @@
       "type": "code",
       "position": {
         "x": 3360.0,
-        "y": 320.0
+        "y": 424.0
       },
       "data": {
         "nodeType": "code",
@@ -1410,7 +1461,7 @@
       "type": "code",
       "position": {
         "x": 4320.0,
-        "y": 744.0
+        "y": 320.0
       },
       "data": {
         "nodeType": "code",
@@ -1457,11 +1508,118 @@
       }
     },
     {
+      "id": "link_parts",
+      "type": "code",
+      "position": {
+        "x": 4800.0,
+        "y": 744.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "What linking sees",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note",
+            "label": "note",
+            "type": "object"
+          },
+          {
+            "id": "extraction",
+            "label": "extraction",
+            "type": "object"
+          },
+          {
+            "id": "resolved",
+            "label": "resolved",
+            "type": "array"
+          },
+          {
+            "id": "open_tasks",
+            "label": "open_tasks",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "CANDIDATES_PER_MENTION = 3\nCLAIMS_PER_CANDIDATE = 3\nEVIDENCE_CHARS = 200\nKNOWN_NAMES = 15\nLINK_MENTIONS_PER_CALL = 15\nOPEN_TASKS = 8\nSIMILAR_NOTES = 5\nSUMMARY_CHARS = 240\nTOPICS = 40\ndef clip(text, limit):\n    \"\"\"One line of at most ``limit`` characters, cut at a word boundary (packet views only).\"\"\"\n    s = ' '.join(str(text or '').split())\n    if len(s) <= limit:\n        return s\n    cut = s[:limit].rsplit(' ', 1)[0]\n    return (cut or s[:limit]).rstrip(' ,;:') + '…'\ndef note_envelope():\n    \"\"\"The user message's head ``<runtime_metadata>`` envelope: the SAME bytes for every call.\n\n    The runtime keeps an envelope that is already at the head of a message byte for byte and\n    stamps a fresh per-second one only on a message without one; a per-call timestamp there would\n    end the shared prefix after a few tokens. The note's own time and id go at the END of the\n    message (``note_header``), where they cannot break the cached prefix.\"\"\"\n    return '<runtime_metadata>{\"time\": \"the note\\'s own date is on the last line of this message\"}</runtime_metadata>'\ndef note_header(note, part=0, parts=1):\n    \"\"\"The message's LAST line: which note this is (id, title, when it was written, its kind, where\n    it came from). It identifies the note and dates it (\"now\" for the note); it is not content.\"\"\"\n    n = note if isinstance(note, dict) else {}\n    bits = ['About this note (not part of its text): ' + str(n.get('note_id') or '')]\n    if str(n.get('title') or '').strip():\n        bits.append('“' + clip(n.get('title'), 160) + '”')\n    when = str(n.get('occurred_at') or '')[:16].replace('T', ' ')\n    if when:\n        bits.append('written ' + when + ' (now, for this note)')\n    extra = []\n    if n.get('kind'):\n        extra.append('kind ' + str(n.get('kind')))\n    src = n.get('source') if isinstance(n.get('source'), dict) else {}\n    origin = [str(src.get(k)) for k in ('importer', 'client', 'author') if src.get(k)]\n    if origin:\n        extra.append('from ' + '/'.join(origin))\n    if n.get('location'):\n        extra.append('at ' + clip(n.get('location'), 60))\n    if extra:\n        bits.append('(' + '; '.join(extra) + ')')\n    if parts and int(parts) > 1:\n        bits.append('[part ' + str(int(part) + 1) + ' of ' + str(int(parts)) + ']')\n    return ' '.join(bits)\ndef claim_line(c):\n    \"\"\"An existing claim as one line: ``#index subject predicate object (since date)``.\"\"\"\n    obj = c.get('object')\n    obj = '“' + clip(obj, 80) + '”' if c.get('object_is_literal') else clip(obj, 80)\n    text = str(c.get('line') or '').strip() or clip(c.get('subject'), 60) + ' ' + str(c.get('predicate') or '') + ' ' + obj\n    when = str(c.get('observed_at') or '')[:10]\n    return '#' + str(c.get('index')) + ' ' + text + (' (since ' + when + ')' if when else '')\ndef candidate_card(c, prefer=()):\n    \"\"\"An existing entity as at most 1 + CLAIMS_PER_CANDIDATE lines: its current statements with a\n    predicate the note also uses first (the ones a supersession or contradiction can be about),\n    then the most recent.\"\"\"\n    aliases = [clip(a, 40) for a in c.get('aliases') or [] if str(a).strip()][:5]\n    head = '[' + str(c.get('index')) + '] ' + clip(c.get('name'), 80) + ' (' + str(c.get('kind') or 'thing')\n    head += '; also ' + ', '.join(aliases) if aliases else ''\n    head += ')'\n    if str(c.get('summary') or '').strip():\n        head += ' — ' + clip(c.get('summary'), SUMMARY_CHARS)\n    if c.get('last_seen'):\n        head += ' Last seen ' + str(c.get('last_seen'))[:10] + '.'\n    out = [head]\n    claims = [cl for cl in c.get('active_claims') or [] if isinstance(cl, dict)]\n    wanted = set(prefer or ())\n    ranked = [cl for cl in claims if cl.get('predicate') in wanted] + [cl for cl in claims if cl.get('predicate') not in wanted]\n    for cl in ranked[:CLAIMS_PER_CANDIDATE]:\n        out.append('    ' + claim_line(cl))\n    return out\ndef link_batches(note, extraction, resolved, open_tasks, per_call=LINK_MENTIONS_PER_CALL):\n    \"\"\"The dynamic halves of the linking prompts for one note, one per call.\n\n    Mentions are decided ``per_call`` at a time; each call carries the claims whose subject is\n    one of its mentions (the first call also carries the claims about no mention, the tasks and\n    the open tasks they may close). Claim and task numbers stay those of the whole extraction,\n    and existing claims and open tasks keep their packet index, so the calls' answers merge\n    without renumbering (``merge_linkings``).\"\"\"\n    n = note if isinstance(note, dict) else {}\n    ext = extraction if isinstance(extraction, dict) else {}\n    mentions = [m for m in ext.get('mentions') or [] if isinstance(m, dict)]\n    claims = [c for c in ext.get('claims') or [] if isinstance(c, dict)]\n    tasks = [t for t in ext.get('tasks') or [] if isinstance(t, dict)]\n    names = {str(m.get('ref')): clip(m.get('name'), 60) for m in mentions}\n    used = {}\n    for c in claims:\n        for end in (c.get('subject'), c.get('object')):\n            used.setdefault(str(end), set()).add(c.get('predicate'))\n    cands = {}\n    for r in resolved or []:\n        if isinstance(r, dict):\n            cands[str(r.get('ref'))] = [c for c in r.get('candidates') or [] if isinstance(c, dict)]\n    size = max(1, int(per_call or LINK_MENTIONS_PER_CALL))\n    groups = [mentions[i:i + size] for i in range(0, len(mentions), size)]\n    if not groups and (claims or tasks):\n        groups = [[]]\n    owner = {}\n    for gi, group in enumerate(groups):\n        for m in group:\n            owner.setdefault(str(m.get('ref')), gi)\n    by_group = [[] for g in groups]\n    for i, c in enumerate(claims):\n        by_group[owner.get(str(c.get('subject')), 0)].append((i, c))\n    envelope = note_envelope()\n    summary = clip(ext.get('summary'), 600)\n    out = []\n    for gi, group in enumerate(groups):\n        mlines = []\n        for m in group:\n            ref = str(m.get('ref'))\n            aliases = [clip(a, 40) for a in m.get('aliases') or [] if str(a).strip()][:5]\n            line = ref + ' ' + clip(m.get('name'), 80) + ' (' + str(m.get('kind') or 'thing')\n            line += '; also ' + ', '.join(aliases) if aliases else ''\n            line += ')'\n            if str(m.get('role') or '').strip():\n                line += ': ' + clip(m.get('role'), 160)\n            mlines.append(line)\n            found = cands.get(ref) or []\n            if not found:\n                mlines.append('    no existing entity matched')\n            for c in found[:CANDIDATES_PER_MENTION]:\n                mlines.extend(('    ' + x for x in candidate_card(c, used.get(ref) or ())))\n        clines = []\n        for i, c in by_group[gi]:\n            subj = str(c.get('subject'))\n            obj = str(c.get('object') or '')\n            if c.get('object_is_literal'):\n                obj_text = '“' + clip(obj, 80) + '”'\n            else:\n                obj_text = obj + (' ' + names[obj] if obj in names else '')\n            line = '[' + str(i) + '] ' + subj + (' ' + names[subj] if subj in names else '') + ' ' + str(c.get('predicate') or '')\n            line += ' ' + obj_text + ' · ' + str(c.get('certainty') or 'stated')\n            if str(c.get('stance') or 'assert') != 'assert':\n                line += ' · ' + str(c.get('stance'))\n            if str(c.get('evidence') or '').strip():\n                line += ' · “' + clip(c.get('evidence'), EVIDENCE_CHARS) + '”'\n            clines.append(line)\n        tlines = []\n        if gi == 0:\n            for i, t in enumerate(tasks):\n                tlines.append('[' + str(i) + '] ' + str(t.get('status') or 'open') + ': ' + clip(t.get('text'), 160) + (' (due ' + str(t.get('due'))[:10] + ')' if t.get('due') else ''))\n        olines = []\n        if gi == 0 and tasks:\n            for t in (open_tasks or [])[:OPEN_TASKS]:\n                if isinstance(t, dict):\n                    olines.append('#' + str(t.get('index')) + ' ' + clip(t.get('text'), 140) + ' (opened ' + str(t.get('opened_at') or '')[:10] + ')')\n        header = note_header(n)\n        if len(groups) > 1:\n            header += ' [linking part ' + str(gi + 1) + ' of ' + str(len(groups)) + ']'\n        out.append({'envelope': envelope, 'header': header, 'summary': summary or '(no summary)', 'mentions': '\\n'.join(mlines) if mlines else '(none in this part)', 'claims': '\\n'.join(clines) if clines else '(none in this part)', 'tasks': '\\n'.join(tlines) if tlines else '(none)', 'open_tasks': '\\n'.join(olines) if olines else '(none)'})\n    return out\nreturn {\"items\": link_batches(note, extraction, resolved, open_tasks)}\n"
+      }
+    },
+    {
+      "id": "each_link",
+      "type": "loop",
+      "position": {
+        "x": 5280.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "loop",
+        "label": "For each linking part",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "loop",
+            "label": "loop",
+            "type": "execution"
+          },
+          {
+            "id": "done",
+            "label": "done",
+            "type": "execution"
+          },
+          {
+            "id": "item",
+            "label": "item",
+            "type": "any"
+          },
+          {
+            "id": "index",
+            "label": "index",
+            "type": "number"
+          }
+        ]
+      }
+    },
+    {
       "id": "link_prompt",
       "type": "string_template",
       "position": {
-        "x": 4320.0,
-        "y": 1064.0
+        "x": 5280.0,
+        "y": 640.0
       },
       "data": {
         "nodeType": "string_template",
@@ -1473,23 +1631,8 @@
             "type": "string"
           },
           {
-            "id": "note",
-            "label": "note",
-            "type": "any"
-          },
-          {
-            "id": "extraction",
-            "label": "extraction",
-            "type": "any"
-          },
-          {
-            "id": "candidates",
-            "label": "candidates",
-            "type": "any"
-          },
-          {
-            "id": "packet",
-            "label": "packet",
+            "id": "batch",
+            "label": "batch",
             "type": "any"
           }
         ],
@@ -1501,7 +1644,7 @@
           }
         ],
         "pinDefaults": {
-          "template": "You decide how one note changes what a person's notebook knows. Deterministic lookups found the candidates; you judge.\n\nThe note: {{note}}\n\nWhat the note says (merged extraction; claims and tasks are numbered from 0 in order):\n{{extraction}}\n\nCandidate existing entities for each mention (refer to a candidate by its index in that mention's list):\n{{candidates}}\n\nContext packet (existing claims and open tasks carry an `index`; refer to them by that index only):\n{{packet}}\n\nFor each mention give a `decision`:\n- `reuse` with `candidate` = the index of the entity it is;\n- `create` when no candidate is the same thing;\n- `merge` with `merge_candidates` = two candidate indexes that are the same entity (the first one stays), when the note shows that two existing records are one;\n- `unsure` when you cannot tell; it is kept apart and marked as a close match for later consolidation.\nGive the preferred `name` (as the author writes it), its `kind`, other `aliases`, a short `reason`, and a `summary`: one sentence saying what the notebook now knows about the entity. The summary is required when you `create` it (or answer `unsure`), and when this note tells something new about a reused or merged entity (rewrite the current summary into one updated sentence). Use null only for a reused entity this note adds nothing to.\n\nFor each extracted claim (by `index`) give `relation_to_existing`: `new`, `restates` (the same statement seen again), `refines` (adds detail; the old one stays true), `supersedes` (the old one is no longer true) or `contradicts` (both are kept and marked disputed), with `existing` = the index of the existing claim, and a short `reason`.\n\nFor each extracted task (by `index`) give `closes_open_task` = the index of the open task it reports done, or null.\n\nEnd with `revision_summary`: one sentence saying what this note changed.\n\nRules:\n- Use only the note and the provided context; never invent entities, ids or dates.\n- Prefer reusing an existing entity when the candidate list contains it; create sparingly.\n- Keep names as written by the author; put variants in aliases.\n- When unsure whether two things are the same, say `unsure` rather than guessing.\n- Output JSON only, matching the schema.\n"
+          "template": "{{batch.envelope}}\nSummary of the note: {{batch.summary}}\n\nMentions, each with its candidate existing entities:\n{{batch.mentions}}\n\nStatements in the note:\n{{batch.claims}}\n\nTasks in the note:\n{{batch.tasks}}\n\nOpen tasks it may close:\n{{batch.open_tasks}}\n\n{{batch.header}}"
         }
       }
     },
@@ -1509,7 +1652,7 @@
       "id": "link",
       "type": "llm_call",
       "position": {
-        "x": 4800.0,
+        "x": 5760.0,
         "y": 320.0
       },
       "data": {
@@ -1601,7 +1744,7 @@
         ],
         "pinDefaults": {
           "tools": [],
-          "system": "You file and connect a person's notes. Output JSON only, matching the schema.",
+          "system": "You decide how one note changes what a person's notebook knows. Deterministic lookups found the candidate existing entities; you judge. The message gives what the note says (its mentions, each followed by its candidate existing entities, then its statements and tasks, numbered), the open tasks it may close, and on its last line which note this is (that line identifies the note; it is not content).\n\nCandidates are listed under each mention as `[index] name (kind; also aliases) — summary`, each followed by up to three of its current statements as `#index statement`. Refer to a candidate by its index under that mention, and to an existing statement or open task by its `#` number only.\n\nFor each mention give a `decision`:\n- `reuse` with `candidate` = the index of the entity it is;\n- `create` when no candidate is the same thing;\n- `merge` with `merge_candidates` = two candidate indexes that are the same entity (the first one stays), when the note shows that two existing records are one;\n- `unsure` when you cannot tell; it is kept apart and marked as a close match for later consolidation (give the closest `candidate`).\nGive the preferred `name` (as the author writes it), its `kind`, other `aliases`, a `reason` of two to five words, and a `summary`: one sentence saying what the notebook now knows about the entity. Write the summary when you `create` it (or answer `unsure`), and when this note tells something new about a reused or merged entity (rewrite the current summary into one updated sentence). Use null only for a reused entity this note adds nothing to. For `reuse` and `merge` you may leave out `name` and `kind` (the entity has them); leave out `candidate`, `merge_candidates`, `aliases` and `reason` when they are empty.\n\nFor each statement that relates to an existing one (by its `index` number) give `relation_to_existing`: `new`, `restates` (the same statement seen again), `refines` (adds detail; the old one stays true), `supersedes` (the old one is no longer true) or `contradicts` (both are kept and marked disputed), with `existing` = the `#` number of the existing statement, and a `reason` of two to five words. List only statements that restate, refine, supersede or contradict an existing statement: every statement you leave out is new.\n\nList under `tasks` only the tasks (by their `index` number) that report an open task done, with `closes_open_task` = the `#` number of that open task.\n\nEnd with `revision_summary`: one sentence saying what this note changed. When the message is one part of a long note, decide only the mentions, statements and tasks it lists.\n\nRules:\n- Use only the note and the context given; never invent entities, ids or dates.\n- Prefer reusing an existing entity when the candidate list contains it; create sparingly.\n- Keep names as written by the author; put variants in aliases.\n- When unsure whether two things are the same, say `unsure` rather than guessing.\n\nThe answer has this shape (values are illustrations):\n{\"mentions\": [{\"ref\": \"m1\", \"decision\": \"reuse\", \"candidate\": 0, \"aliases\": [\"Dana Ng\"], \"summary\": \"Dana Ng, a colleague at Acme, leads the LUT budget review.\", \"reason\": \"same person\"}, {\"ref\": \"m2\", \"decision\": \"create\", \"name\": \"Pareto chart\", \"kind\": \"artifact\", \"summary\": \"The Pareto chart Dana asked for the LUT budget.\"}], \"claims\": [{\"index\": 1, \"relation_to_existing\": \"supersedes\", \"existing\": 3, \"reason\": \"new deadline\"}], \"tasks\": [{\"index\": 0, \"closes_open_task\": 2}], \"revision_summary\": \"Dana now wants the Pareto chart by Friday.\"}\n\nOutput JSON only, matching the schema, written compactly on one line (no indentation).\n",
           "temperature": 0.2,
           "resp_schema": {
             "type": "object",
@@ -1629,18 +1772,21 @@
                         "integer",
                         "null"
                       ],
-                      "description": "index in this mention's candidate list"
+                      "description": "index in this mention's candidate list",
+                      "default": null
                     },
                     "merge_candidates": {
                       "type": "array",
                       "items": {
                         "type": "integer"
                       },
-                      "description": "two candidate indexes that are the same entity"
+                      "description": "two candidate indexes that are the same entity",
+                      "default": []
                     },
                     "name": {
                       "type": "string",
-                      "description": "preferred name"
+                      "description": "preferred name",
+                      "default": ""
                     },
                     "kind": {
                       "type": "string",
@@ -1654,13 +1800,15 @@
                         "artifact",
                         "software",
                         "thing"
-                      ]
+                      ],
+                      "default": null
                     },
                     "aliases": {
                       "type": "array",
                       "items": {
                         "type": "string"
-                      }
+                      },
+                      "default": []
                     },
                     "summary": {
                       "type": [
@@ -1672,19 +1820,14 @@
                     },
                     "reason": {
                       "type": "string",
-                      "description": "short"
+                      "description": "short",
+                      "default": ""
                     }
                   },
                   "required": [
                     "ref",
                     "decision",
-                    "candidate",
-                    "merge_candidates",
-                    "name",
-                    "kind",
-                    "aliases",
-                    "summary",
-                    "reason"
+                    "summary"
                   ]
                 }
               },
@@ -1712,18 +1855,18 @@
                         "integer",
                         "null"
                       ],
-                      "description": "index of the existing claim in the packet"
+                      "description": "index of the existing claim in the packet",
+                      "default": null
                     },
                     "reason": {
                       "type": "string",
-                      "description": "short"
+                      "description": "short",
+                      "default": ""
                     }
                   },
                   "required": [
                     "index",
-                    "relation_to_existing",
-                    "existing",
-                    "reason"
+                    "relation_to_existing"
                   ]
                 }
               },
@@ -1741,12 +1884,12 @@
                         "integer",
                         "null"
                       ],
-                      "description": "index of the open task it closes"
+                      "description": "index of the open task it closes",
+                      "default": null
                     }
                   },
                   "required": [
-                    "index",
-                    "closes_open_task"
+                    "index"
                   ]
                 }
               },
@@ -1763,15 +1906,145 @@
             ]
           },
           "thinking": "on",
-          "max_output_tokens": 3000
+          "max_output_tokens": 6000
         }
+      }
+    },
+    {
+      "id": "keep_linking",
+      "type": "add_to_list",
+      "position": {
+        "x": 6240.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "add_to_list",
+        "label": "Keep the linking",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "item",
+            "label": "item",
+            "type": "any"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "list",
+            "label": "list",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "name": "linkings"
+        }
+      }
+    },
+    {
+      "id": "linkings",
+      "type": "get_var",
+      "position": {
+        "x": 5280.0,
+        "y": 960.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get linkings",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "linkings",
+          "default": []
+        }
+      }
+    },
+    {
+      "id": "merge_links",
+      "type": "code",
+      "position": {
+        "x": 5760.0,
+        "y": 744.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Merge the linking parts",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "linkings",
+            "label": "linkings",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "linking",
+            "label": "linking",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "CANDIDATES_PER_MENTION = 3\nCLAIMS_PER_CANDIDATE = 3\nEVIDENCE_CHARS = 200\nKNOWN_NAMES = 15\nLINK_MENTIONS_PER_CALL = 15\nOPEN_TASKS = 8\nSIMILAR_NOTES = 5\nSUMMARY_CHARS = 240\nTOPICS = 40\ndef merge_linkings(parts):\n    \"\"\"One Linking from the answers of a note's linking calls (first decision per mention,\n    claim and task wins; the revision summaries are joined).\"\"\"\n    mentions, claims, tasks, summaries = ([], [], [], [])\n    seen_m, seen_c, seen_t = (set(), set(), set())\n    for p in parts or []:\n        if not isinstance(p, dict):\n            continue\n        for m in p.get('mentions') or []:\n            if isinstance(m, dict) and str(m.get('ref')) not in seen_m:\n                seen_m.add(str(m.get('ref')))\n                mentions.append(m)\n        for c in p.get('claims') or []:\n            if isinstance(c, dict) and c.get('index') not in seen_c:\n                seen_c.add(c.get('index'))\n                claims.append(c)\n        for t in p.get('tasks') or []:\n            if isinstance(t, dict) and t.get('index') not in seen_t:\n                seen_t.add(t.get('index'))\n                tasks.append(t)\n        s = ' '.join(str(p.get('revision_summary') or '').split())\n        if s and s not in summaries:\n            summaries.append(s)\n    return {'mentions': mentions, 'claims': claims, 'tasks': tasks, 'revision_summary': ' '.join(summaries)}\nreturn {\"linking\": merge_linkings(linkings)}\n"
       }
     },
     {
       "id": "apply_args",
       "type": "code",
       "position": {
-        "x": 5280.0,
+        "x": 6240.0,
         "y": 320.0
       },
       "data": {
@@ -1827,7 +2100,7 @@
       "id": "apply",
       "type": "tool_calls",
       "position": {
-        "x": 5760.0,
+        "x": 6720.0,
         "y": 0.0
       },
       "data": {
@@ -1883,7 +2156,7 @@
       "id": "apply_out",
       "type": "code",
       "position": {
-        "x": 6240.0,
+        "x": 7200.0,
         "y": 0.0
       },
       "data": {
@@ -1939,7 +2212,7 @@
       "id": "end",
       "type": "on_flow_end",
       "position": {
-        "x": 6720.0,
+        "x": 7680.0,
         "y": 0.0
       },
       "data": {
@@ -2056,53 +2329,67 @@
       "targetHandle": "exec-in"
     },
     {
-      "id": "e-context_out-note-extract_prompt-note",
+      "id": "e-context_out-note-extract_packet-note",
       "source": "context_out",
       "sourceHandle": "note",
-      "target": "extract_prompt",
+      "target": "extract_packet",
       "targetHandle": "note"
     },
     {
-      "id": "e-each_section-item-extract_prompt-section",
+      "id": "e-each_section-item-extract_packet-item",
       "source": "each_section",
       "sourceHandle": "item",
-      "target": "extract_prompt",
-      "targetHandle": "section"
+      "target": "extract_packet",
+      "targetHandle": "item"
     },
     {
-      "id": "e-context_out-similar_notes-extract_prompt-similar_notes",
+      "id": "e-sections-count-extract_packet-parts",
+      "source": "sections",
+      "sourceHandle": "count",
+      "target": "extract_packet",
+      "targetHandle": "parts"
+    },
+    {
+      "id": "e-context_out-similar_notes-extract_packet-similar_notes",
       "source": "context_out",
       "sourceHandle": "similar_notes",
-      "target": "extract_prompt",
+      "target": "extract_packet",
       "targetHandle": "similar_notes"
     },
     {
-      "id": "e-context_out-candidate_entities-extract_prompt-candidate_entities",
+      "id": "e-context_out-candidate_entities-extract_packet-candidate_entities",
       "source": "context_out",
       "sourceHandle": "candidate_entities",
-      "target": "extract_prompt",
+      "target": "extract_packet",
       "targetHandle": "candidate_entities"
     },
     {
-      "id": "e-context_out-open_tasks-extract_prompt-open_tasks",
+      "id": "e-context_out-open_tasks-extract_packet-open_tasks",
       "source": "context_out",
       "sourceHandle": "open_tasks",
-      "target": "extract_prompt",
+      "target": "extract_packet",
       "targetHandle": "open_tasks"
     },
     {
-      "id": "e-context_out-topics-extract_prompt-topics",
+      "id": "e-context_out-topics-extract_packet-topics",
       "source": "context_out",
       "sourceHandle": "topics",
-      "target": "extract_prompt",
+      "target": "extract_packet",
       "targetHandle": "topics"
     },
     {
-      "id": "e-context_out-vocabulary-extract_prompt-vocabulary",
-      "source": "context_out",
-      "sourceHandle": "vocabulary",
+      "id": "e-each_section-loop-extract_packet-exec-in",
+      "source": "each_section",
+      "sourceHandle": "loop",
+      "target": "extract_packet",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-extract_packet-packet-extract_prompt-packet",
+      "source": "extract_packet",
+      "sourceHandle": "packet",
       "target": "extract_prompt",
-      "targetHandle": "vocabulary"
+      "targetHandle": "packet"
     },
     {
       "id": "e-extract_prompt-result-extract-prompt",
@@ -2126,9 +2413,9 @@
       "targetHandle": "model"
     },
     {
-      "id": "e-each_section-loop-extract-exec-in",
-      "source": "each_section",
-      "sourceHandle": "loop",
+      "id": "e-extract_packet-exec-out-extract-exec-in",
+      "source": "extract_packet",
+      "sourceHandle": "exec-out",
       "target": "extract",
       "targetHandle": "exec-in"
     },
@@ -2301,32 +2588,60 @@
       "targetHandle": "exec-in"
     },
     {
-      "id": "e-context_out-note-link_prompt-note",
+      "id": "e-context_out-note-link_parts-note",
       "source": "context_out",
       "sourceHandle": "note",
-      "target": "link_prompt",
+      "target": "link_parts",
       "targetHandle": "note"
     },
     {
-      "id": "e-merge-extraction-link_prompt-extraction",
+      "id": "e-merge-extraction-link_parts-extraction",
       "source": "merge",
       "sourceHandle": "extraction",
-      "target": "link_prompt",
+      "target": "link_parts",
       "targetHandle": "extraction"
     },
     {
-      "id": "e-resolve_out-mentions-link_prompt-candidates",
+      "id": "e-resolve_out-mentions-link_parts-resolved",
       "source": "resolve_out",
       "sourceHandle": "mentions",
-      "target": "link_prompt",
-      "targetHandle": "candidates"
+      "target": "link_parts",
+      "targetHandle": "resolved"
     },
     {
-      "id": "e-context_out-tool_output-link_prompt-packet",
+      "id": "e-context_out-open_tasks-link_parts-open_tasks",
       "source": "context_out",
-      "sourceHandle": "tool_output",
+      "sourceHandle": "open_tasks",
+      "target": "link_parts",
+      "targetHandle": "open_tasks"
+    },
+    {
+      "id": "e-resolve_out-exec-out-link_parts-exec-in",
+      "source": "resolve_out",
+      "sourceHandle": "exec-out",
+      "target": "link_parts",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-link_parts-items-each_link-items",
+      "source": "link_parts",
+      "sourceHandle": "items",
+      "target": "each_link",
+      "targetHandle": "items"
+    },
+    {
+      "id": "e-link_parts-exec-out-each_link-exec-in",
+      "source": "link_parts",
+      "sourceHandle": "exec-out",
+      "target": "each_link",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-each_link-item-link_prompt-batch",
+      "source": "each_link",
+      "sourceHandle": "item",
       "target": "link_prompt",
-      "targetHandle": "packet"
+      "targetHandle": "batch"
     },
     {
       "id": "e-link_prompt-result-link-prompt",
@@ -2350,10 +2665,38 @@
       "targetHandle": "model"
     },
     {
-      "id": "e-resolve_out-exec-out-link-exec-in",
-      "source": "resolve_out",
-      "sourceHandle": "exec-out",
+      "id": "e-each_link-loop-link-exec-in",
+      "source": "each_link",
+      "sourceHandle": "loop",
       "target": "link",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-link-data-keep_linking-item",
+      "source": "link",
+      "sourceHandle": "data",
+      "target": "keep_linking",
+      "targetHandle": "item"
+    },
+    {
+      "id": "e-link-exec-out-keep_linking-exec-in",
+      "source": "link",
+      "sourceHandle": "exec-out",
+      "target": "keep_linking",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-linkings-value-merge_links-linkings",
+      "source": "linkings",
+      "sourceHandle": "value",
+      "target": "merge_links",
+      "targetHandle": "linkings"
+    },
+    {
+      "id": "e-each_link-done-merge_links-exec-in",
+      "source": "each_link",
+      "sourceHandle": "done",
+      "target": "merge_links",
       "targetHandle": "exec-in"
     },
     {
@@ -2371,15 +2714,15 @@
       "targetHandle": "extraction"
     },
     {
-      "id": "e-link-data-apply_args-linking",
-      "source": "link",
-      "sourceHandle": "data",
+      "id": "e-merge_links-linking-apply_args-linking",
+      "source": "merge_links",
+      "sourceHandle": "linking",
       "target": "apply_args",
       "targetHandle": "linking"
     },
     {
-      "id": "e-link-exec-out-apply_args-exec-in",
-      "source": "link",
+      "id": "e-merge_links-exec-out-apply_args-exec-in",
+      "source": "merge_links",
       "sourceHandle": "exec-out",
       "target": "apply_args",
       "targetHandle": "exec-in"

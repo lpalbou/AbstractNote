@@ -413,6 +413,11 @@
             "type": "string"
           },
           {
+            "id": "received_at",
+            "label": "received_at",
+            "type": "string"
+          },
+          {
             "id": "similar",
             "label": "similar",
             "type": "array"
@@ -450,7 +455,7 @@
       "type": "code",
       "position": {
         "x": 1440.0,
-        "y": 398.0
+        "y": 424.0
       },
       "data": {
         "nodeType": "code",
@@ -646,11 +651,92 @@
       }
     },
     {
+      "id": "filing_packet",
+      "type": "code",
+      "position": {
+        "x": 2400.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "What filing sees",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "occurred_at",
+            "label": "occurred_at",
+            "type": "string"
+          },
+          {
+            "id": "received_at",
+            "label": "received_at",
+            "type": "string"
+          },
+          {
+            "id": "title",
+            "label": "title",
+            "type": "string"
+          },
+          {
+            "id": "text",
+            "label": "text",
+            "type": "string"
+          },
+          {
+            "id": "similar",
+            "label": "similar",
+            "type": "array"
+          },
+          {
+            "id": "revisits",
+            "label": "revisits",
+            "type": "array"
+          },
+          {
+            "id": "topics",
+            "label": "topics",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "packet",
+            "label": "packet",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "CANDIDATES_PER_MENTION = 3\nCLAIMS_PER_CANDIDATE = 3\nEVIDENCE_CHARS = 200\nKNOWN_NAMES = 15\nLINK_MENTIONS_PER_CALL = 15\nOPEN_TASKS = 8\nSIMILAR_NOTES = 5\nSUMMARY_CHARS = 240\nTOPICS = 40\ndef clip(text, limit):\n    \"\"\"One line of at most ``limit`` characters, cut at a word boundary (packet views only).\"\"\"\n    s = ' '.join(str(text or '').split())\n    if len(s) <= limit:\n        return s\n    cut = s[:limit].rsplit(' ', 1)[0]\n    return (cut or s[:limit]).rstrip(' ,;:') + '…'\ndef note_envelope():\n    \"\"\"The user message's head ``<runtime_metadata>`` envelope: the SAME bytes for every call.\n\n    The runtime keeps an envelope that is already at the head of a message byte for byte and\n    stamps a fresh per-second one only on a message without one; a per-call timestamp there would\n    end the shared prefix after a few tokens. The note's own time and id go at the END of the\n    message (``note_header``), where they cannot break the cached prefix.\"\"\"\n    return '<runtime_metadata>{\"time\": \"the note\\'s own date is on the last line of this message\"}</runtime_metadata>'\ndef filing_packet(note_id, occurred_at, title, text, similar, revisits, topics):\n    \"\"\"The dynamic half of the quick filing prompt: ``{envelope, title, text, context, header}``.\"\"\"\n    lines = []\n    sims = []\n    for s in (similar or [])[:SIMILAR_NOTES]:\n        if isinstance(s, dict) and (s.get('title') or s.get('note_id')):\n            sims.append('“' + clip(s.get('title') or 'untitled', 100) + '” (' + str(s.get('occurred_at') or '')[:10] + ')')\n    if sims:\n        lines.append('Similar earlier notes: ' + '; '.join(sims) + '.')\n    days = [str(r.get('occurred_at') or '')[:10] for r in revisits or [] if isinstance(r, dict) and r.get('occurred_at')]\n    if days:\n        lines.append('Earlier notes with the same words: ' + ', '.join(days[:5]) + '.')\n    shown = [str(t) for t in topics or [] if str(t).strip()][:TOPICS]\n    if shown:\n        lines.append('Existing topics: ' + ', '.join(shown) + '.')\n    when = str(occurred_at or '')[:16].replace('T', ' ')\n    return {'envelope': note_envelope(), 'header': 'About this note (not part of its text): ' + str(note_id or '') + (', written ' + when + ' (now, for this note)' if when else '') + '.', 'title': clip(title, 200) if str(title or '').strip() else '(none)', 'text': str(text or '').rstrip(), 'context': '\\n'.join(lines) if lines else 'Nothing related is saved yet.'}\nreturn {\"packet\": filing_packet(note_id, occurred_at or received_at, title, text, similar, revisits, topics)}\n"
+      }
+    },
+    {
       "id": "filing_prompt",
       "type": "string_template",
       "position": {
-        "x": 1920.0,
-        "y": 320.0
+        "x": 2400.0,
+        "y": 744.0
       },
       "data": {
         "nodeType": "string_template",
@@ -662,28 +748,8 @@
             "type": "string"
           },
           {
-            "id": "title",
-            "label": "title",
-            "type": "any"
-          },
-          {
-            "id": "text",
-            "label": "text",
-            "type": "any"
-          },
-          {
-            "id": "similar",
-            "label": "similar",
-            "type": "any"
-          },
-          {
-            "id": "revisits",
-            "label": "revisits",
-            "type": "any"
-          },
-          {
-            "id": "topics",
-            "label": "topics",
+            "id": "packet",
+            "label": "packet",
             "type": "any"
           }
         ],
@@ -695,7 +761,7 @@
           }
         ],
         "pinDefaults": {
-          "template": "You file one note the moment it arrives. Be quick and literal.\n\nNote title (may be empty): {{title}}\n\nNote text:\n{{text}}\n\nSimilar earlier notes: {{similar}}\nEarlier notes with the same words: {{revisits}}\nExisting topics (prefer these): {{topics}}\n\nReturn:\n- `title`: a short title of at most 80 characters, in the note's own words where possible;\n- `kind`: idea, task, decision, fact, event, question, reflection, reference, log, conversation or personal;\n- `topics`: at most 4, chosen from the existing topics first; propose a new topic only when none fits;\n- `urgency`: urgent or high only for deadlines, warnings, or anything the author marks as urgent; normal otherwise (never bulk for a note written now);\n- `language`: the note's language as a BCP-47 tag (for example `en`, `fr`);\n- `one_line`: the note in one plain sentence.\n\nRules:\n- Use only the note and the context above; never invent people, dates or facts.\n- Keep names as the author wrote them.\n- Output JSON only, matching the schema.\n"
+          "template": "{{packet.envelope}}\nNote title: {{packet.title}}\n\nNote text:\n{{packet.text}}\n\n{{packet.context}}\n\n{{packet.header}}"
         }
       }
     },
@@ -703,7 +769,7 @@
       "id": "filing",
       "type": "llm_call",
       "position": {
-        "x": 2400.0,
+        "x": 2880.0,
         "y": 320.0
       },
       "data": {
@@ -795,7 +861,7 @@
         ],
         "pinDefaults": {
           "tools": [],
-          "system": "You file and connect a person's notes. Output JSON only, matching the schema.",
+          "system": "You file one note the moment it arrives. Be quick and literal. The message gives the note's title (may be empty), its text, what is already saved, and on its last line which note this is and when it was written (that line is not content).\n\nReturn one JSON object with:\n- `title`: a short title of at most 80 characters, in the note's own words where possible;\n- `kind`: idea, task, decision, fact, event, question, reflection, reference, log, conversation or personal;\n- `topics`: at most 4, chosen from the existing topics first; propose a new topic only when none fits;\n- `urgency`: urgent or high only for deadlines, warnings, or anything the author marks as urgent; normal otherwise (never bulk for a note written now);\n- `language`: the note's language as a BCP-47 tag (for example `en`, `fr`);\n- `one_line`: the note in one plain sentence.\n\nRules:\n- Use only the note and the context given; never invent people, dates or facts.\n- Keep names as the author wrote them.\n\nThe answer has this shape (values are illustrations):\n{\"title\": \"Dana wants the LUT Pareto by Friday\", \"kind\": \"task\", \"topics\": [\"lut\"], \"urgency\": \"high\", \"language\": \"en\", \"one_line\": \"Dana asked for the LUT Pareto chart by Friday.\"}\n\nOutput JSON only, matching the schema, written compactly on one line (no indentation).\n",
           "temperature": 0.2,
           "resp_schema": {
             "type": "object",
@@ -865,7 +931,7 @@
       "id": "filing_fields",
       "type": "break_object",
       "position": {
-        "x": 2400.0,
+        "x": 2880.0,
         "y": 744.0
       },
       "data": {
@@ -926,7 +992,7 @@
       "id": "file_args",
       "type": "code",
       "position": {
-        "x": 2880.0,
+        "x": 3360.0,
         "y": 320.0
       },
       "data": {
@@ -1002,8 +1068,8 @@
       "id": "file",
       "type": "tool_calls",
       "position": {
-        "x": 3360.0,
-        "y": 320.0
+        "x": 3840.0,
+        "y": 0.0
       },
       "data": {
         "nodeType": "tool_calls",
@@ -1058,7 +1124,7 @@
       "id": "file_out",
       "type": "code",
       "position": {
-        "x": 3840.0,
+        "x": 4320.0,
         "y": 0.0
       },
       "data": {
@@ -1114,7 +1180,7 @@
       "id": "saved_msg",
       "type": "code",
       "position": {
-        "x": 4320.0,
+        "x": 4800.0,
         "y": 0.0
       },
       "data": {
@@ -1180,7 +1246,7 @@
       "id": "saved_answer",
       "type": "answer_user",
       "position": {
-        "x": 4800.0,
+        "x": 5280.0,
         "y": 0.0
       },
       "data": {
@@ -1224,7 +1290,7 @@
       "id": "inline_branch",
       "type": "if",
       "position": {
-        "x": 5280.0,
+        "x": 5760.0,
         "y": 0.0
       },
       "data": {
@@ -1260,7 +1326,7 @@
       "id": "end_queued",
       "type": "on_flow_end",
       "position": {
-        "x": 5760.0,
+        "x": 6240.0,
         "y": 0.0
       },
       "data": {
@@ -1298,7 +1364,7 @@
       "id": "process",
       "type": "subflow",
       "position": {
-        "x": 5760.0,
+        "x": 6240.0,
         "y": 320.0
       },
       "data": {
@@ -1373,7 +1439,7 @@
       "id": "process_ok",
       "type": "code",
       "position": {
-        "x": 6240.0,
+        "x": 6720.0,
         "y": 0.0
       },
       "data": {
@@ -1424,7 +1490,7 @@
       "id": "inline_ack_args",
       "type": "code",
       "position": {
-        "x": 6720.0,
+        "x": 7200.0,
         "y": 0.0
       },
       "data": {
@@ -1481,7 +1547,7 @@
       "id": "inline_ack",
       "type": "tool_calls",
       "position": {
-        "x": 7200.0,
+        "x": 7680.0,
         "y": 0.0
       },
       "data": {
@@ -1537,7 +1603,7 @@
       "id": "inline_ack_out",
       "type": "code",
       "position": {
-        "x": 7680.0,
+        "x": 8160.0,
         "y": 0.0
       },
       "data": {
@@ -1588,7 +1654,7 @@
       "id": "processed_msg",
       "type": "code",
       "position": {
-        "x": 8160.0,
+        "x": 8640.0,
         "y": 0.0
       },
       "data": {
@@ -1639,7 +1705,7 @@
       "id": "end_processed",
       "type": "on_flow_end",
       "position": {
-        "x": 8640.0,
+        "x": 9120.0,
         "y": 0.0
       },
       "data": {
@@ -1889,39 +1955,74 @@
       "targetHandle": "exec-in"
     },
     {
-      "id": "e-start-title-filing_prompt-title",
+      "id": "e-capture_out-note_id-filing_packet-note_id",
+      "source": "capture_out",
+      "sourceHandle": "note_id",
+      "target": "filing_packet",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-start-occurred_at-filing_packet-occurred_at",
+      "source": "start",
+      "sourceHandle": "occurred_at",
+      "target": "filing_packet",
+      "targetHandle": "occurred_at"
+    },
+    {
+      "id": "e-capture_out-received_at-filing_packet-received_at",
+      "source": "capture_out",
+      "sourceHandle": "received_at",
+      "target": "filing_packet",
+      "targetHandle": "received_at"
+    },
+    {
+      "id": "e-start-title-filing_packet-title",
       "source": "start",
       "sourceHandle": "title",
-      "target": "filing_prompt",
+      "target": "filing_packet",
       "targetHandle": "title"
     },
     {
-      "id": "e-start-text-filing_prompt-text",
+      "id": "e-start-text-filing_packet-text",
       "source": "start",
       "sourceHandle": "text",
-      "target": "filing_prompt",
+      "target": "filing_packet",
       "targetHandle": "text"
     },
     {
-      "id": "e-capture_out-similar-filing_prompt-similar",
+      "id": "e-capture_out-similar-filing_packet-similar",
       "source": "capture_out",
       "sourceHandle": "similar",
-      "target": "filing_prompt",
+      "target": "filing_packet",
       "targetHandle": "similar"
     },
     {
-      "id": "e-capture_out-revisits-filing_prompt-revisits",
+      "id": "e-capture_out-revisits-filing_packet-revisits",
       "source": "capture_out",
       "sourceHandle": "revisits",
-      "target": "filing_prompt",
+      "target": "filing_packet",
       "targetHandle": "revisits"
     },
     {
-      "id": "e-capture_out-topics-filing_prompt-topics",
+      "id": "e-capture_out-topics-filing_packet-topics",
       "source": "capture_out",
       "sourceHandle": "topics",
-      "target": "filing_prompt",
+      "target": "filing_packet",
       "targetHandle": "topics"
+    },
+    {
+      "id": "e-dup_branch-false-filing_packet-exec-in",
+      "source": "dup_branch",
+      "sourceHandle": "false",
+      "target": "filing_packet",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-filing_packet-packet-filing_prompt-packet",
+      "source": "filing_packet",
+      "sourceHandle": "packet",
+      "target": "filing_prompt",
+      "targetHandle": "packet"
     },
     {
       "id": "e-filing_prompt-result-filing-prompt",
@@ -1945,9 +2046,9 @@
       "targetHandle": "model"
     },
     {
-      "id": "e-dup_branch-false-filing-exec-in",
-      "source": "dup_branch",
-      "sourceHandle": "false",
+      "id": "e-filing_packet-exec-out-filing-exec-in",
+      "source": "filing_packet",
+      "sourceHandle": "exec-out",
       "target": "filing",
       "targetHandle": "exec-in"
     },

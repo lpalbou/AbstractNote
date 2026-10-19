@@ -17,10 +17,13 @@ from .. import ids
 from ..ingest.normalise import DEFAULT_SECTION_CHARS, sections
 from ..recall.shapes import excerpt
 from ..store.embeddings import top_k
-from .vocabulary import vocabulary
+from .packets import CLAIMS_PER_CANDIDATE
+from .vocabulary import predicate_words, vocabulary
 
 MAX_CANDIDATE_ENTITIES = 15
-MAX_CLAIMS_PER_ENTITY = 8
+#: Active claims attached to each candidate entity (and indexed in the packet): the most recent
+#: few, one line each in the prompts (backlog 0024 bounds the packet, never the note's text).
+MAX_CLAIMS_PER_ENTITY = CLAIMS_PER_CANDIDATE
 MAX_OPEN_TASKS = 20
 SIMILAR_NOTES = 5
 ENTITY_VECTOR_MIN = 0.3
@@ -54,9 +57,11 @@ def empty_packet() -> Dict[str, Any]:
 def claim_view(nb: Any, row: Any, index: int) -> Dict[str, Any]:
     subject = nb.store._name(row["subject_id"]) or row["subject_id"]
     obj = (nb.store._name(row["object_id"]) or row["object_id"]) if row["object_id"] else row["object_literal"]
+    literal = row["object_id"] is None
+    line = f"{subject} {predicate_words(row['predicate'])} " + (f"\u201c{obj}\u201d" if literal else str(obj))
     return {"index": index, "claim_id": row["claim_id"], "subject": subject, "predicate": row["predicate"],
-            "object": obj, "object_is_literal": row["object_id"] is None, "observed_at": row["observed_at"],
-            "certainty": row["certainty"], "evidence": row["evidence"]}
+            "object": obj, "object_is_literal": literal, "observed_at": row["observed_at"],
+            "certainty": row["certainty"], "evidence": row["evidence"], "line": line}
 
 
 def active_claim_rows(nb: Any, entity_id: str, limit: int = MAX_CLAIMS_PER_ENTITY) -> List[Any]:
@@ -73,10 +78,11 @@ def entity_view(nb: Any, entity_id: str) -> Dict[str, Any]:
             "summary": e["summary"], "last_seen": e["last_seen"]}
 
 
-def attach_claims(nb: Any, packet: Dict[str, Any], entity_id: str, views: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Active claims of an entity as indexed views, appending new ones to the packet."""
+def attach_claims(nb: Any, packet: Dict[str, Any], entity_id: str, views: List[Dict[str, Any]],
+                  limit: int = MAX_CLAIMS_PER_ENTITY) -> List[Dict[str, Any]]:
+    """Active claims of an entity (most recent first) as indexed views, appending new ones to the packet."""
     out = []
-    for row in active_claim_rows(nb, entity_id):
+    for row in active_claim_rows(nb, entity_id, limit):
         cid = row["claim_id"]
         if cid in packet["existing_claims"]:
             idx = packet["existing_claims"].index(cid)
@@ -122,15 +128,43 @@ def entities_named_in(nb: Any, text: str) -> List[str]:
 
 # ----------------------------------------------------------------------------- note_context
 
+def note_parts(text: str, source: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The note's text as parts by who wrote them.
+
+    A prompt note (importers) keeps the assistant's answer in ``source.origin.outcome`` by
+    ``source.origin.outcome_author`` and also appends it to the text after a separator. When the
+    text ends with that stored answer, the part before it is the author's and the answer is a
+    part of its own (source ``answer``), so extraction can tell the author's words from what the
+    model said. Structural only: the stored fields say where the answer is, no text is parsed."""
+    author = str(source.get("author") or "") or None
+    origin = source.get("origin") if isinstance(source.get("origin"), dict) else {}
+    outcome = origin.get("outcome")
+    if isinstance(outcome, str) and outcome.strip() and text.rstrip().endswith(outcome.strip()):
+        head = text.rstrip()[: len(text.rstrip()) - len(outcome.strip())]
+        head = head.rstrip()
+        sep = head.rfind("\n---")
+        rest = [ln for ln in head[sep:].splitlines() if ln.strip()] if sep >= 0 else []
+        if rest and rest[0].strip() == "---" and len(rest) <= 2 and all(ln.startswith("#") for ln in rest[1:]):
+            head = head[:sep]  # the importer's separator: a rule and the answer's heading
+        return [p for p in (
+            {"source": "note", "author": author, "text": head.strip()},
+            {"source": "answer", "author": str(origin.get("outcome_author") or "assistant"), "text": outcome.strip()},
+        ) if p["text"]]
+    return [{"source": "note", "author": author, "text": text}]
+
+
 def note_context(nb: Any, note_id: str, max_chars: Optional[int] = None) -> Dict[str, Any]:
     row = nb.store.note_row(note_id)
     if row is None:
         raise ValueError("That note is not in this notebook.")
     budget = int(max_chars) if max_chars else DEFAULT_SECTION_CHARS
     atts = nb.store.attachments_of(note_id)
+    source = json.loads(row["source_json"] or "{}")
     secs: List[Dict[str, Any]] = []
-    for s in sections(row["text"] or "", budget):
-        secs.append({"index": len(secs), "source": "note", "chars": s["chars"], "text": s["text"]})
+    for part in note_parts(row["text"] or "", source):
+        for s in sections(part["text"], budget):
+            secs.append({"index": len(secs), "source": part["source"], "author": part["author"],
+                         "chars": s["chars"], "text": s["text"]})
     full_text = [row["title"] or "", row["text"] or ""]
     for a in atts:
         path = nb.root / "extracted" / f"{a['sha256']}.txt"
@@ -144,7 +178,6 @@ def note_context(nb: Any, note_id: str, max_chars: Optional[int] = None) -> Dict
     if not secs and row["title"]:
         secs.append({"index": 0, "source": "title", "chars": len(row["title"]), "text": row["title"]})
 
-    source = json.loads(row["source_json"] or "{}")
     about = json.loads(row["about_json"]) if row["about_json"] else None
     note = {
         "note_id": note_id, "title": row["title"], "kind": row["kind"], "occurred_at": row["occurred_at"],

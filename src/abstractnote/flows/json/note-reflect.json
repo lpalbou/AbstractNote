@@ -784,7 +784,7 @@
           }
         ],
         "pinDefaults": {
-          "template": "You look over candidates drawn from a person's notebook and choose what deserves their attention now.\n\nCandidates (each has an `index` and the `rule` that found it):\n{{candidates}}\n\nChoose at most {{limit}} items. For each, give the `candidate` index, the `kind` (warning, reminder, connection, contradiction or evolution), a short `title`, and a `body` of two or three sentences that says why it matters now and invites the person to add a note about it. Choose nothing when nothing deserves attention.\n\nRules:\n- Use only the candidates above; never invent notes, people or dates.\n- Output JSON only, matching the schema.\n"
+          "template": "Choose at most {{limit}} items.\n\nCandidates:\n{{candidates}}"
         }
       }
     },
@@ -884,7 +884,7 @@
         ],
         "pinDefaults": {
           "tools": [],
-          "system": "You file and connect a person's notes. Output JSON only, matching the schema.",
+          "system": "You look over candidates drawn from a person's notebook and choose what deserves their attention now. The message gives the candidates (each with an `index` and the `rule` that found it) and how many to choose at most.\n\nFor each chosen item, give the `candidate` index, the `kind` (warning, reminder, connection, contradiction or evolution), a short `title`, and a `body` of two or three sentences that says why it matters now and invites the person to add a note about it. Choose nothing (an empty `items` list) when nothing deserves attention.\n\nRules:\n- Use only the candidates in the message; never invent notes, people or dates.\n\nOutput JSON only, matching the schema, written compactly on one line (no indentation).\n",
           "temperature": 0.2,
           "resp_schema": {
             "type": "object",

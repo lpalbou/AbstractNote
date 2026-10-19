@@ -304,9 +304,9 @@ class Flow:
     def llm(self, node_id: str, label: str, *, schema: Dict[str, Any], prompt: Src, provider: Src, model: Src,
             system: str, temperature: float = 0.2, thinking: Optional[str] = None,
             max_output_tokens: Optional[int] = None) -> str:
-        """One structured model call. ``thinking`` ("on"/"off") and ``max_output_tokens`` are pinned
-        on the node (a node value wins over the run's ``_runtime.thinking`` and over the model
-        card's output limit; backlog 0024)."""
+        """One structured model call. ``system`` is the step's STATIC system prompt (same bytes for
+        every note, so a local model's prompt cache reuses it); ``thinking`` ("on"/"off") and
+        ``max_output_tokens`` are pinned per step (backlog 0024)."""
         defaults: Dict[str, Any] = {"tools": [], "system": system, "temperature": temperature, "resp_schema": schema}
         if thinking is not None:
             defaults["thinking"] = thinking

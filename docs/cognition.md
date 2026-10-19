@@ -64,37 +64,48 @@ flowchart TD
 ```mermaid
 flowchart TD
     S[on_flow_start note_id, provider?, model?] --> X[tool note_context<br/>text, extracted attachment text,<br/>similar notes, candidate entities,<br/>recent claims about them, topics]
-    X --> E[llm_call extract<br/>resp_schema Extraction]
+    X --> P1[code: extraction packet<br/>per section]
+    P1 --> E[llm_call extract<br/>resp_schema Extraction]
     E --> R[tool note_resolve_candidates<br/>per mention: alias, full-text, vector candidates]
-    R --> J[llm_call link<br/>resp_schema Linking]
-    J --> A[tool note_apply_revision]
+    R --> P2[code: linking parts<br/>at most 15 mentions each]
+    P2 --> J[llm_call link, once per part<br/>resp_schema Linking]
+    J --> M[code: merge the parts]
+    M --> A[tool note_apply_revision]
     A --> Z[on_flow_end revision summary]
 ```
 
 1. **Context** (`note_context`): what the notebook already knows that is relevant: the nearest
    notes, entities whose names or aliases appear in the text or whose embeddings are close,
-   their current summaries and the active claims about them, the open tasks that mention them,
-   and the topic vocabulary. This is the "look at the existing knowledge" step.
-2. **Extract** (`Extraction` schema): summary, mentions (name, kind, aliases seen, role in the
-   note), claims (subject, predicate, object, literal flag, certainty, stance, evidence excerpt,
-   optional validity dates), tasks (opened, completed), time references, and topics. The prompt
-   carries the predicate vocabulary from the AbstractSemantics registry and allows `ex:` for the
-   rest.
-3. **Resolve candidates** (`note_resolve_candidates`): for every mention, up to five existing
-   entities with their kind, aliases, summary, last seen date and how they matched.
-4. **Link** (`Linking` schema): the model decides, per mention, `reuse` (a candidate index),
-   `create`, or `merge` (two candidate indexes); per claim, whether it `restates` an existing claim
-   (reinforce), `refines` it (new claim, old stays active), `supersedes` it (close the old one) or
-   `contradicts` it (both stay, marked disputed), naming the existing claim by its index in the
-   packet; per task, open or close by index. The schema uses indexes and enumerations rather than
-   free-form ids so that small models cannot invent identifiers; `note_apply_revision` rejects any
-   reference outside the packet and downgrades it to `create` or `new` with a warning. The model
-   also writes the revision summary and a one-sentence summary for each entity it creates and for
-   each reused entity the note tells something new about.
+   their current summaries and their most recent active claims, the open tasks that mention
+   them, and the topic vocabulary. This is the "look at the existing knowledge" step.
+2. **Extract** (`Extraction` schema), once per section: summary, mentions (name, kind, aliases
+   seen, role in the note), claims (subject, predicate, object, literal flag, certainty, stance,
+   evidence excerpt, optional validity dates), tasks (opened, completed), time references, and
+   topics. The model sees the section's whole text and a bounded orientation packet (see
+   "Prompts and bounds"); the predicate vocabulary from the AbstractSemantics registry is in the
+   static system prompt and `ex:` is allowed for the rest.
+3. **Resolve candidates** (`note_resolve_candidates`): for every mention, up to three existing
+   entities with their kind, aliases, summary, last seen date, how they matched, and their most
+   recent active claims.
+4. **Link** (`Linking` schema), once per part of at most 15 mentions: the model decides, per
+   mention, `reuse` (a candidate index), `create`, or `merge` (two candidate indexes); per
+   claim, whether it `restates` an existing claim (reinforce), `refines` it (new claim, old stays
+   active), `supersedes` it (close the old one) or `contradicts` it (both stay, marked disputed),
+   naming the existing claim by its `#` index in the packet; per task, open or close by index.
+   Each part carries the claims whose subject is one of its mentions (the first part also the
+   tasks and the open tasks they may close); claim, task and packet indexes stay those of the
+   whole note, so the parts merge back into one Linking without renumbering. The schema uses
+   indexes and enumerations rather than free-form ids so that small models cannot invent
+   identifiers; `note_apply_revision` rejects any reference outside the packet and downgrades it
+   to `create` or `new` with a warning. The model also writes the revision summary and a
+   one-sentence summary for each entity it creates and for each reused entity the note tells
+   something new about. A missing summary is never a failed note: a created entity gets one
+   built from its role in the note (or where it was seen) and a reused entity keeps its current
+   summary, each with a warning in the revision.
 5. **Apply** (`note_apply_revision`): writes the revision ops to the index and the triple store in
    one transaction per store, updates relations, topics, tasks, embeddings, and marks the note
    `processed`. The response lists created and merged entities, claims added and superseded, and
-   any warnings (unknown predicates mapped to `ex:`, unresolved references).
+   any warnings (unknown predicates mapped to `ex:`, unresolved references, missing summaries).
 
 Large notes: `note_context` splits texts beyond the model's budget into sections; `note-process`
 loops over sections for extraction and merges mentions and claims before linking, so no text is
@@ -222,13 +233,20 @@ models from them and repairs invalid output. Python mirrors live in `abstractnot
  "topics": ["string"]}
 ```
 
+Fields with a default may be left out by the model (the runtime fills the default): in
+Extraction `aliases` ([]), `object_is_literal` (false), `certainty` (stated), `stance` (assert),
+`valid_from`, `valid_until`, `due` and `iso` (null); in Linking `candidate` (null),
+`merge_candidates` ([]), `name` (""), `kind` (null), `aliases` ([]), `reason` (""), `existing`
+(null) and `closes_open_task` (null). `claims` lists only the statements that relate to an
+existing one (a statement left out is `new`) and `tasks` only those that close an open task.
+
 **Linking** (indexes refer to the candidate lists in the context packet; enumerations are JSON
 Schema enums)
 
 ```json
 {"mentions": [{"ref": "m1", "decision": "reuse|create|merge|unsure", "candidate": 0,
                "merge_candidates": [0, 1], "name": "preferred name", "kind": "person|org|project|concept|place|event|artifact|software|thing",
-               "aliases": ["..."], "summary": "one sentence; required for create and unsure, and for a reused entity this note tells something new about; otherwise null", "reason": "short"}],
+               "aliases": ["..."], "summary": "one sentence for create and unsure, and for a reused entity this note tells something new about; otherwise null (a missing one is a warning, never a failed note)", "reason": "short"}],
  "claims": [{"index": 0, "relation_to_existing": "new|restates|refines|supersedes|contradicts",
              "existing": 0, "reason": "short"}],
  "tasks": [{"index": 0, "closes_open_task": 0}],
@@ -238,10 +256,37 @@ Schema enums)
 **Answer**, **MiningPlan**, **SliceFindings**, **Dossier**, **Reflections**: see
 `abstractnote.process.schemas`; each is documented inline with the fields listed above.
 
-## Prompts
+## Prompts and bounds
 
-Prompts are Markdown files under `src/abstractnote/process/prompts/` rendered with the context
-packet. Rules that every prompt states:
+Every model step has two Markdown files under `src/abstractnote/process/prompts/`:
+
+- `<step>.system.md`, the **static system prompt**: the instructions, the output shape with one
+  illustrative answer, and the rules; the extraction one also lists the predicate vocabulary
+  from the AbstractSemantics registry with one-line glosses, filled in when the flows are
+  generated. These bytes are the same for every note, so a local model's prompt cache reuses
+  them (below).
+- `<step>.md`, the **dynamic user message**: rendered inside the flow by a `string_template`
+  node from a packet that a code node builds with `abstractnote.process.packets` (the flows'
+  code nodes carry that module's own source, so Python and the flows cannot drift).
+
+The note steps' user message starts with one constant envelope,
+`<runtime_metadata>{"time": "the note's own date is on the last line of this message"}</runtime_metadata>`,
+and ends with a line that identifies the note: `About this note (not part of its text): nt_…
+“title”, written 2026-07-10 08:47 (now, for this note) (kind …; from …) [part 2 of 3]`. The
+runtime keeps an envelope already at the head of a message byte for byte (it stamps a fresh
+per-second one on a message without one), so no per-call value sits in the shared prefix; the
+note's date is "now" for the model (relative dates resolve from it) and the system prompt says
+the last line is not content. The user templates end without trailing whitespace, which the
+runtime needs to recognise the envelope as the message's own.
+
+A prompt note from the Claude sessions importer keeps the assistant's answer in
+`source.origin.outcome` by `source.origin.outcome_author` (and appended to the text):
+`note_context` then returns the author's text and the answer as separate sections (`source`
+`note` or `answer`, with their `author`), and the packet labels them "Text written by …" and
+"Answer by … (what they said; not written by the note's author)"; the extraction prompt
+writes statements from an answer as `reported`.
+
+Rules that every prompt states:
 
 - Use only the note and the provided context; never invent entities or dates.
 - Prefer reusing an existing entity when the candidate list contains it; create sparingly.
@@ -251,9 +296,79 @@ packet. Rules that every prompt states:
   `skos:closeMatch` claim for later consolidation) rather than guessing.
 - Output JSON only, matching the schema.
 
-The predicate vocabulary is loaded from the AbstractSemantics registry at build time and listed
-in the extraction prompt with one-line glosses. Predicates outside it are accepted as
-`ex:snake_case` and reported in the revision warnings so the vocabulary can grow deliberately.
+Predicates outside the vocabulary are accepted as `ex:snake_case` and reported in the revision
+warnings so the vocabulary can grow deliberately.
+
+**Bounds.** Only the packet is bounded; the note's text is never cut (long notes are split into
+sections, each read whole).
+
+| Packet | Bound (`abstractnote.process.packets`) |
+|---|---|
+| Extraction orientation | names and kinds of at most 15 known entities (no claims), at most 40 topics (the note's own first), 5 similar notes by title and date, 8 open tasks, one line each |
+| Candidates per mention | 3 (`note_resolve_candidates`) |
+| Candidate card | name, kind, up to 5 aliases, summary (at most 240 characters), last seen, and at most 3 active claims as one line each, those with a predicate the note also uses first |
+| Mentions per linking call | 15; the rest go to further calls for the same note, merged back |
+| Statement lines | subject, predicate, object, certainty, stance, evidence (at most 200 characters) |
+| Open tasks in linking | only when the note has tasks, at most 8 |
+| Section | 6000 characters per extraction call (`note_context` `max_chars`), so each answer fits the extract output cap |
+
+**Checks on the answers.** A section of at least 200 characters whose extraction names nothing is
+read once more; a second empty answer is kept and the revision says so ("A part of this note
+names nothing although it has text, even when read a second time."). `note_apply_revision`
+leaves out, with a warning, a mention whose name and aliases never occur as whole words in the
+note's own text (its title and header do not count: names copied from the context packet are
+refused); a statement about it is skipped, one pointing at it keeps the name as text.
+
+## Prompt cache, thinking and output caps
+
+**Prompt cache.** It applies only on AbstractCore's prompted structured-output lane; on the
+Outlines lane (below), which the gateway and the headless runner use for MLX today, no call
+uses or reports a prompt cache. On the prompted lane AbstractRuntime derives one prompt-cache
+key per (session, provider, model, flow, node) for every run that has a session, so all notes
+processed in one session share one key per step (the processor automation has a session). Hybrid models
+such as Qwen3.6-35B-A3B (Gated-DeltaNet plus attention) restore only an exactly stored prefix:
+after each call the provider snapshots the part of the prompt that the last two calls on the
+key shared, and the next call reuses it when its prompt extends that snapshot. Every note
+step's prompt is the same system prompt followed by the same envelope, with the note's id and
+date on the last line, so consecutive notes share at least the whole system prompt. When two
+consecutive notes also share the first words of their text, the snapshot moves past the system
+prompt and a following note that starts differently cannot extend it: that call is a full
+prefill ("rebuilt"), and the next one hits again (backlog 0024 measures how often). (A fresh key would fork
+the runtime's prepared system prefix instead, but for chat templates that render tool
+definitions before the system text, as Qwen3.5 and 3.6 do, that prefix is 3 tokens long; the
+flows therefore do not give each note its own cache scope.) The provider reports each call's
+`prompt_cache` record (`outcome`, `cached_tokens`, `fed_tokens`); AbstractRuntime does not copy
+it into the ledger for structured calls today (a structured result carries no metadata), so
+backlog 0024's measurements read it at the provider.
+
+**Structured output lane.** With Outlines installed, AbstractCore's MLX and HuggingFace providers
+decode structured output through Outlines unless `structured_output_method="prompted"`. That lane
+bypasses the prompt cache, cannot think, and applies the chat template a second time around the
+already rendered prompt; the system prompts therefore carry the output shape, so the model
+writes the right fields on either lane (on the old prompts, with thinking off, this lane
+answered empty lists). A provider created with `structured_output_method="prompted"` (for
+example `NoteRunner.local(..., llm_kwargs={"structured_output_method": "prompted"})`) generates
+normally and uses the prompt cache, but with thinking on it reasons for minutes per call
+(backlog 0024 measured 160-181 s per extraction), so the flows do not ask for it.
+
+**Thinking and output caps** are pinned on each `llm_call` node (a node value wins over the run's
+`_runtime.thinking`):
+
+| Step | Thinking | Output cap (tokens) |
+|---|---|---|
+| quick filing | off | 400 |
+| extract (and its second reading) | on | 4000 |
+| link | on | 6000 |
+| synthesize, dossier, reflect | the runtime default | 8192 |
+| mining plan, slice findings | the runtime default | 4096 |
+
+On MLX, Qwen3.6 has only an on/off switch (`enable_thinking`): any level ("low", "medium") is
+treated as on and there is no thinking budget, so a thinking step can run until the output cap.
+On the Outlines lane "on" changes only how the prompt ends (JSON-constrained decoding leaves no
+room to reason); a failed Outlines decode falls back to normal generation, which then does think.
+A truncated structured answer is retried by AbstractCore's structured-output handler with a
+doubled budget, at most three attempts; a flow cannot turn that off today, so the caps are set
+well above what a bounded section or linking part needs.
 
 ## Headless execution
 

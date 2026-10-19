@@ -29,7 +29,7 @@ from .. import ids
 from ..ingest.normalise import normalize_topic, text_norm
 from ..store.notes import _TakenIds
 from . import schemas
-from .context import empty_packet, load_packet
+from .context import empty_packet, load_packet, words
 from .merge import merge_extractions
 from .vocabulary import normalize_predicate
 
@@ -54,6 +54,8 @@ class _Builder:
         self.claim_ids: set = set()
         self.task_ids: set = set()
         self.mentioned: List[str] = []
+        self.dropped: Dict[str, str] = {}
+        self._note_words: Optional[str] = None
         self.stats = {"created": {}}
 
     # ---------------------------------------------------------------- helpers
@@ -114,6 +116,28 @@ class _Builder:
         return eid
 
     # ---------------------------------------------------------------- mentions
+    def note_words(self) -> str:
+        """The note's own words (text and extracted attachment text, not its title or header), as
+        `` w1 w2 ... `` for whole-word sequence checks."""
+        if getattr(self, "_note_words", None) is None:
+            parts = [self.note["text"] or ""]
+            for a in self.nb.store.attachments_of(self.note_id):
+                path = self.nb.root / "extracted" / f"{a['sha256']}.txt"
+                if a["extracted_chars"] and path.exists():
+                    parts.append(path.read_text(encoding="utf-8"))
+            self._note_words = " " + " ".join(words("\n".join(parts))) + " "
+        return self._note_words
+
+    def written_in_note(self, m: schemas.Mention) -> bool:
+        """Structural check (backlog 0024): the mention's name or one of its aliases occurs in the
+        note's own words, as a whole-word sequence (case-folded). Names from the context packet or
+        the header that the text never writes are refused."""
+        for name in [m.name, *m.aliases]:
+            ws = words(str(name or ""))
+            if ws and (" " + " ".join(ws) + " ") in self.note_words():
+                return True
+        return False
+
     def mentions(self, ext: schemas.Extraction, link: schemas.Linking) -> None:
         by_ref: Dict[str, schemas.MentionLink] = {}
         for lm in link.mentions:
@@ -123,8 +147,12 @@ class _Builder:
             if lm.ref not in known_refs:
                 self.warnings.append(f"The linking named a mention {lm.ref} that the extraction does not have.")
         for m in ext.mentions:
-            if m.ref in self.refmap:
+            if m.ref in self.refmap or m.ref in self.dropped:
                 self.warnings.append(f"The mention ref {m.ref} appears twice; the first one was used.")
+                continue
+            if not self.written_in_note(m):
+                self.dropped[m.ref] = m.name
+                self.warnings.append(f"{m.name} is not written in the note; it was left out.")
                 continue
             lm = by_ref.get(m.ref)
             if lm is None:
@@ -219,7 +247,8 @@ class _Builder:
         for i, c in enumerate(ext.claims):
             subject = self.refmap.get(c.subject)
             if subject is None:
-                self.warnings.append(f"Statement {i}: its subject {c.subject!r} is not a mention; it was skipped.")
+                if c.subject not in self.dropped:
+                    self.warnings.append(f"Statement {i}: its subject {c.subject!r} is not a mention; it was skipped.")
                 continue
             obj_id: Optional[str] = None
             literal: Optional[str] = None
@@ -227,6 +256,8 @@ class _Builder:
                 literal = str(c.object)
             elif c.object in self.refmap:
                 obj_id = self.refmap[c.object]
+            elif c.object in self.dropped:
+                literal = self.dropped[c.object]
             else:
                 literal = str(c.object)
                 self.warnings.append(f"Statement {i}: its object {c.object!r} is not a mention; it was kept as text.")

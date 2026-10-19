@@ -66,7 +66,7 @@ EXTRACTION = _obj({
         "kind": {"type": "string", "enum": ENTITY_KINDS},
         "aliases": _arr(_str(), "as written in the note"),
         "role": _str("what the note says about it, one phrase"),
-    })),
+    }, ["ref", "name", "kind", "role"])),
     "claims": _arr(_obj({
         "subject": _str("a mention ref"),
         "predicate": _str("CURIE from the vocabulary or ex:snake_case"),
@@ -77,13 +77,13 @@ EXTRACTION = _obj({
         "evidence": _str("verbatim excerpt"),
         "valid_from": _nullable_str("ISO date or null"),
         "valid_until": _nullable_str("ISO date or null"),
-    })),
+    }, ["subject", "predicate", "object", "evidence"])),
     "tasks": _arr(_obj({
         "text": _str(),
         "status": {"type": "string", "enum": ["open", "done"]},
         "due": _nullable_str("ISO date or null"),
-    })),
-    "time_refs": _arr(_obj({"text": _str(), "iso": _nullable_str("ISO or null")})),
+    }, ["text", "status"])),
+    "time_refs": _arr(_obj({"text": _str(), "iso": _nullable_str("ISO or null")}, ["text"])),
     "topics": _arr(_str()),
 })
 
@@ -98,17 +98,17 @@ LINKING = _obj({
         "aliases": _arr(_str()),
         "summary": _nullable_str("updated one-paragraph summary or null"),
         "reason": _str("short"),
-    })),
+    }, ["ref", "decision", "summary"])),
     "claims": _arr(_obj({
         "index": {"type": "integer", "description": "index of the claim in the extraction"},
         "relation_to_existing": {"type": "string", "enum": ["new", "restates", "refines", "supersedes", "contradicts"]},
         "existing": {"type": ["integer", "null"], "description": "index of the existing claim in the context packet"},
         "reason": _str("short"),
-    })),
+    }, ["index", "relation_to_existing"])),
     "tasks": _arr(_obj({
         "index": {"type": "integer"},
         "closes_open_task": {"type": ["integer", "null"], "description": "index of the open task it closes"},
-    })),
+    }, ["index"])),
     "revision_summary": _str("one sentence"),
 })
 

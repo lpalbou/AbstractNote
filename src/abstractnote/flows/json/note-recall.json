@@ -611,6 +611,11 @@
             "type": "string"
           },
           {
+            "id": "query",
+            "label": "query",
+            "type": "string"
+          },
+          {
             "id": "permissions",
             "label": "permissions",
             "type": "string"
@@ -632,7 +637,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif note_ids is not None and note_ids != \"\":\n    arguments[\"note_ids\"] = note_ids\nif entity_ids is not None and entity_ids != \"\":\n    arguments[\"entity_ids\"] = entity_ids\nif as_of is not None and as_of != \"\":\n    arguments[\"as_of\"] = as_of\nreturn {\"tool_calls\": [{\"name\": \"note_expand\", \"call_id\": \"expand\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif note_ids is not None and note_ids != \"\":\n    arguments[\"note_ids\"] = note_ids\nif entity_ids is not None and entity_ids != \"\":\n    arguments[\"entity_ids\"] = entity_ids\nif as_of is not None and as_of != \"\":\n    arguments[\"as_of\"] = as_of\nif query is not None and query != \"\":\n    arguments[\"query\"] = query\nreturn {\"tool_calls\": [{\"name\": \"note_expand\", \"call_id\": \"expand\", \"arguments\": arguments}]}\n"
       }
     },
     {
@@ -782,7 +787,7 @@
           }
         ],
         "pinDefaults": {
-          "template": "You answer a question from a person's own notes.\n\nQuestion: {{question}}\nAs of: {{as_of}}\n\nSearch results:\n{{hits}}\n\nEntity cards, claim timelines, relation timelines and then-versus-now pairs:\n{{expansion}}\n\nWrite the `answer` with inline citations like [nt_...] using only the note ids above. Then give the `evidence` (note id, title, date, excerpt), what changed over time (`evolution`: the earliest stance, the latest stance, and the turning points with their note ids), the related `open_loops`, and up to three `follow_ups` worth asking next. When the notes do not answer the question, say so plainly in the answer.\n\nRules:\n- Use only the material above; never invent notes, people or dates.\n- Prefer the latest belief, and say when it changed and why.\n- Output JSON only, matching the schema.\n"
+          "template": "Question: {{question}}\nAs of: {{as_of}}\n\nSearch results:\n{{hits}}\n\nEntity cards, claim timelines, relation timelines and then-versus-now pairs:\n{{expansion}}"
         }
       }
     },
@@ -882,7 +887,7 @@
         ],
         "pinDefaults": {
           "tools": [],
-          "system": "You answer questions from a person's notes. Output JSON only, matching the schema.",
+          "system": "You answer a question from a person's own notes. The message gives the question, the moment it is asked about (as of), the search results, and the entity cards, claim timelines, relation timelines and then-versus-now pairs found for them.\n\nWrite the `answer` with inline citations like [nt_...] using only the note ids in the message. Then give the `evidence` (note id, title, date, excerpt), what changed over time (`evolution`: the earliest stance, the latest stance, and the `turning_points` with their note ids), the related `open_loops`, and up to three `follow_ups` worth asking next. When the notes do not answer the question, say so plainly in the answer.\n\nRules:\n- Use only the material in the message; never invent notes, people or dates.\n- Prefer the latest belief, and say when it changed and why.\n\nOutput JSON only, matching the schema, written compactly on one line (no indentation).\n",
           "temperature": 0.2,
           "resp_schema": {
             "type": "object",
@@ -1580,6 +1585,13 @@
       "sourceHandle": "as_of",
       "target": "expand_args",
       "targetHandle": "as_of"
+    },
+    {
+      "id": "e-ask-question_text-expand_args-query",
+      "source": "ask",
+      "sourceHandle": "question_text",
+      "target": "expand_args",
+      "targetHandle": "query"
     },
     {
       "id": "e-by_effort-case-standard-expand_args-exec-in",

@@ -273,7 +273,7 @@
           }
         ],
         "pinDefaults": {
-          "template": "You plan a deep search through a person's notes to answer a question.\n\nQuestion: {{question}}\nTime window: since {{since}} until {{until}}\n\nFirst search results:\n{{hits}}\n\nReturn up to six `steps` (each a sub-question, with an optional time slice `since` / `until` and the names of entities to trace), the `contradictions_to_test`, and the number of search `rounds` (1 to 8).\n\nRules:\n- Plan only searches the notes can answer; never invent entities or dates.\n- Output JSON only, matching the schema.\n"
+          "template": "Question: {{question}}\nTime window: since {{since}} until {{until}}\n\nFirst search results:\n{{hits}}"
         }
       }
     },
@@ -373,7 +373,7 @@
         ],
         "pinDefaults": {
           "tools": [],
-          "system": "You file and connect a person's notes. Output JSON only, matching the schema.",
+          "system": "You plan a deep search through a person's notes to answer a question. The message gives the question, the time window, and the first search results.\n\nReturn up to six `steps` (each a sub-question, with an optional time slice `since` / `until` and the names of `entities` to trace), the `contradictions_to_test`, and the number of search `rounds` (1 to 8).\n\nRules:\n- Plan only searches the notes can answer; never invent entities or dates.\n\nOutput JSON only, matching the schema, written compactly on one line (no indentation).\n",
           "temperature": 0.2,
           "resp_schema": {
             "type": "object",
@@ -895,7 +895,7 @@
           }
         ],
         "pinDefaults": {
-          "template": "You read the search results for one step of a deep search through a person's notes.\n\nMain question: {{question}}\nThis step: {{step}}\n\nSearch results:\n{{hits}}\n\nReturn the `facts` with the note ids that support each one (`citations`), what `changes` over time the results show, and the `gaps`: what is missing to answer the step.\n\nRules:\n- Use only these results; cite note ids exactly as given.\n- Output JSON only, matching the schema.\n"
+          "template": "Main question: {{question}}\nThis step: {{step}}\n\nSearch results:\n{{hits}}"
         }
       }
     },
@@ -995,7 +995,7 @@
         ],
         "pinDefaults": {
           "tools": [],
-          "system": "You file and connect a person's notes. Output JSON only, matching the schema.",
+          "system": "You read the search results for one step of a deep search through a person's notes. The message gives the main question, this step, and its search results.\n\nReturn the `facts` with the note ids that support each one (`citations`), what `changes` over time the results show, and the `gaps`: what is missing to answer the step.\n\nRules:\n- Use only these results; cite note ids exactly as given.\n\nOutput JSON only, matching the schema, written compactly on one line (no indentation).\n",
           "temperature": 0.2,
           "resp_schema": {
             "type": "object",
@@ -1225,7 +1225,7 @@
           }
         ],
         "pinDefaults": {
-          "template": "You write a dossier that answers a question from the findings of a deep search through a person's notes.\n\nQuestion: {{question}}\nPlan: {{plan}}\n\nFindings per step:\n{{findings}}\n\nWrite a `title`, a `narrative` with inline citations [nt_...], a `timeline` of the subject (date, event, note ids), how the view `evolution` went, the `contradictions`, `forgotten` items worth revisiting, `suggestions`, and a `confidence` statement that says how well the notes support the answer.\n\nRules:\n- Use only the note ids in the findings; never invent notes, people or dates.\n- Output JSON only, matching the schema.\n"
+          "template": "Question: {{question}}\nPlan: {{plan}}\n\nFindings per step:\n{{findings}}"
         }
       }
     },
@@ -1325,7 +1325,7 @@
         ],
         "pinDefaults": {
           "tools": [],
-          "system": "You file and connect a person's notes. Output JSON only, matching the schema.",
+          "system": "You write a dossier that answers a question from the findings of a deep search through a person's notes. The message gives the question, the search plan, and the findings per step.\n\nWrite a `title`, a `narrative` with inline citations [nt_...], a `timeline` of the subject (date, event, note ids), how the view `evolution` went, the `contradictions`, `forgotten` items worth revisiting, `suggestions`, and a `confidence` statement that says how well the notes support the answer.\n\nRules:\n- Use only the note ids in the findings; never invent notes, people or dates.\n\nOutput JSON only, matching the schema, written compactly on one line (no indentation).\n",
           "temperature": 0.2,
           "resp_schema": {
             "type": "object",

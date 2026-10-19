@@ -31,7 +31,7 @@ def test_every_model_node_pins_thinking_and_an_output_budget():
     pins = {k[1]: (llm[k]["data"]["pinDefaults"].get("thinking"), llm[k]["data"]["pinDefaults"]["max_output_tokens"])
             for k in llm if k[0] in ("note-capture", "note-process")}
     assert pins == {"filing": ("off", 400), "extract": ("on", 4000), "extract_again": ("on", 4000),
-                    "link": ("on", 3000)}
+                    "link": ("on", 6000)}
 
 
 def test_sections_are_bounded_for_the_extract_budget():
@@ -94,4 +94,4 @@ def test_the_node_thinking_holds_whatever_the_run_asks(tmp_path):
     llm.generate = spy
     runner.run_capture("Met Dana.", _runtime={"thinking": False})
     runner.run_drain(max_items=5, budget_s=60, _runtime={"thinking": False})
-    assert seen == [("off", 400), ("on", 4000), ("on", 3000)]
+    assert seen == [("off", 400), ("on", 4000), ("on", 6000)]
