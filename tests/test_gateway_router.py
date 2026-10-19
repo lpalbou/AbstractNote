@@ -270,3 +270,26 @@ def test_as_of_travels_over_http(gw):
     r = c.get("/api/gateway/note/entities/ex:person-dana", params={"at": t1}, headers=h)
     assert r.status_code == 200, r.text
     assert r.json()["as_of"] == t1 and [b["claim_id"] for b in r.json()["beliefs"]] == ["cl_asof"]
+
+
+def test_user_actions_record_the_client_from_the_app_proxy_never_from_the_body(gw):
+    """Review 02 m4: the account is the principal; the client is `web` only through the Note web
+    app's proxy (`X-AbstractFramework-App-Proxy: abstractnote`), else `api`; a body cannot say."""
+    from test_store_support import claim, create, rev, t
+
+    from abstractnote.gateway.router import notebook_for
+
+    c, h = gw["client"], gw["alice"]
+    nb = notebook_for(_plane(gw, "alice"))
+    nb.apply_revision(rev("rv_m4", t(10), create("ex:person-dana", "Dana"), create("ex:project-lut", "LUT"),
+                          claim("cl_m4", "ex:person-dana", "schema:participant", "ex:project-lut", at=t(10)),
+                          {"op": "task.open", "payload": {"task_id": "tk_m4", "text": "Send Dana the Pareto"}}))
+    r = c.post("/api/gateway/note/claims/cl_m4/retract", headers=h, json={"reason": "wrong", "client": "watch"})
+    assert r.status_code == 422  # no client-declared field
+    r = c.post("/api/gateway/note/claims/cl_m4/retract", headers=h, json={"reason": "wrong"})
+    assert r.status_code == 200, r.text
+    assert nb.revision(r.json()["revision_id"])["source"] == {"client": "api", "account": "alice"}
+    r = c.post("/api/gateway/note/tasks/tk_m4/close", headers={**h, "X-AbstractFramework-App-Proxy": "abstractnote"},
+               json={})
+    assert r.status_code == 200, r.text
+    assert nb.revision(r.json()["revision_id"])["source"] == {"client": "web", "account": "alice"}

@@ -149,7 +149,9 @@ Operations:
 | `note.summary` | `{note_id, summary, kind, language}` |
 
 User actions (`close a task`, `retract a claim`, `undo a merge`) produce revisions with
-`source = {client, account}` and no note; they are the human side of an actionable graph.
+`source = {client, account}` and no note; they are the human side of an actionable graph. Through
+the gateway, `account` is the signed-in user and `client` is `web` (the Note web app) or `api`
+(any other caller), decided by the server, never by the request body.
 
 Reversibility: a merge keeps both records and can be undone by a later revision that re-points
 claims; a supersession keeps the old claim with its window closed.

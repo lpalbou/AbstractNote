@@ -83,6 +83,11 @@ signed-in principal for their own notebook. The few write actions are bookkeepin
 | `POST /note/claims/{claim_id}/retract` | user action: retract a claim (a revision with the account as source) | `reason` |
 | `POST /note/tasks/{task_id}/close` | user action: close an open loop | `note?` |
 | `POST /note/entities/{entity_id}/unmerge` | user action: undo a merge | `from_id, reason` |
+
+A user action's revision carries `source = {account, client}`: `account` is the signed-in
+principal; `client` is `web` when the request came through the Note web app's proxy (which marks
+what it relays with `X-AbstractFramework-App-Proxy: abstractnote`) and `api` otherwise. Request
+bodies cannot set it (an unknown field such as `client` is refused with 422).
 | `GET /note/cues` | cue cards: a few reflect-generated prompts you can answer by adding a note (a person gone quiet, a decision that aged, a task mentioned often and never closed) | `limit` |
 | `GET /note/graph` | nodes and edges for the explorer | `focus (entity ids), at, depth (1..3), since, until, kinds, min_count, limit` |
 | `GET /note/timeline` | activity per bucket: notes, revisions, new entities, superseded claims | `since, until, granularity=day|week|month` |

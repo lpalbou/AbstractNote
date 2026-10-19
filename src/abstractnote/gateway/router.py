@@ -138,6 +138,19 @@ def _account(principal: Any) -> str:
     return str(getattr(principal, "user_id", "") or "")
 
 
+# The app-server session proxy marks every request it relays with the app's id (it drops any value
+# the browser sent): `X-AbstractFramework-App-Proxy: abstractnote` is the Note web app.
+APP_PROXY_HEADER = "X-AbstractFramework-App-Proxy"
+APP_CLIENTS = {"abstractnote": "web"}
+
+
+def action_client(request: Request) -> str:
+    """``source.client`` of a user action: ``web`` through the Note web app's proxy, else ``api``.
+    Informational only; the signed-in account (the principal) is what is authoritative."""
+    app = str(request.headers.get(APP_PROXY_HEADER) or "").strip().lower()
+    return APP_CLIENTS.get(app, "api")
+
+
 def _items(value: Any) -> Dict[str, Any]:
     if isinstance(value, dict) and "items" in value:
         return value
@@ -293,7 +306,6 @@ class UnmergeBody(BaseModel):
 
     from_id: str
     reason: str = ""
-    client: str = "web"
 
 
 @router.post("/entities/{entity_id}/unmerge")
@@ -301,7 +313,8 @@ async def note_unmerge(request: Request, entity_id: str, body: UnmergeBody) -> D
     def work(nb, svc, p):
         _entity_or_404(nb, entity_id)
         _entity_or_404(nb, body.from_id)
-        return _call(nb, "unmerge_entity", entity_id, body.from_id, _account(p), body.reason, client=body.client)
+        return _call(nb, "unmerge_entity", entity_id, body.from_id, _account(p), body.reason,
+                     client=action_client(request))
 
     return await _run(request, work)
 
@@ -322,14 +335,13 @@ class RetractBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason: str
-    client: str = "web"
 
 
 @router.post("/claims/{claim_id}/retract")
 async def note_claim_retract(request: Request, claim_id: str, body: RetractBody) -> Dict[str, Any]:
     def work(nb, svc, p):
         _require(nb, "claim", claim_id, "statement")
-        return _call(nb, "retract_claim", claim_id, _account(p), body.reason, client=body.client)
+        return _call(nb, "retract_claim", claim_id, _account(p), body.reason, client=action_client(request))
 
     return await _run(request, work)
 
@@ -338,7 +350,6 @@ class CloseTaskBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     note: Optional[str] = None
-    client: str = "web"
 
 
 @router.post("/tasks/{task_id}/close")
@@ -347,7 +358,7 @@ async def note_task_close(request: Request, task_id: str, body: Optional[CloseTa
 
     def work(nb, svc, p):
         _require(nb, "task", task_id, "task")
-        return _call(nb, "close_task", task_id, _account(p), body.note, client=body.client)
+        return _call(nb, "close_task", task_id, _account(p), body.note, client=action_client(request))
 
     return await _run(request, work)
 
