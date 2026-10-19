@@ -26,8 +26,10 @@ dependencies = [
     "abstractruntime>=0.10.2",
     "abstractcore>=2.26.3",
     "pydantic>=2.0",
-    # Louvain community detection over the entity graph (backlog 0030); pure Python, no compiled parts
-    "networkx>=3.2",
+    # Louvain community detection over the entity graph (backlog 0030); pure Python, no compiled parts.
+    # Capped below 3.7: Louvain gives other communities from one networkx release to the next (gate 04 M1), so
+    # only tested releases are allowed; meta.communities records the version and a change carries labels over.
+    "networkx>=3.2,<3.7",
 ]
 
 [project.optional-dependencies]

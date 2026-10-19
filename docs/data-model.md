@@ -220,14 +220,22 @@ make a large graph readable: the explorer colours nodes by community, and the st
 | `stale_label` | the label is kept but more than 20 % of the membership changed since it was labelled: the next reflect run names it again |
 | `revision_count_at_compute` | applied revisions when detection last ran; `GET /note/communities` reports `revisions_since` |
 
-Detection is Louvain (`networkx`, fixed seed, resolution 1.0 by default) over the live entities;
+Detection is Louvain (`networkx`, fixed seed, resolution 1.0 by default) over the live entities,
+deterministic for a given networkx version: the same graph under the same networkx release gives the
+same communities, but another release may split it differently, so `meta.communities` records the
+`networkx` version of each computation (`GET /note/communities` reports it) and the dependency is
+capped at the releases that were tested (`networkx>=3.2,<3.7`);
 the weight of a pair is the number of its statements that were not retracted (merged entries count
 for their survivor) plus a co-mention weight: each note that mentions `k` live entities adds
 `1/(k-1)` to every pair among them. Groups of fewer than 3 entities are the **loose ends** and
 belong to no community. A recomputation matches each new group to the previous community it
 overlaps most (Jaccard of the member sets, best overlaps first, each previous community used once):
 an overlap of at least 0.6 keeps the id, label, summary and kind; anything else is a new community
-with a new id and no label. Tables `communities` and `entity_communities` (one row per member) are
+with a new id and no label. Once after the networkx version changed (or after a computation that
+recorded none), the floor is 0.5, and a labelled previous community that still matches nothing hands
+its label, marked stale, to the unmatched new group it overlaps most (a new id); the recompute
+response lists those labels under `carry_over` (`kept`, `stale`, and `dropped` for a label no new
+group overlaps), so a library upgrade never loses a label silently. Tables `communities` and `entity_communities` (one row per member) are
 derived, but because the labels are model work, `rebuild` keeps them (`schema.KEPT_TABLES`). A
 notebook opened without its embedding model reads communities and refuses to recompute or label.
 

@@ -1,16 +1,25 @@
 """Communities of the knowledge graph (backlog 0030, docs/cognition.md "Communities").
 
-Detection is deterministic and needs no model: Louvain (``networkx``, a fixed seed) over the live entities, an
+Detection needs no model: Louvain (``networkx``, a fixed seed) over the live entities, an
 edge weighing the statements between two entities (claims with an entity object that were not retracted, merged
 entries counted for their survivor) plus their co-mentions (each note that mentions ``k`` live entities adds
 ``1/(k-1)`` to each pair it mentions, so one long note does not outweigh many short ones). A community smaller
 than :data:`MIN_COMMUNITY_SIZE` is left out: its entities are the loose ends (no ``entity_communities`` row).
 
+Detection is deterministic for a given networkx version: the same graph under the same networkx release
+always gives the same communities, but Louvain's implementation changes between releases (3.6.1 and 3.7
+split the same graph differently), so ``meta.communities`` records the ``networkx`` version of each
+computation.
+
 Ids are stable: a new community whose members overlap a previous community by Jaccard >= :data:`KEEP_JACCARD`
 keeps that community's id, label, summary and kind (the best overlaps are matched first, each previous community
 at most once); any other community gets ``cm_`` + a hash of its sorted member ids. A kept label is marked
 ``stale_label`` when more than :data:`STALE_CHANGE` of the membership changed since it was labelled (Jaccard
-with the members at labelling time below ``1 - STALE_CHANGE``). The model names communities in the reflect flow
+with the members at labelling time below ``1 - STALE_CHANGE``). Once after a networkx change (or after a
+computation that recorded no version), the floor is :data:`KEEP_JACCARD_VERSION_CHANGE`, and a labelled
+previous community that still matches nothing hands its label, marked stale, to the unmatched new group it
+overlaps most; the recompute response lists every kept, carried and dropped label under ``carry_over``
+(never silently lost). The model names communities in the reflect flow
 (:func:`pending` -> one ``llm_call`` with :data:`COMMUNITY_LABELS_SCHEMA` -> :func:`label`).
 
 The tables are derived, but the labels are the model's work, so ``Notebook.rebuild`` keeps them
@@ -20,6 +29,7 @@ The tables are derived, but the labels are the model's work, so ``Notebook.rebui
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .. import ids
@@ -27,9 +37,10 @@ from ..store.notes import clamp_limit
 from . import shapes
 
 DEFAULT_RESOLUTION = 1.0
-SEED = 20261019                 # fixed Louvain seed: the same graph always gives the same communities
+SEED = 20261019                 # fixed Louvain seed: same graph, same networkx -> same communities
 MIN_COMMUNITY_SIZE = 3          # smaller groups are loose ends
 KEEP_JACCARD = 0.6              # overlap with a previous community that keeps its id and label
+KEEP_JACCARD_VERSION_CHANGE = 0.5  # the same, once, after the networkx version changed
 STALE_CHANGE = 0.2              # share of the membership that may change before a kept label is stale
 TOP_ENTITIES = 5                # entities shown per community
 PENDING_LIMIT = 5               # communities handed to the model per reflect run
@@ -86,6 +97,8 @@ Groups:
 
 #: The variables the reflect flow wires into :data:`LABEL_TEMPLATE`.
 LABEL_TEMPLATE_VARS = frozenset({"communities"})
+
+_log = logging.getLogger(__name__)
 
 _CERTAINTY_RANK = {"stated": 0, "probable": 1, "reported": 2, "possible": 3, "disputed": 4}
 
@@ -176,6 +189,13 @@ def _jaccard(a: "set[str]", b: "set[str]") -> float:
     return len(a & b) / len(a | b) if (a or b) else 0.0
 
 
+def networkx_version() -> str:
+    """The installed networkx release (detection is deterministic for a given one)."""
+    import networkx
+
+    return str(networkx.__version__)
+
+
 def _revision_count(nb: Any) -> int:
     return int(nb.store.q1("SELECT COUNT(*) FROM revisions WHERE applied_index=1")[0])
 
@@ -192,34 +212,46 @@ def _check_resolution(resolution: Any) -> float:
 
 def recompute(nb: Any, resolution: Any = None) -> Dict[str, Any]:
     """Run detection and store the communities (no model). Returns ``{communities, loose_ends, entities, edges,
-    new, labels_kept, stale_labels, unlabelled, resolution, computed_at}``."""
+    new, labels_kept, stale_labels, unlabelled, resolution, computed_at, networkx, carry_over}``; ``carry_over``
+    is null unless the previous computation ran under another networkx version (or recorded none): then it is
+    ``{from_networkx, to_networkx, floor, kept, stale, dropped}`` (see the module doc)."""
     nb.require_embedder()  # a notebook opened without its embedding model is read-only
     res = _check_resolution(resolution)
     found = detect(nb, res)
     g = found["graph"]
+    version = networkx_version()
     note_counts = {r["entity_id"]: int(r["note_count"] or 0) for r in nb.store.q(
         "SELECT entity_id, note_count FROM entities WHERE merged_into IS NULL")}
     now = ids.utc_now()
     revisions = _revision_count(nb)
     with nb._apply_lock, nb.store.tx() as c:
         prev = {r["community_id"]: r for r in c.execute("SELECT * FROM communities").fetchall()}
+        prev_meta = nb.store.meta_get("communities") or {}
+        changed = bool(prev) and prev_meta.get("networkx") != version
+        floor = KEEP_JACCARD_VERSION_CHANGE if changed else KEEP_JACCARD
         prev_members: Dict[str, set] = {cid: set() for cid in prev}
         for r in c.execute("SELECT entity_id, community_id FROM entity_communities").fetchall():
             prev_members.setdefault(r["community_id"], set()).add(r["entity_id"])
         owner = {e: cid for cid, ms in prev_members.items() for e in ms}
-        pairs = []
+        overlaps = []
         for i, members in enumerate(found["groups"]):
             mset = set(members)
             for cid in sorted({owner[e] for e in members if e in owner}):
-                j = _jaccard(mset, prev_members[cid])
-                if j >= KEEP_JACCARD:
-                    pairs.append((-j, i, cid))
-        pairs.sort()
+                overlaps.append((-_jaccard(mset, prev_members[cid]), i, cid))
+        overlaps.sort()
         matched: Dict[int, str] = {}
+        jaccard_of: Dict[int, float] = {}
         used: set = set()
-        for _, i, cid in pairs:
-            if i not in matched and cid not in used:
-                matched[i], used = cid, used | {cid}
+        for nj, i, cid in overlaps:
+            if -nj >= floor and i not in matched and cid not in used:
+                matched[i], used, jaccard_of[i] = cid, used | {cid}, -nj
+        carried: Dict[int, str] = {}  # after a version change: unmatched group -> labelled previous community
+        if changed:
+            for nj, i, cid in overlaps:
+                if i not in matched and i not in carried and cid not in used and prev[cid]["label"]:
+                    carried[i], used, jaccard_of[i] = cid, used | {cid}, -nj
+        carry = {"from_networkx": prev_meta.get("networkx"), "to_networkx": version, "floor": floor,
+                 "kept": [], "stale": [], "dropped": []} if changed else None
         c.execute("DELETE FROM entity_communities")
         c.execute("DELETE FROM communities")
         counts = {"new": 0, "labels_kept": 0, "stale_labels": 0, "unlabelled": 0}
@@ -237,6 +269,18 @@ def recompute(nb: Any, resolution: Any = None) -> Dict[str, Any]:
                     then = set(json.loads(labelled_members or "[]"))
                     stale = bool(p["stale_label"]) or _jaccard(mset, then) < 1.0 - STALE_CHANGE
                     counts["labels_kept"] += 1
+                    if carry is not None and jaccard_of[i] < KEEP_JACCARD:
+                        carry["kept"].append({"community_id": cid, "label": label,
+                                              "jaccard": round(jaccard_of[i], 4)})
+            elif i in carried:
+                p = prev[carried[i]]
+                cid, created_at = community_id_for(members), now
+                label, summary, kind, labelled_at = p["label"], p["summary"], p["kind"], p["labelled_at"]
+                labelled_members = p["labelled_member_ids_json"]
+                stale = True  # the reflect flow names it again, with this label as the previous one
+                counts["new"] += 1
+                carry["stale"].append({"community_id": cid, "previous_community_id": p["community_id"],
+                                       "label": label, "jaccard": round(jaccard_of[i], 4)})
             else:
                 cid, created_at = community_id_for(members), now
                 label = summary = kind = labelled_at = labelled_members = None
@@ -251,11 +295,20 @@ def recompute(nb: Any, resolution: Any = None) -> Dict[str, Any]:
                        now, labelled_at, labelled_members, int(stale), revisions))
             c.executemany("INSERT INTO entity_communities(entity_id, community_id) VALUES (?,?)",
                           [(e, cid) for e in members])
+        if carry is not None:
+            carry["dropped"] = [{"community_id": cid, "label": p["label"]} for cid, p in sorted(prev.items())
+                                if p["label"] and cid not in used]
         c.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('communities', ?)", (json.dumps({
             "computed_at": now, "resolution": res, "revision_count_at_compute": revisions,
-            "loose_ends": len(found["loose"]), "entities": g.number_of_nodes(), "edges": g.number_of_edges()}),))
+            "loose_ends": len(found["loose"]), "entities": g.number_of_nodes(), "edges": g.number_of_edges(),
+            "networkx": version}),))
+    if carry is not None:
+        _log.warning("communities: networkx %s -> %s; labels kept from Jaccard %.1f: %d, carried as stale: %d,"
+                     " dropped: %d", carry["from_networkx"], version, floor, len(carry["kept"]),
+                     len(carry["stale"]), len(carry["dropped"]))
     return {"communities": len(found["groups"]), "loose_ends": len(found["loose"]), "entities": g.number_of_nodes(),
-            "edges": g.number_of_edges(), **counts, "resolution": res, "computed_at": now}
+            "edges": g.number_of_edges(), **counts, "resolution": res, "computed_at": now, "networkx": version,
+            "carry_over": carry}
 
 
 # --------------------------------------------------------------------------- reads
@@ -278,13 +331,15 @@ def _item(nb: Any, r: Any) -> Dict[str, Any]:
 
 
 def communities(nb: Any) -> Dict[str, Any]:
-    """``GET /note/communities``: ``{computed_at, resolution, revision_count_at_compute, revisions_since,
-    loose_ends, items: [Community]}``, largest first; ``revisions_since`` counts revisions applied after the last
-    computation (the graph moved); everything is null/0/empty before the first computation."""
+    """``GET /note/communities``: ``{computed_at, resolution, networkx, revision_count_at_compute, revisions_since,
+    loose_ends, items: [Community]}``, largest first; ``networkx`` is the version the last computation ran under
+    (null if it recorded none); ``revisions_since`` counts revisions applied after the last computation (the graph
+    moved); everything is null/0/empty before the first computation."""
     meta = nb.store.meta_get("communities") or {}
     at = int(meta.get("revision_count_at_compute") or 0)
     rows = nb.store.q("SELECT * FROM communities ORDER BY size DESC, community_id")
     return {"computed_at": meta.get("computed_at"), "resolution": meta.get("resolution"),
+            "networkx": meta.get("networkx"),
             "revision_count_at_compute": at, "revisions_since": max(0, _revision_count(nb) - at) if meta else 0,
             "loose_ends": int(meta.get("loose_ends") or 0), "items": [_item(nb, r) for r in rows]}
 

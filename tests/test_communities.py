@@ -55,8 +55,9 @@ def _groups(nb):
 
 def test_recompute_finds_the_two_groups_and_leaves_the_rest_as_loose_ends(nb):
     world(nb)
-    assert nb.communities() == {"computed_at": None, "resolution": None, "revision_count_at_compute": 0,
-                                "revisions_since": 0, "loose_ends": 0, "items": []}  # never computed: nothing
+    assert nb.communities() == {"computed_at": None, "resolution": None, "networkx": None,
+                                "revision_count_at_compute": 0, "revisions_since": 0, "loose_ends": 0,
+                                "items": []}  # never computed: nothing
     counts = nb.recompute_communities()
     assert (counts["communities"], counts["loose_ends"], counts["entities"]) == (2, 3, 11)
     assert counts["labels_kept"] == 0 and counts["new"] == 2
@@ -292,3 +293,95 @@ def test_the_community_tools_are_bound(tmp_path):
                                                   "kind": "tooling"}])
     assert out == {"labelled": [cid], "warnings": []}
     assert tools["note_communities_pending"]()["count"] == 1
+
+
+# --------------------------------------------------------------------------- networkx version (gate 04 M1)
+
+
+def _set_meta_networkx(nb, version):
+    meta = nb.store.meta_get("communities")
+    if version is None:
+        meta.pop("networkx", None)
+    else:
+        meta["networkx"] = version
+    nb.store.meta_set("communities", meta)
+
+
+def _grow_lut(nb, note_id, names, day):
+    ops = []
+    for name in names:
+        eid = f"ex:person-{name}"
+        ops += [create(eid, name.title()), mention(eid, note_id)]
+        ops += [claim(f"cl_{name}_{i}", eid, "ex:works_with", m, at=t(day), note_id=note_id) for i, m in enumerate(A)]
+    nb.apply_revision(rev(f"rv_grow_{day}", t(day), *ops, note_id=note_id))
+
+
+def test_the_networkx_version_is_recorded_and_reported(nb):
+    import networkx
+
+    world(nb)
+    counts = nb.recompute_communities()
+    assert counts["networkx"] == networkx.__version__ and counts["carry_over"] is None
+    assert nb.store.meta_get("communities")["networkx"] == networkx.__version__
+    assert nb.communities()["networkx"] == networkx.__version__
+
+
+def test_a_networkx_change_carries_labels_over_once_and_never_drops_one_silently(nb):
+    w = world(nb)
+    nb.recompute_communities()
+    (lut,) = [c for c, m in _groups(nb).items() if "ex:project-lut" in m]
+    cm.label(nb, [{"community_id": lut, "label": "LUT", "summary": "The LUT project.", "kind": "project"}])
+    _grow_lut(nb, w["n1"], ("fay", "gus", "hal"), 6)  # 7 members, Jaccard 4/7 = 0.57: below 0.6, above 0.5
+    _set_meta_networkx(nb, "3.5.0")  # the last computation ran under another networkx
+    counts = nb.recompute_communities()
+    item = {c["community_id"]: c for c in nb.communities()["items"]}.get(lut)
+    assert item is not None and (item["label"], item["stale_label"], item["size"]) == ("LUT", True, 7)
+    carry = counts["carry_over"]
+    assert (carry["from_networkx"], carry["floor"]) == ("3.5.0", cm.KEEP_JACCARD_VERSION_CHANGE)
+    assert [(k["community_id"], k["label"]) for k in carry["kept"]] == [(lut, "LUT")]
+    assert carry["kept"][0]["jaccard"] == pytest.approx(4 / 7, abs=1e-3)
+    assert carry["stale"] == [] and carry["dropped"] == []
+    # once: the next computation runs under the recorded version again, with the usual floor
+    assert nb.recompute_communities()["carry_over"] is None
+
+
+def test_a_networkx_change_keeps_a_far_label_as_stale_rather_than_losing_it(nb):
+    w = world(nb)
+    nb.recompute_communities()
+    (lut,) = [c for c, m in _groups(nb).items() if "ex:project-lut" in m]
+    cm.label(nb, [{"community_id": lut, "label": "LUT", "summary": "The LUT project.", "kind": "project"}])
+    _grow_lut(nb, w["n1"], ("fay", "gus", "hal", "ivy", "jo"), 6)  # 9 members, Jaccard 4/9 = 0.44 < 0.5
+    _set_meta_networkx(nb, None)  # computed before the version was recorded: treated as a change
+    counts = nb.recompute_communities()
+    (now,) = [c for c in nb.communities()["items"] if "ex:project-lut" in cm.members(nb, c["community_id"])]
+    assert now["community_id"] != lut  # a new id: the group changed too much to keep it
+    assert (now["label"], now["stale_label"]) == ("LUT", True)  # but the label follows it, to be renamed
+    carry = counts["carry_over"]
+    assert carry["from_networkx"] is None and carry["kept"] == []
+    assert [(s["community_id"], s["previous_community_id"], s["label"]) for s in carry["stale"]] == [
+        (now["community_id"], lut, "LUT")]
+    (waiting,) = [i for i in cm.pending(nb)["items"] if i["community_id"] == now["community_id"]]
+    assert waiting["previous_label"] == "LUT"
+
+
+def test_without_a_networkx_change_a_far_label_is_not_carried(nb):
+    w = world(nb)
+    nb.recompute_communities()
+    (lut,) = [c for c, m in _groups(nb).items() if "ex:project-lut" in m]
+    cm.label(nb, [{"community_id": lut, "label": "LUT", "summary": "x.", "kind": "project"}])
+    _grow_lut(nb, w["n1"], ("fay", "gus", "hal"), 6)
+    counts = nb.recompute_communities()
+    assert counts["carry_over"] is None
+    (now,) = [c for c in nb.communities()["items"] if "ex:project-lut" in cm.members(nb, c["community_id"])]
+    assert now["community_id"] != lut and now["label"] is None
+
+
+def test_networkx_is_pinned_below_the_untested_release():
+    import pathlib
+
+    tomllib = pytest.importorskip("tomllib")  # Python 3.11+
+    Requirement = pytest.importorskip("packaging.requirements").Requirement
+
+    deps = tomllib.loads((pathlib.Path(__file__).parents[1] / "pyproject.toml").read_text())["project"]["dependencies"]
+    (nx_req,) = [Requirement(d) for d in deps if Requirement(d).name == "networkx"]
+    assert "3.6.1" in nx_req.specifier and "3.7" not in nx_req.specifier and "3.2" in nx_req.specifier
