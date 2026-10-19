@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/gateway/runs/session_memory_note-watch-<uuid>/audio/transcribe",
+    "body": {
+      "audio_artifact": {
+        "$artifact": "<artifact id>"
+      }
+    }
+  },
+  "status": 500,
+  "body": {
+    "detail": "STT child run did not complete successfully: Effect failed after 3 attempts: No STT engine is available.\nDefault STT uses OpenAI remote audio; set OPENAI_API_KEY or pass remote_api_key=....\nFor local faster-whisper, install and select the STT engine:\n  pip install \"abstractvoice[stt]\"\n  pip install \"abstractvoice[apple]\"  # Apple profile\n  pip install \"abstractvoice[gpu]\"    # GPU profile\n  VoiceManager(stt_engine=\"faster_whisper\", ...)"
+  },
+  "recorded": "hermetic gateway 2026-10-19, :18890, venv without an STT engine and no OPENAI_API_KEY (gate 03 m3)"
+}

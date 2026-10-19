@@ -16,6 +16,6 @@ let package = Package(
         .target(name: "GatewayCore"),
         // watchOS only (each file is `#if os(watchOS)`), so `swift test` on a Mac builds it empty.
         .target(name: "AbstractWatchKit", dependencies: ["GatewayCore"]),
-        .testTarget(name: "GatewayCoreTests", dependencies: ["GatewayCore"]),
+        .testTarget(name: "GatewayCoreTests", dependencies: ["GatewayCore"], resources: [.copy("transcribe_no_engine_500.json")]),
     ]
 )

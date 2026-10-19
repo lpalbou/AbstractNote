@@ -16,6 +16,9 @@ public enum GatewayError: Error, Equatable, Sendable, LocalizedError {
     case invalidResponse
     /// A 2xx answer whose JSON is not the documented shape (the server and the app disagree).
     case unexpectedAnswer(String)
+    /// The server answered a transcription with a server error (5xx): it has no speech to text
+    /// (recorded: a seven-line install recipe in a 500), whatever its words.
+    case transcriptionUnavailable(body: String)
 
     public var errorDescription: String? {
         switch self {
@@ -26,6 +29,7 @@ public enum GatewayError: Error, Equatable, Sendable, LocalizedError {
         case .http(let s, let body): GatewayErrorBody.parse(body)?.message.flatMap(Problem.sentence) ?? (s >= 500 ? "The server is having trouble. Try again." : "That didn't work. Try again.")
         case .invalidResponse: "Can't reach the server."
         case .unexpectedAnswer: "This answer could not be read. Update the app."
+        case .transcriptionUnavailable: Problem.cannotTranscribe.sentence
         }
     }
 }
@@ -169,9 +173,17 @@ public actor GatewayTransport {
 
     /// What was said in an uploaded recording: `POST /api/gateway/runs/{owner}/audio/transcribe`
     /// `{audio_artifact: {"$artifact": id}}` with the gateway's speech to text.
+    /// A server error here (5xx) is `transcriptionUnavailable`: the person gets one sentence, never
+    /// the server's install notes, and keeps the recording (gate 03 m3). Decided by the call and its
+    /// status, not by the server's words.
     public func transcribe(_ audio: UploadedAttachment) async throws -> String {
-        let data = try await request("POST", "api/gateway/runs/\(try Self.segment(audio.ownerRunId))/audio/transcribe",
+        let data: Data
+        do {
+            data = try await request("POST", "api/gateway/runs/\(try Self.segment(audio.ownerRunId))/audio/transcribe",
                                      body: TranscribeRequest(audio_artifact: ["$artifact": audio.artifactId]), timeout: 120)
+        } catch GatewayError.http(let status, let body) where status >= 500 {
+            throw GatewayError.transcriptionUnavailable(body: body)
+        }
         do { return try JSONDecoder().decode(TranscribeResponse.self, from: data).text.trimmingCharacters(in: .whitespacesAndNewlines) }
         catch { throw GatewayError.unexpectedAnswer("audio/transcribe: \(error)") }
     }

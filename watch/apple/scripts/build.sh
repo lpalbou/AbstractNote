@@ -16,7 +16,7 @@ BUNDLE=ai.abstractframework.note.watch
 DERIVED_DATA="${DERIVED_DATA:-$ROOT/build/DerivedData}"
 SPM_SCRATCH="${SPM_SCRATCH:-}"
 SCREENS_DIR="${SCREENS_DIR:-$ROOT/../../untracked/screens/watch}"
-SCREENS=(signin note note-listening note-recording note-sending note-saved note-error ask ask-thinking ask-answer ask-deeper
+SCREENS=(signin note note-listening note-recording note-no-stt note-sending note-saved note-error ask ask-thinking ask-answer ask-deeper
          today today-quiet today-signin today-notsetup today-offline insight loop cue cue-why note-detail settings server account about)
 t() { date +%s; }
 

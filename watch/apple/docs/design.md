@@ -81,7 +81,10 @@ by the server (`POST /api/gateway/runs/{owner}/audio/transcribe {audio_artifact:
 the owner being the upload's `run_id`). The words fill the field, editable. **Send** sends the words;
 **Send as recording** sends them with the upload's `attachment` reference, unchanged, in
 `input_data.context.attachments`, so the original audio stays with the note. Dictation and scribble
-on the field itself still work.
+on the field itself still work. A server without speech to text answers the transcription with a
+server error (recorded: a 500 carrying an install recipe); the watch says one sentence instead, "This
+server can't transcribe voice yet. Type or send the recording instead.", keeps the recording, and
+**Send as recording** stays available (with no words typed the note is named "Voice note (0:12)").
 
 ## Errors
 

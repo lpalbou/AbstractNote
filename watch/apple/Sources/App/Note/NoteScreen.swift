@@ -118,7 +118,6 @@ struct NoteScreen: View {
             if recording != nil {
                 Button("Send as recording") { send(withRecording: true) }
                     .buttonStyle(FilledButtonStyle(fill: Theme.neutralButton))
-                    .disabled(empty)
                     .accessibilityIdentifier("note.sendRecording")
                     .accessibilityHint("Saves the words and keeps the recording with the note")
             }
@@ -214,8 +213,10 @@ struct NoteScreen: View {
         defer { RuntimeKeeper.shared.release("transcribe") }
         do {
             let audio = try await model.client.upload(wav: wav, sessionId: model.sessionId)
-            let words = try await model.client.transcribe(audio)
+            // Uploaded: the recording is kept whatever the transcription does, so "Send as
+            // recording" stays possible on a server without speech to text (gate 03 m3).
             recording = Recording(audio: audio, duration: duration)
+            let words = try await model.client.transcribe(audio)
             text = text.isEmpty ? words : text + " " + words
             if words.isEmpty { voiceError = .said("No words were found in the recording; it is kept.") }
             WKInterfaceDevice.current().play(.success)
@@ -229,7 +230,9 @@ struct NoteScreen: View {
     // MARK: - Sending
 
     private func send(withRecording: Bool) {
-        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A recording with no words (nothing typed, no transcription) still goes, named as what it is.
+        if body.isEmpty, withRecording, let r = recording { body = "Voice note (\(ListeningView.clock(r.duration)))" }
         guard !body.isEmpty else { return }
         pending = Capture(text: body, occurredAt: .now, location: location.current, idempotencyKey: UUID().uuidString.lowercased(),
                           sessionId: model.sessionId, about: model.subject,
@@ -277,7 +280,7 @@ struct NoteScreen: View {
         switch demo {
         case "note": return
         case "note-listening": demoListening = true; phase = .listening
-        case "note-recording": await writeDown(Data("RIFF-sample".utf8), duration: 12)
+        case "note-recording", "note-no-stt": await writeDown(Data("RIFF-sample".utf8), duration: 12)
         default:
             text = "Met Dana about the LUT budget; she wants the Pareto by Friday."
             send(withRecording: false)

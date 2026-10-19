@@ -146,7 +146,7 @@ final class AppModel: ObservableObject {
 /// screenshots), `--gateway URL --token T [--user U]` (provision a sign-in from the Mac with
 /// devicectl), `--forget-gateway` (sign out). With none, the first screen is the sign-in. See BUILD.md.
 struct LaunchOptions {
-    static let screens = ["signin", "note", "note-listening", "note-recording", "note-sending", "note-saved", "note-error",
+    static let screens = ["signin", "note", "note-listening", "note-recording", "note-no-stt", "note-sending", "note-saved", "note-error",
                           "ask", "ask-thinking", "ask-answer", "ask-deeper",
                           "today", "today-quiet", "today-signin", "today-notsetup", "today-offline",
                           "insight", "loop", "cue", "cue-why", "note-detail", "settings", "server", "account", "about"]
@@ -181,7 +181,7 @@ struct LaunchOptions {
             default: nil
             }
             let client = MockGatewayClient(answerDelay: ["note-sending", "ask-thinking"].contains(s) ? .seconds(3600) : .milliseconds(600),
-                                           failure: failure, quiet: s == "today-quiet")
+                                           failure: failure, quiet: s == "today-quiet", canTranscribe: s != "note-no-stt")
             let model = AppModel(client: client, signIn: nil, file: nil, needsSignIn: s == "signin", location: location)
             model.demo = s
             return model

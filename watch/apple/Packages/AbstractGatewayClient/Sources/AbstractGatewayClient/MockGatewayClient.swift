@@ -19,8 +19,11 @@ public actor MockGatewayClient: GatewayClient {
     private var closedLoops: Set<String> = []
     public private(set) var captures: [Capture] = []
 
-    public init(answerDelay: Duration = .milliseconds(800), failure: Failure? = nil, quiet: Bool = false) {
-        self.answerDelay = answerDelay; self.failure = failure; self.quiet = quiet
+    /// False: the server has no speech to text (its transcription answers a server error).
+    private let canTranscribe: Bool
+
+    public init(answerDelay: Duration = .milliseconds(800), failure: Failure? = nil, quiet: Bool = false, canTranscribe: Bool = true) {
+        self.answerDelay = answerDelay; self.failure = failure; self.quiet = quiet; self.canTranscribe = canTranscribe
     }
 
     private func check() throws {
@@ -136,6 +139,7 @@ public actor MockGatewayClient: GatewayClient {
     public func transcribe(_ audio: UploadedAttachment) async throws -> String {
         try check()
         try await Task.sleep(for: answerDelay)
+        guard canTranscribe else { throw GatewayError.transcriptionUnavailable(body: #"{"detail":"No STT engine is available."}"#) }
         return Self.transcript
     }
 

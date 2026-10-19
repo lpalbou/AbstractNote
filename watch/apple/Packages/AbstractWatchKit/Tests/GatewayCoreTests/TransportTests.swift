@@ -54,6 +54,33 @@ let recordedUpload = #"""
         #expect((body?["audio_artifact"] as? [String: String])?["$artifact"] == "f82202d00e362f35827cd0f731987a5b")
     }
 
+    /// Gate 03 m3, recorded on the hermetic gateway without a speech engine: the 500's seven-line
+    /// install recipe becomes one sentence, and the person can still send the recording.
+    @Test func aServerWithoutSpeechToTextSaysSoInOneSentence() async throws {
+        let url = try #require(Bundle.module.url(forResource: "transcribe_no_engine_500", withExtension: "json"))
+        let recorded = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let status = try #require(recorded["status"] as? Int)
+        let body = String(decoding: try JSONSerialization.data(withJSONObject: try #require(recorded["body"])), as: UTF8.self)
+        #expect(status == 500 && body.contains("pip install"))
+        Stub.answers = [(status, body)]; Stub.sent = []
+        let audio = UploadedAttachment(reference: .object(["$artifact": .string("a1")]), artifactId: "a1", ownerRunId: "session_memory_s")
+        do { _ = try await Stub.transport().transcribe(audio); Issue.record("no error") }
+        catch {
+            let p = Problem.of(error, host: "h")
+            #expect(p == .cannotTranscribe && p.action == .none)
+            #expect(p.sentence == "This server can't transcribe voice yet. Type or send the recording instead.")
+            #expect(!p.sentence.contains("pip") && !p.sentence.contains("\n"))
+        }
+        #expect(Stub.sent.count == 1)   // a write: sent once
+    }
+
+    @Test func aTranscriptionRefusalOtherThanAServerErrorKeepsItsSentence() async {
+        Stub.answers = [(404, #"{"detail":"Run 'x' not found"}"#)]; Stub.sent = []
+        let audio = UploadedAttachment(reference: .null, artifactId: "a1", ownerRunId: "x")
+        do { _ = try await Stub.transport().transcribe(audio); Issue.record("no error") }
+        catch { #expect(Problem.of(error, host: "h") == .notFound("Run 'x' not found")) }
+    }
+
     @Test func anUploadWithoutAnArtifactFailsLoudly() {
         #expect(throws: GatewayError.self) { try GatewayTransport.uploaded(Data(#"{"ok":true}"#.utf8), sessionId: "s") }
         // No run id anywhere: the session's own memory run owns it.

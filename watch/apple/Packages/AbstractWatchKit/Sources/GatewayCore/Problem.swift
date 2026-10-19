@@ -12,6 +12,8 @@ public enum Problem: Equatable, Sendable {
     case notSetUp(app: String)
     /// A 404 the app has not explained yet (it probes its status route to tell "not set up" apart).
     case notFound(String?)
+    /// The server has no speech to text: the recording can still be sent as it is.
+    case cannotTranscribe
     /// Anything else: the server's own sentence, or the app's.
     case said(String)
 
@@ -23,6 +25,7 @@ public enum Problem: Equatable, Sendable {
         case .unreachable(let host): "Can't reach \(host)."
         case .notSetUp(let app): "\(app) isn't set up on this server yet."
         case .notFound(let s): s ?? "That isn't on the server."
+        case .cannotTranscribe: "This server can't transcribe voice yet. Type or send the recording instead."
         case .said(let s): s
         }
     }
@@ -31,7 +34,7 @@ public enum Problem: Equatable, Sendable {
         switch self {
         case .signIn: .signIn
         case .unreachable, .said, .notFound: .retry
-        case .notSetUp: .none
+        case .notSetUp, .cannotTranscribe: .none
         }
     }
 
@@ -40,6 +43,7 @@ public enum Problem: Equatable, Sendable {
         switch error {
         case GatewayError.unauthorized: return .signIn
         case let e as URLError where e.code == .cancelled: return .said("Stopped.")
+        case GatewayError.transcriptionUnavailable: return .cannotTranscribe
         case is URLError, GatewayError.invalidResponse: return .unreachable(host: host)
         case GatewayError.http(404, let body): return .notFound(GatewayErrorBody.parse(body)?.message.flatMap(sentence))
         case GatewayError.http(let status, let body):
