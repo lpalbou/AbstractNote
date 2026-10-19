@@ -6,6 +6,7 @@
   },
   "status": 200,
   "body": {
-    "items": []
+    "items": [],
+    "next_cursor": null
   }
 }

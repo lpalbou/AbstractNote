@@ -1,19 +1,19 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/gateway/runs/89d18d78-5bdd-409e-a7a3-8db4ec794cd6",
+    "path": "/api/gateway/runs/6068376f-ac95-4b00-ac23-b9bbf3006d99",
     "body": null
   },
   "status": 200,
   "body": {
-    "run_id": "89d18d78-5bdd-409e-a7a3-8db4ec794cd6",
+    "run_id": "6068376f-ac95-4b00-ac23-b9bbf3006d99",
     "workflow_id": "abstractnote@0.1.0:note-capture",
     "status": "completed",
     "current_node": "capture_out",
-    "created_at": "2026-10-19T00:03:45.301419+00:00",
-    "updated_at": "2026-10-19T00:03:45.332179+00:00",
+    "created_at": "2026-10-19T01:23:10.831937+00:00",
+    "updated_at": "2026-10-19T01:23:10.858042+00:00",
     "actor_id": "gateway",
-    "session_id": "s-smoke-c7cbd584",
+    "session_id": "s-smoke-0326864d",
     "parent_run_id": null,
     "error": null,
     "flow_warnings": null,
@@ -41,10 +41,10 @@
       "result": null,
       "error": "Runtime error: Local file paths are not accepted here; upload the file as an attachment instead.",
       "execution": {
-        "duration_ms": 0.079,
-        "cpu_time_ms": 0.079,
-        "cpu_percent": 100.317,
-        "memory_rss_mb": 278.406,
+        "duration_ms": 0.068,
+        "cpu_time_ms": 0.068,
+        "cpu_percent": 99.634,
+        "memory_rss_mb": 277.75,
         "memory_rss_delta_mb": 0.0,
         "permissions": "sandbox"
       },
@@ -56,6 +56,6 @@
     "occurrence_index": null,
     "session_kind": "chat",
     "legacy": false,
-    "workspace_root": "<scratch>/data/users/default/alice/runtime/workspaces/session-s-smoke-c7cbd584-f77d84c22ed8"
+    "workspace_root": "<scratch>/hermetic/data/users/default/alice/runtime/workspaces/session-s-smoke-0326864d-5783c31ef60c"
   }
 }

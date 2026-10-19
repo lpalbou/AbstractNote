@@ -8,17 +8,17 @@
   "body": {
     "recent": [
       {
-        "note_id": "nt_gembktcb2st5aqddwa2jvqw36j",
+        "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
         "title": "Dana and the LUT budget",
         "kind": "event",
         "occurred_at": "2026-10-19T09:12:00Z",
         "excerpt": "Met Dana about the LUT budget; she wants the Pareto by Friday. Met Dana about the LUT budget; she wants the Pareto by Friday."
       },
       {
-        "note_id": "nt_ga4vfs5wkkkhjv5cdpbbvhqx7c",
+        "note_id": "nt_pqyk3mbyyvglxptg3asbfawefx",
         "title": "Dana and the LUT budget",
         "kind": "event",
-        "occurred_at": "2026-10-19T00:03:50Z",
+        "occurred_at": "2026-10-19T01:23:15Z",
         "excerpt": "Met Dana about the LUT budget; she wants the Pareto by Friday."
       }
     ],
@@ -42,14 +42,14 @@
         "name": "Dana",
         "kind": "person",
         "note_count": 1,
-        "last_seen": "2026-10-19T00:03:50Z"
+        "last_seen": "2026-10-19T01:23:15Z"
       },
       {
         "entity_id": "ex:project-lut-2",
         "name": "LUT",
         "kind": "project",
         "note_count": 1,
-        "last_seen": "2026-10-19T00:03:50Z"
+        "last_seen": "2026-10-19T01:23:15Z"
       }
     ],
     "insights": [],
@@ -208,7 +208,7 @@
       {
         "day": "2026-10-19",
         "notes": 2,
-        "revisions": 2
+        "revisions": 3
       }
     ]
   }

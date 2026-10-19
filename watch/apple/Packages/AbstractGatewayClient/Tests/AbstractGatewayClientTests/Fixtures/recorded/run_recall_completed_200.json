@@ -1,19 +1,19 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/gateway/runs/69078d9d-220c-4d75-accd-1937df5de39a",
+    "path": "/api/gateway/runs/7178a655-6e35-40a7-8157-8fb027dcecd0",
     "body": null
   },
   "status": 200,
   "body": {
-    "run_id": "69078d9d-220c-4d75-accd-1937df5de39a",
+    "run_id": "7178a655-6e35-40a7-8157-8fb027dcecd0",
     "workflow_id": "abstractnote@0.1.0:note-recall",
     "status": "completed",
     "current_node": "end_standard",
-    "created_at": "2026-10-19T00:03:55.244817+00:00",
-    "updated_at": "2026-10-19T00:03:56.356775+00:00",
+    "created_at": "2026-10-19T01:23:20.598998+00:00",
+    "updated_at": "2026-10-19T01:23:21.709267+00:00",
     "actor_id": "gateway",
-    "session_id": "s-smoke-c7cbd584",
+    "session_id": "s-smoke-0326864d",
     "parent_run_id": null,
     "error": null,
     "flow_warnings": null,
@@ -52,10 +52,10 @@
         "as_of": null,
         "notes": [
           {
-            "note_id": "nt_ga4vfs5wkkkhjv5cdpbbvhqx7c",
+            "note_id": "nt_pqyk3mbyyvglxptg3asbfawefx",
             "title": "Dana and the LUT budget",
             "kind": "event",
-            "occurred_at": "2026-10-19T00:03:50Z",
+            "occurred_at": "2026-10-19T01:23:15Z",
             "excerpt": "Dana moved the Pareto deadline to next week.",
             "score": 0.016393,
             "matched_by": [
@@ -71,7 +71,7 @@
             "insight_kind": null
           },
           {
-            "note_id": "nt_gembktcb2st5aqddwa2jvqw36j",
+            "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
             "title": "Dana and the LUT budget",
             "kind": "event",
             "occurred_at": "2026-10-19T09:12:00Z",
@@ -96,12 +96,12 @@
             "kind": "person",
             "name": "Dana",
             "aliases": [],
-            "summary": null,
+            "summary": "Dana owns the LUT budget decisions.",
             "first_seen": "2026-10-19T09:12:00Z",
             "last_seen": "2026-10-19T09:12:00Z",
             "note_count": 1,
             "merged_into": null,
-            "score": 0.032787,
+            "score": 0.032522,
             "matched_by": [
               "fts",
               "vector"
@@ -112,12 +112,12 @@
             "kind": "person",
             "name": "Dana",
             "aliases": [],
-            "summary": null,
-            "first_seen": "2026-10-19T00:03:50Z",
-            "last_seen": "2026-10-19T00:03:50Z",
+            "summary": "Dana owns the LUT budget decisions.",
+            "first_seen": "2026-10-19T01:23:15Z",
+            "last_seen": "2026-10-19T01:23:15Z",
             "note_count": 1,
             "merged_into": null,
-            "score": 0.032258,
+            "score": 0.032522,
             "matched_by": [
               "fts",
               "vector"
@@ -126,7 +126,7 @@
         ],
         "claims": [
           {
-            "claim_id": "cl_vwo4b5oh4vbukv2l2znagy3ixt",
+            "claim_id": "cl_tcugdgiq6udgqtcpe57fn2nv7l",
             "subject_id": "ex:person-dana",
             "predicate": "schema:participant",
             "object_id": "ex:project-lut",
@@ -135,13 +135,13 @@
             "stance": "assert",
             "observed_at": "2026-10-19T09:12:00Z",
             "valid_from": "2026-10-19T09:12:00Z",
-            "valid_until": null,
-            "status": "active",
+            "valid_until": "2026-10-19T09:12:00Z",
+            "status": "retracted",
             "superseded_by": null,
             "evidence": "Met Dana about the LUT budget",
-            "note_id": "nt_gembktcb2st5aqddwa2jvqw36j",
-            "revision_id": "rv_ki3dvbecphsz274q6x7iqb6z6t",
-            "assertion_id": "cl_vwo4b5oh4vbukv2l2znagy3ixt",
+            "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
+            "revision_id": "rv_oyh5cvpbfta4r7hpje4nxavtb7",
+            "assertion_id": "cl_tcugdgiq6udgqtcpe57fn2nv7l",
             "disputed_with": [],
             "reinforced_count": 0,
             "subject_name": "Dana",
@@ -149,22 +149,22 @@
             "score": 0.016393
           },
           {
-            "claim_id": "cl_ed7eww7br2hale37gquz55c7ew",
+            "claim_id": "cl_2qp5b2geh2y4oqcv2o3j6ojkbf",
             "subject_id": "ex:person-dana-2",
             "predicate": "schema:participant",
             "object_id": "ex:project-lut-2",
             "object_literal": null,
             "certainty": "stated",
             "stance": "assert",
-            "observed_at": "2026-10-19T00:03:50Z",
-            "valid_from": "2026-10-19T00:03:50Z",
+            "observed_at": "2026-10-19T01:23:15Z",
+            "valid_from": "2026-10-19T01:23:15Z",
             "valid_until": null,
             "status": "active",
             "superseded_by": null,
             "evidence": "Met Dana about the LUT budget",
-            "note_id": "nt_ga4vfs5wkkkhjv5cdpbbvhqx7c",
-            "revision_id": "rv_xn7ndot757p4w4hg7okqjjol7l",
-            "assertion_id": "cl_ed7eww7br2hale37gquz55c7ew",
+            "note_id": "nt_pqyk3mbyyvglxptg3asbfawefx",
+            "revision_id": "rv_azybk2fyntka74wrjqjyfvspfx",
+            "assertion_id": "cl_2qp5b2geh2y4oqcv2o3j6ojkbf",
             "disputed_with": [],
             "reinforced_count": 0,
             "subject_name": "Dana",
@@ -214,7 +214,8 @@
             }
           ]
         },
-        "considered": 2
+        "considered": 2,
+        "warnings": []
       },
       "effort": "standard",
       "success": true
@@ -225,6 +226,6 @@
     "occurrence_index": null,
     "session_kind": "chat",
     "legacy": false,
-    "workspace_root": "<scratch>/data/users/default/alice/runtime/workspaces/session-s-smoke-c7cbd584-f77d84c22ed8"
+    "workspace_root": "<scratch>/hermetic/data/users/default/alice/runtime/workspaces/session-s-smoke-0326864d-5783c31ef60c"
   }
 }

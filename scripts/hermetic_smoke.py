@@ -13,6 +13,8 @@ What it checks (exit 1 on the first failure, with the reason):
   - the processor automation is created, ``automation.run_now`` starts a drain, a second one while it
     runs answers 409 ``automation_busy``, and the queue drains;
   - a note-recall run started with ``prompt`` (the agent contract) answers on ``output.response`` (S3);
+  - a retraction through the API closes the statement's window where it opens and is listed in the
+    delta as ``kind: retracted`` in plain words (no vocabulary term);
   - the reflect automation has not run on its own (its first occurrence is one interval away), its
     "Reflect now" (``automation.run_now``) occurrence completes, every processor occurrence completed,
     and no run in the account's plane is ``failed`` (review 02 M1).
@@ -25,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 import urllib.error
@@ -34,6 +37,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 FIXTURES: Optional[Path] = None
+CURIE = re.compile(r"\b[a-z][a-z0-9]*:[A-Za-z]")  # a vocabulary term (schema:participant) in text a person reads
 SCRUB: list = []  # (text, replacement): scratch paths left out of the recorded fixtures
 
 
@@ -290,6 +294,28 @@ def main() -> int:
     stats = wait_drained(gw, a)
     check(stats.get("failed", 0) == 0 and stats.get("done", 0) >= 2, f"the queue did not drain cleanly: {stats}")
     report["queue"] = stats
+    # a user retraction: a revision with the account as source, listed in the delta in plain words (M3, m3, m4)
+    status, before = call(gw, "GET", "/api/gateway/note/changes", token=a)
+    check(status == 200, f"changes answered {status}")
+    status, note = call(gw, "GET", f"/api/gateway/note/notes/{note_id}", token=a)
+    claims = [c for c in (note or {}).get("claims") or [] if c.get("status") == "active"]
+    check(status == 200 and claims, f"the filed note has no active statement to retract: {status} {note}")
+    cid = claims[0]["claim_id"]
+    status, ret = call(gw, "POST", f"/api/gateway/note/claims/{cid}/retract", token=a,
+                       json_body={"reason": "Dana was never on that project."}, fixture="note_claim_retract_200")
+    check(status == 200 and ret.get("revision_id"), f"retract answered {status}: {ret}")
+    status, cl = call(gw, "GET", f"/api/gateway/note/claims/{cid}", token=a)
+    check(status == 200, f"GET /note/claims/{cid} answered {status}: {cl}")
+    claim_row = cl["claim"]
+    check(claim_row.get("status") == "retracted" and claim_row.get("valid_until") == claim_row.get("valid_from"),
+          f"a retracted statement keeps a window: {claim_row}")
+    status, delta = call(gw, "GET", f"/api/gateway/note/changes?since={before['cursor']}", token=a)
+    gone = [c for c in delta.get("superseded_claims") or [] if c.get("claim_id") == cid]
+    check(gone and gone[0].get("kind") == "retracted" and gone[0].get("superseded_by") is None,
+          f"the retraction is not listed as retracted: {delta.get('superseded_claims')}")
+    check(bool(gone[0].get("text")) and not CURIE.search(gone[0]["text"]),
+          f"the delta names a vocabulary term: {gone[0].get('text')!r}")
+    report["retraction"] = gone[0]
     for name, path in (("note_get_200", f"/api/gateway/note/notes/{note_id}"), ("note_changes_200", "/api/gateway/note/changes"),
                        ("note_overview_200", "/api/gateway/note/overview"), ("note_cues_200", "/api/gateway/note/cues"),
                        ("note_tasks_200", "/api/gateway/note/tasks"), ("note_insights_200", "/api/gateway/note/insights"),

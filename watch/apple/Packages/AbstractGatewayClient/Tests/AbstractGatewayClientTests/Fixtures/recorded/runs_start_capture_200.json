@@ -5,23 +5,23 @@
     "body": {
       "bundle_id": "abstractnote",
       "flow_id": "note-capture",
-      "session_id": "s-smoke-c7cbd584",
+      "session_id": "s-smoke-0326864d",
       "input_data": {
         "text": "Met Dana about the LUT budget; she wants the Pareto by Friday.",
         "occurred_at": "2026-10-19T09:12:00Z",
         "source": {
           "client": "watch"
         },
-        "idempotency_key": "a23b6efb-5ca8-4773-a1d3-250dc052d2ec",
-        "session_id": "s-smoke-c7cbd584",
+        "idempotency_key": "1b1ec455-38bf-4305-a1f3-3b21a36f0184",
+        "session_id": "s-smoke-0326864d",
         "context": {
           "attachments": [
             {
-              "$artifact": "368d1433d71d764b7d6b0cfc42b2f33a",
-              "artifact_id": "368d1433d71d764b7d6b0cfc42b2f33a",
+              "$artifact": "edb97d8e578363ba16e5d1a191d5d452",
+              "artifact_id": "edb97d8e578363ba16e5d1a191d5d452",
               "content_type": "text/plain",
               "modality": "text",
-              "run_id": "session_memory_s-smoke-c7cbd584",
+              "run_id": "session_memory_s-smoke-0326864d",
               "filename": "budget.txt",
               "source_path": "client:budget.txt",
               "sha256": "59aeb8921a4eae2304f7eaef12a47afd082c697e70070325eb8222bc490edbbd",
@@ -34,7 +34,7 @@
   },
   "status": 200,
   "body": {
-    "run_id": "ea970aa1-7e90-49a4-8c4e-7c9a59f19908",
+    "run_id": "614658d6-524c-4c2b-8ca2-103d5cb9a968",
     "runner_warning": null,
     "resolved_workflow": {
       "source": "client",

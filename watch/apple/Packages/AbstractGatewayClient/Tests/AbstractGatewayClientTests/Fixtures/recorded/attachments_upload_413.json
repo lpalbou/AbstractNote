@@ -4,7 +4,7 @@
     "path": "/api/gateway/attachments/upload",
     "body": {
       "multipart": {
-        "session_id": "s-smoke-c7cbd584",
+        "session_id": "s-smoke-0326864d",
         "file": "big.bin (1048577 bytes)"
       }
     }

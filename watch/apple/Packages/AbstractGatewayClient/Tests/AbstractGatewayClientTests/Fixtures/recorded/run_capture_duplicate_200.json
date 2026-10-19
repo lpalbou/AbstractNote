@@ -1,19 +1,19 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/gateway/runs/abf23bff-c067-4505-9e7e-6a33605d85e7",
+    "path": "/api/gateway/runs/145bdd39-de9f-4656-9dc5-b3ccd9ede778",
     "body": null
   },
   "status": 200,
   "body": {
-    "run_id": "abf23bff-c067-4505-9e7e-6a33605d85e7",
+    "run_id": "145bdd39-de9f-4656-9dc5-b3ccd9ede778",
     "workflow_id": "abstractnote@0.1.0:note-capture",
     "status": "completed",
     "current_node": "end_duplicate",
-    "created_at": "2026-10-19T00:03:44.713398+00:00",
-    "updated_at": "2026-10-19T00:03:44.753338+00:00",
+    "created_at": "2026-10-19T01:23:10.267623+00:00",
+    "updated_at": "2026-10-19T01:23:10.300872+00:00",
     "actor_id": "gateway",
-    "session_id": "s-smoke-c7cbd584",
+    "session_id": "s-smoke-0326864d",
     "parent_run_id": null,
     "error": null,
     "flow_warnings": null,
@@ -37,7 +37,7 @@
     "is_draft": false,
     "output": {
       "response": "Already saved on 2026-10-19.",
-      "note_id": "nt_gembktcb2st5aqddwa2jvqw36j",
+      "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
       "status": "duplicate",
       "success": true
     },
@@ -47,6 +47,6 @@
     "occurrence_index": null,
     "session_kind": "chat",
     "legacy": false,
-    "workspace_root": "<scratch>/data/users/default/alice/runtime/workspaces/session-s-smoke-c7cbd584-f77d84c22ed8"
+    "workspace_root": "<scratch>/hermetic/data/users/default/alice/runtime/workspaces/session-s-smoke-0326864d-5783c31ef60c"
   }
 }

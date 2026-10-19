@@ -68,6 +68,14 @@ describe("copy rules", () => {
     expect(deltaVocabulary({ superseded_claims: [{ text: "Dana participant LUT" }], entities: [{ name: "Dana" }] })).toEqual([]);
   });
 
+  it("the delta recorded from the hermetic gateway reads in plain words", () => {
+    const recorded = join(__dirname, "..", "..", "watch", "apple", "Packages", "AbstractGatewayClient", "Tests",
+      "AbstractGatewayClientTests", "Fixtures", "recorded", "note_changes_200.json");
+    const delta = JSON.parse(readFileSync(recorded, "utf8")).body;
+    expect(delta.superseded_claims.length).toBeGreaterThan(0); // a recording without one would check nothing
+    expect(deltaVocabulary(delta)).toEqual([]);
+  });
+
   it("no on/off setting is labelled with a verb", () => {
     for (const f of files(SRC)) expect(findVerbToggleLabels(readFileSync(f, "utf8")), f).toEqual([]);
   });

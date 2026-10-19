@@ -1,17 +1,17 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/gateway/note/notes/nt_gembktcb2st5aqddwa2jvqw36j",
+    "path": "/api/gateway/note/notes/nt_l7e27gj63qbf7ggvjjg2q332yz",
     "body": null
   },
   "status": 200,
   "body": {
-    "note_id": "nt_gembktcb2st5aqddwa2jvqw36j",
+    "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
     "title": "Dana and the LUT budget",
     "text": "Met Dana about the LUT budget; she wants the Pareto by Friday.",
     "kind": "event",
     "occurred_at": "2026-10-19T09:12:00Z",
-    "received_at": "2026-10-19T00:03:43Z",
+    "received_at": "2026-10-19T01:23:08Z",
     "status": "processed",
     "topics": [
       "lut"
@@ -25,15 +25,15 @@
     "location": null,
     "attachments": [
       {
-        "attachment_id": "at_xe64uuxrzcienomcdxu7qlhdle",
-        "note_id": "nt_gembktcb2st5aqddwa2jvqw36j",
+        "attachment_id": "at_v74p67tsuwlfvrxbxx2w5jus7f",
+        "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
         "sha256": "59aeb8921a4eae2304f7eaef12a47afd082c697e70070325eb8222bc490edbbd",
         "size": 37,
         "mime": "text/plain",
         "filename": "budget.txt",
         "artifact_ref": {
-          "artifact_id": "368d1433d71d764b7d6b0cfc42b2f33a",
-          "run_id": "session_memory_s-smoke-c7cbd584"
+          "artifact_id": "edb97d8e578363ba16e5d1a191d5d452",
+          "run_id": "session_memory_s-smoke-0326864d"
         },
         "blob_path": "blobs/59/59aeb8921a4eae2304f7eaef12a47afd082c697e70070325eb8222bc490edbbd",
         "extracted_by": "plain",
@@ -42,13 +42,13 @@
       }
     ],
     "revision": {
-      "revision_id": "rv_ki3dvbecphsz274q6x7iqb6z6t",
-      "note_id": "nt_gembktcb2st5aqddwa2jvqw36j",
+      "revision_id": "rv_oyh5cvpbfta4r7hpje4nxavtb7",
+      "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
       "attempt": 1,
       "action": null,
       "target": null,
       "at": "2026-10-19T09:12:00Z",
-      "recorded_at": "2026-10-19T00:03:49Z",
+      "recorded_at": "2026-10-19T01:23:14Z",
       "run_id": null,
       "ops": [
         {
@@ -58,14 +58,14 @@
             "entity_id": "ex:person-dana",
             "kind": "person",
             "name": "Dana",
-            "summary": null
+            "summary": "Dana owns the LUT budget decisions."
           }
         },
         {
           "op": "entity.mention",
           "payload": {
             "entity_id": "ex:person-dana",
-            "note_id": "nt_gembktcb2st5aqddwa2jvqw36j"
+            "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz"
           }
         },
         {
@@ -75,23 +75,23 @@
             "entity_id": "ex:project-lut",
             "kind": "project",
             "name": "LUT",
-            "summary": null
+            "summary": "The LUT project and its budget."
           }
         },
         {
           "op": "entity.mention",
           "payload": {
             "entity_id": "ex:project-lut",
-            "note_id": "nt_gembktcb2st5aqddwa2jvqw36j"
+            "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz"
           }
         },
         {
           "op": "claim.add",
           "payload": {
             "certainty": "stated",
-            "claim_id": "cl_vwo4b5oh4vbukv2l2znagy3ixt",
+            "claim_id": "cl_tcugdgiq6udgqtcpe57fn2nv7l",
             "evidence": "Met Dana about the LUT budget",
-            "note_id": "nt_gembktcb2st5aqddwa2jvqw36j",
+            "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
             "object_id": "ex:project-lut",
             "object_literal": null,
             "observed_at": "2026-10-19T09:12:00Z",
@@ -106,15 +106,15 @@
           "op": "task.open",
           "payload": {
             "due": null,
-            "note_id": "nt_gembktcb2st5aqddwa2jvqw36j",
-            "task_id": "tk_oymy5lvok4m7oiex6dderddwca",
+            "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
+            "task_id": "tk_mtpuzdh3vqarhsh2lqakvmglrl",
             "text": "Send Dana the Pareto by Friday"
           }
         },
         {
           "op": "topic.assign",
           "payload": {
-            "note_id": "nt_gembktcb2st5aqddwa2jvqw36j",
+            "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
             "topic": "lut"
           }
         },
@@ -123,7 +123,7 @@
           "payload": {
             "kind": null,
             "language": null,
-            "note_id": "nt_gembktcb2st5aqddwa2jvqw36j",
+            "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
             "summary": "Met Dana about the LUT budget; she wants the Pareto by Friday. Met Dana about the LUT budget; she wants the Pareto by Friday."
           }
         }
@@ -140,7 +140,7 @@
         "kind": "person",
         "name": "Dana",
         "aliases": [],
-        "summary": null,
+        "summary": "Dana owns the LUT budget decisions.",
         "first_seen": "2026-10-19T09:12:00Z",
         "last_seen": "2026-10-19T09:12:00Z",
         "note_count": 1,
@@ -151,7 +151,7 @@
         "kind": "project",
         "name": "LUT",
         "aliases": [],
-        "summary": null,
+        "summary": "The LUT project and its budget.",
         "first_seen": "2026-10-19T09:12:00Z",
         "last_seen": "2026-10-19T09:12:00Z",
         "note_count": 1,
@@ -160,7 +160,7 @@
     ],
     "claims": [
       {
-        "claim_id": "cl_vwo4b5oh4vbukv2l2znagy3ixt",
+        "claim_id": "cl_tcugdgiq6udgqtcpe57fn2nv7l",
         "subject_id": "ex:person-dana",
         "predicate": "schema:participant",
         "object_id": "ex:project-lut",
@@ -169,13 +169,13 @@
         "stance": "assert",
         "observed_at": "2026-10-19T09:12:00Z",
         "valid_from": "2026-10-19T09:12:00Z",
-        "valid_until": null,
-        "status": "active",
+        "valid_until": "2026-10-19T09:12:00Z",
+        "status": "retracted",
         "superseded_by": null,
         "evidence": "Met Dana about the LUT budget",
-        "note_id": "nt_gembktcb2st5aqddwa2jvqw36j",
-        "revision_id": "rv_ki3dvbecphsz274q6x7iqb6z6t",
-        "assertion_id": "cl_vwo4b5oh4vbukv2l2znagy3ixt",
+        "note_id": "nt_l7e27gj63qbf7ggvjjg2q332yz",
+        "revision_id": "rv_oyh5cvpbfta4r7hpje4nxavtb7",
+        "assertion_id": "cl_tcugdgiq6udgqtcpe57fn2nv7l",
         "disputed_with": [],
         "reinforced_count": 0,
         "subject_name": "Dana",

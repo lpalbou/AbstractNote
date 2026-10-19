@@ -34,7 +34,7 @@ enum RecordedFixtures {
     /// Paths the gateway answers that the watch never calls (the web app and the CLI do).
     static let notCalledByWatch = ["/api/gateway/note/status", "/api/gateway/note/entities", "/api/gateway/note/graph",
                                    "/api/gateway/note/queue", "/api/gateway/note/settings", "/api/gateway/note/processor/ensure",
-                                   "/api/gateway/attachments/upload", "/api/gateway/automations/"]
+                                   "/api/gateway/attachments/upload", "/api/gateway/automations/", "/api/gateway/note/claims/"]
 
     /// Decodes one recorded answer with the model the client uses for that path and status.
     static func check(_ f: Fixture) throws {
@@ -96,7 +96,7 @@ extension ReplayGroup {
 
         @Test func aCaptureRequestHasTheRecordedShapeIncludingTheSessionInsideInputData() async throws {
             try serve("runs_start_capture_200")
-            #expect(try await ReplayStub.client().startCapture(capture) == "ea970aa1-7e90-49a4-8c4e-7c9a59f19908")
+            #expect(try await ReplayStub.client().startCapture(capture) == "614658d6-524c-4c2b-8ca2-103d5cb9a968")
             let sent = try #require(ReplayStub.seen.first)
             let input = try #require(sent.body["input_data"] as? [String: Any])
             #expect(input["session_id"] as? String == "note-watch-1" && sent.body["session_id"] as? String == "note-watch-1")
@@ -120,7 +120,7 @@ extension ReplayGroup {
             try serve("run_capture_completed_200", "run_capture_duplicate_200", "run_capture_path_refused")
             let c = ReplayStub.client()
             #expect(try await c.captureProgress(runId: "a") == .done(CaptureAnswer(response: "Saved as event “Dana and the LUT budget”.",
-                                                                                   noteId: "nt_gembktcb2st5aqddwa2jvqw36j", status: "queued")))
+                                                                                   noteId: "nt_l7e27gj63qbf7ggvjjg2q332yz", status: "queued")))
             guard case .done(let dup) = try await c.captureProgress(runId: "b") else { Issue.record("duplicate"); return }
             #expect(dup.status == "duplicate")
             // A refused input completes with success false: its sentence, without "Runtime error: ".
@@ -138,11 +138,12 @@ extension ReplayGroup {
             let c = ReplayStub.client()
             let ch = try await c.changes(since: nil)
             #expect(ch.notes.count == 2 && ch.entities.count == 4 && !ch.cursor.isEmpty)
+            #expect(ch.supersededClaims.map(\.kind) == ["retracted"] && ch.supersededClaims.first?.text == "Dana participant LUT")
             #expect(try await c.cues(limit: 3).isEmpty)
             #expect(try await c.openLoops(limit: 5).first?.text == "Send Dana the Pareto by Friday")
             #expect(try await c.insights(limit: 5).isEmpty)
             #expect(try await c.overview().resurfacing.isEmpty)
-            #expect(try await c.note(id: "nt_gembktcb2st5aqddwa2jvqw36j").title == "Dana and the LUT budget")
+            #expect(try await c.note(id: "nt_l7e27gj63qbf7ggvjjg2q332yz").title == "Dana and the LUT budget")
         }
 
         @Test func recordedRefusalsMapToTheirSentences() async throws {
