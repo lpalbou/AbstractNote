@@ -67,3 +67,9 @@ export function thenNowView(raw: unknown, claimsById?: Map<string, Obj>): ThenNo
 export function claimsById(claims: Array<{ claim_id: string }>): Map<string, Obj> {
   return new Map(claims.map((c) => [c.claim_id, c as unknown as Obj]));
 }
+
+/** Entities with one row per entity id (the first one kept): a picker never offers the same entity twice. */
+export function uniqueEntities<T extends { entity_id: string }>(entities: T[] | null | undefined): T[] {
+  const seen = new Set<string>();
+  return (entities || []).filter((e) => (seen.has(e.entity_id) ? false : (seen.add(e.entity_id), true)));
+}

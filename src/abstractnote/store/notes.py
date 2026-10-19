@@ -624,6 +624,7 @@ class NoteStore:
                                " revision_id DESC LIMIT 1", (r["entity_id"], at_n))
                 summary = srow[0] if srow else None
             out_nodes.append({"id": r["entity_id"], "kind": r["kind"], "name": r["name"],
+                              "display_name": r["display_name"] or r["name"],
                               "first_seen": r["first_seen"], "last_seen": r["last_seen"],
                               "note_count": r["note_count"], "summary": summary})
         for e in edge_list:
@@ -650,6 +651,7 @@ class NoteStore:
             if row is None or (at_n and agg["first_seen"] > at_n):
                 continue
             out[c] = {"entity_id": c, "kind": row["kind"], "name": arch.name(c, at_n) or row["name"],
+                      "display_name": row["display_name"] or row["name"],
                       "first_seen": agg["first_seen"], "last_seen": agg["last_seen"], "note_count": len(agg["notes"]),
                       "summary": arch.summary(c, at_n)}
         return out

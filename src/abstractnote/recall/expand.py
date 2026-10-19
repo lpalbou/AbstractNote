@@ -7,7 +7,7 @@ import json
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from .. import ids
-from ..store.notes import _uj, clamp_limit, fts_terms
+from ..store.notes import _uj, clamp_limit, distinct_names, fts_terms
 from . import shapes
 from .then_now import relation_then_now, then_now
 
@@ -67,15 +67,13 @@ def entity_card(nb: Any, entity_id: str, at: Optional[str] = None, as_received: 
     name_row = s.q1("SELECT name FROM entity_names WHERE entity_id=? AND at<=? ORDER BY at DESC, revision_id DESC LIMIT 1",
                     (eid, ref))
     name = name_row[0] if (name_row and at_n) else row["name"]
-    aliases: List[str] = []
+    names: List[str] = []
     for m in members:
-        for a in s.aliases(m, at_n):
-            if ids.fold(a) != ids.fold(name) and ids.fold(a) not in {ids.fold(x) for x in aliases}:
-                aliases.append(a)
+        names += s.aliases(m, at_n)
         if m != eid:
             mrow = s.entity_row(m)
-            if ids.fold(mrow["name"]) != ids.fold(name) and ids.fold(mrow["name"]) not in {ids.fold(x) for x in aliases}:
-                aliases.append(mrow["name"])
+            names.append(mrow["display_name"] or mrow["name"])
+    aliases = distinct_names(names, exclude=[name])  # one per canonical name, never the entity's own
     history = [{"at": r["at"], "summary": r["summary"], "note_id": r["note_id"], "revision_id": r["revision_id"]}
                for r in s.q(f"SELECT * FROM entity_summaries WHERE entity_id IN ({q}) AND at<=? ORDER BY at, revision_id",
                             [*members, ref])]
@@ -93,7 +91,8 @@ def entity_card(nb: Any, entity_id: str, at: Optional[str] = None, as_received: 
         months[r[0]] = r[1]
     return {
         "entity_id": eid, "resolved_from": entity_id if entity_id != eid else None, "as_of": at_n,
-        "kind": row["kind"], "name": name, "aliases": aliases, "summary": summary, "summary_history": history,
+        "kind": row["kind"], "name": name, "display_name": row["display_name"] or row["name"], "aliases": aliases,
+        "summary": summary, "summary_history": history,
         "first_seen": stats[0] or row["first_seen"], "last_seen": stats[1] or row["last_seen"],
         "note_count": int(stats[2] or 0), "merged_from": [m for m in members if m != eid],
         "merged_into": row["merged_into"] if at_n is None else None,
@@ -127,16 +126,14 @@ def _archive_card(nb: Any, arch: Any, entity_id: str, at_n: Optional[str]) -> Di
     if at_n and (first is None or first > at_n):
         raise ValueError("That entity was not known yet at that time.")
     name = arch.name(eid, at_n) or row["name"]
-    aliases: List[str] = []
+    names: List[str] = []
     for m in members:
-        for (a,) in s.q(f"SELECT alias FROM entity_aliases WHERE entity_id=? AND added_at<=? AND {in_rev}"
-                        " ORDER BY added_at, alias", [m, ref, *p_rev]):
-            if ids.fold(a) != ids.fold(name) and ids.fold(a) not in {ids.fold(x) for x in aliases}:
-                aliases.append(a)
+        names += [a for (a,) in s.q(f"SELECT alias FROM entity_aliases WHERE entity_id=? AND added_at<=? AND {in_rev}"
+                                    " ORDER BY added_at, alias", [m, ref, *p_rev])]
         if m != eid:
-            mname = arch.name(m, at_n) or s.entity_row(m)["name"]
-            if ids.fold(mname) != ids.fold(name) and ids.fold(mname) not in {ids.fold(x) for x in aliases}:
-                aliases.append(mname)
+            mrow = s.entity_row(m)
+            names.append(mrow["display_name"] or arch.name(m, at_n) or mrow["name"])
+    aliases = distinct_names(names, exclude=[name])
     history = [{"at": r["at"], "summary": r["summary"], "note_id": r["note_id"], "revision_id": r["revision_id"]}
                for r in s.q(f"SELECT * FROM entity_summaries WHERE entity_id IN ({q}) AND at<=? AND {in_rev}"
                             " ORDER BY at, revision_id", [*members, ref, *p_rev])]
@@ -157,7 +154,8 @@ def _archive_card(nb: Any, arch: Any, entity_id: str, at_n: Optional[str]) -> Di
         months[r[0]] = r[1]
     return {
         "entity_id": eid, "resolved_from": entity_id if entity_id != eid else None, "as_of": at_n,
-        "as_received": arch.at, "kind": row["kind"], "name": name, "aliases": aliases,
+        "as_received": arch.at, "kind": row["kind"], "name": name, "display_name": row["display_name"] or row["name"],
+        "aliases": aliases,
         "summary": history[-1]["summary"] if history else None, "summary_history": history,
         "first_seen": first, "last_seen": stats[1] or first, "note_count": int(stats[2] or 0),
         "merged_from": [m for m in members if m != eid], "merged_into": None,
@@ -353,7 +351,7 @@ def _entity_line(nb: Any, eid: str, at: Optional[str], focus: bool) -> Optional[
     summary = summary[0] if summary else (row["summary"] if at is None else None)
     stats = s.q1(f"SELECT MIN(at), MAX(at), COUNT(DISTINCT note_id) FROM entity_notes WHERE entity_id IN ({q}) AND"
                  " at<=?", [*members, ref])
-    aliases = [a for m in members for a in s.aliases(m, at) if ids.fold(a) != ids.fold(row["name"])][:3]
+    aliases = distinct_names([a for m in members for a in s.aliases(m, at)], exclude=[row["name"]])[:3]
     line = f"{row['name']} ({row['kind']}" + (f"; also {', '.join(aliases)}" if aliases else "") + ")"
     if summary:
         line += ": " + shapes.excerpt(summary, ENTITY_SUMMARY_CHARS)

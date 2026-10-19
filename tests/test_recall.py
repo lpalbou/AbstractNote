@@ -400,5 +400,5 @@ def test_pinned_shapes_of_note_tasks_overview(nb):
     ov = nb.overview(days=7, now="2025-03-03T00:00:00Z")
     assert set(ov) == {"recent", "entities", "insights", "resurfacing", "activity"}
     assert len(ov["activity"]) == 8 and set(ov["activity"][0]) == {"day", "notes", "revisions"}
-    assert set(ov["entities"][0]) == {"entity_id", "name", "kind", "note_count", "last_seen"}
+    assert set(ov["entities"][0]) == {"entity_id", "name", "display_name", "kind", "note_count", "last_seen"}
     assert set(ov["recent"][0]) == {"note_id", "title", "kind", "occurred_at", "excerpt"}

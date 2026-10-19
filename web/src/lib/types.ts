@@ -1,6 +1,8 @@
 /** Response shapes of the note read API (docs/api.md). Fields api.md leaves open are optional. */
 
-export type EntityRef = { entity_id: string; name: string; kind: string };
+/** `name` is the entity's one canonical name (lower case, words joined by `_`); `display_name` is the first way a
+ * note wrote it, for a client that wants it. Show `name`. */
+export type EntityRef = { entity_id: string; name: string; kind: string; display_name?: string };
 /** Pinned (docs/api.md "Pinned response shapes"): {note_id, title, kind, occurred_at, excerpt}. */
 export type NoteRef = { note_id: string; title: string; kind: string; occurred_at: string; excerpt?: string; status?: string; topics?: string[] };
 
@@ -97,7 +99,7 @@ export type ClaimChain = {
   revision?: { summary?: string } | null;
 };
 
-export type GraphNode = { id: string; kind: string; name: string; first_seen?: string; last_seen?: string; note_count?: number; summary?: string };
+export type GraphNode = { id: string; kind: string; name: string; display_name?: string; first_seen?: string; last_seen?: string; note_count?: number; summary?: string };
 export type GraphEdge = { source: string; target: string; predicate: string; first_seen?: string; last_seen?: string; count: number; active: boolean };
 /** `as_received` is echoed when the graph was asked for what the archive held on a date (docs/api.md "Three dates"). */
 export type Graph = { as_of: string; as_received?: string; nodes: GraphNode[]; edges: GraphEdge[] };

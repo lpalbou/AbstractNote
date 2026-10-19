@@ -8,7 +8,7 @@ import { noteAbout, useAt, type Route } from "../lib/nav";
 import { fetchReview, reviewAction, runReviewAction } from "../lib/review";
 import { followRun, runErrorText, startFlow, stepWords } from "../lib/runs";
 import type { Changes, Cue, EntityListItem, EntityCard, EntityRecord, Insight, ListOf, Note, NoteRef, NoteStatus, Overview, RecallOutput, RelationTimeline, ReviewAction, ReviewItem, ReviewSide, SearchResult, Task, ThenNowRaw, Topic } from "../lib/types";
-import { claimsById, thenNowView } from "../lib/shapes";
+import { claimsById, thenNowView, uniqueEntities } from "../lib/shapes";
 import { NOTE_KINDS, claimSentence, longDate, relative, shortDate, topicLabel } from "../lib/words";
 import { basisLine, reviewWhy, whyLine } from "../lib/why";
 import { Disclose, EmptyNotebook, EntityChip, KindBadge, NoteLink, ReadView, Section, Sparkline, openClaim, openEntity, openNote, useApp } from "../components/common";
@@ -606,7 +606,7 @@ function ThenVersusNow() {
   const overview = useRead<Overview>(() => api.get<Overview>("note/overview", { days: 90 }), [api]);
   const [a, setA] = useState("");
   const [b, setB] = useState("");
-  const candidates = overview.data?.entities || [];
+  const candidates = uniqueEntities(overview.data?.entities);
   const first = a || candidates[0]?.entity_id || "";
   return (
     <Section id="thennow" title="Then and now">
@@ -617,7 +617,7 @@ function ThenVersusNow() {
               <label className="nt-field nt-field--inline">
                 <span className="nt-field__label">About</span>
                 <select className="nt-input" value={first} onChange={(e) => setA(e.target.value)}>
-                  {(o.entities || []).map((e) => (
+                  {uniqueEntities(o.entities).map((e) => (
                     <option key={e.entity_id} value={e.entity_id}>
                       {e.name}
                     </option>
@@ -628,7 +628,7 @@ function ThenVersusNow() {
                 <span className="nt-field__label">and its link with</span>
                 <select className="nt-input" value={b} onChange={(e) => setB(e.target.value)}>
                   <option value="">nobody in particular</option>
-                  {(o.entities || [])
+                  {uniqueEntities(o.entities)
                     .filter((e) => e.entity_id !== first)
                     .map((e) => (
                       <option key={e.entity_id} value={e.entity_id}>

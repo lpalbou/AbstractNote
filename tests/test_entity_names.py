@@ -301,3 +301,24 @@ def test_dry_run_of_a_notebook_pinned_to_an_absent_model_and_its_merge_refused(t
     assert len(json.loads(capsys.readouterr().out)["groups"]) == 1
     assert main(["normalize", "--notebook", str(root)]) == 2
     assert "some-gateway-model" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------- 4. what clients see
+
+def test_cards_lists_and_overview_show_the_canonical_name_and_keep_the_surface_form(nb):
+    _legacy_world(nb)
+    nb.apply_revision(rev("rv_4", t(4), {"op": "entity.alias", "payload": {"entity_id": "ex:concept-memory",
+                                                                          "alias": "the memory"}}))
+    nb.normalize_entities(None)
+    card = nb.entity("ex:concept-memory")
+    assert (card["name"], card["display_name"]) == ("memory", "Memory")
+    assert card["aliases"] == ["the memory"]  # MEMORY., memory and the merged entries' names are not other names
+    listed = {e["entity_id"]: e for e in nb.entities()["items"]}
+    assert listed["ex:concept-memory"]["name"] == "memory" and "ex:concept-memory-2" not in listed
+    ov = nb.overview(days=3650, now=t(5))
+    ids_ = [e["entity_id"] for e in ov["entities"]]
+    assert len(ids_) == len(set(ids_)) and [e["name"] for e in ov["entities"]].count("memory") == 1
+    node = next(n for n in nb.graph()["nodes"] if n["id"] == "ex:concept-memory")
+    assert (node["name"], node["display_name"]) == ("memory", "Memory")
+    line = nb.expand(entity_ids=["ex:concept-memory"])["entities"][0]["line"]
+    assert line.startswith("memory (concept; also the memory)")

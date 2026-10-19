@@ -74,7 +74,8 @@ def changes(nb: Any, since: Optional[str] = None, limit: int = 50, as_received: 
     for r in q("SELECT * FROM entities WHERE recorded_at>=?" + f_created + " ORDER BY recorded_at, entity_id LIMIT ?",
                (ts, *p_created, limit + len(seen))):
         add("entities", "entity", r["entity_id"], r["recorded_at"],
-            {"entity_id": r["entity_id"], "name": r["name"], "kind": r["kind"], "first_seen": r["first_seen"]})
+            {"entity_id": r["entity_id"], "name": r["name"], "display_name": r["display_name"] or r["name"],
+             "kind": r["kind"], "first_seen": r["first_seen"]})
     for r in q("SELECT c.*, v.recorded_at AS closed_recorded_at, v.note_id AS closing_note_id FROM claims c"
                " JOIN revisions v ON v.revision_id=c.closed_revision_id WHERE c.status IN ('superseded','retracted')"
                " AND v.recorded_at>=?" + f_closed + " ORDER BY v.recorded_at, c.claim_id LIMIT ?",
@@ -131,8 +132,8 @@ def overview(nb: Any, days: int = 30, *, now: Optional[str] = None) -> Dict[str,
     recent = [shapes.note_ref(r) for r in q(
         "SELECT * FROM notes WHERE insight_kind IS NULL AND archived_at IS NULL ORDER BY occurred_at DESC,"
         " note_id DESC LIMIT 20")]
-    entities = [{"entity_id": r["entity_id"], "name": r["name"], "kind": r["kind"], "note_count": r["note_count"],
-                 "last_seen": r["last_seen"]} for r in q(
+    entities = [{"entity_id": r["entity_id"], "name": r["name"], "display_name": r["display_name"] or r["name"],
+                 "kind": r["kind"], "note_count": r["note_count"], "last_seen": r["last_seen"]} for r in q(
         "SELECT * FROM entities WHERE merged_into IS NULL AND last_seen>=? ORDER BY note_count DESC, last_seen DESC,"
         " entity_id LIMIT 20", (start,))]
     insights = [shapes.insight(r) for r in q(
