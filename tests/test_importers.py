@@ -259,6 +259,40 @@ def test_agora_channel_filter_and_idempotence(tmp_path, notebook):
     assert (r1.created, r2.created, r2.duplicates) == (5, 0, 5)
 
 
+def test_agora_kinds_channels_and_retracted(tmp_path, capsys):
+    db = _agora_db(tmp_path / "agora.db")
+    full, _ = _drafts(agora.drafts, path=db)
+    decisions, report = _drafts(agora.drafts, path=db, kinds=["decision"])
+    assert [d.source_key for d in decisions] == ["store:commons:decision:note-port:2"]
+    assert report.skipped["kind_filtered_claim"] == 1 and report.skipped["kind_filtered_answered_thread"] == 1
+    # separate kinds add up to one full import (an operator reply stays inside its thread)
+    parts = [d.source_key for k in agora.KINDS for d in _drafts(agora.drafts, path=db, kinds=[k])[0]]
+    assert sorted(parts) == sorted(d.source_key for d in full)
+    ops, _ = _drafts(agora.drafts, path=db, kinds=["operator"])
+    assert [d.source_key for d in ops] == ["message:m8"]  # m3 (laurent's reply) is in thread m1
+    no_dm, report = _drafts(agora.drafts, path=db, exclude_channels=["dm:framework--laurent"])
+    assert "message:m8" not in {d.source_key for d in no_dm} and report.skipped["channel_excluded"] == 1
+    with_retracted, report = _drafts(agora.drafts, path=db, include_retracted=True)
+    m9 = next(d for d in with_retracted if d.source_key == "message:m9")
+    assert m9.source["origin"]["retracted_at"] == importers.iso_from_epoch(1783500000.0 + 800)
+    assert "retracted" not in report.skipped
+    with pytest.raises(ValueError, match="Unknown kind chatter"):
+        _drafts(agora.drafts, path=db, kinds=["chatter"])
+
+    from abstractnote.importers.cli import main
+
+    nb_dir = tmp_path / "nb"
+    assert main(["agora", str(db), "--notebook", str(nb_dir), "--dry-run", "--kinds", "decision,thread",
+                 "--exclude-channels", "hub-alerts", "--include-channels", "commons"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["by_kind"] == {"answered_thread": 1, "decision": 1, "resolved_thread": 1} and out["created"] == 3
+    assert main(["agora", str(db), "--notebook", str(nb_dir), "--dry-run", "--include-retracted",
+                 "--kinds", "operator"]) == 0
+    assert json.loads(capsys.readouterr().out)["by_kind"] == {"operator_message": 2}
+    assert main(["agora", str(db), "--notebook", str(nb_dir), "--dry-run", "--kinds", "chatter"]) == 2
+    assert "Unknown kind chatter" in capsys.readouterr().err
+
+
 # --------------------------------------------------------------------------- Markdown
 
 

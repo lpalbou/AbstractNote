@@ -7,7 +7,12 @@ order), and per operator message that is not already part of an imported thread.
 names one, else its ``updated_at``). The database is opened read-only.
 
 Skipped as noise: system and file-change messages (``kind`` system/fs), the ``hub-alerts`` channel,
-silence alerts, retracted messages. ``--channels`` keeps only the named channels.
+silence alerts, and retracted messages (kept with ``include_retracted``; their ``retracted_at`` is
+then in ``source.origin``). ``include_channels`` keeps only the named channels and
+``exclude_channels`` leaves the named ones out. ``kinds`` (``decision``, ``claim``, ``work``,
+``thread``, ``operator``) picks what to write; the notes are cut the same way whatever the
+selection (an operator reply inside a thread stays part of that thread), so imports of separate
+kinds add up to one full import.
 """
 
 from __future__ import annotations
@@ -23,6 +28,34 @@ IMPORTER = "agora"
 DEFAULT_OPERATORS = ("laurent", "dl-owner")
 NOISE_CHANNELS = ("hub-alerts",)
 STORE_PREFIXES = {"decision:": "decision", "claim:": "claim", "work:": "work"}
+# --kinds value -> the draft kinds it selects
+KINDS = {"decision": ("decision",), "claim": ("claim",), "work": ("work",),
+         "thread": ("answered_thread", "resolved_thread"), "operator": ("operator_message",)}
+
+
+def _kind_set(kinds: Optional[Sequence[str]]) -> Optional[set]:
+    wanted = [k.strip() for k in (kinds or []) if k and k.strip()]
+    if not wanted:
+        return None
+    unknown = sorted(set(wanted) - set(KINDS))
+    if unknown:
+        raise ValueError(f"Unknown kind {', '.join(unknown)}; choose from {', '.join(KINDS)}.")
+    return {d for k in wanted for d in KINDS[k]}
+
+
+class _Channels:
+    def __init__(self, include: Optional[Sequence[str]], exclude: Optional[Sequence[str]]):
+        self.include = {c.strip() for c in (include or []) if c and c.strip()} or None
+        self.exclude = {c.strip() for c in (exclude or []) if c and c.strip()}
+
+    def skip(self, channel: str, report: ImportReport) -> bool:
+        if self.include is not None and channel not in self.include:
+            report.skip("channel_filtered")
+            return True
+        if channel in self.exclude:
+            report.skip("channel_excluded")
+            return True
+        return False
 
 
 def _connect(db: Path) -> sqlite3.Connection:
@@ -45,7 +78,8 @@ def _data(raw: Any) -> Dict[str, Any]:
 
 def _source(row: sqlite3.Row, *, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     origin = {"message_id": row["id"], "channel": row["channel"], "seq": row["seq"], "sender": row["sender"],
-              "reply_to": row["reply_to"], "status": row["status"], "hash": row["hash"]}
+              "reply_to": row["reply_to"], "status": row["status"], "hash": row["hash"],
+              "retracted_at": iso_from_epoch(row["retracted_at"]) if row["retracted_at"] is not None else None}
     origin.update(extra or {})
     return {"client": "importer", "importer": IMPORTER, "author": row["sender"],
             "origin": {k: v for k, v in origin.items() if v is not None}}
@@ -70,8 +104,8 @@ def _attachments(conn: sqlite3.Connection, row: sqlite3.Row) -> List[Dict[str, A
     return out
 
 
-def _is_noise(row: sqlite3.Row, report: ImportReport, *, skip_system: bool) -> bool:
-    if row["retracted_at"] is not None:
+def _is_noise(row: sqlite3.Row, report: ImportReport, *, skip_system: bool, include_retracted: bool = False) -> bool:
+    if row["retracted_at"] is not None and not include_retracted:
         report.skip("retracted")
         return True
     if skip_system and row["kind"] in ("system", "fs"):
@@ -87,25 +121,38 @@ def _is_noise(row: sqlite3.Row, report: ImportReport, *, skip_system: bool) -> b
 
 
 def drafts(*, report: ImportReport, path: str | Path, channels: Optional[Sequence[str]] = None,
-           skip_system: bool = True, operators: Sequence[str] = DEFAULT_OPERATORS,
-           since: Optional[str] = None, until: Optional[str] = None) -> Iterator[NoteDraft]:
+           exclude_channels: Optional[Sequence[str]] = None, kinds: Optional[Sequence[str]] = None,
+           include_retracted: bool = False, skip_system: bool = True,
+           operators: Sequence[str] = DEFAULT_OPERATORS, since: Optional[str] = None,
+           until: Optional[str] = None) -> Iterator[NoteDraft]:
+    """``channels`` = the channels to keep (all when empty); ``exclude_channels`` = channels to leave out."""
+    wanted = _kind_set(kinds)
+    chans = _Channels(channels, exclude_channels)
     conn = _connect(Path(path).expanduser())
-    keep = {c.strip() for c in (channels or []) if c and c.strip()} or None
     try:
-        yield from _store_drafts(conn, report, keep, since, until)
-        yield from _thread_and_operator_drafts(conn, report, keep, skip_system, set(operators), since, until)
+        for draft in _all_drafts(conn, report, chans, skip_system, include_retracted, set(operators), since, until):
+            if wanted is not None and draft.kind not in wanted:
+                report.skip(f"kind_filtered_{draft.kind}")
+                continue
+            yield draft
     finally:
         conn.close()
 
 
-def _store_drafts(conn: sqlite3.Connection, report: ImportReport, keep: Optional[set], since: Optional[str],
+def _all_drafts(conn: sqlite3.Connection, report: ImportReport, chans: _Channels, skip_system: bool,
+                include_retracted: bool, operators: set, since: Optional[str], until: Optional[str]
+                ) -> Iterator[NoteDraft]:
+    yield from _store_drafts(conn, report, chans, since, until)
+    yield from _thread_and_operator_drafts(conn, report, chans, skip_system, include_retracted, operators, since, until)
+
+
+def _store_drafts(conn: sqlite3.Connection, report: ImportReport, chans: _Channels, since: Optional[str],
                   until: Optional[str]) -> Iterator[NoteDraft]:
     rows = conn.execute(
         "SELECT channel, key, value, version, updated_by, updated_at FROM store "
         "WHERE key LIKE 'decision:%' OR key LIKE 'claim:%' OR key LIKE 'work:%' ORDER BY updated_at")
     for row in rows:
-        if keep is not None and row["channel"] not in keep:
-            report.skip("channel_filtered")
+        if chans.skip(row["channel"], report):
             continue
         kind = next(v for p, v in STORE_PREFIXES.items() if row["key"].startswith(p))
         try:
@@ -141,8 +188,8 @@ def _store_drafts(conn: sqlite3.Connection, report: ImportReport, keep: Optional
                         row["key"].split(":", 1)[1], source)
 
 
-def _thread_and_operator_drafts(conn: sqlite3.Connection, report: ImportReport, keep: Optional[set],
-                                skip_system: bool, operators: set, since: Optional[str], until: Optional[str]
+def _thread_and_operator_drafts(conn: sqlite3.Connection, report: ImportReport, chans: _Channels,
+                                skip_system: bool, include_retracted: bool, operators: set, since: Optional[str], until: Optional[str]
                                 ) -> Iterator[NoteDraft]:
     rows = conn.execute("SELECT * FROM messages ORDER BY created_at, seq").fetchall()
     by_id = {r["id"]: r for r in rows}
@@ -157,10 +204,9 @@ def _thread_and_operator_drafts(conn: sqlite3.Connection, report: ImportReport, 
     replies: Dict[str, List[sqlite3.Row]] = {}
     kept: List[sqlite3.Row] = []
     for r in rows:
-        if keep is not None and r["channel"] not in keep:
-            report.skip("channel_filtered")
+        if chans.skip(r["channel"], report):
             continue
-        if _is_noise(r, report, skip_system=skip_system):
+        if _is_noise(r, report, skip_system=skip_system, include_retracted=include_retracted):
             continue
         kept.append(r)
         if r["reply_to"]:

@@ -1,7 +1,9 @@
 """``abstractnote import <source> ...`` (docs/api.md CLI). Also runnable as ``python -m abstractnote.importers``.
 
     abstractnote import claude-sessions DIR [--notebook DIR] [--since ISO] [--until ISO] [--exclude-session ID ...]
-    abstractnote import agora DB_PATH [--channels a,b] [--include-system] [--operators a,b] [--notebook DIR]
+    abstractnote import agora DB_PATH [--kinds decision,claim,work,thread,operator] [--include-channels a,b]
+                              [--exclude-channels a,b] [--include-retracted] [--include-system] [--operators a,b]
+                              [--notebook DIR]
     abstractnote import markdown DIR [--glob '**/*.md'] [--notebook DIR]
     abstractnote import files PATH ... [--notebook DIR]
 
@@ -47,7 +49,12 @@ def build_parser(prog: str = "abstractnote import") -> argparse.ArgumentParser:
     common(p)
     p = sub.add_parser("agora", help="an agora hub database (opened read-only)")
     p.add_argument("db", type=Path)
-    p.add_argument("--channels", help="comma-separated channels to keep (default: all)")
+    p.add_argument("--include-channels", "--channels", dest="channels",
+                   help="comma-separated channels to keep (default: all)")
+    p.add_argument("--exclude-channels", help="comma-separated channels to leave out")
+    p.add_argument("--kinds", help="comma-separated kinds to write: decision, claim, work, thread, operator "
+                   "(default: all)")
+    p.add_argument("--include-retracted", action="store_true", help="keep retracted messages (left out by default)")
     p.add_argument("--include-system", action="store_true", help="keep system and file messages and hub alerts")
     p.add_argument("--operators", help="comma-separated senders whose messages are notes on their own")
     common(p)
@@ -85,7 +92,9 @@ def main(argv: Optional[List[str]] = None, *, prog: str = "abstractnote import")
     if args.source == "claude-sessions":
         options.update(path=args.dir, exclude_sessions=args.exclude_session, author=args.author)
     elif args.source == "agora":
-        options.update(path=args.db, channels=_csv(args.channels), skip_system=not args.include_system)
+        options.update(path=args.db, channels=_csv(args.channels), exclude_channels=_csv(args.exclude_channels),
+                       kinds=_csv(args.kinds), include_retracted=args.include_retracted,
+                       skip_system=not args.include_system)
         if args.operators:
             options["operators"] = _csv(args.operators)
     elif args.source == "markdown":
