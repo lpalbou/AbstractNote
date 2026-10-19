@@ -128,10 +128,14 @@ flowchart TD
     B -- no --> Z
 ```
 
-- A lease lasts 15 minutes; an expired lease is taken over by the next drain. Acknowledging a
-  failure increments `attempts` and schedules a retry (after 1 minute, then after 10 minutes); the
-  third failure sets the note to `failed`, visible in the web app's queue panel with the error,
-  and offers a manual retry.
+- A lease lasts 15 minutes. Acknowledging a failure increments `attempts` and schedules a retry
+  (after 1 minute, then after 10 minutes); the third failure sets the note to `failed`, visible in
+  the web app's queue panel with the error, and offers a manual retry.
+- An expired lease (the drain stopped, for example on a gateway restart) is not taken over at once:
+  the next drain that leases counts it as a failure ("Processing stopped before it finished.") with
+  the same backoff, and a drain retakes the note once that backoff has passed. It counts toward the
+  same three failures, so a note whose processing is cut off three times (three restarts during
+  the same long note) becomes `failed` and waits for a manual retry.
 - **The processor automation.** `POST /api/gateway/note/processor/ensure` (the web app calls it
   when it opens and the automations are missing) creates two automations per user, idempotently: the processor
   (trigger `schedule@2` every `2m`, flow `note-drain`, `max_items = 20`, `budget_s = 90`) and the
