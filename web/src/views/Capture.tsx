@@ -210,8 +210,7 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
         ) : (
           <div className="nt-empty">
             <h1>What is on your mind?</h1>
-            <p>Write a thought, paste a link or drop a file.</p>
-            <p className="nt-empty__hint">It is kept as you wrote it, then organized into topics and links.</p>
+            <p>Write your first note below.</p>
           </div>
         )}
       </div>
@@ -358,7 +357,22 @@ function Ack({ item, onRetry }: { item: CaptureItem; onRetry: () => void }) {
   const revisits = (note?.revisits || []).filter((r) => r.note_id !== note?.note_id);
   const changed = note?.revision?.summary || item.revisionSummary || "";
   return (
-    <div className="nt-ack" data-state={state} data-answer-source={item.answerSource || ""} aria-live="polite">
+    <div className={`nt-ack${organized ? " nt-ack--organized" : ""}`} data-state={state} data-answer-source={item.answerSource || ""} aria-live="polite">
+      {organized && note ? (
+        // What the eye lands on first: what the note became and what it links to.
+        <div className="nt-ack__lead">
+          <button type="button" className="nt-link nt-ack__title" onClick={() => openNote(note.note_id)}>
+            <span className="nt-link__title">{note.title}</span>
+          </button>
+          {(note.entities || []).length ? (
+            <span className="nt-chips" aria-label="Linked to">
+              {(note.entities || []).map((e) => (
+                <EntityChip key={e.entity_id} entity={e} />
+              ))}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       <div className="nt-ack__row">
         <button
           type="button"
@@ -383,7 +397,7 @@ function Ack({ item, onRetry }: { item: CaptureItem; onRetry: () => void }) {
       </div>
       {expandable && open ? (
         <div id={panel} className="nt-ack__more">
-          {note ? (
+          {note && !organized ? (
             <div className="nt-ack__row">
               <KindBadge kind={note.kind} />
               <button type="button" className="nt-link" onClick={() => openNote(note.note_id)}>
@@ -401,14 +415,7 @@ function Ack({ item, onRetry }: { item: CaptureItem; onRetry: () => void }) {
               ))}
             </div>
           ) : null}
-          {organized && (note?.entities || []).length ? (
-            <div className="nt-ack__row" aria-label="Linked to">
-              <span className="nt-muted">Linked to</span>
-              {(note?.entities || []).map((e) => (
-                <EntityChip key={e.entity_id} entity={e} />
-              ))}
-            </div>
-          ) : null}
+
           {organized && revisits[0] ? (
             <p className="nt-muted">
               {"You noted this before on "}

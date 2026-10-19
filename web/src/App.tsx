@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AfAppearanceDialog, AfTopBarActions, GatewayConnectModal, Icon, aboutVersionsFromGateway, randomId, useAppearanceSettings, useGatewayConnection, type AfAboutVersions, type AppIdentity, type GatewayAboutPayload } from "@abstractframework/ui-kit";
+import { AfAppearanceDialog, AfTopBarActions, Icon, aboutVersionsFromGateway, randomId, useAppearanceSettings, useGatewayConnection, type AfAboutVersions, type AppIdentity, type GatewayAboutPayload } from "@abstractframework/ui-kit";
 import { NOT_INSTALLED, createApi, noteMount, type Mount } from "./lib/api";
 import { useNarrow, useRead } from "./lib/hooks";
 import { captureSessionId } from "./lib/local";
@@ -7,6 +7,7 @@ import { navigate, useRoute, VIEWS, type View } from "./lib/nav";
 import type { Api } from "./lib/api";
 import type { NoteSettings, NoteStatus } from "./lib/types";
 import { AppContext, Spinner } from "./components/common";
+import { ConnectDialog } from "./components/ConnectDialog";
 import { Dialogs } from "./components/Dialogs";
 import { ViewBoundary } from "./components/ViewBoundary";
 import { CaptureView } from "./views/Capture";
@@ -36,11 +37,16 @@ export function noteIdentity(): AppIdentity {
   return { id: "abstractnote", name: "AbstractNote", version: pkg.version, website: "https://abstractframework.ai", repo, docs: `${repo}/tree/main/docs`, issues: `${repo}/issues`, feedback: `${repo}/issues/new?labels=feedback` };
 }
 
+/** The app server's own gateway address (bin/server.js injects `--gateway-url` into the page). */
+export function serverUrl(): string | null {
+  return (typeof window !== "undefined" && window.__ABSTRACT_UI_CONFIG__?.gateway_url) || null;
+}
+
 export function App() {
   // The framework's shared sign-in (ui-kit): gateway address, account, token, remember; the token becomes an
   // HTTP-only session in the app server and the page never keeps it. Blocking: the app has nothing to show
   // signed out.
-  const conn = useGatewayConnection({ appName: "AbstractNote", variant: "blocking", defaultGatewayUrl: (typeof window !== "undefined" && window.__ABSTRACT_UI_CONFIG__?.gateway_url) || undefined });
+  const conn = useGatewayConnection({ appName: "AbstractNote", variant: "blocking", defaultGatewayUrl: serverUrl() || undefined });
   const [appearance, setAppearance] = useAppearanceSettings("abstractnote", { defaults: { theme: "dark" } });
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const user = conn.status?.gateway?.principal?.user_id || null;
@@ -56,7 +62,7 @@ export function App() {
           </main>
         </div>
       )}
-      <GatewayConnectModal {...conn.modalProps} />
+      <ConnectDialog {...conn.modalProps} serverUrl={serverUrl()} />
       <AfAppearanceDialog open={appearanceOpen} onClose={() => setAppearanceOpen(false)} value={appearance} onChange={setAppearance} />
     </>
   );

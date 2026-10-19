@@ -48,6 +48,8 @@ describe("app server (app-server mount contract)", () => {
     expect(r.body).toContain("__ABSTRACT_UI_CONFIG__");
     const plain = await get("/");
     expect(plain.body).toContain('<base href="/">');
+    // The sign-in dialog defaults to the server's own --gateway-url (operator, 2026-10-19).
+    expect(plain.body).toContain('"gateway_url":"http://127.0.0.1:9"');
   });
 
   it("falls back to the page for app routes, 404 for missing assets", async () => {

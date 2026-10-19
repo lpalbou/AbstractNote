@@ -204,3 +204,65 @@ describe("a gateway without AbstractNote", () => {
     expect(errorSentence(new ApiError(404, "Not found."), "this note")).not.toBe(NOT_INSTALLED);
   });
 });
+
+import { MAX_FIT_ZOOM, boundsOf, fitView, settleFrames, toWorld, zoomAt } from "../src/lib/graph_layout";
+import { initialSignIn, readRemembered, signInSentence } from "../src/lib/signin";
+
+describe("Explore canvas geometry", () => {
+  const four = [
+    { id: "a", x: 480, y: 330, r: 12 },
+    { id: "b", x: 560, y: 350, r: 12 },
+    { id: "c", x: 500, y: 400, r: 12 },
+    { id: "d", x: 540, y: 300, r: 12 },
+  ];
+  it("four nodes fill the view: the fitted box spans the width or the height, centred", () => {
+    const b = boundsOf(four)!;
+    const v = fitView(b, 900, 600, 28, 10);
+    const left = b.minX * v.k + v.x;
+    const right = b.maxX * v.k + v.x;
+    const top = b.minY * v.k + v.y;
+    const bottom = b.maxY * v.k + v.y;
+    expect(Math.min(left, 900 - right, top, 600 - bottom)).toBeCloseTo(28, 0);
+    expect((left + right) / 2).toBeCloseTo(450, 0);
+    expect((top + bottom) / 2).toBeCloseTo(300, 0);
+    expect(v.k).toBeGreaterThan(3);
+    // The default cap keeps a tiny graph from filling the screen with one circle.
+    expect(fitView(b, 900, 600).k).toBe(MAX_FIT_ZOOM);
+  });
+  it("zooming keeps the point under the pointer still, within the zoom limits", () => {
+    const v = { k: 1.5, x: 40, y: -20 };
+    const before = toWorld(v, 300, 200);
+    const z = zoomAt(v, 1.7, 300, 200);
+    const after = toWorld(z, 300, 200);
+    expect(after.x).toBeCloseTo(before.x, 6);
+    expect(after.y).toBeCloseTo(before.y, 6);
+    expect(zoomAt(v, 100, 0, 0).k).toBe(4);
+    expect(zoomAt(v, 0.0001, 0, 0).k).toBe(0.2);
+  });
+  it("a dropped node stays where it was put while the others settle", () => {
+    const frames = settleFrames(four, [{ source: "a", target: "b" }], { id: "a", x: 100, y: 100 }, 4, 10);
+    expect(frames.length).toBe(4);
+    for (const f of frames) expect(f.find((n) => n.id === "a")).toMatchObject({ x: 100, y: 100 });
+    expect(frames[3].find((n) => n.id === "b")).not.toEqual(four[1]);
+  });
+});
+
+describe("sign-in dialog defaults", () => {
+  it("opens on the server's own address and the remembered account", () => {
+    expect(initialSignIn(null, "http://127.0.0.1:18080/")).toEqual({ gatewayUrl: "http://127.0.0.1:18080", user: "" });
+    const r = { gateway_url: "http://127.0.0.1:8080", user: "laurent", server_url: "http://127.0.0.1:8080" };
+    // The server moved: never default to the stale address (the server would refuse it), keep the account.
+    expect(initialSignIn(r, "http://127.0.0.1:18080")).toEqual({ gatewayUrl: "http://127.0.0.1:18080", user: "laurent" });
+    expect(initialSignIn(r, "http://127.0.0.1:8080")).toEqual({ gatewayUrl: "http://127.0.0.1:8080", user: "laurent" });
+    expect(initialSignIn(null, null, "http://h:1")).toEqual({ gatewayUrl: "http://h:1", user: "" });
+    expect(readRemembered("{broken")).toBeNull();
+  });
+  it("says one sentence on a refusal", () => {
+    for (const status of [400, 401, 403, 0, 502, 500]) {
+      const s = signInSentence(status, "http://x:1", "http://127.0.0.1:18080");
+      expect(s.split(/[.!?](\s|$)/).filter((x) => x && x.trim()).length, s).toBe(1);
+      expect(/HTTP|\d{3}\b|detail/.test(s.replace("127.0.0.1:18080", "").replace("x:1", "")), s).toBe(false);
+    }
+    expect(signInSentence(401, "", "")).toMatch(/not accepted/);
+  });
+});

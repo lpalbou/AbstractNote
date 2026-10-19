@@ -7,11 +7,11 @@ import { CURSOR_KEY, readLocal, writeLocal } from "../lib/local";
 import { noteAbout, useAt, type Route } from "../lib/nav";
 import { fetchReview, reviewAction, runReviewAction } from "../lib/review";
 import { followRun, runErrorText, startFlow, stepWords } from "../lib/runs";
-import type { Changes, Cue, EntityListItem, EntityCard, EntityRecord, Insight, ListOf, Note, NoteRef, Overview, RecallOutput, RelationTimeline, ReviewAction, ReviewItem, ReviewSide, SearchResult, Task, ThenNowRaw, Topic } from "../lib/types";
+import type { Changes, Cue, EntityListItem, EntityCard, EntityRecord, Insight, ListOf, Note, NoteRef, NoteStatus, Overview, RecallOutput, RelationTimeline, ReviewAction, ReviewItem, ReviewSide, SearchResult, Task, ThenNowRaw, Topic } from "../lib/types";
 import { claimsById, thenNowView } from "../lib/shapes";
 import { NOTE_KINDS, claimSentence, longDate, relative, shortDate, topicLabel } from "../lib/words";
 import { basisLine, reviewWhy, whyLine } from "../lib/why";
-import { Disclose, EntityChip, KindBadge, NoteLink, ReadView, Section, Sparkline, openClaim, openEntity, openNote, useApp } from "../components/common";
+import { Disclose, EmptyNotebook, EntityChip, KindBadge, NoteLink, ReadView, Section, Sparkline, openClaim, openEntity, openNote, useApp } from "../components/common";
 import { ThenNowCard } from "../components/ThenNow";
 import { TimeScrubber } from "../components/TimeScrubber";
 
@@ -29,6 +29,15 @@ export function RememberView({ route }: { route: Route }) {
   const cues = useRead<ListOf<Cue>>(() => api.get<ListOf<Cue>>("note/cues", { limit: 3 }), [api]);
   const insights = useRead<ListOf<Insight>>(() => api.get<ListOf<Insight>>("note/insights", { acked: false, limit: 20 }), [api]);
   const cueIds = useMemo(() => new Set((cues.data?.items || []).map((c) => c.cue_id)), [cues.data]);
+  // An empty notebook gets one inviting sentence instead of six empty sections.
+  const status = useRead<NoteStatus>(() => api.get<NoteStatus>("note/status"), [api]);
+  if (status.data && Number(status.data.counts?.notes ?? 1) === 0) {
+    return (
+      <div className="nt-center">
+        <EmptyNotebook />
+      </div>
+    );
+  }
   return (
     <div className="nt-remember">
       <div className="nt-remember__top">

@@ -135,7 +135,7 @@ async function main() {
     check(typeof run?.output?.response === "string" && run.output.response.trim() === shown, `"Saved as" shown equals GET /runs/{id} output.response${run?.output?.response?.trim() === shown ? "" : ` (shown ${JSON.stringify(shown)} vs ${JSON.stringify(run?.output?.response)})`}`);
     // M8: the queued note is re-read until processed (live: the processor automation runs every 2 minutes).
     await page.locator('.nt-ack[data-state="organized"]').last().waitFor({ timeout: live ? 300_000 : 30_000 });
-    check((await ack.locator(".nt-ack__row[aria-label='Linked to']").count()) === 1, "the queued note got its links once organized");
+    check((await ack.locator(".nt-ack__lead [aria-label='Linked to']").count()) === 1, "once organized the title and its links lead the acknowledgement");
     check((await ack.locator(".nt-ack__reply").count()) === 0, "once organized the reply sentence is not repeated beside the links");
     check(/^Added to .+ · .+ · /.test((await ack.locator(".nt-ack__summary").innerText()).trim()), "the organized line is short: Added to … · kind · links");
     await page.screenshot({ path: join(OUT, "capture-organized-dark-1280.png") });
@@ -271,6 +271,31 @@ async function main() {
     await page.locator(".nt-milestone--later").first().waitFor({ timeout: 10_000 });
     await page.waitForTimeout(400);
     check((await page.locator(".nt-node--future").count()) > 0, "choosing an earlier date fades entities that did not exist yet");
+    {
+      // The picture fills the view (fit on load), and a clicked node shows no rectangle.
+      const svg = await page.locator(".nt-canvas__svg").boundingBox();
+      const nodes = await page.locator(".nt-canvas__svg > g").boundingBox();
+      check(svg && nodes && (nodes.width > svg.width * 0.5 || nodes.height > svg.height * 0.5), `the graph fills the view (${Math.round(nodes?.width || 0)}x${Math.round(nodes?.height || 0)} in ${Math.round(svg?.width || 0)}x${Math.round(svg?.height || 0)})`);
+      await page.locator(".nt-node").first().click();
+      const outline = await page.locator(".nt-node").first().evaluate((el) => getComputedStyle(el).outlineStyle);
+      check(outline === "none", `a clicked node has no rectangular outline (${outline})`);
+      await page.locator(".nt-node").first().focus();
+      await page.keyboard.press("Tab");
+      await page.keyboard.down("Shift");
+      await page.keyboard.press("Tab");
+      await page.keyboard.up("Shift");
+      const ring = await page.locator(".nt-node:focus-visible .nt-node__ring").count();
+      check(ring === 1, "keyboard focus shows the round ring on the node");
+      await page.screenshot({ path: join(OUT, "explore-focus-dark-1280.png") });
+      const before = await page.locator(".nt-canvas__svg > g").getAttribute("transform");
+      await page.mouse.move(svg.x + svg.width / 2, svg.y + svg.height / 2);
+      await page.mouse.wheel(0, -400);
+      await page.waitForTimeout(200);
+      check((await page.locator(".nt-canvas__svg > g").getAttribute("transform")) !== before, "the wheel zooms the picture");
+      await page.getByRole("button", { name: "Fit to view" }).click();
+      await page.waitForTimeout(200);
+      check((await page.locator(".nt-canvas__svg > g").getAttribute("transform")) === before, "Fit to view returns to the fitted picture");
+    }
     await page.screenshot({ path: join(OUT, "explore-then-dark-1280.png") });
     const held = page.waitForRequest((r) => r.url().includes("note/graph") && r.url().includes("as_received="));
     await page.getByRole("radio", { name: "Saved by then" }).click();

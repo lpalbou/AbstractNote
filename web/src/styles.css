@@ -294,6 +294,12 @@ p { margin: 0 0 6px; }
 .nt-ack__line[aria-expanded="true"] .nt-ack__chev { transform: rotate(90deg); }
 .nt-ack__more { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 4px; padding: 10px 14px; border-left: 1px solid var(--nt-line-strong); }
 .nt-ack__row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.nt-ack__lead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 2px 4px 2px; }
+.nt-ack__title { font-size: var(--font-size-lg); font-weight: 600; }
+.nt-ack--organized .nt-ack__line { min-height: 26px; font-size: var(--font-size-sm); }
+.nt-ack--organized .nt-state { font-size: var(--font-size-sm); }
+.nt-empty-line { max-width: 52ch; text-align: center; color: var(--text-secondary); margin: 0; }
+.nt-empty-line code { font-family: var(--font-mono); font-size: 0.92em; padding: 1px 5px; border-radius: 4px; border: 1px solid var(--nt-line); background: var(--nt-raise); }
 .nt-ack__reply { color: var(--text-secondary); margin: 0; }
 .nt-ack__error { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--text-secondary); font-size: var(--font-size-md); margin: 2px 0 0; }
 .nt-composer { padding: 10px 20px 16px; border-top: 1px solid var(--nt-line); background: var(--nt-bg); }
@@ -376,7 +382,8 @@ p { margin: 0 0 6px; }
 /* ---- explore (graph) */
 .nt-graph { display: grid; grid-template-columns: minmax(0, 1fr) 440px; height: 100%; min-height: 0; }
 .nt-graph__main { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--nt-line); }
-.nt-graph__canvas { flex: 1; min-height: 0; overflow: auto; padding: 0 12px; }
+.nt-graph__canvas { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.nt-graph__canvas > .nt-rels__wrap { overflow: auto; padding: 0 12px; }
 .nt-graph__side { overflow: auto; min-height: 0; background: var(--nt-bg); }
 .nt-focusbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 12px; }
 .nt-focusbar__end { margin-left: auto; }
@@ -389,28 +396,34 @@ p { margin: 0 0 6px; }
 .nt-suggest button:hover, .nt-suggest button:focus-visible { background: var(--nt-soft); }
 .nt-depth { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); }
 .nt-depth .nt-input { width: auto; min-height: 30px; }
-.nt-canvas svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+.nt-canvas { position: relative; flex: 1; min-height: 320px; overflow: hidden; touch-action: none; }
+.nt-canvas__svg { position: absolute; inset: 0; display: block; user-select: none; -webkit-user-select: none; }
+.nt-canvas__bg { fill: transparent; cursor: grab; }
+.nt-canvas__svg:active .nt-canvas__bg { cursor: grabbing; }
+.nt-canvas__tools { position: absolute; z-index: 2; top: 8px; right: 10px; display: flex; flex-direction: column; gap: 2px; padding: 2px; border-radius: var(--radius-md); border: 1px solid var(--nt-line); background: color-mix(in oklab, var(--nt-bg) 85%, transparent); }
+/* Never the browser's rectangle around an svg element: nodes draw their own round ring. */
+.nt-canvas__svg :focus, .nt-canvas__svg :focus-visible { outline: none; }
+.nt-node__ring { fill: none; stroke: transparent; stroke-width: 2.5; pointer-events: none; }
+.nt-node:focus-visible .nt-node__ring { stroke: var(--nt-focus); }
 .nt-node { cursor: pointer; transition: opacity 120ms ease; }
-.nt-node circle { fill: color-mix(in oklab, var(--info) 22%, var(--nt-bg)); stroke: color-mix(in oklab, var(--info) 70%, var(--text-primary)); stroke-width: 1.25; }
-.nt-node--person circle { fill: color-mix(in oklab, var(--nt-indigo) 26%, var(--nt-bg)); stroke: var(--nt-indigo); }
-.nt-node--project circle { fill: color-mix(in oklab, var(--nt-mint) 22%, var(--nt-bg)); stroke: var(--nt-mint); }
-.nt-node--concept circle { fill: color-mix(in oklab, var(--nt-cyan) 22%, var(--nt-bg)); stroke: var(--nt-cyan); }
-.nt-node--place circle, .nt-node--event circle { fill: color-mix(in oklab, var(--text-muted) 22%, var(--nt-bg)); stroke: var(--text-secondary); }
-.nt-node text { fill: var(--text-primary); font-size: calc(12px * var(--font-scale, 1)); font-weight: 550; paint-order: stroke; stroke: var(--nt-bg); stroke-width: 3px; stroke-linejoin: round; }
-.nt-node--focus circle { stroke-width: 2.5; }
-.nt-node--selected circle { stroke: var(--text-primary); stroke-width: 2.5; }
-.nt-node:focus-visible { outline: none; }
-.nt-node:focus-visible circle { stroke: var(--nt-focus); stroke-width: 3.5; }
+.nt-node .nt-node__dot { fill: color-mix(in oklab, var(--info) 22%, var(--nt-bg)); stroke: color-mix(in oklab, var(--info) 70%, var(--text-primary)); stroke-width: 1.25; }
+.nt-node--person .nt-node__dot { fill: color-mix(in oklab, var(--nt-indigo) 26%, var(--nt-bg)); stroke: var(--nt-indigo); }
+.nt-node--project .nt-node__dot { fill: color-mix(in oklab, var(--nt-mint) 22%, var(--nt-bg)); stroke: var(--nt-mint); }
+.nt-node--concept .nt-node__dot { fill: color-mix(in oklab, var(--nt-cyan) 22%, var(--nt-bg)); stroke: var(--nt-cyan); }
+.nt-node--place .nt-node__dot, .nt-node--event .nt-node__dot { fill: color-mix(in oklab, var(--text-muted) 22%, var(--nt-bg)); stroke: var(--text-secondary); }
+.nt-node text { fill: var(--text-primary); font-weight: 550; paint-order: stroke; stroke: var(--nt-bg); stroke-width: 3px; stroke-linejoin: round; }
+.nt-node--focus .nt-node__dot { stroke-width: 2.5; }
+.nt-node--selected .nt-node__dot { stroke: var(--text-primary); stroke-width: 2.5; }
 .nt-node--future { opacity: 0.18; }
 .nt-edge line { stroke: color-mix(in oklab, var(--text-secondary) 55%, transparent); stroke-width: 1.2; }
 .nt-edge .nt-edge__hit { stroke: transparent; stroke-width: 14; cursor: pointer; }
 .nt-edge--old line:first-child { stroke-dasharray: 5 4; stroke: var(--text-muted); }
 .nt-edge--future { opacity: 0.12; }
-.nt-edge__label { fill: var(--text-secondary); font-size: calc(10.5px * var(--font-scale, 1)); cursor: pointer; paint-order: stroke; stroke: var(--nt-bg); stroke-width: 3px; }
+.nt-edge__label { fill: var(--text-secondary); cursor: pointer; paint-order: stroke; stroke: var(--nt-bg); stroke-width: 3px; }
 .nt-edge:hover line:first-child { stroke: var(--nt-link); }
 .nt-edge:hover .nt-edge__label { fill: var(--nt-link); }
 .nt-arrow { fill: color-mix(in oklab, var(--text-secondary) 55%, transparent); }
-.nt-legend { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; color: var(--text-muted); font-size: var(--font-size-sm); margin: 4px 0 8px; }
+.nt-legend { position: absolute; left: 0; right: 0; bottom: 4px; display: flex; flex-wrap: wrap; gap: 4px 14px; justify-content: center; color: var(--text-muted); font-size: var(--font-size-sm); margin: 0; padding: 0 56px; pointer-events: none; }
 .nt-legend__item { display: inline-flex; align-items: center; gap: 6px; }
 .nt-legend__solid { stroke: var(--text-secondary); stroke-width: 1.5; }
 .nt-legend__dashed { stroke: var(--text-muted); stroke-width: 1.5; stroke-dasharray: 5 4; }
@@ -478,6 +491,7 @@ p { margin: 0 0 6px; }
   .nt-graph { grid-template-columns: 1fr; height: auto; }
   .nt-graph__main { border-right: none; }
   .nt-graph__side { border-top: 1px solid var(--nt-line); }
+  .nt-canvas { flex: none; height: min(78vw, 560px); min-height: 300px; }
   .nt-remember__top { grid-template-columns: 1fr; }
   .nt-remember__top > .nt-section + .nt-section { border-left: none; border-top: 1px solid var(--nt-line); }
 }
@@ -496,6 +510,7 @@ p { margin: 0 0 6px; }
   .nt-btn--sm { min-height: 40px; }
   .nt-icon-btn { width: 44px; }
   .nt-file__name { max-width: 150px; }
+  .nt-legend__hint { display: none; }
   .nt-focusbar__end { margin-left: 0; }
 }
 

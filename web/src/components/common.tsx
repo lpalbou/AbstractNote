@@ -112,3 +112,12 @@ export function Sparkline({ dates, from, to, label, width = 120, height = 26 }: 
     </svg>
   );
 }
+
+/** An empty notebook invites the first step (operator, 2026-10-19): one sentence. */
+export function EmptyNotebook() {
+  return (
+    <p className="nt-empty-line">
+      Nothing here yet — add a note in Capture, or import your history with <code>abstractnote import</code>.
+    </p>
+  );
+}

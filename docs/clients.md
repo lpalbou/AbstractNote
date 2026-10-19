@@ -34,9 +34,13 @@ API, read the note API for views, and never send user, tenant or runtime identif
   Location switch in Settings (kept per browser, and offered only on a secure page); Capture then
   attaches it to notes.
 - Sign-in and the top-right corner are the framework's (ui-kit): `useGatewayConnection` with the
-  `GatewayConnectModal` (gateway URL, account, token, keep this browser signed in; the app server
-  exchanges the token for an HTTP-only session), and `AfTopBarActions` (appearance, About, Settings,
-  the signed-in account, and the Connect / Disconnect pill). At start the app asks
+  kit's sign-in card (`GatewaySessionSignInCard`: gateway URL, account, token, keep this browser
+  signed in; the app server exchanges the token for an HTTP-only session that survives reloads). The
+  address defaults to the app server's own `--gateway-url` (given to the page by `bin/server.js`);
+  the last address and account are remembered per browser (the address only while the server still
+  points there); a refused sign-in reads as one sentence, and `AfTopBarActions` (appearance, About, Settings,
+  the signed-in account, and the Connect / Disconnect pill), and an empty notebook invites the first
+  note or `abstractnote import`. At start the app asks
   `GET /note/status`: a 401 opens the sign-in dialog; a 404 while `GET /me` answers shows "AbstractNote
   is not installed on this gateway." instead of the views.
 - Theming uses ui-kit tokens only, so every kit theme works; tested on default-dark, observer-night

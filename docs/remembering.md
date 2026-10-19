@@ -105,6 +105,10 @@ Explore view already covers "what did this look like then".
 
 - **Focus and depth**: pick one or several entities; see their neighbourhood up to depth three,
   edges labelled by predicate with first and last seen dates and counts.
+- **The picture**: it fits the view when it loads and when its data changes; scroll or pinch to zoom
+  about the pointer, drag the background to pan, drag a node to move it (the others settle around it),
+  double-click the background or press Fit to view to fit again. Keyboard focus draws a ring around
+  the node.
 - **Picture or List**: the same connections drawn, or as a readable table (from, link, to, since,
   believed or no longer believed); each row opens the link's history or the entity.
 - **Time scrubber and date field**: moving the slider or choosing a date changes `as_of` (the date
@@ -131,8 +135,9 @@ A stream of your notes as you wrote them, with the composer at the bottom. You t
 attach files (images show a preview), drop images, or dictate; Enter saves and Shift+Enter starts
 a new line; with your permission the browser attaches your location. Under each note one short
 acknowledgement shows one state at a time, as a word and a symbol: **Sending**, **Received**,
-**Organizing**, then **Organized** or **Needs attention**. Organized reads like "Added to #lut ·
-event · 2 links" and opens on what was filed: the note's title, topics, linked entities, when you
+**Organizing**, then **Organized** or **Needs attention**. Once organized, the note's title and the
+entities it links to come first, with the line "Organized · Added to #lut · event · 2 links" under
+them; it opens on what was filed: the note's title, topics, linked entities, when you
 said the same thing before, and what it changed. Until the note is organized the details show
 the notebook's reply. With "Instant linking" on (Settings) the note is processed right away;
 otherwise the app re-reads the note until it is. Nothing uses system vocabulary: no run ids, no

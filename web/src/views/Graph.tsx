@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { AfChip, AfChipButton, AfTabs } from "@abstractframework/ui-kit";
+import { AfChip, AfChipButton, AfTabs, Icon } from "@abstractframework/ui-kit";
 import { ApiError } from "../lib/api";
 import { useDebounced, useRead } from "../lib/hooks";
-import { layoutGraph } from "../lib/graph_layout";
+import { boundsOf, fitView, layoutGraph, settleFrames, toWorld, zoomAt, type Positioned, type ViewTransform } from "../lib/graph_layout";
 import { milestones } from "../lib/milestones";
 import { momentParams, navigate, noteAbout, useAt, useByReceived, type Route } from "../lib/nav";
 import { thenNowView } from "../lib/shapes";
 import type { Day, EntityCard, EntityListItem, EntityRecord, Graph, ListOf, ThenNowRaw, TimelineItem } from "../lib/types";
 import { capitalize, claimSentence, longDate, predicateWords, shortDate } from "../lib/words";
-import { EntityChip, KindBadge, NoteLink, ReadView, Section, Sparkline, openClaim, openNote, openRelation, useApp } from "../components/common";
+import { EmptyNotebook, EntityChip, KindBadge, NoteLink, ReadView, Section, Sparkline, openClaim, openNote, openRelation, useApp } from "../components/common";
 import { ThenNowCard } from "../components/ThenNow";
 import { TimeScrubber } from "../components/TimeScrubber";
 
@@ -37,9 +37,13 @@ export function GraphView({ route }: { route: Route }) {
       <div className="nt-graph__main">
         <FocusBar focus={focus} depth={depth} onFocus={(ids) => go({ focus: ids.join(","), entity: ids[ids.length - 1] || selected })} onDepth={(d) => go({ depth: d })} asList={asList} onList={(v) => go({ view: v ? "list" : null })} />
         <div className="nt-graph__canvas">
-          <ReadView read={now} what="the connections" empty={(g) => (g.nodes.length ? false : "Nothing is linked yet. Notes you capture fill this in.")}>
+          <ReadView read={now} what="the connections">
             {(g) =>
-              asList ? (
+              !g.nodes.length ? (
+                <div className="nt-center">
+                  <EmptyNotebook />
+                </div>
+              ) : asList ? (
                 <RelationList graph={g} then={at ? then.data : null} onSelect={(id) => go({ entity: id, day: "" })} />
               ) : (
                 <GraphCanvas graph={g} then={at ? then.data : null} selected={selected} focus={focus} onSelect={(id) => go({ entity: id, day: "" })} />
@@ -204,103 +208,253 @@ function RelationList({ graph, then, onSelect }: { graph: Graph; then: Graph | n
   );
 }
 
-function useWidth<T extends HTMLElement>(): [React.RefObject<T>, number] {
+/** The canvas's size in pixels (it fills the space the layout gives it). */
+function useSize<T extends HTMLElement>(): [React.RefObject<T>, { w: number; h: number }] {
   const ref = useRef<T>(null);
-  const [w, setW] = useState(800);
+  const [size, setSize] = useState({ w: 800, h: 520 });
   useEffect(() => {
     const el = ref.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => setW(Math.max(280, Math.round(el.clientWidth))));
+    if (!el) return;
+    const measure = () => {
+      // The canvas box has its own height (CSS); the picture takes all of it.
+      const w = Math.max(280, Math.round(el.clientWidth));
+      const h = Math.max(240, Math.round(el.clientHeight));
+      setSize((s) => (s.w === w && s.h === h ? s : { w, h }));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    setW(Math.max(280, Math.round(el.clientWidth)));
     return () => ro.disconnect();
   }, []);
-  return [ref, w];
+  return [ref, size];
 }
 
+/** The layout's own space: fixed, so a graph lands the same way at every window size (the view fits it). */
+const WORLD = { w: 1000, h: 700 };
+
+function reducedMotion(): boolean {
+  try {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
+}
+
+type Drag = { kind: "pan"; sx: number; sy: number; vx: number; vy: number } | { kind: "node"; id: string; sx: number; sy: number; moved: boolean } | null;
+
 function GraphCanvas({ graph, then, selected, focus, onSelect }: { graph: Graph; then: Graph | null; selected: string; focus: string[]; onSelect: (id: string) => void }) {
-  const [ref, width] = useWidth<HTMLDivElement>();
-  const height = Math.max(320, Math.min(620, Math.round(width * 0.62)));
-  const pos = useMemo(() => {
-    const placed = layoutGraph({ nodes: graph.nodes.map((n) => ({ id: n.id, weight: n.note_count })), edges: graph.edges, width, height, focus });
-    return new Map(placed.map((p) => [p.id, p]));
-  }, [graph, width, height, focus]);
+  const [ref, size] = useSize<HTMLDivElement>();
+  const svgRef = useRef<SVGSVGElement>(null);
+  // Laid out once per graph (not per date: the picture stays where it is when the date changes).
+  const laid = useMemo(() => layoutGraph({ nodes: graph.nodes.map((n) => ({ id: n.id, weight: n.note_count })), edges: graph.edges, width: WORLD.w, height: WORLD.h, focus }), [graph, focus]);
+  const [placed, setPlaced] = useState<Positioned[]>(laid);
+  const [view, setView] = useState<ViewTransform>({ k: 1, x: 0, y: 0 });
+  const drag = useRef<Drag>(null);
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ d: number } | null>(null);
+  // The legend sits along the bottom edge: the fit leaves it its strip.
+  const LEGEND = 34;
+  const fitNow = (nodes: Positioned[] = placed) => setView(fitView(boundsOf(nodes), size.w, size.h - LEGEND));
+  // Fit on load and whenever the data or the space changes.
+  useEffect(() => {
+    setPlaced(laid);
+    setView(fitView(boundsOf(laid), size.w, size.h - LEGEND));
+  }, [laid, size.w, size.h]);
+  const pos = useMemo(() => new Map(placed.map((p) => [p.id, p])), [placed]);
   const thenNodes = useMemo(() => (then ? new Set(then.nodes.map((n) => n.id)) : null), [then]);
   const thenEdges = useMemo(() => (then ? new Map(then.edges.map((e) => [`${e.source}|${e.target}|${e.predicate}`, e])) : null), [then]);
   const pairs = new Map<string, number>();
+
+  const local = (e: { clientX: number; clientY: number }) => {
+    const r = svgRef.current?.getBoundingClientRect();
+    return { x: e.clientX - (r?.left || 0), y: e.clientY - (r?.top || 0) };
+  };
+  // Wheel and trackpad pinch (a pinch arrives as a wheel with ctrlKey): zoom about the pointer.
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const p = local(e);
+      setView((v) => zoomAt(v, Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)), p.x, p.y));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  const settle = (id: string) => {
+    const p = pos.get(id);
+    if (!p) return;
+    const frames = settleFrames(placed, graph.edges, { id, x: p.x, y: p.y });
+    if (reducedMotion()) {
+      setPlaced(frames[frames.length - 1]);
+      return;
+    }
+    let i = 0;
+    const step = () => {
+      setPlaced(frames[i]);
+      i += 1;
+      if (i < frames.length) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  };
+
+  const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    const p = local(e);
+    pointers.current.set(e.pointerId, p);
+    svgRef.current?.setPointerCapture?.(e.pointerId);
+    if (pointers.current.size === 2) {
+      const [a, b] = [...pointers.current.values()];
+      pinch.current = { d: Math.hypot(a.x - b.x, a.y - b.y) };
+      drag.current = null;
+      return;
+    }
+    const node = (e.target as Element).closest?.("[data-node]");
+    if (node) drag.current = { kind: "node", id: node.getAttribute("data-node") || "", sx: p.x, sy: p.y, moved: false };
+    else if ((e.target as Element).closest?.("[data-edge]")) drag.current = null;
+    else drag.current = { kind: "pan", sx: p.x, sy: p.y, vx: view.x, vy: view.y };
+  };
+  const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!pointers.current.has(e.pointerId)) return;
+    const p = local(e);
+    pointers.current.set(e.pointerId, p);
+    if (pinch.current && pointers.current.size === 2) {
+      const [a, b] = [...pointers.current.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      const factor = d / Math.max(1, pinch.current.d);
+      pinch.current = { d };
+      setView((v) => zoomAt(v, factor, (a.x + b.x) / 2, (a.y + b.y) / 2));
+      return;
+    }
+    const d = drag.current;
+    if (!d) return;
+    if (d.kind === "pan") {
+      setView((v) => ({ ...v, x: d.vx + p.x - d.sx, y: d.vy + p.y - d.sy }));
+      return;
+    }
+    if (!d.moved && Math.hypot(p.x - d.sx, p.y - d.sy) < 4) return;
+    d.moved = true;
+    const w = toWorld(view, p.x, p.y);
+    setPlaced((prev) => prev.map((n) => (n.id === d.id ? { ...n, x: Math.round(w.x), y: Math.round(w.y) } : n)));
+  };
+  const onPointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size < 2) pinch.current = null;
+    const d = drag.current;
+    drag.current = null;
+    if (d?.kind === "node") {
+      if (d.moved) settle(d.id);
+      else onSelect(d.id);
+    }
+  };
+  // Labels and their halo keep their screen size whatever the zoom.
+  const fontPx = (px: number) => ({ fontSize: `calc(${px}px * var(--font-scale, 1) / ${view.k.toFixed(3)})`, strokeWidth: 3 / view.k });
+
   return (
     <div ref={ref} className="nt-canvas">
-      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Graph of ${graph.nodes.length} entities and ${graph.edges.length} links`}>
+      <div className="nt-canvas__tools" role="group" aria-label="Zoom">
+        <button type="button" className="nt-icon-btn" aria-label="Zoom in" title="Zoom in" onClick={() => setView((v) => zoomAt(v, 1.25, size.w / 2, size.h / 2))}>
+          <Icon name="zoomIn" size={16} />
+        </button>
+        <button type="button" className="nt-icon-btn" aria-label="Zoom out" title="Zoom out" onClick={() => setView((v) => zoomAt(v, 0.8, size.w / 2, size.h / 2))}>
+          <Icon name="zoomOut" size={16} />
+        </button>
+        <button type="button" className="nt-icon-btn" aria-label="Fit to view" title="Fit to view (or double-click the background)" onClick={() => fitNow()}>
+          <Icon name="fitView" size={16} />
+        </button>
+      </div>
+      <svg
+        ref={svgRef}
+        width={size.w}
+        height={size.h}
+        viewBox={`0 0 ${size.w} ${size.h}`}
+        role="img"
+        aria-label={`Graph of ${graph.nodes.length} entities and ${graph.edges.length} links; drag to move, scroll or pinch to zoom`}
+        className="nt-canvas__svg"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onDoubleClick={(e) => {
+          if (!(e.target as Element).closest?.("[data-node], [data-edge]")) fitNow();
+        }}
+      >
         <defs>
           <marker id="nt-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" className="nt-arrow" />
           </marker>
         </defs>
-        {graph.edges.map((e) => {
-          const a = pos.get(e.source);
-          const b = pos.get(e.target);
-          if (!a || !b) return null;
-          const key = `${e.source}|${e.target}|${e.predicate}`;
-          const te = thenEdges ? thenEdges.get(key) : e;
-          const existed = Boolean(te);
-          const active = te ? te.active : false;
-          const pairKey = [e.source, e.target].sort().join("|");
-          const nth = pairs.get(pairKey) || 0;
-          pairs.set(pairKey, nth + 1);
-          const dx = b.x - a.x;
-          const dy = b.y - a.y;
-          const len = Math.max(1, Math.hypot(dx, dy));
-          const ux = dx / len;
-          const uy = dy / len;
-          const sx = a.x + ux * a.r;
-          const sy = a.y + uy * a.r;
-          const tx = b.x - ux * (b.r + 2);
-          const ty = b.y - uy * (b.r + 2);
-          const off = nth * 14;
-          const mx = (sx + tx) / 2 - uy * off;
-          const my = (sy + ty) / 2 + ux * off;
-          const count = te ? te.count : e.count;
-          return (
-            <g key={key} className={`nt-edge${existed ? "" : " nt-edge--future"}${existed && !active ? " nt-edge--old" : ""}`}>
-              <line x1={sx} y1={sy} x2={tx} y2={ty} markerEnd="url(#nt-arrow)" />
-              <line x1={sx} y1={sy} x2={tx} y2={ty} className="nt-edge__hit" onClick={() => openRelation(e.source, e.target)}>
-                <title>{`${predicateWords(e.predicate)}${count > 1 ? ` · ${count} times` : ""} · since ${shortDate(e.first_seen)} — open how this link changed`}</title>
-              </line>
-              <text x={mx} y={my - 4} textAnchor="middle" className="nt-edge__label" onClick={() => openRelation(e.source, e.target)}>
-                {predicateWords(e.predicate)}
-                {count > 1 ? ` ×${count}` : ""}
-              </text>
-            </g>
-          );
-        })}
-        {graph.nodes.map((n) => {
-          const p = pos.get(n.id);
-          if (!p) return null;
-          const existed = !thenNodes || thenNodes.has(n.id);
-          return (
-            <g
-              key={n.id}
-              className={`nt-node nt-node--${n.kind}${existed ? "" : " nt-node--future"}${selected === n.id ? " nt-node--selected" : ""}${focus.includes(n.id) ? " nt-node--focus" : ""}`}
-              transform={`translate(${p.x},${p.y})`}
-              tabIndex={0}
-              role="button"
-              aria-label={`${n.name}, ${n.kind}${existed ? "" : ", not known yet at that time"}`}
-              onClick={() => onSelect(n.id)}
-              onKeyDown={(ev) => {
-                if (ev.key === "Enter" || ev.key === " ") {
-                  ev.preventDefault();
-                  onSelect(n.id);
-                }
-              }}
-            >
-              <title>{`${n.name} · ${n.kind}${n.note_count ? ` · ${n.note_count} ${n.note_count === 1 ? "note" : "notes"}` : ""}`}</title>
-              <circle r={p.r} />
-              <text y={p.r + 14} textAnchor="middle">
-                {n.name}
-              </text>
-            </g>
-          );
-        })}
+        <rect className="nt-canvas__bg" x={0} y={0} width={size.w} height={size.h} />
+        <g transform={`translate(${view.x},${view.y}) scale(${view.k})`}>
+          {graph.edges.map((e) => {
+            const a = pos.get(e.source);
+            const b = pos.get(e.target);
+            if (!a || !b) return null;
+            const key = `${e.source}|${e.target}|${e.predicate}`;
+            const te = thenEdges ? thenEdges.get(key) : e;
+            const existed = Boolean(te);
+            const active = te ? te.active : false;
+            const pairKey = [e.source, e.target].sort().join("|");
+            const nth = pairs.get(pairKey) || 0;
+            pairs.set(pairKey, nth + 1);
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const len = Math.max(1, Math.hypot(dx, dy));
+            const ux = dx / len;
+            const uy = dy / len;
+            const sx = a.x + ux * a.r;
+            const sy = a.y + uy * a.r;
+            const tx = b.x - ux * (b.r + 2);
+            const ty = b.y - uy * (b.r + 2);
+            const off = nth * 14;
+            const mx = (sx + tx) / 2 - uy * off;
+            const my = (sy + ty) / 2 + ux * off;
+            const count = te ? te.count : e.count;
+            return (
+              <g key={key} data-edge="" className={`nt-edge${existed ? "" : " nt-edge--future"}${existed && !active ? " nt-edge--old" : ""}`}>
+                <line x1={sx} y1={sy} x2={tx} y2={ty} markerEnd="url(#nt-arrow)" vectorEffect="non-scaling-stroke" />
+                <line x1={sx} y1={sy} x2={tx} y2={ty} className="nt-edge__hit" onClick={() => openRelation(e.source, e.target)}>
+                  <title>{`${predicateWords(e.predicate)}${count > 1 ? ` · ${count} times` : ""} · since ${shortDate(e.first_seen)}, open how this link changed`}</title>
+                </line>
+                <text x={mx} y={my - 4 / view.k} textAnchor="middle" className="nt-edge__label" style={fontPx(10.5)} onClick={() => openRelation(e.source, e.target)}>
+                  {predicateWords(e.predicate)}
+                  {count > 1 ? ` ×${count}` : ""}
+                </text>
+              </g>
+            );
+          })}
+          {graph.nodes.map((n) => {
+            const p = pos.get(n.id);
+            if (!p) return null;
+            const existed = !thenNodes || thenNodes.has(n.id);
+            return (
+              <g
+                key={n.id}
+                data-node={n.id}
+                className={`nt-node nt-node--${n.kind}${existed ? "" : " nt-node--future"}${selected === n.id ? " nt-node--selected" : ""}${focus.includes(n.id) ? " nt-node--focus" : ""}`}
+                transform={`translate(${p.x},${p.y})`}
+                tabIndex={0}
+                role="button"
+                aria-label={`${n.name}, ${n.kind}${existed ? "" : ", not known yet at that time"}`}
+                onKeyDown={(ev) => {
+                  if (ev.key === "Enter" || ev.key === " ") {
+                    ev.preventDefault();
+                    onSelect(n.id);
+                  }
+                }}
+              >
+                <title>{`${n.name} · ${n.kind}${n.note_count ? ` · ${n.note_count} ${n.note_count === 1 ? "note" : "notes"}` : ""}`}</title>
+                {/* The focus ring: a circle around the node, shown on keyboard focus (never a rectangle). */}
+                <circle className="nt-node__ring" r={p.r + 5 / view.k} vectorEffect="non-scaling-stroke" />
+                <circle className="nt-node__dot" r={p.r} vectorEffect="non-scaling-stroke" />
+                <text y={p.r + 14 / view.k} textAnchor="middle" style={fontPx(12)}>
+                  {n.name}
+                </text>
+              </g>
+            );
+          })}
+        </g>
       </svg>
       <p className="nt-legend">
         <span className="nt-legend__item">
@@ -316,6 +470,7 @@ function GraphCanvas({ graph, then, selected, focus, onSelect }: { graph: Graph;
           no longer believed
         </span>
         {then ? <span className="nt-legend__item nt-legend__item--faded">faded: not known yet</span> : null}
+        <span className="nt-legend__item nt-legend__hint">drag to move · scroll or pinch to zoom · double-click to fit</span>
       </p>
     </div>
   );
