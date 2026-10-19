@@ -261,7 +261,8 @@ abstractnote rebuild --notebook DIR [--reembed]                  # replay revisi
 abstractnote bundle [--out DIR]                                  # pack abstractnote@<version>.flow
 
 abstractnote import claude-sessions DIR --notebook DIR [--exclude-session ID ...] [--author NAME]
-abstractnote import agora DB_PATH --notebook DIR [--channels a,b] [--include-system] [--operators a,b]
+abstractnote import agora DB_PATH --notebook DIR [--include-channels a,b] [--exclude-channels a,b]   # --channels = --include-channels
+                    [--kinds decision,claim,work,thread,operator] [--include-retracted] [--include-system] [--operators a,b]
 abstractnote import markdown DIR --notebook DIR [--glob '**/*.md']
 abstractnote import files PATH ... --notebook DIR
                     # every import also takes [--since ISO] [--until ISO] [--dry-run] [--embed-base-url URL --embed-model MODEL]

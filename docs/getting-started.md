@@ -1,35 +1,34 @@
 # Getting started
 
-This guide takes you from a source checkout to a working notebook in two steps: first a
+This guide takes you from an install to a working notebook in two steps: first a
 **headless notebook** on your machine (no gateway, and no model until you want one), then the
 **gateway path** with the web app and the Apple Watch app. For what AbstractNote is, see the
 [README](../README.md); for how the parts fit, see [architecture.md](architecture.md). If a step
 fails, [troubleshooting.md](troubleshooting.md) lists the messages you may see and their fixes.
 
-## 1. Install from source
+## 1. Install
 
-AbstractNote is not published on PyPI or npm yet. You need Python 3.10 or later and source
-checkouts of the framework packages next to this repository (the AbstractFramework
-`scripts/clone.sh` clones them side by side):
-
-```text
-abstractframework/
-  abstractcore/  abstractmemory/  abstractruntime/  abstractsemantics/  abstractgateway/
-  abstractnote/   <- this repository
-```
-
-AbstractMemory must include `close_assertion` (its `close-assertion` branch until the next
-AbstractMemory release). From the `abstractnote` folder:
+You need Python 3.10 or later. In a virtual environment:
 
 ```sh
 python3 -m venv .venv
-.venv/bin/pip install -e ../abstractsemantics -e ../abstractcore -e ../abstractruntime -e ../abstractmemory
-.venv/bin/pip install -e .
+.venv/bin/pip install "abstractnote[gateway]"
 .venv/bin/abstractnote --help
 ```
 
+The `[gateway]` extra adds AbstractGateway 0.15.11 or later, the first release that carries the
+AbstractNote integration; leave it out (`pip install abstractnote`) if you only want a headless
+notebook. AbstractMemory 0.3.1 or later, AbstractRuntime and AbstractCore come with the package.
+
 The examples below call `abstractnote` directly; activate the environment first
 (`. .venv/bin/activate`) or prefix the commands with `.venv/bin/`.
+
+### Install from source
+
+To work on AbstractNote itself, clone the framework packages next to this repository (the
+AbstractFramework `scripts/clone.sh` clones them side by side) and install them editable; see
+[CONTRIBUTING.md](../CONTRIBUTING.md#development-environment). The scratch gateway in section 3
+(`scripts/hermetic_gateway.sh`) and the web app's `npm run dev` need this checkout.
 
 ## 2. A headless notebook in five minutes
 
@@ -119,21 +118,13 @@ reference in [api.md](api.md#cli).
 
 Inside AbstractGateway every user gets their own notebook, the flows run as durable runs, a
 processor automation drains the queue every two minutes, and the web and watch apps connect to
-it. The gateway needs the AbstractNote integration, which lives on AbstractGateway's
-`abstractnote-seam` branch until a gateway release contains it.
+it. The integration is on as soon as `abstractnote` is installed in the gateway's own Python
+environment: install `"abstractnote[gateway]"` there (section 1) and restart the gateway.
 
-Install that checkout into the same environment. Install it editable, and do not use
-AbstractNote's `[gateway]` extra yet: the extra resolves AbstractGateway from PyPI, which does
-not have the integration.
-
-```sh
-.venv/bin/pip install -e ../abstractgateway     # on the abstractnote-seam branch
-```
-
-The gateway must carry the AbstractNote seam, its `abstractgateway.abstractnote_seam` module
-(the first AbstractGateway release that contains it will be named here when AbstractNote is
-released). Importing `abstractnote.gateway` into a gateway without it fails at once with one
-sentence ("This AbstractGateway does not carry the AbstractNote seam …"), never half-working.
+The gateway must carry the AbstractNote seam, its `abstractgateway.abstractnote_seam` module, which
+AbstractGateway has from 0.15.11. Importing `abstractnote.gateway` into an older gateway fails at
+once with one sentence ("This AbstractGateway does not carry the AbstractNote seam …"), never
+half-working.
 
 To check a running gateway, ask for the note status as a signed-in account: `200` means the note
 API is mounted, `404` means this gateway has no AbstractNote integration (without a token every
@@ -185,7 +176,9 @@ The scratch directory stays until you delete it. Ports must be in the 18800-1889
 
 ### The web app
 
-The web app needs Node.js 18 or later. Against a gateway:
+The web app needs Node.js 18 or later. A gateway installs and serves it from its app catalog as
+the Note app (the npm package `@abstractframework/note`). From a source checkout, against a
+gateway:
 
 ```sh
 cd web

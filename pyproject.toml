@@ -29,9 +29,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The gateway must carry the AbstractNote seam (abstractgateway.abstractnote_seam); no released
-# AbstractGateway has it yet, so this floor is raised to the first release that does when
-# AbstractNote is released. Until then abstractnote.gateway refuses to import without the seam.
+# The gateway must carry the AbstractNote seam (abstractgateway.abstractnote_seam); 0.15.11 is
+# the first AbstractGateway release that does. abstractnote.gateway refuses to import without it.
 gateway = ["abstractgateway>=0.15.11", "fastapi>=0.110"]
 dev = ["pytest>=7.0", "ruff>=0.1"]
 

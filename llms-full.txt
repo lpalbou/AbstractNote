@@ -40,8 +40,8 @@ runtime and one notebook per user, app hosting), **AbstractRuntime** and **Abstr
 capture and understanding workflows), **AbstractMemory** (temporal facts) and **AbstractCore**
 (models, structured output, embeddings).
 
-Status: version 0.1.0, in development. It is not published on PyPI or npm yet; you install it
-from source (see [Install](#install)).
+Status: version 0.1.1, alpha. The Python package is `abstractnote` on PyPI and the web app is
+`@abstractframework/note` on npm (see [Install](#install)).
 
 ## What you get
 
@@ -61,29 +61,23 @@ from source (see [Install](#install)).
 
 ## Install
 
-AbstractNote needs Python 3.10 or later and the framework packages next to it. Until the
-packages are published, install everything from source checkouts:
+AbstractNote needs Python 3.10 or later. Install it with the gateway integration:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/pip install -e ../abstractsemantics -e ../abstractcore -e ../abstractruntime \
-                      -e ../abstractmemory     # a checkout that has close_assertion, see below
-.venv/bin/pip install -e .
-.venv/bin/abstractnote --help
+pip install "abstractnote[gateway]"
+abstractnote --help
 ```
 
-Two framework changes that AbstractNote relies on are not in released packages yet:
+This brings AbstractMemory 0.3.1 or later and AbstractGateway 0.15.11 or later, the first gateway
+release that carries the AbstractNote integration (`abstractgateway.abstractnote_seam`): with
+`abstractnote` installed in the gateway's environment, every user gets the note tools, the note
+read API under `/api/gateway/note` and the note workflows. `pip install abstractnote` alone is
+enough for a headless notebook on one machine. To run models locally on Apple silicon, add
+`pip install "abstractcore[apple]"` (MLX).
 
-- **AbstractMemory `close_assertion`** (the `close-assertion` branch): closes a superseded fact in
-  place. AbstractNote's first release waits for the AbstractMemory release that contains it.
-- **The AbstractGateway integration** (the `abstractnote-seam` branch): binds the note tools to
-  each user's notebook, serves the note read API and lists the Note app. You need it only for the
-  gateway path; the headless notebook works without a gateway. The gateway must carry this seam
-  (`abstractgateway.abstractnote_seam`; the first gateway release with it is named at
-  AbstractNote's release): the `[gateway]` extra alone does not guarantee it, and
-  `abstractnote.gateway` refuses to import into a gateway without it, with one sentence.
-
-To run models locally on Apple silicon, add `pip install "abstractcore[apple]"` (MLX).
+The web app is the npm package `@abstractframework/note`, which the gateway's app catalog installs
+and serves as the Note app. To work on AbstractNote itself, install it from a source checkout; see
+[CONTRIBUTING.md](CONTRIBUTING.md) and [docs/getting-started.md](docs/getting-started.md#install-from-source).
 
 ## Quick start
 
@@ -117,7 +111,7 @@ gateway, the web app and the watch app.
 
 | Client | Where | What it does |
 |---|---|---|
-| Web app | [`web/`](web/) (`@abstractframework/note`) | Capture (a chat with attachments), Graph (entities and links through time), Remember (since you last looked, cue cards, ask by effort, then and now), Settings |
+| Web app | [`web/`](web/) (`@abstractframework/note`) | Capture (a chat with attachments), Remember (since you last looked, cue cards, ask by effort, then and now), Explore (entities and links through time), and a Settings panel |
 | Apple Watch app | [`watch/apple/`](watch/apple/README.md) | Note, Ask, Today, Settings; watch-only, watchOS 26 or later |
 | Command line | `abstractnote` | Headless capture, search, processing, imports, rebuild, JSON output for scripts and agents |
 
@@ -146,36 +140,35 @@ MIT. See [LICENSE](LICENSE).
 
 # Getting started
 
-This guide takes you from a source checkout to a working notebook in two steps: first a
+This guide takes you from an install to a working notebook in two steps: first a
 **headless notebook** on your machine (no gateway, and no model until you want one), then the
 **gateway path** with the web app and the Apple Watch app. For what AbstractNote is, see the
 [README](../README.md); for how the parts fit, see [architecture.md](architecture.md). If a step
 fails, [troubleshooting.md](troubleshooting.md) lists the messages you may see and their fixes.
 
-## 1. Install from source
+## 1. Install
 
-AbstractNote is not published on PyPI or npm yet. You need Python 3.10 or later and source
-checkouts of the framework packages next to this repository (the AbstractFramework
-`scripts/clone.sh` clones them side by side):
-
-```text
-abstractframework/
-  abstractcore/  abstractmemory/  abstractruntime/  abstractsemantics/  abstractgateway/
-  abstractnote/   <- this repository
-```
-
-AbstractMemory must include `close_assertion` (its `close-assertion` branch until the next
-AbstractMemory release). From the `abstractnote` folder:
+You need Python 3.10 or later. In a virtual environment:
 
 ```sh
 python3 -m venv .venv
-.venv/bin/pip install -e ../abstractsemantics -e ../abstractcore -e ../abstractruntime -e ../abstractmemory
-.venv/bin/pip install -e .
+.venv/bin/pip install "abstractnote[gateway]"
 .venv/bin/abstractnote --help
 ```
 
+The `[gateway]` extra adds AbstractGateway 0.15.11 or later, the first release that carries the
+AbstractNote integration; leave it out (`pip install abstractnote`) if you only want a headless
+notebook. AbstractMemory 0.3.1 or later, AbstractRuntime and AbstractCore come with the package.
+
 The examples below call `abstractnote` directly; activate the environment first
 (`. .venv/bin/activate`) or prefix the commands with `.venv/bin/`.
+
+### Install from source
+
+To work on AbstractNote itself, clone the framework packages next to this repository (the
+AbstractFramework `scripts/clone.sh` clones them side by side) and install them editable; see
+[CONTRIBUTING.md](../CONTRIBUTING.md#development-environment). The scratch gateway in section 3
+(`scripts/hermetic_gateway.sh`) and the web app's `npm run dev` need this checkout.
 
 ## 2. A headless notebook in five minutes
 
@@ -265,21 +258,13 @@ reference in [api.md](api.md#cli).
 
 Inside AbstractGateway every user gets their own notebook, the flows run as durable runs, a
 processor automation drains the queue every two minutes, and the web and watch apps connect to
-it. The gateway needs the AbstractNote integration, which lives on AbstractGateway's
-`abstractnote-seam` branch until a gateway release contains it.
+it. The integration is on as soon as `abstractnote` is installed in the gateway's own Python
+environment: install `"abstractnote[gateway]"` there (section 1) and restart the gateway.
 
-Install that checkout into the same environment. Install it editable, and do not use
-AbstractNote's `[gateway]` extra yet: the extra resolves AbstractGateway from PyPI, which does
-not have the integration.
-
-```sh
-.venv/bin/pip install -e ../abstractgateway     # on the abstractnote-seam branch
-```
-
-The gateway must carry the AbstractNote seam, its `abstractgateway.abstractnote_seam` module
-(the first AbstractGateway release that contains it will be named here when AbstractNote is
-released). Importing `abstractnote.gateway` into a gateway without it fails at once with one
-sentence ("This AbstractGateway does not carry the AbstractNote seam …"), never half-working.
+The gateway must carry the AbstractNote seam, its `abstractgateway.abstractnote_seam` module, which
+AbstractGateway has from 0.15.11. Importing `abstractnote.gateway` into an older gateway fails at
+once with one sentence ("This AbstractGateway does not carry the AbstractNote seam …"), never
+half-working.
 
 To check a running gateway, ask for the note status as a signed-in account: `200` means the note
 API is mounted, `404` means this gateway has no AbstractNote integration (without a token every
@@ -331,7 +316,9 @@ The scratch directory stays until you delete it. Ports must be in the 18800-1889
 
 ### The web app
 
-The web app needs Node.js 18 or later. Against a gateway:
+The web app needs Node.js 18 or later. A gateway installs and serves it from its app catalog as
+the Note app (the npm package `@abstractframework/note`). From a source checkout, against a
+gateway:
 
 ```sh
 cd web
@@ -741,7 +728,7 @@ Pinned response shapes (clients decode these strictly; absent lists mean empty):
 | `Insight` | `{note_id, title, body, insight_kind, occurred_at, acked_at, evidence_note_ids, entity_ids}` |
 | `GET /note/overview` | `{recent: [NoteRef], entities: [{entity_id, name, kind, note_count, last_seen}], insights: [Insight], resurfacing: [NoteRef], activity: [{day, notes, revisions}]}` |
 | `GET /note/cues` | `{items: [{cue_id, text, kind, subject: {kind, id, title}, evidence_note_ids, entity_ids}]}` (cues are insight notes; `cue_id` is the note id; `evidence_note_ids` and `entity_ids` are the insight's own: the notes it rests on and the entities it is about) |
-| `GET /note/tasks` | `{items: [{task_id, note_id, text, status, due, closed_at}]}` |
+| `GET /note/tasks` | `{items: [{task_id, note_id, text, status, due, closed_at, age_days, stale}]}` (`age_days`: whole days since the task opened, until it closed for a closed one; `stale`: still open after 60 days, `STALE_DAYS` in `abstractnote.recall.reflect`) |
 | `GET /note/notes/{id}` | `{note_id, title, text, kind, occurred_at, received_at, status, topics, summary, source, location, attachments: [...], revision: {...} or null, entities: [...], claims: [...], revisits: [NoteRef], insight: {kind, evidence_note_ids, entity_ids, acked_at} or null}` (`insight` is set on an insight note, `kind` being its `insight_kind`, and null on every other note) |
 | `GET /note/review` | `{items: [{review_id, kind, why, reason, at, sides: [ReviewSide], evidence_note_ids, actions: [{action, method, path, body}]}], next_cursor}` (newest first; `kind` `close_match`, `merge` or `contradiction`; `why` the rule; `reason` the processor's stated reason for a merge, else null; `at` when the notebook recorded it; `evidence_note_ids` starts with the note that raised it; `next_cursor` is always null) |
 | `ReviewSide` | `{type, id, name, kind, note_ids}` (`type` `entity`: `name` its display name, `kind` its entity kind, `note_ids` its newest notes; `type` `claim`: `name` the statement in plain words, `kind` null, `note_ids` the note it came from) |
@@ -780,12 +767,12 @@ Flows call them through `tool_calls` nodes; agents may list them in `allowed_too
 | `note_queue_lease` | `worker_id, max_items=1` | `{items: [{note_id, priority, attempts}]}` |
 | `note_queue_ack` | `note_id, outcome: ok|error, error?, revision_id?` | `{note_id, status, next_attempt_at?}` |
 | `note_queue_stats` | | `{queued, processing, failed, by_priority, oldest_enqueued_at}` |
-| `note_search` | `query, since?, until?, kinds?, entities?, topics?, limit=20, as_of?` | `{notes: [...], entities: [...], claims: [...], facets: {...}}` |
-| `note_expand` | `note_ids, entity_ids, as_of?` | `{entities: [card...], claims_timeline: [...], relation_timelines: [...], neighbours: [...], then_now: [...]}` |
+| `note_search` | `query, since?, until?, kinds?, entities?, topics?, limit=20, as_of?, order? (relevance or earliest)` | `{query, order, notes: [...], entities: [...], claims: [...], facets: {...}, considered, warnings}`: each note carries `score` (rank fusion), `relevance` (0 to 1), `matched_entities` and `matched_claims`; an entity or statement is a hit only when its relevance reaches 0.5 (`HIT_MIN_SCORE`) and a returned note carries it, and lists those `note_ids` (an entity also `first_at` and `latest_at`: the first and latest date among the matching notes that carry it); `order=earliest` lists the notes whose relevance reaches 0.75 (`EARLIEST_MIN_SCORE`) oldest first ([remembering.md](remembering.md#quick-relevance)) |
+| `note_expand` | `note_ids, entity_ids, as_of?, query?, budget_chars?` | the standard recall packet, chosen within `budget_chars` (default 24000, `EXPAND_BUDGET_CHARS`, measured as JSON): `{as_of, budget_chars, used_chars, notes: [NoteRef with an excerpt around the match of query, else of the focus entities' names, and summary?], entities: [{entity_id, line, focus}], claims_timeline: [{entity_id, claims: [{claim_id, at, text, status, note_id, closed?}]}], relation_timelines: [{a, b, claims}], neighbours: [{entity_id, name, kind, count, via}], then_now: [{entity_id, earliest, latest, turning_points}], omitted: {notes, entities, claims}}`; the given `entity_ids` are the focus: their one-line cards come first, then the notes in the order given (best first, up to 60 % of the budget), the other entities those notes mention as one line each, and for the focus entities only the claim timelines (earliest and latest kept), then-versus-now, relations and neighbours; what is left goes to further notes |
 | `note_changes` | `since, limit` | the since-you-last-looked delta (same shape as `GET /note/changes`) |
 | `note_entity` | `entity_id, at?` | the entity card |
 | `note_timeline` | `since, until, granularity` | buckets |
-| `note_open_loops`, `note_contradictions`, `note_resurface`, `note_anniversaries` | `limit, since?` | candidate lists for the reflect flow |
+| `note_open_loops`, `note_contradictions`, `note_resurface`, `note_anniversaries` | `limit, since?` | candidate lists for the reflect flow (`{items}`, each with its `rule`, `note_ids` and `entity_ids`; an open loop also carries `age_days` and `stale`, as `GET /note/tasks` does; contradictions are only the disputed pairs a note's linking marked) |
 | `note_insight_write` | `kind, title, body, evidence_note_ids, entity_ids, run_id?` | `{note_id}` |
 
 All tools are read-and-write on the caller's own notebook only and are auto-approved. Every
@@ -811,6 +798,12 @@ day = nb.day("2026-09-14")
 `Notebook.open(dir, embedder=...)` takes the embedding model the notebook is pinned to (none
 needed for the built-in hashing embedder; `abstractnote.store.embeddings.openai_compat_embedder(url,
 model)` for an OpenAI-compatible server). `Notebook` is also a context manager.
+
+Opening a notebook never finishes a revision that a stopped process left half applied, because
+another process may still be applying it: reads (status, search, entity cards, days, changes, open
+loops) leave it alone. Writes finish it first (capture, filing, processing, user actions, archiving,
+through `Notebook.recover_pending()`), and so do `Notebook.recover()`, `Notebook.open(dir, recover=True)`
+and `abstractnote recover`.
 
 The note tools and the flows run headlessly too:
 
@@ -840,17 +833,20 @@ failed; they are listed under `errors`).
 ```
 abstractnote capture ["text"] --notebook DIR [--file PATH ...] [--at ISO] [--title T] [--priority 0-3] [--key KEY]
 abstractnote search "query" --notebook DIR [--effort quick|standard|deep] [--since ISO] [--until ISO] [--as-of ISO]
-                    [--limit N] [--provider P --model M]          # a model for standard and deep
+                    [--limit N] [--order relevance|earliest]      # earliest: matching notes oldest first (quick)
+                    [--provider P --model M]                      # a model for standard and deep
 abstractnote entity ID --notebook DIR [--at ISO]
 abstractnote day YYYY-MM-DD --notebook DIR [--tz ZONE]
 abstractnote status --notebook DIR
 abstractnote changes --notebook DIR [--since CURSOR_OR_ISO] [--limit N]
 abstractnote process --local --notebook DIR --provider P --model M [--max-items 20] [--budget-s 90]
+abstractnote recover --notebook DIR                              # finish revisions a stopped process left half applied
 abstractnote rebuild --notebook DIR [--reembed]                  # replay revisions into fresh stores
 abstractnote bundle [--out DIR]                                  # pack abstractnote@<version>.flow
 
 abstractnote import claude-sessions DIR --notebook DIR [--exclude-session ID ...] [--author NAME]
-abstractnote import agora DB_PATH --notebook DIR [--channels a,b] [--include-system] [--operators a,b]
+abstractnote import agora DB_PATH --notebook DIR [--include-channels a,b] [--exclude-channels a,b]   # --channels = --include-channels
+                    [--kinds decision,claim,work,thread,operator] [--include-retracted] [--include-system] [--operators a,b]
 abstractnote import markdown DIR --notebook DIR [--glob '**/*.md']
 abstractnote import files PATH ... --notebook DIR
                     # every import also takes [--since ISO] [--until ISO] [--dry-run] [--embed-base-url URL --embed-model MODEL]
@@ -884,6 +880,13 @@ with `--notebook DIR` and runs the flows locally with `process --local`
 ([getting-started.md](getting-started.md#2-a-headless-notebook-in-five-minutes)). Yes, for the web
 app, the watch app, several users, and background processing on a schedule: those come from
 AbstractGateway with the AbstractNote integration ([architecture.md](architecture.md#gateway)).
+
+### The gateway lists the Note app, but the app says "AbstractNote is not installed on this gateway."
+
+The gateway's app catalog shows the Note web app whenever a page titled AbstractNote answers on
+its usual port (3006), even one started outside the gateway, while the note API needs the
+`abstractnote` Python package in the gateway's own environment. Install `"abstractnote[gateway]"`
+there and restart the gateway ([getting-started.md](getting-started.md#3-the-gateway-path)).
 
 ### Can the command line talk to my gateway?
 
@@ -976,10 +979,9 @@ Capture must never wait for a model. The queue gives priority order, retries and
 
 ## Limits of this version
 
-- Not published yet: no PyPI package, no npm package for the web app, no TestFlight or App Store
-  build of the watch app. Install from source ([getting-started.md](getting-started.md)).
-- The gateway integration and AbstractMemory's `close_assertion` are on branches of those
-  packages until their next releases; AbstractMemory's must ship first.
+- The watch app has no TestFlight or App Store build yet; you build and install it from source
+  ([watch/apple/BUILD.md](../watch/apple/BUILD.md)). The Python package (`pip install
+  "abstractnote[gateway]"`) and the web app (`@abstractframework/note`) are published.
 - How the Apple apps store the sign-in (a protected file in the app container) is proposed and
   awaits a ruling ([ADR 0006](adr/0006-apple-client-credential-storage.md)).
 - The command line works on local notebooks only (no gateway client mode).
@@ -1551,37 +1553,48 @@ flowchart TD
 ```mermaid
 flowchart TD
     S[on_flow_start note_id, provider?, model?] --> X[tool note_context<br/>text, extracted attachment text,<br/>similar notes, candidate entities,<br/>recent claims about them, topics]
-    X --> E[llm_call extract<br/>resp_schema Extraction]
+    X --> P1[code: extraction packet<br/>per section]
+    P1 --> E[llm_call extract<br/>resp_schema Extraction]
     E --> R[tool note_resolve_candidates<br/>per mention: alias, full-text, vector candidates]
-    R --> J[llm_call link<br/>resp_schema Linking]
-    J --> A[tool note_apply_revision]
+    R --> P2[code: linking parts<br/>at most 15 mentions each]
+    P2 --> J[llm_call link, once per part<br/>resp_schema Linking]
+    J --> M[code: merge the parts]
+    M --> A[tool note_apply_revision]
     A --> Z[on_flow_end revision summary]
 ```
 
 1. **Context** (`note_context`): what the notebook already knows that is relevant: the nearest
    notes, entities whose names or aliases appear in the text or whose embeddings are close,
-   their current summaries and the active claims about them, the open tasks that mention them,
-   and the topic vocabulary. This is the "look at the existing knowledge" step.
-2. **Extract** (`Extraction` schema): summary, mentions (name, kind, aliases seen, role in the
-   note), claims (subject, predicate, object, literal flag, certainty, stance, evidence excerpt,
-   optional validity dates), tasks (opened, completed), time references, and topics. The prompt
-   carries the predicate vocabulary from the AbstractSemantics registry and allows `ex:` for the
-   rest.
-3. **Resolve candidates** (`note_resolve_candidates`): for every mention, up to five existing
-   entities with their kind, aliases, summary, last seen date and how they matched.
-4. **Link** (`Linking` schema): the model decides, per mention, `reuse` (a candidate index),
-   `create`, or `merge` (two candidate indexes); per claim, whether it `restates` an existing claim
-   (reinforce), `refines` it (new claim, old stays active), `supersedes` it (close the old one) or
-   `contradicts` it (both stay, marked disputed), naming the existing claim by its index in the
-   packet; per task, open or close by index. The schema uses indexes and enumerations rather than
-   free-form ids so that small models cannot invent identifiers; `note_apply_revision` rejects any
-   reference outside the packet and downgrades it to `create` or `new` with a warning. The model
-   also writes the revision summary and a one-sentence summary for each entity it creates and for
-   each reused entity the note tells something new about.
+   their current summaries and their most recent active claims, the open tasks that mention
+   them, and the topic vocabulary. This is the "look at the existing knowledge" step.
+2. **Extract** (`Extraction` schema), once per section: summary, mentions (name, kind, aliases
+   seen, role in the note), claims (subject, predicate, object, literal flag, certainty, stance,
+   evidence excerpt, optional validity dates), tasks (opened, completed), time references, and
+   topics. The model sees the section's whole text and a bounded orientation packet (see
+   "Prompts and bounds"); the predicate vocabulary from the AbstractSemantics registry is in the
+   static system prompt and `ex:` is allowed for the rest.
+3. **Resolve candidates** (`note_resolve_candidates`): for every mention, up to three existing
+   entities with their kind, aliases, summary, last seen date, how they matched, and their most
+   recent active claims.
+4. **Link** (`Linking` schema), once per part of at most 15 mentions: the model decides, per
+   mention, `reuse` (a candidate index), `create`, or `merge` (two candidate indexes); per
+   claim, whether it `restates` an existing claim (reinforce), `refines` it (new claim, old stays
+   active), `supersedes` it (close the old one) or `contradicts` it (both stay, marked disputed),
+   naming the existing claim by its `#` index in the packet; per task, open or close by index.
+   Each part carries the claims whose subject is one of its mentions (the first part also the
+   tasks and the open tasks they may close); claim, task and packet indexes stay those of the
+   whole note, so the parts merge back into one Linking without renumbering. The schema uses
+   indexes and enumerations rather than free-form ids so that small models cannot invent
+   identifiers; `note_apply_revision` rejects any reference outside the packet and downgrades it
+   to `create` or `new` with a warning. The model also writes the revision summary and a
+   one-sentence summary for each entity it creates and for each reused entity the note tells
+   something new about. A missing summary is never a failed note: a created entity gets one
+   built from its role in the note (or where it was seen) and a reused entity keeps its current
+   summary, each with a warning in the revision.
 5. **Apply** (`note_apply_revision`): writes the revision ops to the index and the triple store in
    one transaction per store, updates relations, topics, tasks, embeddings, and marks the note
    `processed`. The response lists created and merged entities, claims added and superseded, and
-   any warnings (unknown predicates mapped to `ex:`, unresolved references).
+   any warnings (unknown predicates mapped to `ex:`, unresolved references, missing summaries).
 
 Large notes: `note_context` splits texts beyond the model's budget into sections; `note-process`
 loops over sections for extraction and merges mentions and claims before linking, so no text is
@@ -1674,7 +1687,7 @@ candidates; the model judges and writes:
 | Tool | Candidates |
 |---|---|
 | `note_open_loops` | open tasks older than N days, questions never answered |
-| `note_contradictions` | disputed claim pairs, single-valued predicates with several active objects |
+| `note_contradictions` | disputed claim pairs only (a note's `contradicts` decision); a subject with several current objects of one predicate is never a candidate, since processing records no single-valued predicates |
 | `note_resurface` | entities and topics active before but silent for N days that relate to recent notes |
 | `note_anniversaries` | notes from the same day in previous months or years |
 
@@ -1709,13 +1722,20 @@ models from them and repairs invalid output. Python mirrors live in `abstractnot
  "topics": ["string"]}
 ```
 
+Fields with a default may be left out by the model (the runtime fills the default): in
+Extraction `aliases` ([]), `object_is_literal` (false), `certainty` (stated), `stance` (assert),
+`valid_from`, `valid_until`, `due` and `iso` (null); in Linking `candidate` (null),
+`merge_candidates` ([]), `name` (""), `kind` (null), `aliases` ([]), `reason` (""), `existing`
+(null) and `closes_open_task` (null). `claims` lists only the statements that relate to an
+existing one (a statement left out is `new`) and `tasks` only those that close an open task.
+
 **Linking** (indexes refer to the candidate lists in the context packet; enumerations are JSON
 Schema enums)
 
 ```json
 {"mentions": [{"ref": "m1", "decision": "reuse|create|merge|unsure", "candidate": 0,
                "merge_candidates": [0, 1], "name": "preferred name", "kind": "person|org|project|concept|place|event|artifact|software|thing",
-               "aliases": ["..."], "summary": "one sentence; required for create and unsure, and for a reused entity this note tells something new about; otherwise null", "reason": "short"}],
+               "aliases": ["..."], "summary": "one sentence for create and unsure, and for a reused entity this note tells something new about; otherwise null (a missing one is a warning, never a failed note)", "reason": "short"}],
  "claims": [{"index": 0, "relation_to_existing": "new|restates|refines|supersedes|contradicts",
              "existing": 0, "reason": "short"}],
  "tasks": [{"index": 0, "closes_open_task": 0}],
@@ -1725,10 +1745,37 @@ Schema enums)
 **Answer**, **MiningPlan**, **SliceFindings**, **Dossier**, **Reflections**: see
 `abstractnote.process.schemas`; each is documented inline with the fields listed above.
 
-## Prompts
+## Prompts and bounds
 
-Prompts are Markdown files under `src/abstractnote/process/prompts/` rendered with the context
-packet. Rules that every prompt states:
+Every model step has two Markdown files under `src/abstractnote/process/prompts/`:
+
+- `<step>.system.md`, the **static system prompt**: the instructions, the output shape with one
+  illustrative answer, and the rules; the extraction one also lists the predicate vocabulary
+  from the AbstractSemantics registry with one-line glosses, filled in when the flows are
+  generated. These bytes are the same for every note, so a local model's prompt cache reuses
+  them (below).
+- `<step>.md`, the **dynamic user message**: rendered inside the flow by a `string_template`
+  node from a packet that a code node builds with `abstractnote.process.packets` (the flows'
+  code nodes carry that module's own source, so Python and the flows cannot drift).
+
+The note steps' user message starts with one constant envelope,
+`<runtime_metadata>{"time": "the note's own date is on the last line of this message"}</runtime_metadata>`,
+and ends with a line that identifies the note: `About this note (not part of its text): nt_…
+“title”, written 2026-07-10 08:47 (now, for this note) (kind …; from …) [part 2 of 3]`. The
+runtime keeps an envelope already at the head of a message byte for byte (it stamps a fresh
+per-second one on a message without one), so no per-call value sits in the shared prefix; the
+note's date is "now" for the model (relative dates resolve from it) and the system prompt says
+the last line is not content. The user templates end without trailing whitespace, which the
+runtime needs to recognise the envelope as the message's own.
+
+A prompt note from the Claude sessions importer keeps the assistant's answer in
+`source.origin.outcome` by `source.origin.outcome_author` (and appended to the text):
+`note_context` then returns the author's text and the answer as separate sections (`source`
+`note` or `answer`, with their `author`), and the packet labels them "Text written by …" and
+"Answer by … (what they said; not written by the note's author)"; the extraction prompt
+writes statements from an answer as `reported`.
+
+Rules that every prompt states:
 
 - Use only the note and the provided context; never invent entities or dates.
 - Prefer reusing an existing entity when the candidate list contains it; create sparingly.
@@ -1738,9 +1785,85 @@ packet. Rules that every prompt states:
   `skos:closeMatch` claim for later consolidation) rather than guessing.
 - Output JSON only, matching the schema.
 
-The predicate vocabulary is loaded from the AbstractSemantics registry at build time and listed
-in the extraction prompt with one-line glosses. Predicates outside it are accepted as
-`ex:snake_case` and reported in the revision warnings so the vocabulary can grow deliberately.
+Predicates outside the vocabulary are accepted as `ex:snake_case` and reported in the revision
+warnings so the vocabulary can grow deliberately.
+
+**Bounds.** Only the packet is bounded; the note's text is never cut (long notes are split into
+sections, each read whole).
+
+| Packet | Bound (`abstractnote.process.packets`) |
+|---|---|
+| Extraction orientation | names and kinds of at most 15 known entities (no claims), at most 40 topics (the note's own first), 5 similar notes by title and date, 8 open tasks, one line each |
+| Candidates per mention | 3 (`note_resolve_candidates`) |
+| Candidate card | name, kind, up to 5 aliases, summary (at most 240 characters), last seen, and at most 3 active claims as one line each, those with a predicate the note also uses first |
+| Mentions per linking call | 15; the rest go to further calls for the same note, merged back |
+| Statement lines | subject, predicate, object, certainty, stance, evidence (at most 200 characters) |
+| Open tasks in linking | only when the note has tasks, at most 8 |
+| Section | 6000 characters per extraction call (`note_context` `max_chars`), so each answer fits the extract output cap |
+
+**Checks on the answers.** A section of at least 200 characters whose extraction names nothing is
+read once more; a second empty answer is kept and the revision says so ("A part of this note
+names nothing although it has text, even when read a second time."). `note_apply_revision`
+leaves out, with a warning, a mention whose name and aliases never occur as whole words in the
+note's own text (its title and header do not count: names copied from the context packet are
+refused); a statement about it is skipped, one pointing at it keeps the name as text. A reused
+entity gains only the aliases the linking lists for it, and `unsure` without a candidate is
+created as new with a warning. The prompts also state: reuse an entity only when the mention
+names that very thing (a part, version, file or tool of X is a new entity related to X); one to
+three topics; no statement whose only content is that the text mentions something, and
+`dcterms:hasPart` only when stated; proposals and plans are `possible`; a superseded statement
+is written with `stance: retract` and its end date, the replacing one with `stance: revise`.
+
+## Prompt cache, thinking and output caps
+
+**Prompt cache.** It applies only on AbstractCore's prompted structured-output lane; on the
+Outlines lane (below), which the gateway and the headless runner use for MLX today, no call
+uses or reports a prompt cache. On the prompted lane AbstractRuntime derives one prompt-cache
+key per (session, provider, model, flow, node) for every run that has a session, so all notes
+processed in one session share one key per step (the processor automation has a session). Hybrid models
+such as Qwen3.6-35B-A3B (Gated-DeltaNet plus attention) restore only an exactly stored prefix:
+after each call the provider snapshots the part of the prompt that the last two calls on the
+key shared, and the next call reuses it when its prompt extends that snapshot. Every note
+step's prompt is the same system prompt followed by the same envelope, with the note's id and
+date on the last line, so consecutive notes share at least the whole system prompt. When two
+consecutive notes also share the first words of their text, the snapshot moves past the system
+prompt and a following note that starts differently cannot extend it: that call is a full
+prefill ("rebuilt"), and the next one hits again (backlog 0024 measures how often). (A fresh key would fork
+the runtime's prepared system prefix instead, but for chat templates that render tool
+definitions before the system text, as Qwen3.5 and 3.6 do, that prefix is 3 tokens long; the
+flows therefore do not give each note its own cache scope.) The provider reports each call's
+`prompt_cache` record (`outcome`, `cached_tokens`, `fed_tokens`); AbstractRuntime does not copy
+it into the ledger for structured calls today (a structured result carries no metadata), so
+backlog 0024's measurements read it at the provider.
+
+**Structured output lane.** With Outlines installed, AbstractCore's MLX and HuggingFace providers
+decode structured output through Outlines unless `structured_output_method="prompted"`. That lane
+bypasses the prompt cache, cannot think, and applies the chat template a second time around the
+already rendered prompt; the system prompts therefore carry the output shape, so the model
+writes the right fields on either lane (on the old prompts, with thinking off, this lane
+answered empty lists). A provider created with `structured_output_method="prompted"` (for
+example `NoteRunner.local(..., llm_kwargs={"structured_output_method": "prompted"})`) generates
+normally and uses the prompt cache, but with thinking on it reasons for minutes per call
+(backlog 0024 measured 160-181 s per extraction), so the flows do not ask for it.
+
+**Thinking and output caps** are pinned on each `llm_call` node (a node value wins over the run's
+`_runtime.thinking`):
+
+| Step | Thinking | Output cap (tokens) |
+|---|---|---|
+| quick filing | off | 400 |
+| extract (and its second reading) | on | 4000 |
+| link | on | 6000 |
+| synthesize, dossier, reflect | the runtime default | 8192 |
+| mining plan, slice findings | the runtime default | 4096 |
+
+On MLX, Qwen3.6 has only an on/off switch (`enable_thinking`): any level ("low", "medium") is
+treated as on and there is no thinking budget, so a thinking step can run until the output cap.
+On the Outlines lane "on" changes only how the prompt ends (JSON-constrained decoding leaves no
+room to reason); a failed Outlines decode falls back to normal generation, which then does think.
+A truncated structured answer is retried by AbstractCore's structured-output handler with a
+doubled budget, at most three attempts; a flow cannot turn that off today, so the caps are set
+well above what a bounded section or linking part needs.
 
 ## Headless execution
 
@@ -1769,7 +1892,8 @@ to spend. This page explains the design that the **Remember** view, the recall t
 |---|---|---|---|
 | Time | "around the release in September", "last winter" | what was going on then | the day and period views: notes, revisions, entities touched, what you believed then |
 | Person or thing | "Dana", "the LUT project" | everything you know, and how it changed | the entity card as of a moment, the claims timeline, then-versus-now |
-| Fragment | three words you are sure were in the note | the note | quick recall: full-text plus vector, grouped by entity and date |
+| Fragment | three words you are sure were in the note | the note | quick recall: full-text plus vector, the entities and statements grouped under the notes that carry them, each entity with its first and latest date |
+| First mention | "when did we first talk about X?" | the oldest note | quick recall in earliest order: the notes that match X, oldest first |
 | Feeling or shape | "that idea I was excited about", "a warning I wrote myself" | the note or the insight | kinds and topics as filters, insights as first-class notes |
 | Association | "it came up together with X" | the neighbours | graph expansion from the hits, relations with first and last seen |
 | Absence | "did I ever decide this?" "what have I dropped?" | the gap | open loops, contradictions, resurfacing, the reflect insights |
@@ -1785,13 +1909,27 @@ citations, and the web app renders that JSON.
 
 | Level | Budget | What runs | Returns |
 |---|---|---|---|
-| **quick** | under a second, no model | full-text (FTS5, BM25) plus vector search over notes, entities and claims; grouping by entity and month; facets | hits with excerpts, matched entities, matched claims, facets |
-| **standard** | seconds, one model call | quick retrieval, then graph expansion (entity cards as of the requested moment, claim timelines, neighbours, then-versus-now pairs), then one synthesis | an answer with citations, the evidence, the evolution summary, open loops, follow-ups |
+| **quick** | under a second, no model | full-text (FTS5, BM25) plus vector search over notes, entities and claims, with a relevance floor; entities and statements grouped under the notes that carry them; relevance or earliest order; facets | hits with excerpts, matched entities with their first and latest date, matched claims, facets |
+| **standard** | seconds, one model call | quick retrieval, then a recall packet chosen within a budget (24,000 characters by default): the best notes with excerpts around the matches, entity cards as of the requested moment as one line each, and for the entities the question is about their claim timelines, neighbours and then-versus-now pairs; then one synthesis | an answer with citations, the evidence, the evolution summary, open loops, follow-ups |
 | **deep** | minutes, several model calls, runs in the background | a mining plan (sub-questions, time slices, entities, contradictions), several retrieval rounds with findings per slice, a dossier | the dossier as an answer and as a stored `synthesis` note; the web app and the watch show it when it is ready |
 
 The level is a parameter everywhere: the Remember view has an effort dial, the watch asks at
 standard by default, agents pass it explicitly, and the CLI takes `--effort`. A deep search is
 never blocking: the run starts, the client gets a run id, and the dossier appears as an insight.
+
+### Quick relevance
+
+Ranking fuses full-text and vector ranks, which orders hits but cannot tell a good hit from the best
+of a bad lot. So every hit also gets a relevance from 0 to 1: the share of the question's words it
+contains, each word weighted by how rare it is among your notes (the square of its inverse document
+frequency, so "Tailscale" counts far more than "when" or "first"; a word no note contains counts for
+nothing), raised but never lowered by the vector similarity. An entity or a statement is shown only
+when its relevance reaches 0.5 and one of the returned notes carries it (the note mentions the
+entity, or made or repeated the statement); it is shown under those notes, and an entity with the
+first and the latest date among the matching notes that carry it. Earliest order (`order=earliest`)
+lists the notes whose relevance reaches 0.75 oldest first: search for the subject ("Tailscale
+HTTPS") to answer "when did we first mention it". The thresholds are `HIT_MIN_SCORE` and
+`EARLIEST_MIN_SCORE` in `abstractnote.recall.search`.
 
 ## The Remember view
 
@@ -1829,7 +1967,8 @@ last looked beside the cue cards, then the ask bar) fits a 1280x800 window; the 
 5. **Why do I believe this**: every claim, and every sentence of an answer, opens its evidence
    chain: the claim, what it superseded or was superseded by, the notes, the attachment excerpt.
    One tap says "this is wrong" and writes a retract revision with your account as the source.
-6. **Revisit**: open loops with a close action, unread insights, "on this day" notes, entities
+6. **Revisit**: open loops with a close action and their age (an open loop still open after 60
+   days is marked stale, so it can be closed or left to age out), unread insights, "on this day" notes, entities
    that went silent but relate to what you added this week, contradictions awaiting a decision.
 7. **To review** (only when there is something, `GET /note/review`): what the notebook decided
    on its own, each with why, the two sides, the notes behind them and its own actions. A merge it
@@ -1847,6 +1986,10 @@ Explore view already covers "what did this look like then".
 
 - **Focus and depth**: pick one or several entities; see their neighbourhood up to depth three,
   edges labelled by predicate with first and last seen dates and counts.
+- **The picture**: it fits the view when it loads and when its data changes; scroll or pinch to zoom
+  about the pointer, drag the background to pan, drag a node to move it (the others settle around it),
+  double-click the background or press Fit to view to fit again. Keyboard focus draws a ring around
+  the node.
 - **Picture or List**: the same connections drawn, or as a readable table (from, link, to, since,
   believed or no longer believed); each row opens the link's history or the entity.
 - **Time scrubber and date field**: moving the slider or choosing a date changes `as_of` (the date
@@ -1873,8 +2016,9 @@ A stream of your notes as you wrote them, with the composer at the bottom. You t
 attach files (images show a preview), drop images, or dictate; Enter saves and Shift+Enter starts
 a new line; with your permission the browser attaches your location. Under each note one short
 acknowledgement shows one state at a time, as a word and a symbol: **Sending**, **Received**,
-**Organizing**, then **Organized** or **Needs attention**. Organized reads like "Added to #lut ·
-event · 2 links" and opens on what was filed: the note's title, topics, linked entities, when you
+**Organizing**, then **Organized** or **Needs attention**. Once organized, the note's title and the
+entities it links to come first, with the line "Organized · Added to #lut · event · 2 links" under
+them; it opens on what was filed: the note's title, topics, linked entities, when you
 said the same thing before, and what it changed. Until the note is organized the details show
 the notebook's reply. With "Instant linking" on (Settings) the note is processed right away;
 otherwise the app re-reads the note until it is. Nothing uses system vocabulary: no run ids, no
@@ -1927,9 +2071,19 @@ API, read the note API for views, and never send user, tenant or runtime identif
   uses relative URLs and the shared shell, as the app-server contract requires.
 - Three views, in the tab order **Capture**, **Remember**, **Explore** (the graph; its route stays
   `#/graph`) (see [remembering.md](remembering.md)), plus a small **Settings** drawer (filing model, answering model, inline processing, reflect schedule,
-  location, queue status with retry, appearance, sign-out). Location is off until you turn on the
+  location, queue status with retry, manage connection). Location is off until you turn on the
   Location switch in Settings (kept per browser, and offered only on a secure page); Capture then
   attaches it to notes.
+- Sign-in and the top-right corner are the framework's (ui-kit): `useGatewayConnection` with the
+  kit's sign-in card (`GatewaySessionSignInCard`: gateway URL, account, token, keep this browser
+  signed in; the app server exchanges the token for an HTTP-only session that survives reloads). The
+  address defaults to the app server's own `--gateway-url` (given to the page by `bin/server.js`);
+  the last address and account are remembered per browser (the address only while the server still
+  points there); a refused sign-in reads as one sentence, and `AfTopBarActions` (appearance, About, Settings,
+  the signed-in account, and the Connect / Disconnect pill), and an empty notebook invites the first
+  note or `abstractnote import`. At start the app asks
+  `GET /note/status`: a 401 opens the sign-in dialog; a 404 while `GET /me` answers shows "AbstractNote
+  is not installed on this gateway." instead of the views.
 - Theming uses ui-kit tokens only, so every kit theme works; tested on default-dark, observer-night
   and solarized-light at 1280 and 400 px. The framework look comes from derivations of those
   tokens: on dark themes the page colour is deepened toward near-black (relative colour of
@@ -1982,7 +2136,7 @@ http://127.0.0.1:8080` runs the production server the way the gateway launches i
 ## iPhone app (`phone/iphone/`)
 
 Planned. The folder holds the plan: the same package layout as the watch with a richer Capture
-(camera, files, voice memos), the full Graph and Remember views, and share-sheet capture from
+(camera, files, voice memos), the full Explore and Remember views, and share-sheet capture from
 other apps. The bundle id reserved is `ai.abstractframework.note.iphone`, following the
 AbstractAssistant precedent of watch-only plus separate iPhone app; if the watch app should
 later become a companion of the iPhone app, the bundle parentage changes before the first
@@ -2009,10 +2163,53 @@ ids derive from the source key.
 
 | Importer | Command | One note per | `occurred_at` | `source.origin` |
 |---|---|---|---|---|
-| Claude Code sessions | `abstractnote import claude-sessions DIR` | human-typed prompt, with the final assistant text of that turn as the outcome; one note per session summary (title, compaction and away summaries); one note per subagent run (its brief and its last report); one note per curated memory file | the record timestamp | `{session_id, uuid, prompt_id, cwd, git_branch, model, file, line}` |
-| Agora hub | `abstractnote import agora DB` | recorded decision (`store decision:*`), claim and work entry, resolved or answered thread (root plus replies), operator message | `created_at` | `{message_id, channel, seq, sender, reply_to, status, hash}` |
-| Markdown tree | `abstractnote import markdown DIR` | file (ADRs, backlog items, notes), with front-matter and headings kept | front-matter dates, else the first git commit date, else the file date | `{repo, path, blob_sha, commit}` |
-| Files | `abstractnote import files PATH...` | file (documents, images, audio, video, logs) | file date or EXIF | `{path, sha256}` |
+| Claude Code sessions | `abstractnote import claude-sessions DIR` | human-typed prompt (the operator's words; the final assistant text of that turn is its outcome); one note per session summary (title, compaction and away summaries); one note per subagent run (its brief and its last report); one note per curated memory file | the record timestamp; a memory file: see [Dates](#dates) | `{session_id, uuid, prompt_id, cwd, git_branch, model, file, line, outcome, outcome_author}` |
+| Agora hub | `abstractnote import agora DB` | recorded decision (`store decision:*`), claim and work entry, resolved or answered thread (root plus replies), operator message | `created_at` (a store entry without a message: its `updated_at`) | `{message_id, channel, seq, sender, reply_to, status, hash, retracted_at?}` |
+| Markdown tree | `abstractnote import markdown DIR` | file (ADRs, backlog items, notes), with front-matter and headings kept | see [Dates](#dates) | `{repo, path, blob_sha, commit, added_as?, completed?}` |
+| Files | `abstractnote import files PATH...` | file (documents, images, audio, video, logs) | EXIF date, else the file date | `{path, sha256}` |
+
+Every `source.origin` also carries `date_basis`: how `occurred_at` was found.
+
+## Dates
+
+| `date_basis` | Meaning | Approximate |
+|---|---|---|
+| `record` | the transcript record's own timestamp (prompts, summaries) | no |
+| `first_record` / `last_record` | a subagent run's first record / a session title's last record | `last_record` yes |
+| `message` | the agora message's `created_at` (threads, operator messages, store entries naming a message) | no |
+| `store_updated` | an agora store entry that names no message: its `updated_at` | yes |
+| `origin_session` | a memory file: the first record of its origin session (front matter `originSessionId`, looked up in the same project folder, then its sibling project folders) | yes (within that session) |
+| `front_matter_modified` | a memory file whose origin session is not on disk: its front matter `modified` | yes (last edit) |
+| `front_matter` | a Markdown front matter `date`, `created` or `created_at` | no |
+| `created_line` | a Markdown `Created:` field line anywhere in the file (`- **Created:** 2026-09-12`) | no |
+| `date_line` | a Markdown `Date:` field line in the first 40 lines (later ones date completion reports) | no |
+| `git_added` | the commit that first added the file, following moves (`git log --follow --diff-filter=A`) | yes |
+| `exif` | a photo's EXIF date | no |
+| `file_mtime` | the file's modification time | yes |
+
+The order for a memory file is `origin_session`, `front_matter_modified`, `git_added`,
+`file_mtime`; for a Markdown file `front_matter`, `created_line`, `date_line`, `git_added`,
+`file_mtime`. A field line is a labelled metadata line (an optional list marker and bold around
+the label) whose value starts with an ISO date. A Markdown `Completed:` field line is kept as
+written in `source.origin.completed` (`2026-09-27`), ready to be stated as a fact; `N/A` is not
+kept. `added_as` is the path the file was first added under, when it has moved since.
+
+## Prompt notes
+
+A prompt note is the operator's prompt, with `source.author` the operator. The assistant's final
+text for that turn is `source.origin.outcome`, by `source.origin.outcome_author` (the model id).
+It is also appended to the text after a separator that names the model (`---` then
+`## Assistant answer (<model id>)`), so a search finds it without it being the operator's words.
+
+## Agora selection
+
+`--kinds decision,claim,work,thread,operator` picks what to write (default: all). Notes are cut
+the same way whatever the selection (an operator reply inside an answered thread stays part of
+that thread), so imports of separate kinds add up to one full import. `--include-channels a,b`
+(also `--channels`) keeps only those channels; `--exclude-channels a,b` leaves those out.
+Retracted messages are left out unless `--include-retracted` is given; a kept one carries
+`retracted_at`. Left-out records are counted in `skipped` by reason (`kind_filtered_<kind>`,
+`channel_filtered`, `channel_excluded`, `retracted`).
 
 Rules shared by all importers:
 
@@ -2022,7 +2219,19 @@ Rules shared by all importers:
 - Attach images by hash and type; do not inline bytes into notes.
 - Mark the author: `source.author` is the account name, the agent seat, or the model name.
 - Private content stays in the notebook; importers never post or copy anything outside it.
-- Report counts (notes created, duplicates skipped, attachments stored) and the time range covered.
+- Report counts (notes created, duplicates skipped, attachments stored, notes by kind, records
+  skipped by reason), the time range covered, and the `date_basis` histogram with
+  `approximate_dates` (how many dates are a session start, a last edit, a commit or a file date), in
+  a dry run too, so a user sees how many dates are approximate before writing anything.
+
+## Re-imports after the 2026-10-19 date and outcome fixes
+
+Note ids derive from the source key, and none of the source keys changed: prompts
+(`<session>:<uuid>`), memory files (`memory:<project>:<file>:<content hash>`), Markdown files
+(`<repo>:<path>:<content hash>`) and agora entries keep their ids. A re-import into a notebook that
+already holds them therefore reports duplicates and keeps the notes as they were (old dates, the
+answer under `## Outcome` in the text, no `date_basis`); the corrected dates, outcome fields and
+date bases reach a notebook only through a fresh import into a new notebook.
 
 Every importer takes `--notebook DIR`, `--since`, `--until` and `--dry-run` (count only, write
 nothing) and prints a counts report as JSON; the full flag list is in [api.md](api.md#cli). A
@@ -2055,13 +2264,15 @@ package are picked up without a release:
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install -e ../abstractsemantics -e ../abstractcore -e ../abstractruntime \
-                      -e ../abstractmemory       # with close_assertion
-.venv/bin/pip install -e ../abstractgateway      # the abstractnote-seam branch, for gateway work
+                      -e ../abstractmemory
+.venv/bin/pip install -e ../abstractgateway      # for gateway work: 0.15.11 or later
 .venv/bin/pip install -e ".[dev]"
 ```
 
-Never install framework packages from PyPI into this environment when a sibling checkout exists:
-the released versions lack the changes AbstractNote depends on.
+Prefer the sibling checkouts over released packages, so a change in a sibling is tested before it
+is released. The checkouts must meet the floors in `pyproject.toml` and the gateway's own: AbstractGateway
+0.15.11 needs AbstractRuntime 0.10.6 or later, so an older `abstractruntime` checkout cannot host the
+gateway tests; install the released `abstractruntime` instead until it moves.
 
 ## Tests
 
@@ -2147,8 +2358,8 @@ We acknowledge reports as promptly as we can and agree a disclosure timeline wit
 
 ## Supported versions
 
-AbstractNote is in development (0.1.0, not yet published). Security fixes go to the `main`
-branch.
+AbstractNote is alpha. Security fixes go to the `main` branch and the latest release on PyPI
+and npm.
 
 ## Security model
 
@@ -2189,6 +2400,53 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-10-19
+
+Install with `pip install "abstractnote[gateway]"` (AbstractGateway 0.15.11 or later carries the
+AbstractNote integration); the web app is `@abstractframework/note` on npm.
+
+### Changed
+
+- **Capture**: reading a notebook never changes it. Capture, quick filing, your own actions and
+  archiving first finish any change a stopped process left half applied; `abstractnote recover`
+  does it on request.
+- **Understanding**: every model step has a fixed thinking setting and output budget (quick filing
+  without thinking; extraction and linking with it), whatever the model or the run asks. Long
+  notes are read in 6000-character sections; a section with text whose extraction finds nothing is
+  read once more, and a second empty answer is marked on the note. The prompts start with the same
+  instructions for every note, and the linking step sees a short list of candidates per name, so
+  prompts are several times smaller and a note is understood faster.
+- **Understanding**: a name becomes an entity only when it occurs in the note and is something you
+  would look up again (ids, values, versions and generic words stay text); an existing entity is
+  reused only for the very same thing (a part, version or feature of it is a new one); one to three
+  topics per note; a statement the note replaces is closed rather than kept beside the new one;
+  a missing entity summary is a warning, never a failed note.
+- **Understanding**: contradiction candidates are only statements the linking marks as disputing
+  each other, so several people or parts of one thing are no longer offered as contradictions.
+- **Recall**: quick search keeps an entity or statement only when it matches the question well and a
+  returned note carries it, groups hits under their notes with first and latest dates, and lists
+  notes oldest first with `--order earliest` (`order=earliest` on `GET /note/search`).
+- **Recall**: the standard answer reads a packet of bounded size (24,000 characters by default):
+  the entities you asked about, the notes with excerpts around your question, and the history of
+  their statements, instead of everything the graph reaches.
+- **Recall**: open loops say how many days they have been open and are marked stale after 60 days
+  (`GET /note/tasks`, `note_open_loops`).
+- **Web app**: sign-in uses the framework's own dialog (gateway address, account, token, keep me
+  signed in), remembers the last address and account, and the top-right corner has appearance,
+  About, Settings and Connect/Disconnect. A gateway without AbstractNote shows one sentence,
+  "AbstractNote is not installed on this gateway.", in every view.
+- **Web app**: the Explore picture zooms (wheel, trackpad, pinch), pans, lets you drag a node while
+  the layout settles around it, and fits to view on load or double-click; an empty notebook invites
+  the first note or an import; organized notes lead with their title and linked entities.
+- **Apple Watch app**: Settings show the server and account and sign out; tap to talk transcribes,
+  or sends the recording as it is; errors are one specific sentence.
+- **Importers**: a prompt note's author is the person who wrote the prompt, with the assistant's
+  answer recorded as such; `import agora` selects by `--kinds`, `--include-channels` and
+  `--exclude-channels` and can keep retracted entries with `--include-retracted`; every imported
+  note records how its date was found, and import reports count the approximate dates.
+- **Install**: the documentation describes the published packages; installing from source checkouts
+  is the contributor path.
+
 ## [0.1.0] - 2026-10-19
 
 The first version: the `abstractnote` package on PyPI and the `@abstractframework/note` web app on npm;
@@ -2221,7 +2479,7 @@ publication of the phone app is pending.
 - **Gateway integration** (with the AbstractGateway integration): per-user note tools,
   auto-approved; the note read API under `/api/gateway/note`; the processor and reflect
   automations through `POST /note/processor/ensure`; the Note app in the gateway's app catalog.
-- **Web app** `@abstractframework/note`: Capture, Graph, Remember and Settings.
+- **Web app** `@abstractframework/note`: Capture, Remember and Explore, with a Settings panel.
 - **Apple Watch app**: Note, Ask, Today and Settings; watch-only, watchOS 26 or later.
 - **Command line** `abstractnote`: capture, search, entity, day, status, changes, rebuild,
   process, bundle and import, on a notebook directory.
@@ -2230,7 +2488,6 @@ publication of the phone app is pending.
 
 ### Requirements
 
-- An AbstractMemory release with `close_assertion`, and an AbstractGateway release with the
-  AbstractNote integration, for the gateway path.
+- AbstractMemory 0.3.1 or later; AbstractGateway 0.15.11 or later for the gateway path.
 
 ---

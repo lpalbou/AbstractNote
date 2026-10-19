@@ -14,6 +14,13 @@ with `--notebook DIR` and runs the flows locally with `process --local`
 app, the watch app, several users, and background processing on a schedule: those come from
 AbstractGateway with the AbstractNote integration ([architecture.md](architecture.md#gateway)).
 
+### The gateway lists the Note app, but the app says "AbstractNote is not installed on this gateway."
+
+The gateway's app catalog shows the Note web app whenever a page titled AbstractNote answers on
+its usual port (3006), even one started outside the gateway, while the note API needs the
+`abstractnote` Python package in the gateway's own environment. Install `"abstractnote[gateway]"`
+there and restart the gateway ([getting-started.md](getting-started.md#3-the-gateway-path)).
+
 ### Can the command line talk to my gateway?
 
 Not in this version. `--gateway URL --token T` is reserved and answers "Gateway client mode is
@@ -105,10 +112,9 @@ Capture must never wait for a model. The queue gives priority order, retries and
 
 ## Limits of this version
 
-- Not published yet: no PyPI package, no npm package for the web app, no TestFlight or App Store
-  build of the watch app. Install from source ([getting-started.md](getting-started.md)).
-- The gateway integration and AbstractMemory's `close_assertion` are on branches of those
-  packages until their next releases; AbstractMemory's must ship first.
+- The watch app has no TestFlight or App Store build yet; you build and install it from source
+  ([watch/apple/BUILD.md](../watch/apple/BUILD.md)). The Python package (`pip install
+  "abstractnote[gateway]"`) and the web app (`@abstractframework/note`) are published.
 - How the Apple apps store the sign-in (a protected file in the app container) is proposed and
   awaits a ruling ([ADR 0006](adr/0006-apple-client-credential-storage.md)).
 - The command line works on local notebooks only (no gateway client mode).

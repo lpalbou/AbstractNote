@@ -95,7 +95,7 @@ http://127.0.0.1:8080` runs the production server the way the gateway launches i
 ## iPhone app (`phone/iphone/`)
 
 Planned. The folder holds the plan: the same package layout as the watch with a richer Capture
-(camera, files, voice memos), the full Graph and Remember views, and share-sheet capture from
+(camera, files, voice memos), the full Explore and Remember views, and share-sheet capture from
 other apps. The bundle id reserved is `ai.abstractframework.note.iphone`, following the
 AbstractAssistant precedent of watch-only plus separate iPhone app; if the watch app should
 later become a companion of the iPhone app, the bundle parentage changes before the first

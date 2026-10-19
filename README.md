@@ -11,8 +11,8 @@ runtime and one notebook per user, app hosting), **AbstractRuntime** and **Abstr
 capture and understanding workflows), **AbstractMemory** (temporal facts) and **AbstractCore**
 (models, structured output, embeddings).
 
-Status: version 0.1.0, in development. It is not published on PyPI or npm yet; you install it
-from source (see [Install](#install)).
+Status: version 0.1.1, alpha. The Python package is `abstractnote` on PyPI and the web app is
+`@abstractframework/note` on npm (see [Install](#install)).
 
 ## What you get
 
@@ -32,29 +32,23 @@ from source (see [Install](#install)).
 
 ## Install
 
-AbstractNote needs Python 3.10 or later and the framework packages next to it. Until the
-packages are published, install everything from source checkouts:
+AbstractNote needs Python 3.10 or later. Install it with the gateway integration:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/pip install -e ../abstractsemantics -e ../abstractcore -e ../abstractruntime \
-                      -e ../abstractmemory     # a checkout that has close_assertion, see below
-.venv/bin/pip install -e .
-.venv/bin/abstractnote --help
+pip install "abstractnote[gateway]"
+abstractnote --help
 ```
 
-Two framework changes that AbstractNote relies on are not in released packages yet:
+This brings AbstractMemory 0.3.1 or later and AbstractGateway 0.15.11 or later, the first gateway
+release that carries the AbstractNote integration (`abstractgateway.abstractnote_seam`): with
+`abstractnote` installed in the gateway's environment, every user gets the note tools, the note
+read API under `/api/gateway/note` and the note workflows. `pip install abstractnote` alone is
+enough for a headless notebook on one machine. To run models locally on Apple silicon, add
+`pip install "abstractcore[apple]"` (MLX).
 
-- **AbstractMemory `close_assertion`** (the `close-assertion` branch): closes a superseded fact in
-  place. AbstractNote's first release waits for the AbstractMemory release that contains it.
-- **The AbstractGateway integration** (the `abstractnote-seam` branch): binds the note tools to
-  each user's notebook, serves the note read API and lists the Note app. You need it only for the
-  gateway path; the headless notebook works without a gateway. The gateway must carry this seam
-  (`abstractgateway.abstractnote_seam`; the first gateway release with it is named at
-  AbstractNote's release): the `[gateway]` extra alone does not guarantee it, and
-  `abstractnote.gateway` refuses to import into a gateway without it, with one sentence.
-
-To run models locally on Apple silicon, add `pip install "abstractcore[apple]"` (MLX).
+The web app is the npm package `@abstractframework/note`, which the gateway's app catalog installs
+and serves as the Note app. To work on AbstractNote itself, install it from a source checkout; see
+[CONTRIBUTING.md](CONTRIBUTING.md) and [docs/getting-started.md](docs/getting-started.md#install-from-source).
 
 ## Quick start
 
@@ -88,7 +82,7 @@ gateway, the web app and the watch app.
 
 | Client | Where | What it does |
 |---|---|---|
-| Web app | [`web/`](web/) (`@abstractframework/note`) | Capture (a chat with attachments), Graph (entities and links through time), Remember (since you last looked, cue cards, ask by effort, then and now), Settings |
+| Web app | [`web/`](web/) (`@abstractframework/note`) | Capture (a chat with attachments), Remember (since you last looked, cue cards, ask by effort, then and now), Explore (entities and links through time), and a Settings panel |
 | Apple Watch app | [`watch/apple/`](watch/apple/README.md) | Note, Ask, Today, Settings; watch-only, watchOS 26 or later |
 | Command line | `abstractnote` | Headless capture, search, processing, imports, rebuild, JSON output for scripts and agents |
 

@@ -8,7 +8,7 @@ the parts fit; the topic pages go deeper into one area each and link back to it.
 
 | Page | What it is for |
 |---|---|
-| [getting-started.md](getting-started.md) | Install from source, a headless notebook in five minutes, then the gateway path with the web and watch apps. |
+| [getting-started.md](getting-started.md) | Install, a headless notebook in five minutes, then the gateway path with the web and watch apps. |
 | [architecture.md](architecture.md) | Principles, components, the data plane, request lifecycles, dependencies and boundaries. Start here to understand the system. |
 | [api.md](api.md) | The gateway runs API as AbstractNote uses it, the note read API, the note tools, the Python API and the CLI. |
 | [faq.md](faq.md) | Short answers to common questions, and the limits of this version. |
@@ -20,7 +20,7 @@ the parts fit; the topic pages go deeper into one area each and link back to it.
 |---|---|
 | [data-model.md](data-model.md) | Notes, attachments, entities, claims, revisions, time semantics, de-duplication and the AbstractMemory projection. |
 | [cognition.md](cognition.md) | The flows (capture, process, drain, recall, mine, reflect), the queue, the schemas and prompts, headless execution. |
-| [remembering.md](remembering.md) | How recall is designed around cues and effort; the Remember, Graph and Capture views; agents as users. |
+| [remembering.md](remembering.md) | How recall is designed around cues and effort; the Capture, Remember and Explore views; agents as users. |
 | [clients.md](clients.md) | The web app, the Apple Watch app, the iPhone plan, sign-in and isolation. |
 | [importers.md](importers.md) | Turning Claude Code sessions, an agora hub database, Markdown trees and files into notes. |
 

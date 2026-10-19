@@ -14,13 +14,15 @@ package are picked up without a release:
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install -e ../abstractsemantics -e ../abstractcore -e ../abstractruntime \
-                      -e ../abstractmemory       # with close_assertion
-.venv/bin/pip install -e ../abstractgateway      # the abstractnote-seam branch, for gateway work
+                      -e ../abstractmemory
+.venv/bin/pip install -e ../abstractgateway      # for gateway work: 0.15.11 or later
 .venv/bin/pip install -e ".[dev]"
 ```
 
-Never install framework packages from PyPI into this environment when a sibling checkout exists:
-the released versions lack the changes AbstractNote depends on.
+Prefer the sibling checkouts over released packages, so a change in a sibling is tested before it
+is released. The checkouts must meet the floors in `pyproject.toml` and the gateway's own: AbstractGateway
+0.15.11 needs AbstractRuntime 0.10.6 or later, so an older `abstractruntime` checkout cannot host the
+gateway tests; install the released `abstractruntime` instead until it moves.
 
 ## Tests
 

@@ -21,8 +21,8 @@ We acknowledge reports as promptly as we can and agree a disclosure timeline wit
 
 ## Supported versions
 
-AbstractNote is in development (0.1.0, not yet published). Security fixes go to the `main`
-branch.
+AbstractNote is alpha. Security fixes go to the `main` branch and the latest release on PyPI
+and npm.
 
 ## Security model
 
