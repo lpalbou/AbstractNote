@@ -117,8 +117,9 @@ flowchart TD
 ```
 
 - A lease lasts 15 minutes; an expired lease is taken over by the next drain. Acknowledging a
-  failure increments `attempts` and schedules a retry (1 min, 10 min, 1 h); the third failure sets
-  the note to `failed`, visible in the web app's queue panel with the error, and offers a retry.
+  failure increments `attempts` and schedules a retry (after 1 minute, then after 10 minutes); the
+  third failure sets the note to `failed`, visible in the web app's queue panel with the error,
+  and offers a manual retry.
 - **The processor automation.** On first use the web app (or `abstractnote processor ensure`)
   creates an automation per user: trigger `schedule@2` every `2m`, flow `note-drain`,
   `max_items = 20`, `budget_s = 90`, and `_runtime.allowed_tools` listing the note tools.
