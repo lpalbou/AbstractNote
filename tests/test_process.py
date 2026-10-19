@@ -241,7 +241,10 @@ def test_references_outside_the_packet_are_rejected(nb):
 
     _, _, _, out = run(nb, "Dana and Zed.", "2026-01-12T10:00:00Z", ext, link)
     created = set(out["entities_created"])
-    assert "ex:person-dana-2" in created  # candidate 4 does not exist: created, never guessed
+    # Candidate 4 does not exist: never guessed, created as new, and the new "Dana" is filed under the
+    # entity that already has that canonical name (one canonical name per entity, store.names).
+    assert "ex:person-dana-2" not in created and nb.store.entity_row("ex:person-dana-2") is None
+    assert any("has the canonical name dana" in w for w in out["warnings"])
     assert out["claims_superseded"] == [] and len(out["claims_added"]) == 1
     assert out["tasks_closed"] == [] and len(out["tasks_opened"]) == 1
     text = " ".join(out["warnings"])
@@ -411,7 +414,9 @@ def test_a_mention_the_note_never_writes_is_left_out(nb):
     rev = nb.store.revision_row(out["revision_id"])
     ops = __import__("json").loads(rev["ops_json"])
     created = {o["payload"]["name"] for o in ops if o["op"] == "entity.create"}
-    assert created == {"Dana Ng", "budget"}  # "Dana-Ng" is the same words as "Dana Ng"
+    # "Dana-Ng" is the same words as "Dana Ng", an alias of Dana: filed under Dana, not created again.
+    assert created == {"budget"}
+    assert any("“Dana Ng” has the canonical name dana_ng" in w for w in out["warnings"])
     claims = [o["payload"] for o in ops if o["op"] == "claim.add"]
     assert len(claims) == 1 and claims[0]["object_literal"] == "LUT"
 

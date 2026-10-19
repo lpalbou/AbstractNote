@@ -36,6 +36,7 @@ from .embeddings import (
     vector_key,
 )
 from .kg import ClaimStore, claim_assertion, kinds_from_index
+from .names import reuse_taken_names
 from .notes import NoteStore, _j, _uj, entity_text, note_vector_text
 
 NOTE_DB = "note.sqlite3"
@@ -217,6 +218,9 @@ class Notebook:
                 if existing["applied_index"] and existing["applied_kg"]:
                     return self._result(existing, already_applied=True)
                 return self._finish(self.store.revision_dict(existing), _fail_after_index=_fail_after_index)
+            # One canonical name per entity: a create of a taken canonical name becomes a reuse, whatever
+            # the model decided (store.names); the stored revision is the rewritten one, so a replay agrees.
+            rev = reuse_taken_names(self.store, rev)
             self.store.insert_revision(rev)
             return self._finish(rev, _fail_after_index=_fail_after_index)
 

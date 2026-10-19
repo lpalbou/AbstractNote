@@ -91,3 +91,93 @@ def test_migration_backfills_keys_and_marks_later_duplicates(tmp_path):
         with pytest.raises(sqlite3.IntegrityError):
             with nb.store.tx() as c:
                 c.execute("UPDATE entities SET key_clash_with=NULL WHERE entity_id='ex:concept-memory-2'")
+
+
+# ---------------------------------------------------------------------------- 2. apply-time guarantee
+
+def _live(nb):
+    return sorted((r["entity_id"], r["name"]) for r in nb.store.q("SELECT * FROM entities WHERE merged_into IS NULL"))
+
+
+def test_a_create_of_a_taken_canonical_name_becomes_a_reuse(nb):
+    from test_store_support import claim
+
+    nb.apply_revision(rev("rv_1", t(1), create("ex:concept-memory", "Memory", summary="What the notebook keeps.")))
+    out = nb.apply_revision(rev(
+        "rv_2", t(2), create("ex:concept-memory-2", "memory"), create("ex:software-abstractgateway", "AbstractGateway"),
+        {"op": "entity.mention", "payload": {"entity_id": "ex:concept-memory-2", "note_id": None}},
+        claim("cl_1", "ex:software-abstractgateway", "ex:uses", "ex:concept-memory-2", at=t(2))))
+    assert _live(nb) == [("ex:concept-memory", "memory"), ("ex:software-abstractgateway", "abstractgateway")]
+    assert out["entities_created"] == ["ex:software-abstractgateway"]
+    assert any("has the canonical name memory" in w and "ex:concept-memory" in w for w in out["warnings"])
+    assert not any("kind_conflict" in w for w in out["warnings"])
+    assert nb.store.claim_row("cl_1")["object_id"] == "ex:concept-memory"
+    stored = nb.revision("rv_2")  # the stored revision is the rewritten one: a replay agrees
+    assert all(op["payload"].get("entity_id") != "ex:concept-memory-2" for op in stored["ops"])
+    before = _live(nb)
+    nb.rebuild()
+    assert _live(nb) == before
+
+
+def test_a_kind_disagreement_never_makes_a_second_entity(nb):
+    nb.apply_revision(rev("rv_1", t(1), create("ex:concept-memory", "Memory")))
+    out = nb.apply_revision(rev("rv_2", t(2), create("ex:software-memory", "MEMORY", kind="software",
+                                                      aliases=["Memory module"])))
+    assert _live(nb) == [("ex:concept-memory", "memory")]
+    assert nb.store.entity_row("ex:concept-memory")["kind"] == "concept"
+    (w,) = [w for w in out["warnings"] if "kind_conflict" in w]
+    assert "software" in w and "concept" in w
+    assert nb.store.entity_brief("ex:concept-memory")["aliases"] == ["Memory module"]
+
+
+def test_an_alias_key_already_held_is_a_reuse_and_two_creates_of_one_name_are_one(nb):
+    nb.apply_revision(rev("rv_1", t(1), create("ex:software-observer", "observer")))
+    out = nb.apply_revision(rev("rv_2", t(2), create("ex:software-abstractobserver", "AbstractObserver",
+                                                      aliases=["Observer"]),
+                                create("ex:person-dana", "Dana"), create("ex:person-dana-2", "dana.")))
+    assert _live(nb) == [("ex:person-dana", "dana"), ("ex:software-observer", "observer")]
+    assert "AbstractObserver" in nb.store.entity_brief("ex:software-observer")["aliases"]
+    assert out["entities_created"] == ["ex:person-dana"]
+
+
+def test_identical_statement_after_the_reuse_is_reinforced_and_a_rename_onto_a_taken_name_is_refused(nb):
+    from test_store_support import claim
+
+    nb.apply_revision(rev("rv_1", t(1), create("ex:person-dana", "Dana"), create("ex:org-acme", "Acme"),
+                          claim("cl_1", "ex:person-dana", "ex:works_at", "ex:org-acme", at=t(1))))
+    out = nb.apply_revision(rev("rv_2", t(2), create("ex:person-dana-2", "DANA"),
+                                claim("cl_2", "ex:person-dana-2", "ex:works_at", "ex:org-acme", at=t(2)),
+                                claim("cl_3", "ex:person-dana-2", "ex:knows", "ex:person-dana", at=t(2))))
+    assert out["claims_added"] == [] and out["claims_reinforced"] == ["cl_1"]
+    assert any("to itself" in w for w in out["warnings"])
+    with pytest.raises(ValueError, match="already called acme"):
+        nb.apply_revision(rev("rv_3", t(3), {"op": "entity.rename", "payload": {"entity_id": "ex:person-dana",
+                                                                                "name": "ACME"}}))
+    assert nb.store.revision_row("rv_3") is None
+
+
+def test_the_model_creating_a_known_name_still_reuses_it(nb):
+    from test_process import extraction, mention, ml, run
+
+    run(nb, "Memory matters.", "2026-01-05T10:00:00Z", extraction([mention("m1", "Memory", "concept")]),
+        lambda p, c: {"mentions": [ml("m1", "create", name="Memory", kind="concept")], "claims": [], "tasks": []})
+    _, _, cands, out = run(nb, "memory again.", "2026-01-06T10:00:00Z", extraction([mention("m1", "memory", "concept")]),
+                           lambda p, c: {"mentions": [ml("m1", "create", name="memory", kind="concept")],
+                                         "claims": [], "tasks": []})
+    assert cands["mentions"][0]["candidates"][0]["entity_id"] == "ex:concept-memory"
+    assert out["entities_created"] == [] and _live(nb) == [("ex:concept-memory", "memory")]
+    assert nb.store.entity_row("ex:concept-memory")["note_count"] == 2
+
+
+def test_candidates_offer_the_key_identical_entity_first(nb):
+    nb.apply_revision(rev("rv_1", t(1), create("ex:concept-a-memory-palace", "Memory Palace",
+                                               summary="memory memory memory")))
+    nb.apply_revision(rev("rv_2", t(2), create("ex:concept-memory", "MEMORY"), {"op": "entity.alias", "payload": {
+        "entity_id": "ex:concept-a-memory-palace", "alias": "memory"}}))  # an alias is the model's call
+    note = nb.capture("Memory, again", occurred_at=t(3))
+    save_packet(nb, note.note_id, empty_packet())
+    # The mention's other name ranks the palace higher by words and meaning; its own canonical name still wins.
+    out = resolve_candidates(nb, note.note_id, [{"ref": "m1", "name": "Memory", "kind": "concept",
+                                                 "aliases": ["Memory Palace"]}])
+    assert [c["entity_id"] for c in out["mentions"][0]["candidates"]][:2] == ["ex:concept-memory",
+                                                                            "ex:concept-a-memory-palace"]
