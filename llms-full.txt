@@ -76,7 +76,10 @@ Two framework changes that AbstractNote relies on are not in released packages y
   place. AbstractNote's first release waits for the AbstractMemory release that contains it.
 - **The AbstractGateway integration** (the `abstractnote-seam` branch): binds the note tools to
   each user's notebook, serves the note read API and lists the Note app. You need it only for the
-  gateway path; the headless notebook works without a gateway.
+  gateway path; the headless notebook works without a gateway. The gateway must carry this seam
+  (`abstractgateway.abstractnote_seam`; the first gateway release with it is named at
+  AbstractNote's release): the `[gateway]` extra alone does not guarantee it, and
+  `abstractnote.gateway` refuses to import into a gateway without it, with one sentence.
 
 To run models locally on Apple silicon, add `pip install "abstractcore[apple]"` (MLX).
 
@@ -271,8 +274,19 @@ not have the integration.
 .venv/bin/pip install -e ../abstractgateway     # on the abstractnote-seam branch
 ```
 
-With `abstractnote` importable, the gateway logs `AbstractNote is installed: note tools,
-/api/gateway/note and its workflows are enabled` at start.
+The gateway must carry the AbstractNote seam, its `abstractgateway.abstractnote_seam` module
+(the first AbstractGateway release that contains it will be named here when AbstractNote is
+released). Importing `abstractnote.gateway` into a gateway without it fails at once with one
+sentence ("This AbstractGateway does not carry the AbstractNote seam …"), never half-working.
+
+To check a running gateway, ask for the note status as a signed-in account: `200` means the note
+API is mounted, `404` means this gateway has no AbstractNote integration (without a token every
+`/api/gateway` path answers `401`, so that tells you nothing).
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18851/api/gateway/note/status \
+     -H "Authorization: Bearer <alice's token>"   # 200
+```
 
 ### Try it on a private scratch gateway
 
@@ -664,6 +678,11 @@ signed-in principal for their own notebook. The few write actions are bookkeepin
 | `POST /note/claims/{claim_id}/retract` | user action: retract a claim (a revision with the account as source) | `reason` |
 | `POST /note/tasks/{task_id}/close` | user action: close an open loop | `note?` |
 | `POST /note/entities/{entity_id}/unmerge` | user action: undo a merge | `from_id, reason` |
+
+A user action's revision carries `source = {account, client}`: `account` is the signed-in
+principal; `client` is `web` when the request came through the Note web app's proxy (which marks
+what it relays with `X-AbstractFramework-App-Proxy: abstractnote`) and `api` otherwise. Request
+bodies cannot set it (an unknown field such as `client` is refused with 422).
 | `GET /note/cues` | cue cards: a few reflect-generated prompts you can answer by adding a note (a person gone quiet, a decision that aged, a task mentioned often and never closed) | `limit` |
 | `GET /note/graph` | nodes and edges for the explorer | `focus (entity ids), at, depth (1..3), since, until, kinds, min_count, limit` |
 | `GET /note/timeline` | activity per bucket: notes, revisions, new entities, superseded claims | `since, until, granularity=day|week|month` |
@@ -679,7 +698,9 @@ signed-in principal for their own notebook. The few write actions are bookkeepin
 | `GET /note/settings` and `PUT /note/settings` | per-notebook settings: filing model, answering model, reflect schedule, inline processing default | |
 | `POST /note/processor/ensure` | create the processor and reflect automations if missing; returns their ids | |
 
-Response envelopes are plain JSON objects; lists return `{items, next_cursor}`. Times are ISO
+Response envelopes are plain JSON objects; every list (`/notes`, `/entities`, `/revisions`,
+`/tasks`, `/cues`, `/topics`, `/insights`) returns `{items, next_cursor}`, with `next_cursor` null
+when there is no further page (the last four never page; `limit` bounds them). Times are ISO
 8601 UTC. Errors use the gateway's error shape, `{"detail": "<one sentence>"}`: `401` without a
 valid sign-in, `404` for an id that is not in the caller's notebook, `400` for bad input, `501`
 for a read the installed `abstractnote` does not provide.
@@ -688,7 +709,8 @@ Pinned response shapes (clients decode these strictly; absent lists mean empty):
 
 | Endpoint | Shape |
 |---|---|
-| `GET /note/changes` | `{cursor, notes: [NoteRef], entities: [{entity_id, name, kind, first_seen}], superseded_claims: [{claim_id, text, superseded_by, note_id}], closed_loops: [{task_id, text, closed_at}], failed_notes: [{note_id, title, error}], insights: [Insight]}` |
+| `GET /note/changes` | `{cursor, notes: [NoteRef], entities: [{entity_id, name, kind, first_seen}], superseded_claims: [{claim_id, kind, text, superseded_by, note_id}], closed_loops: [{task_id, text, closed_at}], failed_notes: [{note_id, title, error}], insights: [Insight]}` |
+| `superseded_claims[]` | `kind` is `superseded` (a later note replaced the claim; `superseded_by` is the new claim's id) or `retracted` (withdrawn by a note or by you; `superseded_by` is null); `text` is the claim in plain words built from entity names and the predicate's label ("Dana works at Acme"), never ids or vocabulary terms |
 | `NoteRef` | `{note_id, title, kind, occurred_at, excerpt}` |
 | `Insight` | `{note_id, title, body, insight_kind, occurred_at, acked_at, evidence_note_ids, entity_ids}` |
 | `GET /note/overview` | `{recent: [NoteRef], entities: [{entity_id, name, kind, note_count, last_seen}], insights: [Insight], resurfacing: [NoteRef], activity: [{day, notes, revisions}]}` |
@@ -1247,7 +1269,7 @@ graph.
 | `certainty` | `stated`, `probable`, `possible`, `reported`, `disputed` (tokens, not numbers) |
 | `stance` | `assert`, `revise`, `retract`: what the note does to earlier knowledge |
 | `observed_at` | the note's `occurred_at` |
-| `valid_from`, `valid_until` | the validity window; `valid_from` defaults to `observed_at` for state claims and is null for timeless facts; `valid_until` is set when a later note supersedes the claim |
+| `valid_from`, `valid_until` | the validity window; `valid_from` defaults to `observed_at` for state claims and is null for timeless facts; `valid_until` is set when a later note supersedes or retracts the claim, and equals `valid_from` when you retract it ("never true") |
 | `status` | `active`, `superseded`, `retracted` |
 | `superseded_by` | the claim that replaced it |
 | `evidence` | the verbatim excerpt of the note that supports the claim |
@@ -1290,7 +1312,7 @@ Operations:
 | `entity.merge` | `{from_id, into_id, reason}` |
 | `claim.add` | the claim |
 | `claim.supersede` | `{claim_id, by_claim_id, reason, valid_until}` |
-| `claim.retract` | `{claim_id, reason}` |
+| `claim.retract` | `{claim_id, reason, valid_until?}` (without `valid_until`, the window closes at the revision's time) |
 | `claim.reinforce` | `{claim_id, note_id}` (the same statement seen again) |
 | `topic.assign` | `{note_id, topic}` |
 | `task.open` / `task.close` / `task.drop` | `{task_id, text, due?, by_note_id?}` |
@@ -1299,7 +1321,9 @@ Operations:
 | `note.summary` | `{note_id, summary, kind, language}` |
 
 User actions (`close a task`, `retract a claim`, `undo a merge`) produce revisions with
-`source = {client, account}` and no note; they are the human side of an actionable graph.
+`source = {client, account}` and no note; they are the human side of an actionable graph. Through
+the gateway, `account` is the signed-in user and `client` is `web` (the Note web app) or `api`
+(any other caller), decided by the server, never by the request body.
 
 Reversibility: a merge keeps both records and can be undone by a later revision that re-points
 claims; a supersession keeps the old claim with its window closed.
@@ -1340,7 +1364,11 @@ Rules:
   earlier note that mentions them when notes are processed out of history order), not merged away
   by T; edges from claims with `observed_at <= T`.
 - **Beliefs at T** = claims with `valid_from <= T` and (`valid_until` is null or `> T`).
-- Supersession sets `valid_until` of the old claim to the `occurred_at` of the superseding note.
+- Supersession sets `valid_until` of the old claim to the `occurred_at` of the superseding note;
+  so does a note whose stance is `retract`.
+- A retraction you make (`POST /note/claims/{id}/retract`) says the claim was never true: its
+  status becomes `retracted` and `valid_until = valid_from` (its `observed_at` when it has no
+  start), an empty window, never the moment you said so. Retracted claims are never beliefs.
 - Importers set `occurred_at` from the source (message timestamp, commit date, file date);
   `received_at` is always the ingest time, so an import is visible as a system-time event while
   history stays truthful.
@@ -1535,7 +1563,12 @@ flowchart TD
   when it opens and the automations are missing) creates two automations per user, idempotently: the processor
   (trigger `schedule@2` every `2m`, flow `note-drain`, `max_items = 20`, `budget_s = 90`) and the
   reflect automation (every `7d` by default, flow `note-reflect`), each with
-  `_runtime.allowed_tools` listing the note tools.
+  `_runtime.allowed_tools` listing the note tools. The processor's first drain runs at creation
+  (an empty queue completes without a model call); the reflect automation's schedule starts one
+  interval after creation (`start_at = now + every`), so opening an empty notebook never starts an
+  answering-model call. "Reflect now" is the same `run_now` command sent to the reflect automation
+  (`POST /api/gateway/automations/{reflect_id}/commands` with `{"command_id": "<uuid>", "type":
+  "automation.run_now"}`).
   Automations run occurrences serially and coalesce missed ticks, which gives the queue exactly
   the eventual, ordered consistency it needs without a gateway worker. "Process now" sends the
   automation's `run_now` command; a `409 automation_busy` answer means a drain is already running
@@ -1584,7 +1617,9 @@ citations as links to notes.
 
 ### note-reflect
 
-Runs from a scheduled automation (default weekly, configurable). Deterministic tools produce
+Runs from a scheduled automation (default weekly, configurable); its first occurrence is one
+interval after the automation is created, and "Reflect now" (`automation.run_now`) runs it at once.
+A failed occurrence is retried by the automation (up to 3 attempts). Deterministic tools produce
 candidates; the model judges and writes:
 
 | Tool | Candidates |
@@ -2083,9 +2118,11 @@ The first version. It is installed from source; PyPI, npm and App Store publicat
   synthesis), deep (a stored dossier); since-you-last-looked changes, cue cards, entity cards as
   of a moment, then-versus-now, relation timelines, evidence chains, day and timeline views.
 - **Reflection**: open loops, contradictions, resurfacing and anniversaries turned into insights
-  on a schedule.
+  on a schedule; the first one runs a full interval after the notebook is set up (opening an
+  empty notebook never starts a model), or at once with "Reflect now".
 - **User actions**: close a task, retract a claim, undo a merge, acknowledge an insight, archive
-  a note; each one is a revision with the account as its source.
+  a note; each one is a revision with the account as its source. A claim you retract was never
+  true; "since you last looked" lists it as withdrawn, in plain words.
 - **Gateway integration** (with the AbstractGateway integration): per-user note tools,
   auto-approved; the note read API under `/api/gateway/note`; the processor and reflect
   automations through `POST /note/processor/ensure`; the Note app in the gateway's app catalog.

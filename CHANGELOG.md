@@ -26,9 +26,11 @@ The first version. It is installed from source; PyPI, npm and App Store publicat
   synthesis), deep (a stored dossier); since-you-last-looked changes, cue cards, entity cards as
   of a moment, then-versus-now, relation timelines, evidence chains, day and timeline views.
 - **Reflection**: open loops, contradictions, resurfacing and anniversaries turned into insights
-  on a schedule.
+  on a schedule; the first one runs a full interval after the notebook is set up (opening an
+  empty notebook never starts a model), or at once with "Reflect now".
 - **User actions**: close a task, retract a claim, undo a merge, acknowledge an insight, archive
-  a note; each one is a revision with the account as its source.
+  a note; each one is a revision with the account as its source. A claim you retract was never
+  true; "since you last looked" lists it as withdrawn, in plain words.
 - **Gateway integration** (with the AbstractGateway integration): per-user note tools,
   auto-approved; the note read API under `/api/gateway/note`; the processor and reflect
   automations through `POST /note/processor/ensure`; the Note app in the gateway's app catalog.
