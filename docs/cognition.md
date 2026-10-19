@@ -317,7 +317,13 @@ read once more; a second empty answer is kept and the revision says so ("A part 
 names nothing although it has text, even when read a second time."). `note_apply_revision`
 leaves out, with a warning, a mention whose name and aliases never occur as whole words in the
 note's own text (its title and header do not count: names copied from the context packet are
-refused); a statement about it is skipped, one pointing at it keeps the name as text.
+refused); a statement about it is skipped, one pointing at it keeps the name as text. A reused
+entity gains only the aliases the linking lists for it, and `unsure` without a candidate is
+created as new with a warning. The prompts also state: reuse an entity only when the mention
+names that very thing (a part, version, file or tool of X is a new entity related to X); one to
+three topics; no statement whose only content is that the text mentions something, and
+`dcterms:hasPart` only when stated; proposals and plans are `possible`; a superseded statement
+is written with `stance: retract` and its end date, the replacing one with `stance: revise`.
 
 ## Prompt cache, thinking and output caps
 

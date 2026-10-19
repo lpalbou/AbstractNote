@@ -177,6 +177,8 @@ class _Builder:
                                          + ("the candidate was reused." if eid else "it was created as new."))
             elif decision == "unsure":
                 close_to = self.candidate(m.ref, lm.candidate)
+                if close_to is None:
+                    self.warnings.append(f"{m.name} was marked unsure without a candidate; it was created as new.")
             name = (lm.name.strip() if lm and lm.name and lm.name.strip() else m.name.strip()) or m.ref
             if eid is None:
                 kind = (lm.kind if lm and lm.kind else m.kind)
@@ -194,8 +196,10 @@ class _Builder:
                                         stance="assert", observed_at=self.at, valid_from=self.at, valid_until=None,
                                         evidence=m.name, note_id=self.note_id))
             else:
+                # A reused entity gains only the aliases the linking lists for it (backlog 0024):
+                # the mention's own spelling may name a part or a namesake, not the entity.
                 known = self.known_names(eid)
-                for alias in [m.name, *m.aliases, *((lm.aliases if lm else []) or []), name]:
+                for alias in ((lm.aliases if lm else []) or []):
                     alias = str(alias or "").strip()
                     if alias and ids.fold(alias) not in known:
                         known.add(ids.fold(alias))

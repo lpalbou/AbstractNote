@@ -426,3 +426,41 @@ def test_flow_flags_about_a_part_reach_the_revision(nb):
     assert flag in out["warnings"]
     merged, _ = merge_extractions([ext, dict(extraction([]), warnings=[flag])])
     assert merged["warnings"] == [flag]
+
+
+def test_a_reused_entity_gains_only_the_aliases_the_linking_lists(nb):
+    seed(nb)
+    ctx = ToolContext(nb=nb)
+    nid = nb.capture("The flow tool and Dana again.", occurred_at="2026-03-02T10:00:00Z").note_id
+    note_context(ctx, nid)
+    ext = extraction([mention("m1", "flow tool", "software", aliases=["flow"]), mention("m2", "Dana", "person")])
+    _, names = merge_extractions([ext])
+    cands = note_resolve_candidates(ctx, nid, names)
+    dana = cand_index(cands, "m2", "ex:person-dana")
+    before = set(nb.store.aliases("ex:person-dana"))
+    note_apply_revision(ctx, nid, ext, {"mentions": [ml("m1", "create", name="flow tool", kind="software"),
+                                                      ml("m2", "reuse", dana, aliases=["D."], summary=None)]})
+    after = set(nb.store.aliases("ex:person-dana"))
+    assert after - before == {"D."}
+
+
+def test_unsure_without_a_candidate_is_created_with_a_warning(nb):
+    ctx = ToolContext(nb=nb)
+    nid = nb.capture("Zed called.", occurred_at="2026-02-02T10:00:00Z").note_id
+    note_context(ctx, nid)
+    out = note_apply_revision(ctx, nid, extraction([mention("m1", "Zed", "person")]),
+                              {"mentions": [ml("m1", "unsure", None, name="Zed", kind="person")]})
+    assert "Zed was marked unsure without a candidate; it was created as new." in out["warnings"]
+
+
+def test_the_wording_rules_stay_in_the_system_prompts():
+    """Eval 4.1 items 2-9 (backlog 0024 step 3); red when a rule is removed."""
+    ext, link, filing = (prompts.system_prompt(n) for n in ("extract", "link", "quick_filing"))
+    assert "generic words are never mentions" in ext and "Each mention's name is written in this text" in ext
+    assert "never extract the note itself" in ext
+    assert "one to three topics" in ext and "one to three topics" in filing
+    assert "`schema:mentions`" in ext and "`dcterms:hasPart` only when the text states" in ext
+    assert "possible for proposals" in ext and "`stance: retract` and `valid_until`" in ext
+    assert "a part, version, file, seat, tool or feature of X is a new entity related to X" in link
+    assert "With no candidate, the answer is `create`, never `unsure`." in link
+    assert "only other names the note uses for that very entity" in link

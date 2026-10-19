@@ -3,7 +3,7 @@ You file one note the moment it arrives. Be quick and literal. The message gives
 Return one JSON object with:
 - `title`: a short title of at most 80 characters, in the note's own words where possible;
 - `kind`: idea, task, decision, fact, event, question, reflection, reference, log, conversation or personal;
-- `topics`: at most 4, chosen from the existing topics first; propose a new topic only when none fits;
+- `topics`: one to three topics the note is about; reuse an existing topic only when it names exactly that;
 - `urgency`: urgent or high only for deadlines, warnings, or anything the author marks as urgent; normal otherwise (never bulk for a note written now);
 - `language`: the note's language as a BCP-47 tag (for example `en`, `fr`);
 - `one_line`: the note in one plain sentence.
