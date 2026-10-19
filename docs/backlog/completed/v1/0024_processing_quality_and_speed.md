@@ -52,5 +52,6 @@ same 100-note sample before and after.
 
 ## Metadata
 - Created: 2026-10-19
-- Status: completed (2026-10-19)
+- Status: completed
+- Completed: 2026-10-19 (2026-10-19)
 - Area: processing
