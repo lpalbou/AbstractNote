@@ -88,7 +88,11 @@ export function createMockGateway(options = {}) {
   };
   const noteRef = (n) => ({ note_id: n.note_id, title: n.title, kind: n.kind, occurred_at: n.occurred_at, excerpt: n.text.length > 160 ? `${n.text.slice(0, 157)}…` : n.text });
   const insightView = (i) => ({ note_id: i.note_id, title: i.title, body: i.body, insight_kind: i.insight_kind, occurred_at: i.occurred_at, acked_at: i.acked_at, evidence_note_ids: i.evidence_note_ids, entity_ids: i.entity_ids });
-  const taskView = (t) => ({ task_id: t.task_id, note_id: t.note_id, text: t.text, status: t.status, due: t.due || null, closed_at: t.closed_at || null });
+  const taskView = (t) => {
+    const opened = db.notes.get(t.note_id)?.occurred_at || nowIso();
+    const age_days = Math.max(0, Math.floor((Date.now() - Date.parse(opened)) / 86400000));
+    return { task_id: t.task_id, note_id: t.note_id, text: t.text, status: t.status, due: t.due || null, closed_at: t.closed_at || null, age_days, stale: t.status === "open" && age_days >= 60 };
+  };
   const claimView = (c) => {
     const n = db.notes.get(c.note_id);
     // W1 claim_dict: names as subject_name / object_name.

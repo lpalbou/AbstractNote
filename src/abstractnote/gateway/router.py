@@ -247,10 +247,11 @@ async def note_archive(request: Request, note_id: str) -> Dict[str, Any]:
 async def note_search(
     request: Request, q: str = Query(..., min_length=1), since: Optional[str] = None, until: Optional[str] = None,
     kinds: Optional[str] = None, entities: Optional[str] = None, topics: Optional[str] = None,
-    limit: int = Query(20, ge=1, le=200),
+    limit: int = Query(20, ge=1, le=200), order: Optional[str] = Query(None, pattern="^(relevance|earliest)$"),
 ) -> Dict[str, Any]:
     return await _run(request, lambda nb, svc, p: _call(nb, "search", q, **_clean(
-        since=since, until=until, kinds=_csv(kinds), entities=_csv(entities), topics=_csv(topics), limit=limit)))
+        since=since, until=until, kinds=_csv(kinds), entities=_csv(entities), topics=_csv(topics), limit=limit,
+        order=order)))
 
 
 @router.get("/entities")
