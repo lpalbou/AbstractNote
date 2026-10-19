@@ -5,9 +5,11 @@
  *   - starts the production server (bin/server.js) in-process on 127.0.0.1;
  *   - signs in through the app's own connection endpoint (the session proxy);
  *   - Capture: sends a note, checks the early answer from the ledger stream
- *     equals GET /runs/{id} output.response (review 01 check S3), and waits
- *     until the note is processed and its links appear in the thread (M8);
- *   - screenshots Capture, Graph and Remember in three themes at 1280 and 400 px.
+ *     equals GET /runs/{id} output.response (review 01 check S3: the reply shows
+ *     in the acknowledgement's details until the note is organized), and waits
+ *     until the note is organized and its links appear (M8);
+ *   - screenshots Capture, Remember and Explore in three themes at 1280x800 and 400 px
+ *     (Remember's first screen must fit 1280x800), plus the states of the design pass.
  *
  *   PLAYWRIGHT_BROWSERS_PATH=<scratch> node scripts/screens.mjs [--out DIR] [--themes a,b] [--widths 1280,400]
  *       [--gateway-url URL --user U --token T] [--only-smoke]
@@ -29,7 +31,7 @@ const args = Object.fromEntries(
     return acc;
   }, []),
 );
-const OUT = resolve(args.out || join(HERE, "..", "..", "untracked", "screens", "web"));
+const OUT = resolve(args.out || join(HERE, "..", "..", "untracked", "screens", "web-v2"));
 const THEMES = String(args.themes || "dark,observer-night,solarized-light").split(",");
 const WIDTHS = String(args.widths || "1280,400").split(",").map(Number);
 const live = Boolean(args["gateway-url"]);
@@ -55,7 +57,8 @@ async function main() {
   let gatewayUrl = args["gateway-url"];
   let mockServer = null;
   if (!live) {
-    const mock = createMockGateway({ processDelayMs: 2500 });
+    // Long enough to read the reply in the acknowledgement before the note is organized (S3).
+    const mock = createMockGateway({ processDelayMs: 6000 });
     mockServer = http.createServer(mock.handler);
     const port = await listen(mockServer, Number(args["mock-port"] || 18890));
     gatewayUrl = `http://127.0.0.1:${port}`;
@@ -67,7 +70,7 @@ async function main() {
 
   const browser = await chromium.launch();
   try {
-    const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: 1 });
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
     const page = await ctx.newPage();
     page.on("pageerror", (e) => {
       console.log(`page error: ${e.message}`);
@@ -92,11 +95,16 @@ async function main() {
     check(startBody?.input_data?.context?.attachments?.length === 1 && startBody?.input_data?.session_id === startBody?.session_id && typeof startBody?.input_data?.idempotency_key === "string", "the start carries the file, input_data.session_id and an idempotency key");
     const runId = (await (await startResp).json()).run_id;
     check(typeof runId === "string" && runId.length > 0, "Capture started note-capture");
-    const answer = page.locator(".pc-chat-body .nt-answer").last();
-    await answer.locator("p", { hasText: "Saved as" }).first().waitFor({ timeout: 60_000 });
-    const filing = page.locator(".nt-filing").last();
-    const source = await filing.getAttribute("data-answer-source");
-    const shown = (await answer.locator(".pc-markdown, p").first().innerText()).trim();
+    const ack = page.locator(".nt-ack").last();
+    await page.locator('.nt-ack[data-state="received"], .nt-ack[data-state="organizing"]').last().waitFor({ timeout: 60_000 });
+    check((await ack.locator(".nt-state").innerText()).trim().length > 0, "the acknowledgement shows one state in words");
+    await ack.locator(".nt-ack__line").click();
+    const reply = ack.locator(".nt-ack__reply");
+    await reply.waitFor({ timeout: 30_000 });
+    const source = await ack.getAttribute("data-answer-source");
+    const shown = (await reply.innerText()).trim();
+    check(shown.startsWith("Saved as"), `the reply reads "Saved as …" (${shown.slice(0, 40)})`);
+    await page.screenshot({ path: join(OUT, "capture-received-dark-1280.png") });
     // The answer can show before the run ends: read the run once it is terminal.
     let run = null;
     for (let i = 0; i < 120; i++) {
@@ -107,8 +115,11 @@ async function main() {
     check(source === "stream", `the answer came from the ledger stream (got ${source})`);
     check(typeof run?.output?.response === "string" && run.output.response.trim() === shown, `"Saved as" shown equals GET /runs/{id} output.response${run?.output?.response?.trim() === shown ? "" : ` (shown ${JSON.stringify(shown)} vs ${JSON.stringify(run?.output?.response)})`}`);
     // M8: the queued note is re-read until processed (live: the processor automation runs every 2 minutes).
-    await page.locator('.nt-filing[data-state="processed"]').last().waitFor({ timeout: live ? 300_000 : 30_000 });
-    check((await filing.locator(".nt-filing__row[aria-label='Linked to']").count()) === 1, "the queued note got its links in the thread once processed");
+    await page.locator('.nt-ack[data-state="organized"]').last().waitFor({ timeout: live ? 300_000 : 30_000 });
+    check((await ack.locator(".nt-ack__row[aria-label='Linked to']").count()) === 1, "the queued note got its links once organized");
+    check((await ack.locator(".nt-ack__reply").count()) === 0, "once organized the reply sentence is not repeated beside the links");
+    check(/^Added to .+ · .+ · /.test((await ack.locator(".nt-ack__summary").innerText()).trim()), "the organized line is short: Added to … · kind · links");
+    await page.screenshot({ path: join(OUT, "capture-organized-dark-1280.png") });
     if (live) {
       // Live tour: every view once, and which endpoints answered what (for the report).
       const seen = new Map();
@@ -139,10 +150,10 @@ async function main() {
       await page.goto(`${base}#/remember`);
       await page.getByRole("searchbox", { name: "Question" }).fill("What did Dana ask for?");
       await page.getByRole("button", { name: "Ask", exact: true }).click();
-      const card = page.locator(".nt-answer-card .nt-answer-text, .nt-answer-card .nt-filing__error").first();
+      const card = page.locator(".nt-answer .nt-answer-text, .nt-answer .nt-error-text").first();
       await card.waitFor({ timeout: 120_000 });
-      check((await page.locator(".nt-answer-card .nt-answer-text").count()) === 1, `Ask answered live: ${(await card.innerText()).slice(0, 80)}`);
-      await page.locator(".nt-answer-card").scrollIntoViewIfNeeded();
+      check((await page.locator(".nt-answer .nt-answer-text").count()) === 1, `Ask answered live: ${(await card.innerText()).slice(0, 80)}`);
+      await page.locator(".nt-answer").scrollIntoViewIfNeeded();
       await page.screenshot({ path: join(OUT, "live-ask-dark-1280.png") });
       await page.getByRole("button", { name: "Settings" }).click();
       await page.waitForTimeout(2000);
@@ -170,7 +181,7 @@ async function main() {
     for (const theme of THEMES) {
       await page.evaluate((t) => localStorage.setItem("af_appearance_abstractnote_v1", JSON.stringify({ theme: t, font_scale: "md", header_density: "standard" })), theme);
       for (const width of WIDTHS) {
-        await page.setViewportSize({ width, height: width < 600 ? 860 : 860 });
+        await page.setViewportSize({ width, height: width < 600 ? 860 : 800 });
         const shot = async (name, full = true) => page.screenshot({ path: join(OUT, `${name}-${theme}-${width}.png`), fullPage: full });
         // The app scrolls inside its main area; for a picture of the whole view, let the page grow.
         const fullShot = async (name) => {
@@ -181,46 +192,74 @@ async function main() {
         };
         await page.goto(`${base}#/capture`);
         await page.reload();
-        await page.locator(".nt-filing").last().waitFor();
+        await page.locator(".nt-ack").last().waitFor();
+        await page.locator(".nt-ack__line").last().click();
+        await page.waitForTimeout(200);
         await shot("capture", false);
-        await page.goto(`${base}#/graph?focus=ex:project-lut&depth=2&entity=ex:person-dana`);
-        await page.locator(".nt-node").first().waitFor();
-        await page.locator(".nt-panel h2").first().waitFor();
-        await page.waitForTimeout(300);
-        await shot("graph", false);
-        await fullShot(`graph-full-${theme}-${width}`);
         await page.goto(`${base}#/remember`);
-        await page.locator(".nt-card").first().waitFor();
+        await page.locator(".nt-cue").first().waitFor();
         await page.locator(".nt-thennow").first().waitFor();
         await page.locator(".nt-revisit .nt-item").first().waitFor();
         await page.waitForTimeout(300);
         await shot("remember", false);
+        if (width >= 1280) {
+          // The first screen holds since-you-last-looked, the cue cards and the ask bar.
+          const box = await page.locator(".nt-ask__bar").boundingBox();
+          check(box && box.y + box.height <= 800, `${theme}: Remember's first screen fits 1280x800 (the ask bar ends at ${Math.round((box?.y || 0) + (box?.height || 0))} px)`);
+        }
         await fullShot(`remember-full-${theme}-${width}`);
+        await page.goto(`${base}#/graph?focus=ex:project-lut&depth=2&entity=ex:project-lut`);
+        await page.locator(".nt-node").first().waitFor();
+        await page.locator(".nt-milestone").first().waitFor();
+        await page.waitForTimeout(300);
+        await shot("explore", false);
+        await fullShot(`explore-full-${theme}-${width}`);
+        await page.goto(`${base}#/graph?focus=ex:project-lut&depth=2&entity=ex:person-dana&view=list`);
+        await page.locator(".nt-rels tbody tr").first().waitFor();
+        await page.waitForTimeout(300);
+        await shot("explore-list", false);
       }
     }
-    // One extra state each, default theme, wide: an answer with sources, a scrubbed graph, the evidence chain, settings.
+    // One extra state each, default theme, wide: an answer in three layers, a date chosen in Explore,
+    // an entry asked for before it existed, the evidence chain, the review inbox, settings.
     await page.evaluate(() => localStorage.setItem("af_appearance_abstractnote_v1", JSON.stringify({ theme: "dark", font_scale: "md", header_density: "standard" })));
-    await page.setViewportSize({ width: 1280, height: 860 });
+    await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`${base}#/remember`);
     await page.reload();
     await page.getByRole("searchbox", { name: "Question" }).fill("LUT budget");
     await page.getByRole("button", { name: "Ask", exact: true }).click();
-    await page.locator(".nt-answer-card .nt-cite").first().waitFor({ timeout: 30_000 });
-    await page.locator(".nt-answer-card").scrollIntoViewIfNeeded();
+    await page.locator(".nt-progress li").first().waitFor({ timeout: 10_000 });
+    await page.locator(".nt-answer").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: join(OUT, "remember-asking-dark-1280.png") });
+    await page.locator(".nt-answer .nt-cite").first().waitFor({ timeout: 30_000 });
+    check((await page.locator(".nt-layer--synthesis").count()) === 1 && (await page.locator(".nt-layer--original").count()) === 1 && (await page.locator(".nt-layer--interpretation").count()) === 1, "the answer shows synthesis, original and interpretation apart");
+    await page.locator(".nt-answer").scrollIntoViewIfNeeded();
     await page.screenshot({ path: join(OUT, "remember-answer-dark-1280.png") });
-    await page.goto(`${base}#/graph?focus=ex:project-lut&depth=2&entity=ex:project-lut`);
+    await page.getByRole("radio", { name: "Quick" }).click();
+    check((await page.getByRole("button", { name: "Ask", exact: true }).count()) === 0, "Quick has no Ask button: matching notes follow the typing");
+    await page.locator(".nt-cue .nt-disclose").first().click();
+    await page.locator(".nt-why .nt-link").first().waitFor();
+    check(true, "a cue says why it surfaced, with the notes it rests on");
+    await page.locator("#review-h").scrollIntoViewIfNeeded();
+    await page.getByRole("button", { name: "Undo the match" }).first().click();
+    await page.screenshot({ path: join(OUT, "remember-review-dark-1280.png") });
+    await page.getByRole("button", { name: "Keep it" }).click();
+    await page.goto(`${base}#/graph?focus=ex:project-lut&depth=2&entity=ex:person-dana`);
     await page.locator(".nt-node").first().waitFor();
-    const slider = page.getByRole("slider", { name: "Show the notebook as it was on" });
-    await slider.evaluate((el) => {
-      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
-      set.call(el, "420");
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-    });
+    await page.getByLabel("Show the notebook as it was on the date").fill("2026-08-20");
     await page.locator(".nt-node--future").first().waitFor({ timeout: 10_000 });
+    await page.locator(".nt-milestone--later").first().waitFor({ timeout: 10_000 });
     await page.waitForTimeout(400);
-    check((await page.locator(".nt-node--future").count()) > 0, "scrubbing back fades entities that did not exist yet");
-    await page.screenshot({ path: join(OUT, "graph-then-dark-1280.png"), fullPage: true });
-    await page.getByRole("button", { name: "Back to now" }).click();
+    check((await page.locator(".nt-node--future").count()) > 0, "choosing an earlier date fades entities that did not exist yet");
+    await page.screenshot({ path: join(OUT, "explore-then-dark-1280.png") });
+    await page.goto(`${base}#/graph?focus=ex:project-lut&depth=2&entity=ex:project-watch-app`);
+    await page.getByLabel("Show the notebook as it was on the date").fill("2026-07-30");
+    await page.locator(".nt-notyet").waitFor({ timeout: 10_000 });
+    check(true, "an entry asked for before it existed says so");
+    await page.screenshot({ path: join(OUT, "explore-notyet-dark-1280.png") });
+    await page.getByRole("button", { name: "Back to now" }).first().click();
+    await page.goto(`${base}#/graph?focus=ex:project-lut&depth=2&entity=ex:project-lut`);
+    await page.getByRole("tab", { name: "Changes" }).click();
     await page.locator(".nt-panel .nt-list__row button", { hasText: "Why" }).first().click();
     await page.getByRole("button", { name: "This is wrong" }).waitFor();
     await page.getByRole("button", { name: "This is wrong" }).click();
@@ -238,7 +277,7 @@ async function main() {
     await page.screenshot({ path: join(OUT, "settings-dark-400.png") });
     if (!live) {
       // ADR-0039: three failed reads, then one sentence with Retry in place of the content.
-      await page.setViewportSize({ width: 1280, height: 860 });
+      await page.setViewportSize({ width: 1280, height: 800 });
       await page.keyboard.press("Escape");
       await page.locator(".af-drawer-backdrop").waitFor({ state: "detached", timeout: 5000 }).catch(() => undefined);
       await page.request.post(`${gatewayUrl}/__mock/fail`, { data: { path: "/api/gateway/note/cues", count: 3, status: 503 } });
@@ -250,7 +289,7 @@ async function main() {
       await err.scrollIntoViewIfNeeded();
       await page.screenshot({ path: join(OUT, "remember-error-dark-1280.png") });
       await err.getByRole("button", { name: "Retry" }).click();
-      await page.locator(".nt-card").first().waitFor();
+      await page.locator(".nt-cue").first().waitFor();
       check(true, "Retry loads the content");
     }
   } finally {
