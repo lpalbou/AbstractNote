@@ -28,6 +28,33 @@ export function answerFromRecord(record: unknown): string | null {
   return typeof msg === "string" && msg.trim() ? msg : null;
 }
 
+/** The tool names the recall flow calls, as progress a person reads (an unknown tool shows nothing). */
+const STEP_TOOLS: Record<string, string> = {
+  note_search: "Searched your notes",
+  note_expand: "Looked closer at what they connect",
+};
+
+/**
+ * One completed ledger step as a progress line for Standard and Deep answers, or null. Reads the effect type
+ * and the tool names only (structured fields), never the content.
+ */
+export function stepWords(record: unknown): string | null {
+  if (!record || typeof record !== "object") return null;
+  const r = record as Record<string, unknown>;
+  if (String(r.status || "").toLowerCase() !== "completed") return null;
+  const eff = (r.effect && typeof r.effect === "object" ? r.effect : {}) as Record<string, unknown>;
+  const type = String(eff.type || "").toLowerCase();
+  if (type === "tool_calls") {
+    const payload = (eff.payload && typeof eff.payload === "object" ? eff.payload : {}) as Record<string, unknown>;
+    const calls = Array.isArray(payload.tool_calls) ? (payload.tool_calls as Array<Record<string, unknown>>) : [];
+    const words = calls.map((c) => STEP_TOOLS[String(c?.name || "")]).find(Boolean);
+    return words || null;
+  }
+  if (type === "start_subworkflow") return "Dug through your history";
+  if (type === "llm_call") return "Wrote the answer";
+  return null;
+}
+
 /** Parse one SSE `step` frame's data into its record (null when unreadable). */
 export function recordFromFrame(data: string): { cursor: number; record: unknown } | null {
   try {
@@ -70,6 +97,8 @@ export type EventSourceLike = {
 
 export type FollowOptions = {
   onAnswer?: (text: string, source: "stream" | "ledger") => void;
+  /** Every ledger record as it arrives (progress lines: see `stepWords`). */
+  onStep?: (record: unknown) => void;
   /** Injected for tests; default `new EventSource(url)`. */
   eventSource?: (url: string) => EventSourceLike;
   sleep?: (ms: number) => Promise<void>;
@@ -107,6 +136,7 @@ export async function followRun(api: Api, runId: string, opts: FollowOptions = {
         const frame = recordFromFrame(String(ev.data));
         if (!frame) return;
         cursor = Math.max(cursor, frame.cursor);
+        opts.onStep?.(frame.record);
         const text = answerFromRecord(frame.record);
         if (text) seen(text, "stream");
       });
@@ -128,12 +158,13 @@ export async function followRun(api: Api, runId: string, opts: FollowOptions = {
       }
     }
   }
-  // Poll: the run for its status, its ledger pages for the early answer.
+  // Poll: the run for its status, its ledger pages for the early answer and the progress.
   for (let i = 0; ; i++) {
     if (opts.signal?.aborted) return { status: "cancelled" };
-    if (!answered) {
+    if (!answered || opts.onStep) {
       const page = await api.get<{ items?: Array<{ cursor?: number; record?: unknown }>; next_after?: number }>(`runs/${encodeURIComponent(runId)}/ledger`, { after: cursor, limit: 200 });
       for (const item of page.items || []) {
+        opts.onStep?.(item.record ?? item);
         const text = answerFromRecord(item.record ?? item);
         if (text) seen(text, "ledger");
       }

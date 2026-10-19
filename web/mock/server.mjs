@@ -120,7 +120,9 @@ export function createMockGateway(options = {}) {
     return [...map.values()];
   }
 
-  function entityCard(id, at) {
+  function entityCard(asked, at) {
+    // W1 expand.entity_card answers with the surviving entity of a merge (resolved_from = the id asked).
+    const id = ent(asked)?.merged_into || asked;
     const e = ent(id);
     if (!e || (at && e.first_seen && ms(e.first_seen) > ms(at))) return null;
     const cl = claimsOf(id).filter((c) => !at || ms(c.observed_at) <= ms(at));
@@ -140,7 +142,7 @@ export function createMockGateway(options = {}) {
       summary_history: history, first_seen: e.first_seen, last_seen: notes.length ? notes[notes.length - 1].occurred_at : e.last_seen,
       note_count: notes.length, beliefs, relations: rels, notes: notes.map(noteRef).reverse(),
       open_tasks: [...db.tasks.values()].filter((t) => t.status === "open" && t.entity_ids.includes(id)).map(taskView),
-      as_of: at || null, resolved_from: null, merged_from: [], merged_into: null,
+      as_of: at || null, resolved_from: id !== asked ? asked : null, merged_from: [...db.entities.values()].filter((m) => m.merged_into === id).map((m) => m.entity_id), merged_into: null,
       sparkline: [...notes.reduce((m, n) => m.set(n.occurred_at.slice(0, 7), (m.get(n.occurred_at.slice(0, 7)) || 0) + 1), new Map())].map(([month, n]) => ({ month, notes: n })),
     };
   }
@@ -315,7 +317,12 @@ export function createMockGateway(options = {}) {
     let evolution = { earliest: null, latest: null, turning_points: [] };
     if (topEntity) {
       evolution = thenNow(claimsOf(topEntity.entity_id), topEntity.summary_history);
-      if (evolution.turning_points.length) sentences.push(`What changed: ${evolution.turning_points.map((t) => `${t.summary} [${t.note_id}]`).join("; ")}.`);
+      // The notes behind the turning points are evidence too (the answer cites them).
+      for (const t of evolution.turning_points) {
+        const n = db.notes.get(t.note_id);
+        if (n && !evidence.some((e) => e.note_id === n.note_id)) evidence.push(noteRef(n));
+      }
+      if (evolution.turning_points.length) sentences.push(`What changed: ${evolution.turning_points.map((t) => `${t.text} [${t.note_id}]`).join("; ")}.`);
     }
     const answer = evidence.length ? sentences.join(" ") : "Your notes do not mention this yet.";
     const open_loops = [...db.tasks.values()].filter((t) => t.status === "open" && (!topEntity || t.entity_ids.includes(topEntity.entity_id))).slice(0, 3);
@@ -567,7 +574,16 @@ export function createMockGateway(options = {}) {
         return send(res, 200, { entity: entRef(id), items });
       }
       if (m[2] === "/then-now") return send(res, 200, { entity_id: id, revision_count: notesOf(id).length, ...thenNow(claimsOf(id), e.summary_history) });
-      return fail(res, 400, "This entity was not merged.");
+      if (method !== "POST") return fail(res, 405, "Method not allowed.");
+      const body = await readJson(req);
+      const from = ent(String(body.from_id || ""));
+      if (!from) return fail(res, 404, "Not found.");
+      if (from.merged_into !== id) return fail(res, 400, `${from.name} is not joined to ${e.name}.`);
+      from.merged_into = null;
+      const when = nowIso();
+      const revision_id = makeId("rv", `unmerge:${from.entity_id}:${when}`);
+      db.revisions.push({ revision_id, note_id: null, at: when, recorded_at: when, summary: `You separated ${from.name} from ${e.name}.`, ops: [{ op: "entity.unmerge", entity_id: id, from_id: from.entity_id, reason: String(body.reason || "") }], source: { client: "web", account: who.user_id } });
+      return send(res, 200, { revision_id });
     }
     m = np.match(/^\/relations\/([^/]+)\/([^/]+)$/);
     if (m) {
@@ -629,7 +645,17 @@ export function createMockGateway(options = {}) {
       if (q.get("entity")) items = items.filter((t) => t.entity_ids.includes(q.get("entity")));
       return send(res, 200, { items: items.sort((a, b) => ms(a.opened_at) - ms(b.opened_at)).map(taskView), next_cursor: null });
     }
-    if (np === "/cues") return send(res, 200, { items: db.cues.slice(0, Number(q.get("limit") || 3)).map((c) => ({ cue_id: c.cue_id, text: c.text, kind: c.kind, subject: c.subject })) });
+    if (np === "/cues") {
+      // W1 recall/changes.cues: the unacknowledged insights other than dossiers, newest first; the subject is
+      // the first linked entity, else the first evidence note, else the insight itself.
+      const items = [...db.insights.values()].filter((i) => !i.acked_at && i.insight_kind !== "dossier").sort((a, b) => ms(b.occurred_at) - ms(a.occurred_at)).slice(0, Number(q.get("limit") || 3)).map((i) => {
+        const e = i.entity_ids.map(ent).find(Boolean);
+        const n = i.evidence_note_ids.map((id) => db.notes.get(id)).find(Boolean);
+        const subject = e ? { kind: "entity", id: e.entity_id, title: e.name } : n ? { kind: "note", id: n.note_id, title: n.title } : { kind: "cue", id: i.note_id, title: i.title };
+        return { cue_id: i.note_id, text: i.body || i.title, kind: i.insight_kind, subject };
+      });
+      return send(res, 200, { items });
+    }
     if (np === "/graph") return send(res, 200, graph(list("focus"), at, Number(q.get("depth") || 1), Number(q.get("limit") || 60)));
     if (np === "/timeline") {
       const gran = q.get("granularity") || "week";

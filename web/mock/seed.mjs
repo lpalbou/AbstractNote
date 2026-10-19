@@ -44,6 +44,8 @@ const E = {
   lyon: ["ex:place-lyon", "place", "Lyon", ["the Lyon office"], "The office Marc works from."],
   report: ["ex:artifact-prefill-report", "artifact", "Prefill report", [], "Priya's benchmark report on the three prefill phases."],
   effort: ["ex:concept-recall-effort", "concept", "Recall effort", ["effort dial"], "Quick, standard and deep recall."],
+  // Created from a note, then merged into Dana by the linking model (the review inbox shows it).
+  danaR: ["ex:person-dana-r", "person", "Dana R.", [], "Sent the watch budget sheet."],
 };
 
 /*
@@ -135,6 +137,9 @@ const N = [
   ]],
   ["2026-10-18T21:40", "idea", "Ask Priya about the kernels", "Priya has been quiet since September; ask how the kernels went.", ["lut"], [], [], { status: "queued" }],
   ["2026-10-17T21:00", "log", "Release call transcript", "Transcript of the 0.11 release call (three hours).", ["release"], [], [], { status: "failed", error: "The filing model did not answer in time." }],
+  ["2026-10-14T16:20", "fact", "Budget sheet from Dana R.", "Dana R. sent the watch budget sheet: 15k for the quarter.", ["watch", "budget"], ["danaR", "watch"], [], {
+    merge: ["danaR", "dana", "Same person: Dana R. sent the sheet for the watch budget that Dana agreed to."],
+  }],
 ];
 
 const MIN = 60_000;
@@ -228,8 +233,15 @@ export function buildSeed() {
       t.closed_by_note_id = note_id;
       ops.push({ op: "task.close", task_id: t.task_id });
     }
+    if (extra.merge) {
+      const [fromKey, intoKey, reason] = extra.merge;
+      entities.get(eid(fromKey)).merged_into = eid(intoKey);
+      ops.push({ op: "entity.merge", from_id: eid(fromKey), into_id: eid(intoKey), reason });
+    }
     const names = ents.map((k) => E[k][2]);
-    const summary = superseded.length
+    const summary = extra.merge
+      ? `Found that ${E[extra.merge[0]][2]} is ${E[extra.merge[1]][2]}; linked to ${names.filter((n) => n !== E[extra.merge[0]][2]).join(", ")}.`
+      : superseded.length
       ? `Filed under ${note.topics.join(", ")}; updated what you knew about ${names.slice(0, 2).join(" and ")}.`
       : names.length
         ? `Linked to ${names.slice(0, 3).join(", ")}.`
@@ -259,15 +271,10 @@ export function buildSeed() {
     const note_id = makeId("nt", `insight-${key}`);
     insights.set(note_id, { note_id, kind: "insight", insight_kind, title, body, occurred_at: iso(at), evidence_note_ids: evidence.map(noteIdx), entity_ids: ents.map(eid), acked_at: null });
   };
-  addInsight("pareto", "2026-10-12T06:00", "reminder", "You promised Dana the Pareto three times", "The Pareto analysis for Dana was written down on 6 August, 19 August and 9 September and never marked done.", [6, 9, 13], ["dana", "pareto"]);
+  addInsight("pareto", "2026-10-12T06:00", "reminder", "You promised Dana the Pareto three times", "You wrote \"the Pareto for Dana\" on 6 August, 19 August and 9 September and never marked it done. Is it done?", [6, 9, 13], ["dana", "pareto"]);
   addInsight("lut", "2026-10-03T06:00", "evolution", "LUT went from funded to stopped in ten weeks", "LUT started on 23 July with 40k, was cut to 25k on 14 September and stopped on 2 October after three NO-GO phases.", [1, 14, 21], ["lut"]);
-
-  const cues = [
-    // Cues are insight notes; cue_id is the note id (docs/api.md pinned shapes).
-    { cue_id: makeId("nt", "cue-priya"), kind: "quiet_person", text: "Priya has not come up since 26 September. What is she working on now?", subject: { kind: "entity", id: eid("priya"), title: "Priya" } },
-    { cue_id: makeId("nt", "cue-pareto"), kind: "lingering_task", text: "You wrote \"the Pareto for Dana\" three times. Is it done?", subject: { kind: "task", id: pareto.task_id, title: "Send Dana the Pareto analysis" } },
-    { cue_id: makeId("nt", "cue-castor"), kind: "aged_decision", text: "Castor moved to Qwen 27B a month ago. Is it still the right model?", subject: { kind: "entity", id: eid("castor"), title: "Castor" } },
-  ];
+  addInsight("priya", "2026-10-17T06:00", "cue", "Priya has gone quiet", "Priya has not come up since 26 September. What is she working on now?", [8, 19], ["priya"]);
+  addInsight("castor", "2026-10-16T06:00", "reminder", "Castor's model is a month old", "Castor moved to Qwen 27B a month ago. Is it still the right model?", [16], ["castor"]);
 
   // W1 DEFAULT_SETTINGS shape.
   const settings = {
@@ -277,5 +284,5 @@ export function buildSeed() {
     process_inline_default: false,
   };
 
-  return { entities, notes, claims, revisions, tasks, queue, insights, cues, settings, entityKey: eid };
+  return { entities, notes, claims, revisions, tasks, queue, insights, settings, entityKey: eid };
 }

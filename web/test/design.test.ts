@@ -66,3 +66,73 @@ describe("How it evolved", () => {
     expect(localDay(end)).toBe("2026-08-20");
   });
 });
+
+import * as http from "node:http";
+import { proposedMatches } from "../src/lib/review";
+import { stepWords } from "../src/lib/runs";
+import { WHY_WORDS, basisLine, whyLine } from "../src/lib/why";
+// @ts-expect-error plain ESM module
+import { MOCK_TOKEN, createMockGateway } from "../mock/server.mjs";
+
+describe("review inbox", () => {
+  const rev = (id: string, at: string, ops: Array<Record<string, unknown>>) => ({ revision_id: id, note_id: `nt_${id}`, at, recorded_at: at, summary: `summary ${id}`, ops });
+  it("lists the merges no later unmerge undid, newest first", () => {
+    const revs = [
+      rev("r1", "2026-10-01T00:00:00Z", [{ op: "entity.merge", from_id: "a", into_id: "b", reason: "same" }]),
+      rev("r2", "2026-10-02T00:00:00Z", [{ op: "entity.merge", from_id: "c", into_id: "d", reason: "same too" }, { op: "claim.add", claim_id: "x" }]),
+      rev("r3", "2026-10-03T00:00:00Z", [{ op: "entity.unmerge", entity_id: "b", from_id: "a" }]),
+    ];
+    expect(proposedMatches(revs).map((m) => [m.from_id, m.into_id, m.note_id, m.reason])).toEqual([["c", "d", "nt_r2", "same too"]]);
+    expect(proposedMatches(revs.slice(0, 2)).map((m) => m.key)).toEqual(["c>d", "a>b"]);
+    expect(proposedMatches([])).toEqual([]);
+  });
+});
+
+describe("progress and why", () => {
+  const rec = (type: string, payload: unknown = {}, status = "completed") => ({ status, effect: { type, payload } });
+  it("names the steps of an answer from the effect type and the tool names only", () => {
+    expect(stepWords(rec("tool_calls", { tool_calls: [{ name: "note_search" }] }))).toBe("Searched your notes");
+    expect(stepWords(rec("tool_calls", { tool_calls: [{ name: "note_expand" }] }))).toBe("Looked closer at what they connect");
+    expect(stepWords(rec("tool_calls", { tool_calls: [{ name: "something_else" }] }))).toBeNull();
+    expect(stepWords(rec("llm_call"))).toBe("Wrote the answer");
+    expect(stepWords(rec("start_subworkflow"))).toBe("Dug through your history");
+    expect(stepWords(rec("llm_call", {}, "running"))).toBeNull();
+    expect(stepWords(rec("answer_user"))).toBeNull();
+  });
+  it("says why each insight kind surfaced, with a fallback", () => {
+    for (const kind of ["warning", "reminder", "connection", "contradiction", "evolution", "dossier", "cue"]) expect(WHY_WORDS[kind], kind).toBeTruthy();
+    expect(whyLine("something new")).toMatch(/look back/);
+    expect(basisLine(1)).toBe("Based on 1 note");
+    expect(basisLine(3)).toBe("Based on 3 notes");
+    expect(basisLine(0)).toBe("");
+  });
+});
+
+describe("mock gateway shapes the design pass reads", () => {
+  let server: http.Server;
+  let base = "";
+  const H = { Authorization: `Bearer ${MOCK_TOKEN}`, "Content-Type": "application/json" };
+  const get = async (p: string) => (await fetch(`${base}/api/gateway/note/${p}`, { headers: H })).json();
+  it("cues are unacknowledged insights; a merged entry resolves to its survivor; a merge can be undone", async () => {
+    server = http.createServer(createMockGateway({ processDelayMs: 50 }).handler);
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    try {
+      const cues = await get("cues?limit=3");
+      const insights = await get("insights?acked=false");
+      const ids = new Set(insights.items.map((i: { note_id: string }) => i.note_id));
+      expect(cues.items.length).toBe(3);
+      for (const c of cues.items) expect(ids.has(c.cue_id)).toBe(true);
+      const card = await get("entities/ex%3Aperson-dana-r");
+      expect(card).toMatchObject({ entity_id: "ex:person-dana", resolved_from: "ex:person-dana-r" });
+      expect(card.summary_history.every((h: { note_id?: string }) => typeof h.note_id === "string")).toBe(true);
+      const matches = proposedMatches((await get("revisions?limit=200")).items);
+      expect(matches.map((m) => [m.from_id, m.into_id])).toEqual([["ex:person-dana-r", "ex:person-dana"]]);
+      const undo = await fetch(`${base}/api/gateway/note/entities/ex%3Aperson-dana/unmerge`, { method: "POST", headers: H, body: JSON.stringify({ from_id: "ex:person-dana-r", reason: "test" }) });
+      expect(undo.status).toBe(200);
+      expect(proposedMatches((await get("revisions?limit=200")).items)).toEqual([]);
+    } finally {
+      server.close();
+    }
+  });
+});
