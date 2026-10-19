@@ -92,3 +92,23 @@ describe("runCapture", () => {
     expect(start.input_data.context).toMatchObject({ attachments: [{ $artifact: "art-0" }] });
   });
 });
+
+describe("first use", () => {
+  it("creates the processor automations only when the notebook has none", async () => {
+    const { ensureProcessor } = await import("../src/App");
+    const calls: string[] = [];
+    const mk = (automations: unknown) =>
+      createApi({
+        fetch: (async (url: RequestInfo | URL, init?: RequestInit) => {
+          calls.push(`${init?.method || "GET"} ${String(url)}`);
+          return new Response(JSON.stringify(String(url).endsWith("note/status") ? { automations } : { processor_id: "p", reflect_id: "r" }));
+        }) as unknown as typeof globalThis.fetch,
+        csrf: () => "c",
+      });
+    expect(await ensureProcessor(mk({ processor_id: null, reflect_id: null }))).toBe(true);
+    expect(calls).toContain("POST api/gateway/note/processor/ensure");
+    calls.length = 0;
+    expect(await ensureProcessor(mk({ processor_id: "p", reflect_id: "r" }))).toBe(false);
+    expect(calls.some((c) => c.startsWith("POST"))).toBe(false);
+  });
+});

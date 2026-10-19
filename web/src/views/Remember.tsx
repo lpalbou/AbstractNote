@@ -6,7 +6,8 @@ import { useDebounced, useRead } from "../lib/hooks";
 import { CURSOR_KEY, readLocal, writeLocal } from "../lib/local";
 import { noteAbout, useAt, type Route } from "../lib/nav";
 import { followRun, runErrorText, startFlow } from "../lib/runs";
-import type { Changes, Cue, EntityCard, EntityListItem, Insight, ListOf, NoteRef, Overview, RecallOutput, RelationTimeline, SearchResult, Task, ThenNow, Topic } from "../lib/types";
+import type { Changes, Cue, EntityCard, EntityListItem, Insight, ListOf, NoteRef, Overview, RecallOutput, RelationTimeline, SearchResult, Task, ThenNowRaw, Topic } from "../lib/types";
+import { claimsById, thenNowView } from "../lib/shapes";
 import { NOTE_KINDS, claimSentence, longDate, relative, shortDate, topicLabel } from "../lib/words";
 import { EntityChip, NoteLink, ReadView, Section, Sparkline, openClaim, openEntity, openNote, useApp } from "../components/common";
 import { ThenNowCard } from "../components/ThenNow";
@@ -427,7 +428,7 @@ function AnswerCard({ asked, onSave, saved, onFollowUp }: { asked: Asked; onSave
     );
   }
   const out = asked.output || {};
-  const evolution = normalizeEvolution(out.evolution);
+  const evolution = thenNowView(out.evolution);
   const text = out.answer || out.response || "";
   const { segments, cited } = splitCitations(text);
   const evidence = out.evidence || [];
@@ -460,7 +461,7 @@ function AnswerCard({ asked, onSave, saved, onFollowUp }: { asked: Asked; onSave
           </ol>
         </div>
       ) : null}
-      {evolution && (evolution.earliest || evolution.latest || evolution.turning_points.length) ? <ThenNowCard data={evolution} title="How it changed" /> : null}
+      {evolution ? <ThenNowCard data={evolution} title="How it changed" /> : null}
       {(out.open_loops || []).length ? (
         <div className="nt-block">
           <h3>Still open</h3>
@@ -497,16 +498,6 @@ function AnswerCard({ asked, onSave, saved, onFollowUp }: { asked: Asked; onSave
       </div>
     </article>
   );
-}
-
-/** The recall `evolution` (api.md leaves it open; the flow answers strings or {at, summary} points). */
-export function normalizeEvolution(e: unknown): ThenNow | null {
-  if (!e || typeof e !== "object") return null;
-  const r = e as Record<string, unknown>;
-  const point = (v: unknown) => (typeof v === "string" ? (v.trim() ? { at: "", summary: v } : null) : v && typeof v === "object" && typeof (v as { summary?: unknown }).summary === "string" ? (v as ThenNow["earliest"]) : null);
-  const tps = Array.isArray(r.turning_points) ? r.turning_points : [];
-  const turning_points = tps.map((t) => (typeof t === "string" ? { at: "", summary: t } : (t as ThenNow["turning_points"][number]))).filter((t) => t && typeof t.summary === "string");
-  return { earliest: point(r.earliest), latest: point(r.latest), turning_points };
 }
 
 // ---------------------------------------------------------------- then versus now
@@ -559,7 +550,7 @@ function ThenVersusNow() {
 
 function EntityThenNow({ id }: { id: string }) {
   const { api } = useApp();
-  const tn = useRead<ThenNow>(() => api.get<ThenNow>(`note/entities/${encodeURIComponent(id)}/then-now`), [api, id]);
+  const tn = useRead<ThenNowRaw>(() => api.get<ThenNowRaw>(`note/entities/${encodeURIComponent(id)}/then-now`), [api, id]);
   const card = useRead<EntityCard>(() => api.get<EntityCard>(`note/entities/${encodeURIComponent(id)}`), [api, id]);
   const dates = useMemo(() => (card.data?.notes || []).map((n) => n.occurred_at), [card.data]);
   const to = Date.now();
@@ -571,14 +562,14 @@ function EntityThenNow({ id }: { id: string }) {
           <button type="button" className="nt-link" onClick={() => openEntity(id)}>
             <span className="nt-link__title">{card.data.name}</span>
             <span className="nt-link__date">
-              {card.data.note_count} notes · latest {relative(card.data.last_seen)}
+              {card.data.note_count === 1 ? "1 note" : `${card.data.note_count ?? 0} notes`} · latest {relative(card.data.last_seen)}
             </span>
           </button>
           <Sparkline dates={dates} from={from} to={to} label={`${card.data.name} activity`} />
         </div>
       ) : null}
-      <ReadView read={tn} what="then and now" empty={(d) => (d.earliest || d.latest ? false : "Nothing has changed yet.")}>
-        {(d) => <ThenNowCard data={d} />}
+      <ReadView read={tn} what="then and now" empty={(d) => (thenNowView(d) ? false : "Nothing has changed yet.")}>
+        {(d) => <ThenNowCard data={thenNowView(d)!} />}
       </ReadView>
     </div>
   );
@@ -588,10 +579,13 @@ function RelationThenNow({ a, b }: { a: string; b: string }) {
   const { api } = useApp();
   const rel = useRead<RelationTimeline>(() => api.get<RelationTimeline>(`note/relations/${encodeURIComponent(a)}/${encodeURIComponent(b)}`), [api, a, b]);
   return (
-    <ReadView read={rel} what="this link" empty={(r) => (r.claims.length || (r.notes || []).length ? false : "Your notes do not link these two yet.")}>
+    <ReadView read={rel} what="this link" empty={(r) => (r.claims.length ? false : "Your notes do not link these two yet.")}>
       {(r) => (
         <div className="nt-thennow-wrap">
-          {r.then_now && (r.then_now.earliest || r.then_now.latest) ? <ThenNowCard data={r.then_now} /> : null}
+          {(() => {
+            const v = thenNowView(r.then_now, claimsById(r.claims));
+            return v ? <ThenNowCard data={v} /> : null;
+          })()}
           <ol className="nt-timeline">
             {r.claims.map((c) => (
               <li key={c.claim_id} className={c.status !== "active" ? "nt-timeline__item nt-timeline__item--old" : "nt-timeline__item"}>

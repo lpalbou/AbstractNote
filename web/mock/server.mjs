@@ -82,6 +82,10 @@ export function createMockGateway(options = {}) {
     return e ? { entity_id: e.entity_id, name: e.name, kind: e.kind } : { entity_id: id, name: id, kind: "thing" };
   };
   // Pinned shapes: docs/api.md "Pinned response shapes".
+  const entBrief = (id) => {
+    const e = ent(id);
+    return { entity_id: e.entity_id, kind: e.kind, name: e.name, aliases: e.aliases, summary: e.summary, first_seen: e.first_seen, last_seen: e.last_seen, note_count: e.note_count, merged_into: null };
+  };
   const noteRef = (n) => ({ note_id: n.note_id, title: n.title, kind: n.kind, occurred_at: n.occurred_at, excerpt: n.text.length > 160 ? `${n.text.slice(0, 157)}…` : n.text });
   const insightView = (i) => ({ note_id: i.note_id, title: i.title, body: i.body, insight_kind: i.insight_kind, occurred_at: i.occurred_at, acked_at: i.acked_at, evidence_note_ids: i.evidence_note_ids, entity_ids: i.entity_ids });
   const taskView = (t) => ({ task_id: t.task_id, note_id: t.note_id, text: t.text, status: t.status, due: t.due || null, closed_at: t.closed_at || null });
@@ -126,7 +130,7 @@ export function createMockGateway(options = {}) {
       .map((r) => {
         const other = r.source === id ? r.target : r.source;
         const list = r.claims.filter((c) => !at || ms(c.observed_at) <= ms(at));
-        return { other: entRef(other), predicate: r.predicate, direction: r.source === id ? "out" : "in", count: list.length, first_seen: r.first_seen, last_seen: r.last_seen, active: list.some((c) => activeAt(c, at)) };
+        return { other_id: other, other_name: entRef(other).name, predicate: r.predicate, direction: r.source === id ? "out" : "in", count: list.length, first_seen: r.first_seen, last_seen: r.last_seen, active: list.some((c) => activeAt(c, at)) };
       });
     const history = e.summary_history.filter((h) => !at || ms(h.at) <= ms(at));
     const notes = notesOf(id).filter((n) => !at || ms(n.occurred_at) <= ms(at));
@@ -135,8 +139,9 @@ export function createMockGateway(options = {}) {
       summary: history.length ? history[history.length - 1].summary : e.summary,
       summary_history: history, first_seen: e.first_seen, last_seen: notes.length ? notes[notes.length - 1].occurred_at : e.last_seen,
       note_count: notes.length, beliefs, relations: rels, notes: notes.map(noteRef).reverse(),
-      open_tasks: [...db.tasks.values()].filter((t) => t.status === "open" && t.entity_ids.includes(id)),
-      as_of: at || null,
+      open_tasks: [...db.tasks.values()].filter((t) => t.status === "open" && t.entity_ids.includes(id)).map(taskView),
+      as_of: at || null, resolved_from: null, merged_from: [], merged_into: null,
+      sparkline: [...notes.reduce((m, n) => m.set(n.occurred_at.slice(0, 7), (m.get(n.occurred_at.slice(0, 7)) || 0) + 1), new Map())].map(([month, n]) => ({ month, notes: n })),
     };
   }
 
@@ -146,16 +151,20 @@ export function createMockGateway(options = {}) {
       const old = c.supersedes ? db.claims.get(c.supersedes) : null;
       const n = db.notes.get(c.note_id);
       return {
-        at: c.observed_at,
-        summary: old ? `${entRef(c.subject_id).name} ${predicateWords(c.predicate)}: ${objectName(old)} → ${objectName(c)}` : `${describe(c)} was withdrawn`,
-        note_id: c.note_id, note_title: n ? n.title : null, claim_id: c.claim_id,
+        at: c.observed_at, kind: old ? "supersede" : "retract",
+        text: old ? `${entRef(c.subject_id).name} ${predicateWords(c.predicate)}: ${objectName(old)} → ${objectName(c)}` : `${describe(c)} was withdrawn`,
+        note_id: c.note_id, claim_id: old ? old.claim_id : c.claim_id, revision_id: c.revision_id,
       };
     });
     const first = sorted[0];
     const last = sorted[sorted.length - 1];
-    const earliest = history && history.length ? { at: history[0].at, summary: history[0].summary } : first ? { at: first.observed_at, summary: describe(first), note_id: first.note_id } : null;
-    const latest = history && history.length ? { at: history[history.length - 1].at, summary: history[history.length - 1].summary } : last ? { at: last.observed_at, summary: describe(last), note_id: last.note_id } : null;
-    return { earliest, latest, turning_points: turning };
+    // W1 then_now: summary points when the entity has summaries, else null with the claims beside them.
+    const point = (h) => ({ at: h.at, summary: h.summary, note_id: null, revision_id: null });
+    const earliest = history && history.length ? point(history[0]) : null;
+    const latest = history && history.length ? point(history[history.length - 1]) : null;
+    void first;
+    void last;
+    return { earliest, latest, turning_points: turning, earliest_claims: sorted.slice(0, 5).map(claimView), current_beliefs: sorted.filter((c) => c.status === "active").map(claimView) };
   }
 
   const predicateWords = (p) => p.split(":").pop().replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
@@ -557,7 +566,7 @@ export function createMockGateway(options = {}) {
         ].filter((it) => inRange(it.at, q.get("since"), q.get("until"))).sort((a, b) => ms(a.at) - ms(b.at));
         return send(res, 200, { entity: entRef(id), items });
       }
-      if (m[2] === "/then-now") return send(res, 200, { entity: entRef(id), ...thenNow(claimsOf(id).filter((c) => c.subject_id === id), e.summary_history) });
+      if (m[2] === "/then-now") return send(res, 200, { entity_id: id, revision_count: notesOf(id).length, ...thenNow(claimsOf(id), e.summary_history) });
       return fail(res, 400, "This entity was not merged.");
     }
     m = np.match(/^\/relations\/([^/]+)\/([^/]+)$/);
@@ -567,7 +576,20 @@ export function createMockGateway(options = {}) {
       if (!ent(a) || !ent(b)) return fail(res, 404, "Not found.");
       const between = [...db.claims.values()].filter((c) => (c.subject_id === a && c.object_id === b) || (c.subject_id === b && c.object_id === a)).filter((c) => inRange(c.observed_at, q.get("since"), q.get("until"))).sort((x, y) => ms(x.observed_at) - ms(y.observed_at));
       const shared = [...db.notes.values()].filter((n) => n.entity_ids.includes(a) && n.entity_ids.includes(b)).sort((x, y) => ms(x.occurred_at) - ms(y.occurred_at));
-      return send(res, 200, { a: entRef(a), b: entRef(b), claims: between.map(claimView), notes: shared.map(noteRef), then_now: thenNow(between, null) });
+      // W1 expand.relation: claims in history order, supersessions, then_now with claim briefs.
+      void shared;
+      const brief = (c) => ({ claim_id: c.claim_id, text: `${entRef(c.subject_id).name} ${c.predicate} ${objectName(c)}`, observed_at: c.observed_at, note_id: c.note_id, certainty: c.certainty });
+      const closed = between.filter((c) => c.status !== "active");
+      const firstAt = between.length ? between[0].observed_at : null;
+      return send(res, 200, {
+        a: entBrief(a), b: entBrief(b), since: q.get("since"), until: q.get("until"), claims: between.map(claimView),
+        supersessions: closed.map((c) => ({ claim_id: c.claim_id, superseded_by: c.superseded_by, at: c.valid_until, kind: c.status === "retracted" ? "retract" : "supersede", note_id: c.superseded_by ? db.claims.get(c.superseded_by)?.note_id : null })),
+        then_now: {
+          earliest: between.filter((c) => c.observed_at === firstAt).map(brief),
+          latest: between.filter((c) => c.status === "active").map(brief),
+          turning_points: closed.map((c) => ({ at: c.valid_until, kind: c.status === "retracted" ? "retract" : "supersede", claim_id: c.claim_id, superseded_by: c.superseded_by, note_id: c.superseded_by ? db.claims.get(c.superseded_by)?.note_id : null, reason: "" })),
+        },
+      });
     }
     m = np.match(/^\/claims\/([^/]+)(\/retract)?$/);
     if (m) {
@@ -585,10 +607,12 @@ export function createMockGateway(options = {}) {
       }
       const n = db.notes.get(c.note_id);
       const supersedes = c.supersedes ? [claimView(db.claims.get(c.supersedes))] : [];
+      const rev = db.revisions.find((r) => r.revision_id === c.revision_id) || null;
+      // W1 claim chain: attachments sit under their note.
       return send(res, 200, {
-        claim: claimView(c), supersedes, superseded_by: c.superseded_by ? claimView(db.claims.get(c.superseded_by)) : null,
-        notes: n ? [{ note_id: n.note_id, title: n.title, occurred_at: n.occurred_at, excerpt: c.evidence }] : [],
-        attachments: n ? n.attachments.map((a) => ({ ...a, note_id: n.note_id, excerpt: "Phase 1 prefill: 1,920 tokens/s against a 1,900 baseline; quality gate failed on 3 of 12 prompts." })) : [],
+        claim: claimView(c), supersedes, superseded_by: c.superseded_by ? claimView(db.claims.get(c.superseded_by)) : null, disputed_with: [],
+        notes: n ? [{ ...noteRef(n), attachments: n.attachments.map((a) => ({ ...a, note_id: n.note_id, extracted_text: "Phase 1 prefill: 1,920 tokens/s against a 1,900 baseline; quality gate failed on 3 of 12 prompts." })) }] : [],
+        revision: rev ? { revision_id: rev.revision_id, summary: rev.summary, at: rev.at } : null,
       });
     }
     m = np.match(/^\/tasks\/([^/]+)\/close$/);

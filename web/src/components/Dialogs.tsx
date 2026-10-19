@@ -3,7 +3,8 @@ import { AfModal } from "@abstractframework/ui-kit";
 import { Markdown } from "@abstractframework/panel-chat";
 import { ApiError } from "../lib/api";
 import { useRead } from "../lib/hooks";
-import type { ClaimChain, Note, RelationTimeline } from "../lib/types";
+import { claimsById, thenNowView } from "../lib/shapes";
+import type { Claim, ClaimChain, Note, RelationTimeline } from "../lib/types";
 import { capitalize, claimSentence, longDate, shortDate, topicLabel } from "../lib/words";
 import { EntityChip, KindBadge, NoteLink, ReadView, openClaim, overlayStore, useApp, useOverlay } from "./common";
 import { ThenNowCard } from "./ThenNow";
@@ -149,12 +150,18 @@ function ClaimDialog({ id, onClose }: { id: string; onClose: () => void }) {
               {chain.claim.valid_until ? ` until ${longDate(chain.claim.valid_until)}` : ""}
               {chain.claim.certainty && chain.claim.certainty !== "stated" ? ` · ${chain.claim.certainty}` : ""}
             </p>
-            {chain.superseded_by ? (
+            {chain.superseded_by && typeof chain.superseded_by === "object" ? (
               <div className="nt-block">
                 <h3>Replaced by</h3>
-                <button type="button" className="nt-link" onClick={() => openClaim(chain.superseded_by!.claim_id)}>
+                <button type="button" className="nt-link" onClick={() => openClaim((chain.superseded_by as Claim).claim_id)}>
                   <span className="nt-link__title">{claimSentence(chain.superseded_by)}</span>
                   <span className="nt-link__date">{shortDate(chain.superseded_by.observed_at)}</span>
+                </button>
+              </div>
+            ) : typeof chain.superseded_by === "string" ? (
+              <div className="nt-block">
+                <button type="button" className="nt-btn nt-btn--quiet" onClick={() => openClaim(chain.superseded_by as string)}>
+                  What replaced it
                 </button>
               </div>
             ) : null}
@@ -171,16 +178,16 @@ function ClaimDialog({ id, onClose }: { id: string; onClose: () => void }) {
             ) : null}
             <div className="nt-block">
               <h3>From your notes</h3>
+              {chain.claim.evidence ? <blockquote>{chain.claim.evidence}</blockquote> : null}
               {chain.notes.map((n) => (
                 <div key={n.note_id} className="nt-evidence">
                   <NoteLink note={n} />
-                  {n.excerpt ? <blockquote>{n.excerpt}</blockquote> : null}
-                </div>
-              ))}
-              {chain.attachments.map((a) => (
-                <div key={a.attachment_id} className="nt-evidence">
-                  <span className="nt-muted">{a.filename || "File"}</span>
-                  {a.excerpt ? <blockquote>{a.excerpt}</blockquote> : null}
+                  {(n.attachments || []).map((a) => (
+                    <div key={a.attachment_id}>
+                      <span className="nt-muted">{a.filename || "File"}</span>
+                      {a.excerpt || a.extracted_text ? <blockquote>{String(a.excerpt || a.extracted_text).slice(0, 600)}</blockquote> : null}
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>
@@ -201,12 +208,13 @@ function RelationDialog({ a, b, onClose }: { a: string; b: string; onClose: () =
   const { api } = useApp();
   const read = useRead<RelationTimeline>(() => api.get<RelationTimeline>(`note/relations/${encodeURIComponent(a)}/${encodeURIComponent(b)}`), [api, a, b]);
   const title = read.data ? `${read.data.a.name} and ${read.data.b.name}` : "How these two are linked";
+  const tn = read.data ? thenNowView(read.data.then_now, claimsById(read.data.claims)) : null;
   return (
     <AfModal open onClose={onClose} title={title} size="narrow">
       <ReadView read={read} what="this link">
         {(r) => (
           <div className="nt-dialog">
-            {r.then_now && (r.then_now.earliest || r.then_now.latest) ? <ThenNowCard data={r.then_now} title="Then and now" /> : null}
+            {tn ? <ThenNowCard data={tn} title="Then and now" /> : null}
             <div className="nt-block">
               <h3>Over time</h3>
               {r.claims.length ? (
@@ -225,14 +233,7 @@ function RelationDialog({ a, b, onClose }: { a: string; b: string; onClose: () =
                 <p className="nt-muted">They appear in the same notes but nothing links them directly.</p>
               )}
             </div>
-            {(r.notes || []).length ? (
-              <div className="nt-block">
-                <h3>Notes about both</h3>
-                {(r.notes || []).map((n) => (
-                  <NoteLink key={n.note_id} note={n} />
-                ))}
-              </div>
-            ) : null}
+
           </div>
         )}
       </ReadView>

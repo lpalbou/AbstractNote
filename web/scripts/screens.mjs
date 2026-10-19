@@ -69,7 +69,13 @@ async function main() {
   try {
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: 1 });
     const page = await ctx.newPage();
-    page.on("pageerror", (e) => failures.push(`page error: ${e.message}`));
+    page.on("pageerror", (e) => {
+      console.log(`page error: ${e.message}`);
+      failures.push(`page error: ${e.message}`);
+    });
+    page.on("console", (m) => {
+      if (m.type() === "error") console.log(`console error: ${m.text().slice(0, 300)}`);
+    });
     const signIn = await page.request.post(`${base}api/connection/gateway`, { data: { gateway_user_id: args.user || "demo", gateway_token: args.token || MOCK_TOKEN, persist: false } });
     check(signIn.ok(), "sign in through the app's connection endpoint");
 
@@ -77,8 +83,13 @@ async function main() {
     await page.goto(`${base}#/capture`);
     const text = `Met Dana about the watch timeline; she wants a beta by December. (${new Date().toISOString().slice(11, 19)})`;
     await page.getByRole("textbox", { name: "Note" }).fill(text);
+    await page.locator('input[type="file"]').setInputFiles({ name: "budget.txt", mimeType: "text/plain", buffer: Buffer.from("LUT budget: 25k for the quarter.\n") });
+    const upload = page.waitForResponse((r) => r.url().includes("api/gateway/attachments/upload"));
     const startResp = page.waitForResponse((r) => r.url().includes("api/gateway/runs/start") && r.request().method() === "POST");
     await page.getByRole("button", { name: "Save" }).click();
+    check((await upload).status() === 200, "the attached file was uploaded first");
+    const startBody = (await startResp).request().postDataJSON();
+    check(startBody?.input_data?.context?.attachments?.length === 1 && startBody?.input_data?.session_id === startBody?.session_id && typeof startBody?.input_data?.idempotency_key === "string", "the start carries the file, input_data.session_id and an idempotency key");
     const runId = (await (await startResp).json()).run_id;
     check(typeof runId === "string" && runId.length > 0, "Capture started note-capture");
     const answer = page.locator(".pc-chat-body .nt-answer").last();
@@ -86,16 +97,74 @@ async function main() {
     const filing = page.locator(".nt-filing").last();
     const source = await filing.getAttribute("data-answer-source");
     const shown = (await answer.locator(".pc-markdown, p").first().innerText()).trim();
-    const run = await (await page.request.get(`${base}api/gateway/runs/${runId}`)).json();
-    check(source === "stream", `the answer came from the ledger stream (got ${source})`);
-    check(typeof run?.output?.response === "string" && run.output.response.trim() === shown, `"Saved as" shown equals GET /runs/{id} output.response`);
-    if (!live) {
-      await page.locator('.nt-filing[data-state="processed"]').last().waitFor({ timeout: 30_000 });
-      check((await filing.locator(".nt-filing__row[aria-label='Linked to']").count()) === 1, "the queued note got its links in the thread once processed");
-    } else {
-      await page.locator('.nt-filing[data-state="queued"], .nt-filing[data-state="processed"]').last().waitFor({ timeout: 60_000 });
+    // The answer can show before the run ends: read the run once it is terminal.
+    let run = null;
+    for (let i = 0; i < 120; i++) {
+      run = await (await page.request.get(`${base}api/gateway/runs/${runId}`)).json();
+      if (["completed", "failed", "cancelled"].includes(run?.status)) break;
+      await page.waitForTimeout(500);
     }
-    if (args["only-smoke"]) return;
+    check(source === "stream", `the answer came from the ledger stream (got ${source})`);
+    check(typeof run?.output?.response === "string" && run.output.response.trim() === shown, `"Saved as" shown equals GET /runs/{id} output.response${run?.output?.response?.trim() === shown ? "" : ` (shown ${JSON.stringify(shown)} vs ${JSON.stringify(run?.output?.response)})`}`);
+    // M8: the queued note is re-read until processed (live: the processor automation runs every 2 minutes).
+    await page.locator('.nt-filing[data-state="processed"]').last().waitFor({ timeout: live ? 300_000 : 30_000 });
+    check((await filing.locator(".nt-filing__row[aria-label='Linked to']").count()) === 1, "the queued note got its links in the thread once processed");
+    if (live) {
+      // Live tour: every view once, and which endpoints answered what (for the report).
+      const seen = new Map();
+      page.on("response", (r) => {
+        const m = r.url().match(/api\/gateway\/([^?]+)/);
+        if (!m) return;
+        const route = m[1].replace(/\b(nt|cl|rv|tk|at)_[a-z2-7]+/g, "{id}").replace(/ex:[a-z0-9-]+/g, "{entity}").replace(/[0-9a-f]{8}-[0-9a-f-]{27}/g, "{run}").replace(/\d{4}-\d{2}-\d{2}$/, "{date}");
+        const key = `${r.request().method()} ${route}`;
+        seen.set(key, [...new Set([...(seen.get(key) || []), r.status()])]);
+      });
+      const rendered = async (name) => check((await page.locator(".nt-error", { hasText: "could not be shown" }).count()) === 0 && (await page.locator(".nt-header").count()) === 1, `${name} renders live data`);
+      await page.goto(`${base}#/remember`);
+      await page.reload();
+      await page.waitForLoadState("networkidle");
+      await page.waitForTimeout(1500);
+      await page.screenshot({ path: join(OUT, "live-remember-dark-1280.png"), fullPage: true });
+      await rendered("Remember");
+      const entity = await (await page.request.get(`${base}api/gateway/note/entities?limit=1`)).json();
+      const eid = entity?.items?.[0]?.entity_id || "";
+      await page.goto(`${base}#/graph?focus=${encodeURIComponent(eid)}&entity=${encodeURIComponent(eid)}`);
+      await page.waitForLoadState("networkidle");
+      await page.waitForTimeout(1500);
+      await page.screenshot({ path: join(OUT, "live-graph-dark-1280.png"), fullPage: true });
+      await rendered("Graph");
+      await page.getByRole("button", { name: "That day" }).click().catch(() => undefined);
+      await page.waitForTimeout(1500);
+      // Ask (note-recall, standard) live.
+      await page.goto(`${base}#/remember`);
+      await page.getByRole("searchbox", { name: "Question" }).fill("What did Dana ask for?");
+      await page.getByRole("button", { name: "Ask", exact: true }).click();
+      const card = page.locator(".nt-answer-card .nt-answer-text, .nt-answer-card .nt-filing__error").first();
+      await card.waitFor({ timeout: 120_000 });
+      check((await page.locator(".nt-answer-card .nt-answer-text").count()) === 1, `Ask answered live: ${(await card.innerText()).slice(0, 80)}`);
+      await page.locator(".nt-answer-card").scrollIntoViewIfNeeded();
+      await page.screenshot({ path: join(OUT, "live-ask-dark-1280.png") });
+      await page.getByRole("button", { name: "Settings" }).click();
+      await page.waitForTimeout(2000);
+      await page.getByRole("button", { name: "Process now" }).click();
+      const line = page.locator(".nt-queue p[role=status]");
+      await line.waitFor({ timeout: 20_000 });
+      const first = await line.innerText();
+      await page.getByRole("button", { name: "Process now" }).click();
+      await page.waitForTimeout(1500);
+      const second = await line.innerText();
+      check(["Processing started.", "Already running."].includes(first) && ["Processing started.", "Already running."].includes(second), `Process now live: "${first}" then "${second}"`);
+      await page.screenshot({ path: join(OUT, "live-settings-dark-1280.png") });
+      await rendered("Settings");
+      await page.keyboard.press("Escape");
+      await page.goto(`${base}#/capture`);
+      await page.waitForTimeout(800);
+      await page.screenshot({ path: join(OUT, "live-capture-dark-1280.png") });
+      await rendered("Capture");
+      console.log("\nlive endpoints (method route: statuses):");
+      for (const [k, v] of [...seen.entries()].sort()) console.log(`  ${k}: ${v.join(",")}`);
+    }
+    if (args["only-smoke"] || live) return;
 
     // ---- Screenshots
     for (const theme of THEMES) {

@@ -45,7 +45,8 @@ export type Note = NoteRef & {
   error?: string | null;
 };
 
-export type Relation = { other: EntityRef; predicate: string; direction: "in" | "out"; count: number; first_seen: string; last_seen: string; active: boolean };
+/** Entity card relation (W1 entity_card). */
+export type Relation = { other_id: string; other_name: string; predicate: string; direction: "in" | "out"; count: number; first_seen: string; last_seen: string; active: boolean };
 export type EntityCard = EntityRef & {
   aliases?: string[];
   summary?: string;
@@ -60,11 +61,19 @@ export type EntityCard = EntityRef & {
 };
 export type EntityListItem = EntityRef & { aliases?: string[]; summary?: string; first_seen?: string; last_seen?: string; note_count?: number };
 
-export type ThenNowPoint = { at: string; summary: string; note_id?: string };
-export type ThenNow = { earliest: ThenNowPoint | null; latest: ThenNowPoint | null; turning_points: Array<ThenNowPoint & { note_title?: string | null; claim_id?: string }> };
+/** Raw then-versus-now answers: see lib/shapes.ts (entity, relation and recall forms). */
+export type ThenNowRaw = Record<string, unknown>;
 export type TimelineItem = { type: "claim" | "note"; at: string; claim?: Claim; note?: NoteRef };
-export type RelationTimeline = { a: EntityRef; b: EntityRef; claims: Claim[]; notes?: NoteRef[]; then_now?: ThenNow };
-export type ClaimChain = { claim: Claim; supersedes: Claim[]; superseded_by: Claim | null; notes: Array<{ note_id: string; title: string; occurred_at: string; excerpt?: string }>; attachments: Array<Attachment & { note_id: string; excerpt?: string }> };
+/** GET /note/relations/{a}/{b} (W1 expand.relation). */
+export type RelationTimeline = { a: EntityListItem; b: EntityListItem; claims: Claim[]; supersessions?: unknown[]; then_now?: ThenNowRaw };
+/** GET /note/claims/{id} (W1). `superseded_by` may be a claim or an id. */
+export type ClaimChain = {
+  claim: Claim;
+  supersedes: Claim[];
+  superseded_by: Claim | string | null;
+  notes: Array<NoteRef & { attachments?: Array<Attachment & { excerpt?: string; extracted_text?: string | null }> }>;
+  revision?: { summary?: string } | null;
+};
 
 export type GraphNode = { id: string; kind: string; name: string; first_seen?: string; last_seen?: string; note_count?: number; summary?: string };
 export type GraphEdge = { source: string; target: string; predicate: string; first_seen?: string; last_seen?: string; count: number; active: boolean };

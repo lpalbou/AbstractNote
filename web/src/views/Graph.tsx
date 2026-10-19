@@ -3,7 +3,8 @@ import { AfChip, AfChipButton } from "@abstractframework/ui-kit";
 import { useDebounced, useRead } from "../lib/hooks";
 import { layoutGraph } from "../lib/graph_layout";
 import { navigate, noteAbout, useAt, type Route } from "../lib/nav";
-import type { Day, EntityCard, EntityListItem, Graph, ListOf, ThenNow, TimelineItem } from "../lib/types";
+import { thenNowView } from "../lib/shapes";
+import type { Day, EntityCard, EntityListItem, Graph, ListOf, ThenNowRaw, TimelineItem } from "../lib/types";
 import { capitalize, claimSentence, longDate, predicateWords, shortDate } from "../lib/words";
 import { EntityChip, NoteLink, ReadView, Section, Sparkline, openClaim, openRelation, useApp } from "../components/common";
 import { ThenNowCard } from "../components/ThenNow";
@@ -245,7 +246,8 @@ export function EntityPanel({ id, at, onFocus }: { id: string; at: string | null
   const { api } = useApp();
   const card = useRead<EntityCard>(() => api.get<EntityCard>(`note/entities/${encodeURIComponent(id)}`, { at }), [api, id, at]);
   const timeline = useRead<{ items: TimelineItem[] }>(() => api.get<{ items: TimelineItem[] }>(`note/entities/${encodeURIComponent(id)}/timeline`), [api, id]);
-  const thenNow = useRead<ThenNow>(() => api.get<ThenNow>(`note/entities/${encodeURIComponent(id)}/then-now`), [api, id]);
+  const thenNow = useRead<ThenNowRaw>(() => api.get<ThenNowRaw>(`note/entities/${encodeURIComponent(id)}/then-now`), [api, id]);
+  const tn = useMemo(() => thenNowView(thenNow.data), [thenNow.data]);
   const noteDates = useMemo(() => (timeline.data?.items || []).filter((i) => i.type === "note").map((i) => i.at), [timeline.data]);
   const range = useMemo(() => {
     const ts = noteDates.map((d) => Date.parse(d)).filter(Number.isFinite);
@@ -293,9 +295,9 @@ export function EntityPanel({ id, at, onFocus }: { id: string; at: string | null
               <Section title="Links">
                 <ul className="nt-list">
                   {(e.relations || []).map((r) => (
-                    <li key={`${r.other.entity_id}|${r.predicate}|${r.direction}`} className="nt-list__row">
-                      <button type="button" className={`nt-link${r.active ? "" : " nt-struck"}`} onClick={() => openRelation(e.entity_id, r.other.entity_id)}>
-                        <span className="nt-link__title">{r.direction === "out" ? `${predicateWords(r.predicate)} ${r.other.name}` : `${r.other.name} ${predicateWords(r.predicate)} ${e.name}`}</span>
+                    <li key={`${r.other_id}|${r.predicate}|${r.direction}`} className="nt-list__row">
+                      <button type="button" className={`nt-link${r.active ? "" : " nt-struck"}`} onClick={() => openRelation(e.entity_id, r.other_id)}>
+                        <span className="nt-link__title">{r.direction === "out" ? `${predicateWords(r.predicate)} ${r.other_name}` : `${r.other_name} ${predicateWords(r.predicate)} ${e.name}`}</span>
                         <span className="nt-link__date">{r.count > 1 ? `${r.count} times` : shortDate(r.first_seen)}</span>
                       </button>
                     </li>
@@ -312,9 +314,9 @@ export function EntityPanel({ id, at, onFocus }: { id: string; at: string | null
                 </ul>
               </Section>
             ) : null}
-            {thenNow.data && thenNow.data.turning_points.length ? (
+            {tn && tn.turning.length ? (
               <Section title="Then and now">
-                <ThenNowCard data={thenNow.data} />
+                <ThenNowCard data={tn} />
               </Section>
             ) : null}
             {(e.notes || []).length ? (
