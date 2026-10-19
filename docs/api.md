@@ -47,7 +47,8 @@ POST /api/gateway/runs/start
 ```
 
 Output: `{response, answer, evidence: [{note_id, title, occurred_at, excerpt}], evolution:
-{earliest, latest, turning_points: [...]}, open_loops: [...], follow_ups: [...], dossier_note_id?}`.
+{earliest, latest, turning_points: [...]}, open_loops: [...], follow_ups: [...], dossier_note_id?,
+hits, effort}` (`hits` is the quick search the answer started from).
 `response` is the answer text, so chat clients using the `abstractcode.agent.v1` contract
 (`prompt` in, `output.response` out) work unchanged: `prompt` is accepted as an alias of `question`.
 
@@ -98,7 +99,9 @@ signed-in principal for their own notebook. The few write actions are bookkeepin
 | `POST /note/processor/ensure` | create the processor and reflect automations if missing; returns their ids | |
 
 Response envelopes are plain JSON objects; lists return `{items, next_cursor}`. Times are ISO
-8601 UTC. Errors use the gateway's error shape.
+8601 UTC. Errors use the gateway's error shape, `{"detail": "<one sentence>"}`: `401` without a
+valid sign-in, `404` for an id that is not in the caller's notebook, `400` for bad input, `501`
+for a read the installed `abstractnote` does not provide.
 
 Pinned response shapes (clients decode these strictly; absent lists mean empty):
 
@@ -112,7 +115,7 @@ Pinned response shapes (clients decode these strictly; absent lists mean empty):
 | `GET /note/tasks` | `{items: [{task_id, note_id, text, status, due, closed_at}]}` |
 | `GET /note/notes/{id}` | `{note_id, title, text, kind, occurred_at, received_at, status, topics, summary, source, location, attachments: [...], revision: {...} or null, entities: [...], claims: [...], revisits: [NoteRef]}` |
 | `note-capture` output | `{response, note_id, status, revision_summary?}` |
-| `note-recall` output | `{response, answer, evidence: [NoteRef], evolution, open_loops, follow_ups, dossier_note_id?}` |
+| `note-recall` output | `{response, answer, evidence: [NoteRef], evolution, open_loops, follow_ups, dossier_note_id?, hits, effort}` |
 
 Linking a new note to a subject: clients may send `input_data.context.about = {kind: insight|task|cue|entity|note, id, title}` on `note-capture`; `note_capture` records it and the revision links the note to that subject (`dcterms:references`), so answering a cue or commenting an insight is traceable.
 
@@ -133,7 +136,7 @@ Flows call them through `tool_calls` nodes; agents may list them in `allowed_too
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `note_capture` | `text, idempotency_key?, title?, occurred_at?, location?, source?, priority?, attachments? ([{"$artifact": id}] inside the gateway; local paths only headless), session_id?, about?` | `{note_id, status: new|duplicate, duplicate_of?, first_saved_at?, received_at, revisits: [{note_id, occurred_at}], similar: [{note_id, title, occurred_at, score}], topics: [...], attachments: [{attachment_id, sha256, mime, size, extracted_by, extracted_chars}], warnings: [...]}` |
+| `note_capture` | `text, idempotency_key?, title?, occurred_at?, location?, source?, priority?, attachments? ([{"$artifact": id}] inside the gateway; [{"path": ...}] only headless, inside the folder given to bind as allow_paths_under), session_id?, about?` | `{note_id, status: new|duplicate, duplicate_of?, first_saved_at?, received_at, revisits: [{note_id, occurred_at}], similar: [{note_id, title, occurred_at, score}], topics: [...], attachments: [{attachment_id, sha256, mime, size, extracted_by, extracted_chars}], warnings: [...]}` |
 | `note_file` | `note_id, title, kind, topics, urgency, language, one_line` | `{note_id, priority, status}` |
 | `note_context` | `note_id, max_chars?` | `{note: {...}, sections: [...], similar_notes: [...], candidate_entities: [{entity_id, name, kind, aliases, summary, last_seen, active_claims: [...]}], open_tasks: [...], topics: [...], vocabulary: [{predicate, gloss}]}` |
 | `note_resolve_candidates` | `note_id, mentions: [{ref, name, kind, aliases}]` | `{mentions: [{ref, candidates: [{entity_id, name, kind, aliases, summary, last_seen, score, matched_by}]}]}` |
@@ -169,6 +172,23 @@ graph = nb.graph(focus=["ex:project-lut"], at=None, depth=2)
 day = nb.day("2026-09-14")
 ```
 
+`Notebook.open(dir, embedder=...)` takes the embedding model the notebook is pinned to (none
+needed for the built-in hashing embedder; `abstractnote.store.embeddings.openai_compat_embedder(url,
+model)` for an OpenAI-compatible server). `Notebook` is also a context manager.
+
+The note tools and the flows run headlessly too:
+
+```python
+from abstractnote.tools import bind, TOOL_NAMES
+from abstractnote.flows.runner import NoteRunner
+
+tools = bind("notes")                                      # the 18 note tools, bound to a notebook
+runner = NoteRunner.local("notes", provider="mlx", model="mlx-community/Qwen3.6-35B-A3B-4bit")
+runner.run_capture("Met Dana about the LUT budget")        # the note-capture flow, quick filing included
+runner.run_drain(max_items=20)                             # note-drain: process queued notes
+runner.run_recall("What did Dana ask for?", effort="standard")
+```
+
 `Notebook` wraps the store (`abstractnote.store.NoteStore`), the AbstractMemory projection
 (`abstractnote.store.kg.ClaimStore`), the queue, the embedder, and the recall helpers. The
 processing steps (`abstractnote.process`) are pure functions over these objects so that the
@@ -176,21 +196,35 @@ flows, the CLI and the tests share one implementation.
 
 ## CLI
 
+The `abstractnote` command works on a notebook directory. Output is JSON on standard output;
+problems are one sentence on standard error. Exit codes: `0` done, `2` bad input, `3` a part that
+is not installed or not available in this version (`abstractnote import`: `1` when some records
+failed; they are listed under `errors`).
+
 ```
-abstractnote capture "text" [--file PATH ...] [--at ISO] [--notebook DIR | --gateway URL --token T]
-abstractnote import claude-sessions DIR [--notebook DIR] [--since ISO] [--priority 0]
-abstractnote import agora DB_PATH [--channels a,b] [--skip-system] [--notebook DIR]
-abstractnote import markdown DIR [--glob '**/*.md'] [--notebook DIR]
-abstractnote process [--local --provider P --model M | --gateway URL --token T] [--max-items N] [--budget-s S]
-abstractnote search "query" [--effort quick|standard|deep] [--since ISO] [--until ISO]
-abstractnote entity ID [--at ISO]
-abstractnote day YYYY-MM-DD
-abstractnote status
-abstractnote bundle [--out PATH]            # pack the .flow bundle
-abstractnote processor ensure --gateway URL --token T
-abstractnote rebuild [--notebook DIR] [--reembed]   # replay revisions into fresh index and triple stores
-abstractnote changes --since ISO            # since you last looked, as JSON (for agents and scripts)
+abstractnote capture ["text"] --notebook DIR [--file PATH ...] [--at ISO] [--title T] [--priority 0-3] [--key KEY]
+abstractnote search "query" --notebook DIR [--effort quick|standard|deep] [--since ISO] [--until ISO] [--as-of ISO]
+                    [--limit N] [--provider P --model M]          # a model for standard and deep
+abstractnote entity ID --notebook DIR [--at ISO]
+abstractnote day YYYY-MM-DD --notebook DIR [--tz ZONE]
+abstractnote status --notebook DIR
+abstractnote changes --notebook DIR [--since CURSOR_OR_ISO] [--limit N]
+abstractnote process --local --notebook DIR --provider P --model M [--max-items 20] [--budget-s 90]
+abstractnote rebuild --notebook DIR [--reembed]                  # replay revisions into fresh stores
+abstractnote bundle [--out DIR]                                  # pack abstractnote@<version>.flow
+
+abstractnote import claude-sessions DIR --notebook DIR [--exclude-session ID ...] [--author NAME]
+abstractnote import agora DB_PATH --notebook DIR [--channels a,b] [--include-system] [--operators a,b]
+abstractnote import markdown DIR --notebook DIR [--glob '**/*.md']
+abstractnote import files PATH ... --notebook DIR
+                    # every import also takes [--since ISO] [--until ISO] [--dry-run]
 ```
 
-`--notebook DIR` works directly on a notebook directory (headless). `--gateway URL --token T`
-goes through a gateway as a client, with the token passed as a direct parameter.
+Every notebook command also takes `--embed-base-url URL --embed-model MODEL` (an OpenAI-compatible
+embedding server). A notebook is pinned to its embedding model when it is created, by the first
+command that opens it; later commands must give the same model, or run `rebuild --reembed` with
+the new one. Imports open the notebook with its own pin (see
+[troubleshooting.md](troubleshooting.md#this-notebooks-vectors-were-made-with-the-embedding-model-)).
+
+`--gateway URL --token T` and `abstractnote processor ensure` are reserved for a gateway client
+mode that is not available in this version (exit `3`); use the HTTP API above instead.

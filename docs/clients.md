@@ -17,7 +17,8 @@ API, read the note API for views, and never send user, tenant or runtime identif
   device; never an admin token.
 - Credential storage on Apple clients: a file in the app container protected with Data
   Protection (`completeUntilFirstUserAuthentication`), not the OS keychain, following the
-  framework's file-sealed secrets rule. The gateway address is stored next to it.
+  framework's file-sealed secrets rule. The gateway address is stored next to it. This choice is
+  proposed and awaits a ruling ([ADR 0006](adr/0006-apple-client-credential-storage.md)).
 
 ## Web app (`web/`)
 
@@ -29,14 +30,17 @@ API, read the note API for views, and never send user, tenant or runtime identif
   uses relative URLs and the shared shell, as the app-server contract requires.
 - Three views: **Capture**, **Graph**, **Remember** (see [remembering.md](remembering.md)), plus a
   small **Settings** drawer (filing model, answering model, inline processing, reflect schedule,
-  location permission, queue status with retry, sign-out). Capture asks once for location
-  permission and attaches it to notes when granted.
+  location, queue status with retry, appearance, sign-out). Location is off until you turn on the
+  Location switch in Settings (kept per browser, and offered only on a secure page); Capture then
+  attaches it to notes.
 - Theming uses ui-kit tokens only; tested on default-dark, observer-night and solarized-light.
-- Registered in the gateway app catalog as `note` (port 3006, cookie prefix `abstractnote`,
-  page title `AbstractNote`) and in the framework installer's app list.
+- Registered by the AbstractGateway integration in the gateway's app catalog, tray, web console
+  and terminal console as `note` (port 3006, cookie prefix `abstractnote`, page title
+  `AbstractNote`, command `abstractnote-web`).
 
-Development: `npm install && npm run dev` serves the app against a gateway given by
-`--gateway-url`; `npm run build` produces `dist/`; `node bin/cli.js --port 3006 --gateway-url
+Development: `npm install`, then `npm run dev -- --gateway-url <url>` serves the app against a
+gateway, and `npm run dev:mock` against a built-in sample notebook; `npm run build` produces
+`dist/`; `node bin/cli.js --port 3006 --gateway-url
 http://127.0.0.1:8080` runs the production server the way the gateway launches it.
 
 ## Apple Watch app (`watch/apple/`)
@@ -46,7 +50,7 @@ http://127.0.0.1:8080` runs the production server the way the gateway launches i
   (`ai.abstractframework.note`) for App Store packaging, a UI test target, Swift 6 with strict
   concurrency. `WKWatchOnly` is set; the app runs independently of a phone.
 - Swift package `Packages/AbstractGatewayClient`: the gateway client (credential, sign-in,
-  requests with read retries, run start and polling, attachment upload, note API reads) and a
+  requests with read retries, run start and polling, note API reads) and a
   mock client for previews and screenshots. It starts as a documented snapshot of the
   AbstractAssistant watch client (`SNAPSHOT.json` records the source and hashes) and adds the
   note endpoints; the two clients are candidates for a shared package once their APIs settle.
@@ -57,13 +61,13 @@ http://127.0.0.1:8080` runs the production server the way the gateway launches i
     fresh idempotency key so a radio retry never duplicates a note.
   - **Ask**: dictate a question, see the standard-effort answer with the evidence titles; "Dig
     deeper" starts a deep recall and the result shows in Today when ready.
-  - **Today**: unacknowledged insights, open loops, on-this-day notes; tap to acknowledge or to
-    add a note about it.
-  - **Settings**: gateway address, account, sign-out, about.
+  - **Today**: what changed since you last looked, unacknowledged insights, open loops, cue
+    cards and on-this-day notes; tap to acknowledge, close, or add a note about it.
+  - **Settings**: the server and account, the Place switch (location), About, Sign out.
 - Build and test: `scripts/build.sh` (XcodeGen, `swift test`, simulator build, screenshots of
   every screen with the mock client), `scripts/deploy-watch.sh` (signed build and install on a
   paired watch through `devicectl`, gateway and token passed as launch arguments), and a GitHub
-  workflow that builds on push.
+  workflow (`.github/workflows/watch.yml`) that builds and tests on every change to `watch/apple/`.
 - End-user copy rules: plain verbs, one-sentence errors, actions at the bottom, no system
   vocabulary, VoiceOver labels on every control, no state shown by colour alone, nothing
   consequential without a tap.
@@ -79,6 +83,7 @@ public release of either.
 
 ## CLI and agents
 
-The `abstractnote` CLI is a client when given `--gateway URL --token T`, and a headless tool when
-given `--notebook DIR`. Agents and entities running inside the same gateway call the note tools
-directly; agents elsewhere use the runs API like any client.
+The `abstractnote` CLI is a headless tool on a notebook directory (`--notebook DIR`);
+`--gateway URL --token T` is reserved for a client mode that is not available in this version.
+Agents and entities running inside the same gateway call the note tools directly; agents
+elsewhere use the runs API like any client.

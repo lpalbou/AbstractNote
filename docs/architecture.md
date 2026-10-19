@@ -99,7 +99,8 @@ flowchart LR
   watch app.
 - **iPhone app** (`phone/iphone/`): planned; the folder holds the plan and the shared contract.
 - **CLI** (`abstractnote`): capture from a terminal, import corpora (Claude Code sessions, an
-  agora hub database, folders of Markdown), run the processor headlessly, search.
+  agora hub database, folders of Markdown, files), run the processor headlessly, search. It works
+  on a notebook directory; gateway client mode is not available in this version.
 - **Agents and entities**: use the same recall tools and flows, with the effort level as a
   parameter, so digital users search the same memory as humans.
 
@@ -201,7 +202,7 @@ related material, and connections you may have missed, as insights.
 | AbstractGateway | auth, per-user planes, runs, attachments, automations, app hosting | AbstractNote adds flows, tools, a router; it never bypasses gateway auth |
 | AbstractRuntime | durable runs, VisualFlow compiler and executor, effect handlers, tool executor | flows use only catalog node types |
 | AbstractFlow | authoring format, node catalog, editor | flows are importable and editable |
-| AbstractMemory | `SQLiteTripleStore`, `TripleAssertion`, `TripleQuery`, `SQLiteJournal`, embedders | library use only; no changes to its public surface |
+| AbstractMemory | `SQLiteTripleStore`, `TripleAssertion`, `TripleQuery`, `SQLiteJournal`, embedders | library use, plus one additive store method (`close_assertion`) that closes a superseded assertion in place |
 | AbstractSemantics | predicate and entity-type registry for claims | predicates outside the registry are written in the `ex:` namespace |
 | AbstractCore | model calls with structured output, embeddings, media text extraction | per-node provider and model pins |
 | AbstractUIC | ui-kit, panel-chat, app-server for the web app | registry packages, semver ranges |

@@ -74,7 +74,7 @@ generic thing.
 | `kind` | `person`, `org`, `project`, `concept`, `place`, `event`, `artifact`, `software`, `thing` |
 | `name` | preferred display name (case preserved) |
 | `aliases` | other names seen in notes, case preserved; matching is case-folded |
-| `summary` | model-written orientation card, revised as notes arrive (each revision kept) |
+| `summary` | one model-written sentence saying what the notebook knows about it, rewritten when a note tells something new (each revision kept) |
 | `first_seen`, `last_seen` | `occurred_at` of the first and latest note mentioning it |
 | `note_count` | number of notes that mention it |
 | `merged_into` | set when the model decided this entity is the same as another; the record stays so old links still resolve |
@@ -245,7 +245,11 @@ note index and handed to the triple store, so a rebuild never re-embeds over the
 `rebuild --reembed` is requested (for example after the embedding model changed; the pin is shown
 by `GET /note/status`).
 
-Store: `SQLiteTripleStore` at `<plane>/abstractnote/kg.sqlite3` with the gateway's embedding
-route as embedder (vectors are pinned to that embedding space) and a `SQLiteJournal` in the same
-file (tables `memj_*`). A retraction (user action or a note's `retract` stance) closes the assertion
+Store: `SQLiteTripleStore` at `<plane>/abstractnote/kg.sqlite3` with the notebook's embedder
+(the gateway's embedding route inside a gateway; headless, the OpenAI-compatible model given on
+the command line or the built-in hashing embedder; vectors are pinned to that embedding space and
+handed over from the note index) and a `SQLiteJournal` in the same file (tables `memj_*`). A
+notebook opened without the embedder it is pinned to opens read-only: reads and word-only search
+work, and anything that would write or embed refuses with a plain sentence. A retraction (user
+action or a note's `retract` stance) closes the assertion
 the same way with `ClosureRecord(kind="retract")`; an undone merge closes its `schema:sameAs`.

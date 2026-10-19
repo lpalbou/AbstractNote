@@ -21,9 +21,10 @@ AbstractFlow's `wf_common`) into `src/abstractnote/flows/json/*.json`; the bundl
 | `note-reflect` | `abstractnote.reflect.v1` | a scheduled automation | surface open loops, contradictions, resurfaced material, connections |
 
 Every flow exposes `provider` and `model` start pins. Blank means the gateway's default text
-model. The processor automation and the reflect automation carry the user's "filing model" (a
-small fast model is recommended, for example `mlx-community/Qwen3.6-35B-A3B-4bit` on Apple
-silicon); recall at standard and deep effort uses the user's "answering model".
+model. The processor automation carries the user's "filing model" (a small fast model is
+recommended, for example `mlx-community/Qwen3.6-35B-A3B-4bit` on Apple silicon); the reflect
+automation and recall at standard and deep effort use the user's "answering model". The
+automations take the models from the notebook settings when they are created.
 
 ### note-capture
 
@@ -54,9 +55,9 @@ flowchart TD
   urgency and the language. `note_file` stores them and maps urgency to queue priority.
 - The answer is delivered twice: as an `answer_user` message as soon as it exists (clients that
   stream the ledger show it immediately) and as `output.response` when the run ends (clients
-  that poll the run read it there). `process_inline` is the client's choice: the web app sets it
-  when the queue is empty so the first note of a conversation links immediately; the watch leaves
-  it off and shows "Saved".
+  that poll the run read it there). `process_inline` is the client's choice: the web app sends
+  its "Instant linking" setting (`process_inline_default`, off by default); the watch always
+  sends `false` and shows the filing answer.
 
 ### note-process
 
@@ -88,8 +89,8 @@ flowchart TD
    packet; per task, open or close by index. The schema uses indexes and enumerations rather than
    free-form ids so that small models cannot invent identifiers; `note_apply_revision` rejects any
    reference outside the packet and downgrades it to `create` or `new` with a warning. The model
-   also writes the revision summary and an updated one-paragraph summary for each touched entity
-   when the note changes what is known.
+   also writes the revision summary and a one-sentence summary for each entity it creates and for
+   each reused entity the note tells something new about.
 5. **Apply** (`note_apply_revision`): writes the revision ops to the index and the triple store in
    one transaction per store, updates relations, topics, tasks, embeddings, and marks the note
    `processed`. The response lists created and merged entities, claims added and superseded, and
@@ -120,16 +121,17 @@ flowchart TD
   failure increments `attempts` and schedules a retry (after 1 minute, then after 10 minutes); the
   third failure sets the note to `failed`, visible in the web app's queue panel with the error,
   and offers a manual retry.
-- **The processor automation.** On first use the web app (or `abstractnote processor ensure`)
-  creates an automation per user: trigger `schedule@2` every `2m`, flow `note-drain`,
-  `max_items = 20`, `budget_s = 90`, and `_runtime.allowed_tools` listing the note tools.
+- **The processor automation.** `POST /api/gateway/note/processor/ensure` (the web app calls it
+  when it opens and the automations are missing) creates two automations per user, idempotently: the processor
+  (trigger `schedule@2` every `2m`, flow `note-drain`, `max_items = 20`, `budget_s = 90`) and the
+  reflect automation (every `7d` by default, flow `note-reflect`), each with
+  `_runtime.allowed_tools` listing the note tools.
   Automations run occurrences serially and coalesce missed ticks, which gives the queue exactly
   the eventual, ordered consistency it needs without a gateway worker. "Process now" sends the
   automation's `run_now` command; a `409 automation_busy` answer means a drain is already running
   and the queue panel says so. Steady-state throughput is at most `max_items` per interval.
 - **No approval waits.** Inside the gateway the note tools are added to the tool approval
   auto-approve set when the runtime is built, so a capture never parks on a tool-approval wait.
-  The hermetic gateway smoke test asserts zero approval waits in a capture run.
 - **Priority**: `3` urgent and `2` high come from the quick filing step (tasks with deadlines,
   warnings, anything the user marks urgent); `1` normal is the default for interactive capture;
   `0` bulk is used by importers so that live notes always go first.
@@ -147,7 +149,7 @@ structured pins, so a chat client that polls `output.response` shows the answer.
 flowchart TD
     S[on_flow_start question or prompt, effort, as_of?, since?, until?,<br/>entities?, topics?, provider?, model?] --> Q[tool note_search quick]
     Q --> E{effort}
-    E -- quick --> Z1[on_flow_end hits]
+    E -- quick --> Z1[on_flow_end response, hits]
     E -- standard --> X[tool note_expand<br/>entity cards as_of, claims timeline,<br/>neighbours, then-vs-now pairs]
     X --> L[llm_call synthesize<br/>resp_schema Answer]
     L --> Z2[on_flow_end response, answer, evidence, follow_ups]
@@ -219,7 +221,7 @@ Schema enums)
 ```json
 {"mentions": [{"ref": "m1", "decision": "reuse|create|merge|unsure", "candidate": 0,
                "merge_candidates": [0, 1], "name": "preferred name", "kind": "person|org|project|concept|place|event|artifact|software|thing",
-               "aliases": ["..."], "summary": "updated one-paragraph summary or null", "reason": "short"}],
+               "aliases": ["..."], "summary": "one sentence; required for create and unsure, and for a reused entity this note tells something new about; otherwise null", "reason": "short"}],
  "claims": [{"index": 0, "relation_to_existing": "new|restates|refines|supersedes|contradicts",
              "existing": 0, "reason": "short"}],
  "tasks": [{"index": 0, "closes_open_task": 0}],
@@ -248,7 +250,7 @@ in the extraction prompt with one-line glosses. Predicates outside it are accept
 
 ## Headless execution
 
-`abstractnote process --local --provider mlx --model <id>` runs `note-drain` without a gateway:
+`abstractnote process --local --notebook DIR --provider mlx --model <id>` runs `note-drain` without a gateway:
 the same compiled flows on a local `Runtime` with real effect handlers (AbstractCore model calls,
 the note tools bound to a local notebook directory). This is how the importers are processed in
 bulk, how the test suite exercises the flows with a scripted model, and how you can run the

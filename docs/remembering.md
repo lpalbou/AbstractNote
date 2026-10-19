@@ -82,9 +82,10 @@ Graph view already covers "what did this look like then".
 
 A chat. You type or paste, attach files, drop images, or dictate; with your permission the
 browser attaches your location. The answer tells you what was saved, how it was filed, which
-earlier notes and entities it relates to, and when you said the same thing before. When the
-notebook is quiet the answer includes the links the processor made; otherwise it says the note
-is queued, and the thread updates that message when the note is processed (the app re-reads the
+earlier notes and entities it relates to, and when you said the same thing before. With
+"Instant linking" on (Settings) the note is processed right away and the answer includes the
+links the processor made; otherwise it says the note is queued, and the thread updates that
+message when the note is processed (the app re-reads the
 note until it is). Nothing in the answer uses system vocabulary: no run ids, no ledger, no gateway.
 
 ## For agents and entities

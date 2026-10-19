@@ -1,0 +1,32 @@
+# AbstractNote
+
+> One endpoint for everything you want to remember: notes, files, photos, recordings and logs are filed with their time, place and provenance and grow a temporal semantic knowledge graph you can search by effort (quick, standard, deep) and revisit through time. Part of the AbstractFramework; runs on AbstractGateway, AbstractRuntime, AbstractFlow, AbstractMemory and AbstractCore. Version 0.1.0, installed from source (not yet on PyPI or npm).
+
+Start with README.md and docs/getting-started.md. docs/api.md is the reference for the runs API usage, the note read API under /api/gateway/note, the note tools, the Python API and the abstractnote CLI. docs/faq.md lists the limits of this version; docs/troubleshooting.md maps messages to fixes.
+
+## Core Docs
+- [README.md](README.md): project overview, what you get, install from source, quick start, clients
+- [docs/getting-started.md](docs/getting-started.md): install, a headless notebook in five minutes, then the gateway path with the web and watch apps
+- [docs/architecture.md](docs/architecture.md): principles, components, data plane, request lifecycles, dependencies and boundaries
+- [docs/api.md](docs/api.md): runs API usage, note read API routes and pinned shapes, note tools, Python API, CLI
+- [docs/faq.md](docs/faq.md): common questions and the limits of this version
+- [docs/troubleshooting.md](docs/troubleshooting.md): messages and symptoms, causes, checks and fixes
+
+## Topic Deep Dives
+- [docs/data-model.md](docs/data-model.md): notes, attachments, entities, claims, revisions, time semantics, de-duplication, AbstractMemory projection
+- [docs/cognition.md](docs/cognition.md): the flows, the queue and processor automation, structured output schemas, prompts, headless execution
+- [docs/remembering.md](docs/remembering.md): recall by cue and effort; the Remember, Graph and Capture views; agents as users
+- [docs/clients.md](docs/clients.md): web app, Apple Watch app, iPhone plan, sign-in and isolation
+- [docs/importers.md](docs/importers.md): Claude Code sessions, agora hub, Markdown trees and files as notes
+
+## Contributing
+- [CONTRIBUTING.md](CONTRIBUTING.md): development environment from sibling checkouts, tests, regenerating flows, product rules
+- [SECURITY.md](SECURITY.md): private vulnerability reporting and the security model
+
+## Optional
+- [docs/README.md](docs/README.md): documentation index
+- [docs/adr/README.md](docs/adr/README.md): architecture decision records
+- [CHANGELOG.md](CHANGELOG.md): release history
+- [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md): credits
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md): community standards
+- [watch/apple/README.md](watch/apple/README.md): the Apple Watch app for users
