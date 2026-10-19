@@ -13,7 +13,7 @@ import { ViewBoundary } from "./components/ViewBoundary";
 import { CaptureView } from "./views/Capture";
 import { GraphView } from "./views/Graph";
 import { RememberView } from "./views/Remember";
-import { SettingsDrawer } from "./views/Settings";
+import { SettingsDrawer, needsRepair } from "./views/Settings";
 import pkg from "../package.json";
 
 /** The deck's vocabulary: Capture, Remember (recall), Explore (the graph). The routes keep their names. */
@@ -112,11 +112,12 @@ function Header({ conn, user, onAppearance, onSettings, tabs }: { conn: Conn; us
   );
 }
 
-/** Create the processor automations when the notebook has none (idempotent on the server; a failure is retried on the next load). */
+/** Create the processor automations when the notebook has none, or repair them when the server reports one
+ * unhealthy (after an upgrade; idempotent on the server; a failure is retried on the next load). */
 export async function ensureProcessor(api: Api): Promise<boolean> {
   try {
     const status = await api.get<NoteStatus>("note/status");
-    if (status.automations?.processor_id && status.automations?.reflect_id) return false;
+    if (status.automations?.processor_id && status.automations?.reflect_id && !needsRepair(status.automations)) return false;
     await api.post("note/processor/ensure");
     return true;
   } catch {

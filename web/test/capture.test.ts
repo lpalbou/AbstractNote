@@ -110,5 +110,13 @@ describe("first use", () => {
     calls.length = 0;
     expect(await ensureProcessor(mk({ processor_id: "p", reflect_id: "r" }))).toBe(false);
     expect(calls.some((c) => c.startsWith("POST"))).toBe(false);
+    // W14: an automation the server reports unhealthy (an upgrade left it on the old version) is repaired on load
+    const health = (healthy: boolean) => ({ id: "x", state: "active", target: "abstractnote@0.1.0:note-drain", healthy, reason: healthy ? null : "old", paused: false });
+    calls.length = 0;
+    expect(await ensureProcessor(mk({ processor_id: "p", reflect_id: "r", processor: health(false), reflect: health(true) }))).toBe(true);
+    expect(calls).toContain("POST api/gateway/note/processor/ensure");
+    calls.length = 0;
+    expect(await ensureProcessor(mk({ processor_id: "p", reflect_id: "r", processor: health(true), reflect: health(true) }))).toBe(false);
+    expect(calls.some((c) => c.startsWith("POST"))).toBe(false);
   });
 });

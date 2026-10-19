@@ -71,7 +71,7 @@ import * as http from "node:http";
 import { fetchReview, reviewAction, runReviewAction } from "../src/lib/review";
 import { createApi } from "../src/lib/api";
 import { momentParams } from "../src/lib/nav";
-import { queueSentence } from "../src/views/Settings";
+import { needsRepair, queueSentence } from "../src/views/Settings";
 import { reviewWhy } from "../src/lib/why";
 import { stepWords } from "../src/lib/runs";
 import { WHY_WORDS, basisLine, whyLine } from "../src/lib/why";
@@ -109,6 +109,14 @@ describe("review inbox", () => {
   it("the queue sentence says what the processor runs with, not a number written in the app", () => {
     const q = { stats: { queued: 0, processing: 0, failed: 0 }, failed: [], waiting: [], automations: { processor_id: "p", reflect_id: "r" }, processor: { max_items: 5, interval: "10m" } };
     expect(queueSentence(q)).toBe("Nothing is waiting. Up to 5 notes are processed every 10 minutes.");
+  });
+  it("the queue panel asks for a repair only when the server reports an automation unhealthy", () => {
+    const h = (healthy: boolean) => ({ id: "a", state: healthy ? "active" : "failed", target: null, healthy, reason: healthy ? null : "It is failed and will not run again." });
+    expect(needsRepair({ processor_id: "p", reflect_id: "r" })).toBe(false);
+    expect(needsRepair({ processor_id: "p", reflect_id: "r", processor: h(true), reflect: h(true) })).toBe(false);
+    expect(needsRepair({ processor_id: "p", reflect_id: "r", processor: h(false), reflect: h(true) })).toBe(true);
+    expect(needsRepair({ processor_id: "p", reflect_id: "r", processor: h(true), reflect: h(false) })).toBe(true);
+    expect(needsRepair(undefined)).toBe(false);
   });
 });
 

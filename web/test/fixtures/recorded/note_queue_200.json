@@ -23,7 +23,23 @@
     "waiting": [],
     "automations": {
       "processor_id": "921d325f-7496-5039-b9bc-cc0833cb0ad4",
-      "reflect_id": "16d2fe7d-8130-552d-a214-9262ad016e0b"
+      "reflect_id": "16d2fe7d-8130-552d-a214-9262ad016e0b",
+      "processor": {
+        "id": "921d325f-7496-5039-b9bc-cc0833cb0ad4",
+        "state": "active",
+        "target": "abstractnote@0.1.1:note-drain",
+        "healthy": true,
+        "reason": null,
+        "paused": false
+      },
+      "reflect": {
+        "id": "16d2fe7d-8130-552d-a214-9262ad016e0b",
+        "state": "active",
+        "target": "abstractnote@0.1.1:note-reflect",
+        "healthy": true,
+        "reason": null,
+        "paused": false
+      }
     },
     "processor": {
       "max_items": 20,

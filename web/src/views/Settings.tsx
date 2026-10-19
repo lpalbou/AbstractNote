@@ -3,7 +3,7 @@ import { AfDrawer, AfSwitch, ProviderModelSelect, randomId, type ProviderOption 
 import { ApiError, NOT_INSTALLED, errorSentence } from "../lib/api";
 import { useRead, type ReadState } from "../lib/hooks";
 import { locationEnabled, setLocationEnabled } from "../lib/location";
-import type { ModelChoice, NoteSettings, NoteStatus, QueueInfo } from "../lib/types";
+import type { Automations, EnsureResult, ModelChoice, NoteSettings, NoteStatus, QueueInfo } from "../lib/types";
 import { NoteLink, ReadView, useApp } from "../components/common";
 
 export const REFLECT_CHOICES: Array<[string, string]> = [
@@ -20,6 +20,11 @@ export function everyWords(every: string | undefined): string {
   const n = Number(m[1]);
   const unit = { s: "second", m: "minute", h: "hour", d: "day" }[m[2] as "s" | "m" | "h" | "d"];
   return n === 1 ? `every ${unit}` : `every ${n} ${unit}s`;
+}
+
+/** The server reports the processor or the reflect automation unable to run (W14: e.g. after an upgrade). */
+export function needsRepair(a: Automations | undefined | null): boolean {
+  return a?.processor?.healthy === false || a?.reflect?.healthy === false;
 }
 
 export function queueSentence(q: QueueInfo): string {
@@ -206,13 +211,12 @@ function QueuePanel({ open, api }: { open: boolean; api: ReturnType<typeof useAp
     setBusy("run");
     setLine("");
     try {
-      let id = queue.data?.automations?.processor_id || "";
+      // A processor the server reports unhealthy (or none) is repaired or created first: run_now on it would do nothing.
+      let autos: Automations | undefined = queue.data?.automations;
+      if (!autos) autos = (await api.get<NoteStatus>("note/status")).automations;
+      let id = autos && !needsRepair(autos) ? autos.processor_id || "" : "";
       if (!id) {
-        const status = await api.get<NoteStatus>("note/status");
-        id = status.automations?.processor_id || "";
-      }
-      if (!id) {
-        const ensured = await api.post<{ processor_id?: string }>("note/processor/ensure");
+        const ensured = await api.post<EnsureResult>("note/processor/ensure");
         id = ensured.processor_id || "";
       }
       if (!id) throw new ApiError(500, "no processor", "no_processor");
@@ -221,6 +225,19 @@ function QueuePanel({ open, api }: { open: boolean; api: ReturnType<typeof useAp
       queue.reload();
     } catch (e) {
       setLine(e instanceof ApiError && e.status === 409 ? "Already running." : errorSentence(e, "the queue").replace("could not be loaded", "could not be started"));
+    } finally {
+      setBusy("");
+    }
+  };
+  const repair = async () => {
+    setBusy("repair");
+    setLine("");
+    try {
+      await api.post<EnsureResult>("note/processor/ensure");
+      setLine("Repaired.");
+      queue.reload();
+    } catch (e) {
+      setLine(e instanceof ApiError && e.status === 401 ? "Please sign in again." : "The repair did not work; try again in a minute.");
     } finally {
       setBusy("");
     }
@@ -245,6 +262,14 @@ function QueuePanel({ open, api }: { open: boolean; api: ReturnType<typeof useAp
         {(q) => (
           <>
             <p>{queueSentence(q)}</p>
+            {needsRepair(q.automations) ? (
+              <div className="nt-actions" role="alert">
+                <p className="nt-error-text">Processor needs repair.</p>
+                <button type="button" className="nt-btn" disabled={busy === "repair"} onClick={() => void repair()}>
+                  {busy === "repair" ? "Repairing…" : "Repair"}
+                </button>
+              </div>
+            ) : null}
             {q.failed.length ? (
               <ul className="nt-list">
                 {q.failed.map((n) => (

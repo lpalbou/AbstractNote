@@ -74,6 +74,9 @@ export function createMockGateway(options = {}) {
   let drainRunning = false;
   const PROCESSOR_ID = "au_note_processor";
   const REFLECT_ID = "au_note_reflect";
+  // W14: each automation's health, as GET /note/status and /note/queue report it.
+  const automationHealth = (id, flow) => ({ id, state: "active", target: `abstractnote@0.1.1:${flow}`, healthy: true, reason: null, paused: false });
+  const automations = () => ({ processor_id: PROCESSOR_ID, reflect_id: REFLECT_ID, processor: automationHealth(PROCESSOR_ID, "note-drain"), reflect: automationHealth(REFLECT_ID, "note-reflect") });
 
   // ------------------------------------------------------------ views
   const ent = (id) => db.entities.get(id);
@@ -481,7 +484,7 @@ export function createMockGateway(options = {}) {
 
     if (np === "/status") {
       const counts = { notes: db.notes.size, entities: db.entities.size, claims: db.claims.size, revisions: db.revisions.length, insights: db.insights.size };
-      return send(res, 200, { counts, queue: queueStats(), settings: db.settings, automations: { processor_id: PROCESSOR_ID, reflect_id: REFLECT_ID }, embedding_pin: { provider: "mock", model: "mock-embed", dims: 8 } });
+      return send(res, 200, { counts, queue: queueStats(), settings: db.settings, automations: automations(), embedding_pin: { provider: "mock", model: "mock-embed", dims: 8 } });
     }
     if (np === "/changes") {
       const since = q.get("since") || new Date(Date.now() - 7 * 86400_000).toISOString();
@@ -787,7 +790,7 @@ export function createMockGateway(options = {}) {
       const waiting = [...db.notes.values()].filter((n) => n.status === "queued").map((n) => ({ note_id: n.note_id, priority: 1, state: "queued", attempts: 0, next_attempt_at: null, title: n.title, occurred_at: n.occurred_at }));
       // W10: the processor's throughput (the processor_schedule setting the automation was created with).
       const ps = db.settings.processor_schedule;
-      return send(res, 200, { stats: queueStats(), failed, waiting, automations: { processor_id: PROCESSOR_ID, reflect_id: REFLECT_ID }, processor: { max_items: ps.max_items, interval: ps.every } });
+      return send(res, 200, { stats: queueStats(), failed, waiting, automations: automations(), processor: { max_items: ps.max_items, interval: ps.every } });
     }
     m = np.match(/^\/queue\/([^/]+)\/retry$/);
     if (m && method === "POST") {
@@ -809,7 +812,7 @@ export function createMockGateway(options = {}) {
       }
       return send(res, 200, db.settings);
     }
-    if (np === "/processor/ensure" && method === "POST") return send(res, 200, { processor_id: PROCESSOR_ID, reflect_id: REFLECT_ID, created: [] });
+    if (np === "/processor/ensure" && method === "POST") return send(res, 200, { processor: { id: PROCESSOR_ID, action: "kept", reason: null }, processor_id: PROCESSOR_ID, reflect: { id: REFLECT_ID, action: "kept", reason: null }, reflect_id: REFLECT_ID, created: [] });
     return fail(res, 404, "Not found.");
   }
 

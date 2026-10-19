@@ -128,7 +128,12 @@ export type Day = { day: string; tz: string; as_received?: string; notes: NoteRe
 /** GET /note/timeline (W1 NoteStore.timeline); `bucket` is the day, the Monday of the week, or the month. */
 export type TimelineBuckets = { granularity: string; buckets: Array<{ bucket: string; notes: number; revisions: number; entities_created: number; claims_superseded: number }> };
 export type Topic = { topic: string; count: number; first_seen?: string; last_seen?: string };
-export type Automations = { processor_id: string | null; reflect_id: string | null };
+/** One automation's health (GET /note/status and /note/queue, W14): `healthy` false = it cannot run on what the server serves; POST /note/processor/ensure repairs it. */
+export type AutomationHealth = { id: string | null; state: string; target: string | null; healthy: boolean; reason: string | null; paused?: boolean };
+export type Automations = { processor_id: string | null; reflect_id: string | null; processor?: AutomationHealth; reflect?: AutomationHealth };
+/** POST /note/processor/ensure: what it did with each automation. */
+export type EnsureAction = { id: string; action: "created" | "kept" | "recreated"; reason: string | null; previous_id?: string };
+export type EnsureResult = { processor_id: string; reflect_id: string; created: string[]; processor?: EnsureAction; reflect?: EnsureAction };
 export type QueueStats = { queued: number; processing: number; failed: number; done?: number; by_priority?: Record<string, number>; oldest_enqueued_at?: string | null };
 /** GET /note/queue (W1 Queue.summary + W2 automations). */
 export type QueueInfo = {
