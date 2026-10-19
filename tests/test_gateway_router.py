@@ -242,3 +242,31 @@ def test_ensure_starts_the_processor_now_and_reflect_only_after_one_interval(gw)
     assert before + timedelta(days=7) - timedelta(minutes=1) <= first <= datetime.now(timezone.utc) + timedelta(days=7)
     proc = config(ids["processor_id"])
     assert datetime.fromisoformat(proc["start_at"]) <= datetime.now(timezone.utc)
+
+
+def test_as_of_travels_over_http(gw):
+    """Review 01 S4 on the wire (review 02 M2): `at` reaches the Notebook through the router."""
+    from test_store_support import claim, create, rev, t
+
+    from abstractnote.gateway.router import notebook_for
+
+    c, h = gw["client"], gw["alice"]
+    t1, before = t(10), t(9)
+    nb = notebook_for(_plane(gw, "alice"))
+    nb.apply_revision(rev("rv_asof", t1, create("ex:person-dana", "Dana"), create("ex:project-lut", "LUT"),
+                          claim("cl_asof", "ex:person-dana", "schema:participant", "ex:project-lut", at=t1)))
+
+    def graph(at):
+        r = c.get("/api/gateway/note/graph", params={"at": at}, headers=h)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    assert graph(before)["nodes"] == [] and graph(before)["edges"] == []
+    then = graph(t1)
+    assert {n["id"] for n in then["nodes"]} == {"ex:person-dana", "ex:project-lut"}
+    assert then["edges"]
+    r = c.get("/api/gateway/note/entities/ex:person-dana", params={"at": before}, headers=h)
+    assert r.status_code == 400 and r.json()["detail"] == "That entity was not known yet at that time."
+    r = c.get("/api/gateway/note/entities/ex:person-dana", params={"at": t1}, headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["as_of"] == t1 and [b["claim_id"] for b in r.json()["beliefs"]] == ["cl_asof"]
