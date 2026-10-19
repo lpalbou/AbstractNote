@@ -87,7 +87,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif note_id is not None:\n    arguments[\"note_id\"] = note_id\nreturn {\"tool_calls\": [{\"name\": \"note_context\", \"call_id\": \"context\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif note_id is not None and note_id != \"\":\n    arguments[\"note_id\"] = note_id\nreturn {\"tool_calls\": [{\"name\": \"note_context\", \"call_id\": \"context\", \"arguments\": arguments}]}\n"
       }
     },
     {
@@ -850,7 +850,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif note_id is not None:\n    arguments[\"note_id\"] = note_id\nif mentions is not None:\n    arguments[\"mentions\"] = mentions\nreturn {\"tool_calls\": [{\"name\": \"note_resolve_candidates\", \"call_id\": \"resolve\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif note_id is not None and note_id != \"\":\n    arguments[\"note_id\"] = note_id\nif mentions is not None and mentions != \"\":\n    arguments[\"mentions\"] = mentions\nreturn {\"tool_calls\": [{\"name\": \"note_resolve_candidates\", \"call_id\": \"resolve\", \"arguments\": arguments}]}\n"
       }
     },
     {
@@ -1311,7 +1311,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif note_id is not None:\n    arguments[\"note_id\"] = note_id\nif extraction is not None:\n    arguments[\"extraction\"] = extraction\nif linking is not None:\n    arguments[\"linking\"] = linking\nreturn {\"tool_calls\": [{\"name\": \"note_apply_revision\", \"call_id\": \"apply\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif note_id is not None and note_id != \"\":\n    arguments[\"note_id\"] = note_id\nif extraction is not None and extraction != \"\":\n    arguments[\"extraction\"] = extraction\nif linking is not None and linking != \"\":\n    arguments[\"linking\"] = linking\nreturn {\"tool_calls\": [{\"name\": \"note_apply_revision\", \"call_id\": \"apply\", \"arguments\": arguments}]}\n"
       }
     },
     {

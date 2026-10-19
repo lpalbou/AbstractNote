@@ -38,31 +38,43 @@ done
 
 pid_alive() { [[ -f "$1" ]] && kill -0 "$(cat "$1")" 2>/dev/null; }
 
-clean_env() {
-  env -i PATH="$VENV/bin:/usr/bin:/bin:/usr/sbin:/sbin" HOME="$SCRATCH_HOME" \
-    XDG_CONFIG_HOME="$SCRATCH_HOME/.config" HF_HOME="$SCRATCH_HOME/hf" TMPDIR="$ROOT/tmp" LANG=C.UTF-8 "$@"
-}
-
 start() {
   mkdir -p "$DATA" "$SCRATCH_HOME" "$LOGS" "$ROOT/tmp"
   if pid_alive "$ROOT/gateway.pid"; then echo "already running: $GW"; exit 0; fi
-  clean_env "$VENV/bin/python" "$HERE/stub_llm.py" --port "$STUB_PORT" --delay "${STUB_DELAY_S:-1}" >"$LOGS/stub_llm.log" 2>&1 &
+  for p in "$PORT" "$STUB_PORT"; do
+    if lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1; then
+      echo "Port $p is already in use; choose PORT/STUB_PORT or stop what listens there." >&2
+      exit 1
+    fi
+  done
+  nohup env -i PATH="$VENV/bin:/usr/bin:/bin" HOME="$SCRATCH_HOME" \
+    "$VENV/bin/python" "$HERE/stub_llm.py" --port "$STUB_PORT" --delay "${STUB_DELAY_S:-1}" >"$LOGS/stub_llm.log" 2>&1 &
   echo $! >"$ROOT/stub.pid"
-  clean_env \
+  disown || true
+  # The text default every blank provider/model pin resolves to: the scripted model, in the scratch
+  # HOME's AbstractCore config (never the operator's). Local engines point at a closed port so a
+  # stray call fails at once instead of reaching a real LM Studio or Ollama.
+  local dead="http://127.0.0.1:9/v1"
+  env -i PATH="$VENV/bin:/usr/bin:/bin" HOME="$SCRATCH_HOME" LMSTUDIO_BASE_URL="$dead" OLLAMA_BASE_URL="$dead" \
+    "$VENV/bin/abstractcore" config set-default output.text --provider openai-compatible --model note-stub >"$LOGS/abstractcore-config.log" 2>&1
+  nohup env -i PATH="$VENV/bin:/usr/bin:/bin:/usr/sbin:/sbin" HOME="$SCRATCH_HOME" \
+    XDG_CONFIG_HOME="$SCRATCH_HOME/.config" HF_HOME="$SCRATCH_HOME/hf" TMPDIR="$ROOT/tmp" LANG=C.UTF-8 \
+    LMSTUDIO_BASE_URL="$dead" OLLAMA_BASE_URL="$dead" \
     ABSTRACTGATEWAY_DATA_DIR="$DATA" \
-    ABSTRACTGATEWAY_PROVIDER=openai-compatible ABSTRACTGATEWAY_MODEL=note-stub \
     OPENAI_BASE_URL="http://127.0.0.1:$STUB_PORT/v1" OPENAI_API_KEY=stub \
     ABSTRACTGATEWAY_MAX_ATTACHMENT_BYTES="$MAX_ATTACHMENT_BYTES" \
     ABSTRACTGATEWAY_AUTO_PUBLISH_SHIPPED=0 ABSTRACTGATEWAY_POLL_S=0.2 \
     "$VENV/bin/abstractgateway" serve --host 127.0.0.1 --port "$PORT" --no-tray --no-print-token \
       --data-dir "$DATA" >"$LOGS/gateway.log" 2>&1 &
   echo $! >"$ROOT/gateway.pid"
+  disown || true
   for _ in $(seq 1 120); do
     if curl -fsS "$GW/api/health" >/dev/null 2>&1; then break; fi
     if ! pid_alive "$ROOT/gateway.pid"; then echo "the gateway exited; see $LOGS/gateway.log" >&2; exit 1; fi
     sleep 0.5
   done
   curl -fsS "$GW/api/health" >/dev/null || { echo "the gateway did not answer; see $LOGS/gateway.log" >&2; exit 1; }
+  for _ in $(seq 1 60); do [[ -s "$DATA/auth/bootstrap-admin-token" ]] && break; sleep 0.5; done
   local admin
   admin="$(cat "$DATA/auth/bootstrap-admin-token")"
   : >"$ROOT/tokens.env"

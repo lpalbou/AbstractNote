@@ -260,7 +260,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif text is not None:\n    arguments[\"text\"] = text\nif title is not None:\n    arguments[\"title\"] = title\nif occurred_at is not None:\n    arguments[\"occurred_at\"] = occurred_at\nif location is not None:\n    arguments[\"location\"] = location\nif source is not None:\n    arguments[\"source\"] = source\nif idempotency_key is not None:\n    arguments[\"idempotency_key\"] = idempotency_key\nif priority is not None:\n    arguments[\"priority\"] = priority\nif session_id is not None:\n    arguments[\"session_id\"] = session_id\nif attachments is not None:\n    arguments[\"attachments\"] = attachments\nif about is not None:\n    arguments[\"about\"] = about\nreturn {\"tool_calls\": [{\"name\": \"note_capture\", \"call_id\": \"capture\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif text is not None and text != \"\":\n    arguments[\"text\"] = text\nif title is not None and title != \"\":\n    arguments[\"title\"] = title\nif occurred_at is not None and occurred_at != \"\":\n    arguments[\"occurred_at\"] = occurred_at\nif location is not None and location != \"\":\n    arguments[\"location\"] = location\nif source is not None and source != \"\":\n    arguments[\"source\"] = source\nif idempotency_key is not None and idempotency_key != \"\":\n    arguments[\"idempotency_key\"] = idempotency_key\nif priority is not None and priority != \"\":\n    arguments[\"priority\"] = priority\nif session_id is not None and session_id != \"\":\n    arguments[\"session_id\"] = session_id\nif attachments is not None and attachments != \"\":\n    arguments[\"attachments\"] = attachments\nif about is not None and about != \"\":\n    arguments[\"about\"] = about\nreturn {\"tool_calls\": [{\"name\": \"note_capture\", \"call_id\": \"capture\", \"arguments\": arguments}]}\n"
       }
     },
     {
@@ -938,7 +938,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif note_id is not None:\n    arguments[\"note_id\"] = note_id\nif title is not None:\n    arguments[\"title\"] = title\nif kind is not None:\n    arguments[\"kind\"] = kind\nif topics is not None:\n    arguments[\"topics\"] = topics\nif urgency is not None:\n    arguments[\"urgency\"] = urgency\nif language is not None:\n    arguments[\"language\"] = language\nif one_line is not None:\n    arguments[\"one_line\"] = one_line\nreturn {\"tool_calls\": [{\"name\": \"note_file\", \"call_id\": \"file\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif note_id is not None and note_id != \"\":\n    arguments[\"note_id\"] = note_id\nif title is not None and title != \"\":\n    arguments[\"title\"] = title\nif kind is not None and kind != \"\":\n    arguments[\"kind\"] = kind\nif topics is not None and topics != \"\":\n    arguments[\"topics\"] = topics\nif urgency is not None and urgency != \"\":\n    arguments[\"urgency\"] = urgency\nif language is not None and language != \"\":\n    arguments[\"language\"] = language\nif one_line is not None and one_line != \"\":\n    arguments[\"one_line\"] = one_line\nreturn {\"tool_calls\": [{\"name\": \"note_file\", \"call_id\": \"file\", \"arguments\": arguments}]}\n"
       }
     },
     {
@@ -1366,7 +1366,7 @@
           "outcome": "ok"
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif note_id is not None:\n    arguments[\"note_id\"] = note_id\nif outcome is not None:\n    arguments[\"outcome\"] = outcome\nif revision_id is not None:\n    arguments[\"revision_id\"] = revision_id\nreturn {\"tool_calls\": [{\"name\": \"note_queue_ack\", \"call_id\": \"inline_ack\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif note_id is not None and note_id != \"\":\n    arguments[\"note_id\"] = note_id\nif outcome is not None and outcome != \"\":\n    arguments[\"outcome\"] = outcome\nif revision_id is not None and revision_id != \"\":\n    arguments[\"revision_id\"] = revision_id\nreturn {\"tool_calls\": [{\"name\": \"note_queue_ack\", \"call_id\": \"inline_ack\", \"arguments\": arguments}]}\n"
       }
     },
     {

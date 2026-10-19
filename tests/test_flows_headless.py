@@ -149,6 +149,13 @@ def test_capture_answers_early_and_in_the_output(runner, doubles):
     assert "note_queue_ack" not in doubles.names()
 
 
+def test_blank_arguments_are_left_out(runner, doubles):
+    # A client form that sends "" for a number must not reach the tool as "" (the runtime refuses it).
+    runner.run_capture("Met Dana", priority="", title="", occurred_at="")
+    (cap,) = doubles.args("note_capture")
+    assert "priority" not in cap and "title" not in cap and "occurred_at" not in cap
+
+
 def test_capture_passes_what_the_note_is_about(runner, doubles):
     about = {"kind": "cue", "id": "nt_cue", "title": "Dana has gone quiet"}
     runner.run_capture("She is on leave.", context={"about": about})

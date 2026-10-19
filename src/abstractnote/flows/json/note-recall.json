@@ -212,7 +212,7 @@
           "limit": 20
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif query is not None:\n    arguments[\"query\"] = query\nif since is not None:\n    arguments[\"since\"] = since\nif until is not None:\n    arguments[\"until\"] = until\nif entities is not None:\n    arguments[\"entities\"] = entities\nif topics is not None:\n    arguments[\"topics\"] = topics\nif limit is not None:\n    arguments[\"limit\"] = limit\nreturn {\"tool_calls\": [{\"name\": \"note_search\", \"call_id\": \"search\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif query is not None and query != \"\":\n    arguments[\"query\"] = query\nif since is not None and since != \"\":\n    arguments[\"since\"] = since\nif until is not None and until != \"\":\n    arguments[\"until\"] = until\nif entities is not None and entities != \"\":\n    arguments[\"entities\"] = entities\nif topics is not None and topics != \"\":\n    arguments[\"topics\"] = topics\nif limit is not None and limit != \"\":\n    arguments[\"limit\"] = limit\nreturn {\"tool_calls\": [{\"name\": \"note_search\", \"call_id\": \"search\", \"arguments\": arguments}]}\n"
       }
     },
     {
@@ -632,7 +632,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif note_ids is not None:\n    arguments[\"note_ids\"] = note_ids\nif entity_ids is not None:\n    arguments[\"entity_ids\"] = entity_ids\nif as_of is not None:\n    arguments[\"as_of\"] = as_of\nreturn {\"tool_calls\": [{\"name\": \"note_expand\", \"call_id\": \"expand\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif note_ids is not None and note_ids != \"\":\n    arguments[\"note_ids\"] = note_ids\nif entity_ids is not None and entity_ids != \"\":\n    arguments[\"entity_ids\"] = entity_ids\nif as_of is not None and as_of != \"\":\n    arguments[\"as_of\"] = as_of\nreturn {\"tool_calls\": [{\"name\": \"note_expand\", \"call_id\": \"expand\", \"arguments\": arguments}]}\n"
       }
     },
     {

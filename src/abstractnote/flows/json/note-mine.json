@@ -113,7 +113,7 @@
           "limit": 20
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif query is not None:\n    arguments[\"query\"] = query\nif since is not None:\n    arguments[\"since\"] = since\nif until is not None:\n    arguments[\"until\"] = until\nif limit is not None:\n    arguments[\"limit\"] = limit\nreturn {\"tool_calls\": [{\"name\": \"note_search\", \"call_id\": \"search\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif query is not None and query != \"\":\n    arguments[\"query\"] = query\nif since is not None and since != \"\":\n    arguments[\"since\"] = since\nif until is not None and until != \"\":\n    arguments[\"until\"] = until\nif limit is not None and limit != \"\":\n    arguments[\"limit\"] = limit\nreturn {\"tool_calls\": [{\"name\": \"note_search\", \"call_id\": \"search\", \"arguments\": arguments}]}\n"
       }
     },
     {
@@ -650,7 +650,7 @@
           "limit": 20
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif query is not None:\n    arguments[\"query\"] = query\nif since is not None:\n    arguments[\"since\"] = since\nif until is not None:\n    arguments[\"until\"] = until\nif limit is not None:\n    arguments[\"limit\"] = limit\nreturn {\"tool_calls\": [{\"name\": \"note_search\", \"call_id\": \"step_search\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif query is not None and query != \"\":\n    arguments[\"query\"] = query\nif since is not None and since != \"\":\n    arguments[\"since\"] = since\nif until is not None and until != \"\":\n    arguments[\"until\"] = until\nif limit is not None and limit != \"\":\n    arguments[\"limit\"] = limit\nreturn {\"tool_calls\": [{\"name\": \"note_search\", \"call_id\": \"step_search\", \"arguments\": arguments}]}\n"
       }
     },
     {
@@ -1443,7 +1443,7 @@
           "kind": "dossier"
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif kind is not None:\n    arguments[\"kind\"] = kind\nif title is not None:\n    arguments[\"title\"] = title\nif body is not None:\n    arguments[\"body\"] = body\nif evidence_note_ids is not None:\n    arguments[\"evidence_note_ids\"] = evidence_note_ids\nif entity_ids is not None:\n    arguments[\"entity_ids\"] = entity_ids\nreturn {\"tool_calls\": [{\"name\": \"note_insight_write\", \"call_id\": \"write\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif kind is not None and kind != \"\":\n    arguments[\"kind\"] = kind\nif title is not None and title != \"\":\n    arguments[\"title\"] = title\nif body is not None and body != \"\":\n    arguments[\"body\"] = body\nif evidence_note_ids is not None and evidence_note_ids != \"\":\n    arguments[\"evidence_note_ids\"] = evidence_note_ids\nif entity_ids is not None and entity_ids != \"\":\n    arguments[\"entity_ids\"] = entity_ids\nreturn {\"tool_calls\": [{\"name\": \"note_insight_write\", \"call_id\": \"write\", \"arguments\": arguments}]}\n"
       }
     },
     {

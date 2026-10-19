@@ -99,7 +99,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif limit is not None:\n    arguments[\"limit\"] = limit\nif since is not None:\n    arguments[\"since\"] = since\nreturn {\"tool_calls\": [{\"name\": \"note_open_loops\", \"call_id\": \"open_loops\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif limit is not None and limit != \"\":\n    arguments[\"limit\"] = limit\nif since is not None and since != \"\":\n    arguments[\"since\"] = since\nreturn {\"tool_calls\": [{\"name\": \"note_open_loops\", \"call_id\": \"open_loops\", \"arguments\": arguments}]}\n"
       }
     },
     {
@@ -257,7 +257,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif limit is not None:\n    arguments[\"limit\"] = limit\nif since is not None:\n    arguments[\"since\"] = since\nreturn {\"tool_calls\": [{\"name\": \"note_contradictions\", \"call_id\": \"contradictions\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif limit is not None and limit != \"\":\n    arguments[\"limit\"] = limit\nif since is not None and since != \"\":\n    arguments[\"since\"] = since\nreturn {\"tool_calls\": [{\"name\": \"note_contradictions\", \"call_id\": \"contradictions\", \"arguments\": arguments}]}\n"
       }
     },
     {
@@ -415,7 +415,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif limit is not None:\n    arguments[\"limit\"] = limit\nif since is not None:\n    arguments[\"since\"] = since\nreturn {\"tool_calls\": [{\"name\": \"note_resurface\", \"call_id\": \"resurface\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif limit is not None and limit != \"\":\n    arguments[\"limit\"] = limit\nif since is not None and since != \"\":\n    arguments[\"since\"] = since\nreturn {\"tool_calls\": [{\"name\": \"note_resurface\", \"call_id\": \"resurface\", \"arguments\": arguments}]}\n"
       }
     },
     {
@@ -573,7 +573,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif limit is not None:\n    arguments[\"limit\"] = limit\nif since is not None:\n    arguments[\"since\"] = since\nreturn {\"tool_calls\": [{\"name\": \"note_anniversaries\", \"call_id\": \"anniversaries\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif limit is not None and limit != \"\":\n    arguments[\"limit\"] = limit\nif since is not None and since != \"\":\n    arguments[\"since\"] = since\nreturn {\"tool_calls\": [{\"name\": \"note_anniversaries\", \"call_id\": \"anniversaries\", \"arguments\": arguments}]}\n"
       }
     },
     {
@@ -1146,7 +1146,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif kind is not None:\n    arguments[\"kind\"] = kind\nif title is not None:\n    arguments[\"title\"] = title\nif body is not None:\n    arguments[\"body\"] = body\nif evidence_note_ids is not None:\n    arguments[\"evidence_note_ids\"] = evidence_note_ids\nif entity_ids is not None:\n    arguments[\"entity_ids\"] = entity_ids\nreturn {\"tool_calls\": [{\"name\": \"note_insight_write\", \"call_id\": \"write\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif kind is not None and kind != \"\":\n    arguments[\"kind\"] = kind\nif title is not None and title != \"\":\n    arguments[\"title\"] = title\nif body is not None and body != \"\":\n    arguments[\"body\"] = body\nif evidence_note_ids is not None and evidence_note_ids != \"\":\n    arguments[\"evidence_note_ids\"] = evidence_note_ids\nif entity_ids is not None and entity_ids != \"\":\n    arguments[\"entity_ids\"] = entity_ids\nreturn {\"tool_calls\": [{\"name\": \"note_insight_write\", \"call_id\": \"write\", \"arguments\": arguments}]}\n"
       }
     },
     {

@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 FIXTURES: Optional[Path] = None
+SCRUB: list = []  # (text, replacement): scratch paths left out of the recorded fixtures
 
 
 class SmokeFailure(AssertionError):
@@ -47,7 +48,10 @@ def _record(name: Optional[str], method: str, path: str, body: Any, status: int,
         return
     FIXTURES.mkdir(parents=True, exist_ok=True)
     doc = {"request": {"method": method, "path": path, "body": body}, "status": status, "body": payload}
-    (FIXTURES / f"{name}.json").write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    text = json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
+    for needle, replacement in SCRUB:
+        text = text.replace(needle, replacement)
+    (FIXTURES / f"{name}.json").write_text(text, encoding="utf-8")
 
 
 def call(gw: str, method: str, path: str, *, token: Optional[str] = None, json_body: Any = None,
@@ -108,6 +112,19 @@ def _approval_wait(run: Dict[str, Any]) -> bool:
     return bool(details.get("tool_calls")) or "tool_approval" in str(waiting.get("wait_key") or "")
 
 
+def wait_drained(gw: str, token: str, timeout_s: float = 180.0) -> Dict[str, Any]:
+    deadline = time.time() + timeout_s
+    stats: Dict[str, Any] = {}
+    while time.time() < deadline:
+        status, q = call(gw, "GET", "/api/gateway/note/queue", token=token)
+        stats = (q or {}).get("stats") or {}
+        if status == 200 and stats.get("queued", 1) == 0 and stats.get("processing", 1) == 0:
+            _record("note_queue_200", "GET", "/api/gateway/note/queue", None, 200, q)
+            return stats
+        time.sleep(1)
+    raise SmokeFailure(f"the queue did not drain within {timeout_s:.0f} s: {stats}")
+
+
 def ledger(gw: str, token: str, run_id: str) -> list:
     status, body = call(gw, "GET", f"/api/gateway/runs/{run_id}/ledger?limit=100000", token=token)
     check(status == 200, f"ledger of {run_id} answered {status}")
@@ -130,7 +147,9 @@ def main() -> int:
     ap.add_argument("--token-b", required=True, help="second account (bob)")
     ap.add_argument("--fixtures", type=Path, default=None, help="directory for recorded fixtures")
     ap.add_argument("--max-attachment-bytes", type=int, default=1048576)
+    ap.add_argument("--scrub", action="append", default=[], help="a path prefix replaced by <scratch> in fixtures")
     args = ap.parse_args()
+    SCRUB.extend((p, "<scratch>") for p in sorted(args.scrub, key=len, reverse=True) if p)
     gw, a, b = args.gateway.rstrip("/"), args.token_a, args.token_b
     if gw.endswith(":8080"):
         raise SystemExit("never against :8080")
@@ -208,10 +227,25 @@ def main() -> int:
     proc = ens["processor_id"]
     status, again = call(gw, "POST", "/api/gateway/note/processor/ensure", token=a)
     check(status == 200 and again.get("processor_id") == proc and again.get("created") == [], "ensure is not idempotent")
-    status, rn = call(gw, "POST", f"/api/gateway/automations/{proc}/commands", token=a,
-                      json_body={"command_id": str(uuid.uuid4()), "type": "automation.run_now"},
-                      fixture="automation_run_now_200")
-    check(status == 200, f"run_now answered {status}: {rn}")
+    # The schedule's first tick starts a drain at once; wait for it to empty the queue.
+    stats = wait_drained(gw, a)
+    check(stats.get("failed", 0) == 0 and stats.get("done", 0) >= 1, f"the first drain did not process the note: {stats}")
+    # A second note, then "Process now": 200, and a repeat while it runs is 409 automation_busy.
+    second = start_run(gw, a, "note-capture", {"text": "Dana moved the Pareto deadline to next week.",
+                                               "idempotency_key": str(uuid.uuid4()), "session_id": session}, session)
+    wait_run(gw, a, second)
+    rn_status = None
+    for _ in range(60):
+        rn_status, rn = call(gw, "POST", f"/api/gateway/automations/{proc}/commands", token=a,
+                             json_body={"command_id": str(uuid.uuid4()), "type": "automation.run_now"})
+        if rn_status == 200:
+            _record("automation_run_now_200", "POST", f"/api/gateway/automations/{proc}/commands",
+                    {"command_id": "<uuid>", "type": "automation.run_now"}, 200, rn)
+            break
+        check(rn_status == 409 and (rn.get("detail") or {}).get("reason_code") == "automation_busy",
+              f"run_now answered {rn_status}: {rn}")
+        time.sleep(1)  # a scheduled tick is running: "already running", try again
+    check(rn_status == 200, "run_now never got through")
     busy_status = None
     for _ in range(40):
         busy_status, busy = call(gw, "POST", f"/api/gateway/automations/{proc}/commands", token=a,
@@ -222,15 +256,9 @@ def main() -> int:
             break
         time.sleep(0.25)
     check(busy_status == 409, f"a second run_now while draining answered {busy_status}")
-    deadline = time.time() + 180
-    while time.time() < deadline:
-        _, q = call(gw, "GET", "/api/gateway/note/queue", token=a)
-        stats = (q or {}).get("stats") or {}
-        if stats.get("queued", 1) == 0 and stats.get("processing", 1) == 0:
-            break
-        time.sleep(1)
-    _record("note_queue_200", "GET", "/api/gateway/note/queue", None, 200, q)
-    check(stats.get("failed", 0) == 0 and stats.get("done", 0) >= 1, f"the queue did not drain cleanly: {stats}")
+    stats = wait_drained(gw, a)
+    check(stats.get("failed", 0) == 0 and stats.get("done", 0) >= 2, f"the queue did not drain cleanly: {stats}")
+    report["queue"] = stats
     for name, path in (("note_get_200", f"/api/gateway/note/notes/{note_id}"), ("note_changes_200", "/api/gateway/note/changes"),
                        ("note_overview_200", "/api/gateway/note/overview"), ("note_cues_200", "/api/gateway/note/cues"),
                        ("note_tasks_200", "/api/gateway/note/tasks"), ("note_insights_200", "/api/gateway/note/insights"),

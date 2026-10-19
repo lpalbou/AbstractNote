@@ -304,7 +304,7 @@
           "max_items": 1
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif worker_id is not None:\n    arguments[\"worker_id\"] = worker_id\nif max_items is not None:\n    arguments[\"max_items\"] = max_items\nreturn {\"tool_calls\": [{\"name\": \"note_queue_lease\", \"call_id\": \"lease\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif worker_id is not None and worker_id != \"\":\n    arguments[\"worker_id\"] = worker_id\nif max_items is not None and max_items != \"\":\n    arguments[\"max_items\"] = max_items\nreturn {\"tool_calls\": [{\"name\": \"note_queue_lease\", \"call_id\": \"lease\", \"arguments\": arguments}]}\n"
       }
     },
     {
@@ -730,7 +730,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif note_id is not None:\n    arguments[\"note_id\"] = note_id\nif outcome is not None:\n    arguments[\"outcome\"] = outcome\nif error is not None:\n    arguments[\"error\"] = error\nif revision_id is not None:\n    arguments[\"revision_id\"] = revision_id\nreturn {\"tool_calls\": [{\"name\": \"note_queue_ack\", \"call_id\": \"ack\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif note_id is not None and note_id != \"\":\n    arguments[\"note_id\"] = note_id\nif outcome is not None and outcome != \"\":\n    arguments[\"outcome\"] = outcome\nif error is not None and error != \"\":\n    arguments[\"error\"] = error\nif revision_id is not None and revision_id != \"\":\n    arguments[\"revision_id\"] = revision_id\nreturn {\"tool_calls\": [{\"name\": \"note_queue_ack\", \"call_id\": \"ack\", \"arguments\": arguments}]}\n"
       }
     },
     {

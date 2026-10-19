@@ -189,7 +189,9 @@ class Flow:
     ) -> str:
         """One deterministic note tool call, visible as three nodes:
 
-        ``<id>_args`` (code: one input pin per tool argument -> the {name, arguments} call),
+        ``<id>_args`` (code: one input pin per tool argument -> the {name, arguments} call; an
+        unset (None) or blank ("") value is left out so the tool's own default applies: the
+        runtime type-checks arguments before the call and refuses "" for an integer),
         ``<id>`` (tool_calls, allowlist = this one tool), ``<id>_out`` (code: the tool's
         result object spread onto named pins, plus ``tool_output`` = the whole object; a
         failed call raises its own plain sentence and ends the run with that error).
@@ -199,7 +201,7 @@ class Flow:
         lines = ["arguments = {}"]
         for a in arg_names:
             ident = a
-            lines.append(f"if {ident} is not None:")
+            lines.append(f"if {ident} is not None and {ident} != \"\":")
             lines.append(f"    arguments[{json.dumps(a)}] = {ident}")
         lines.append(
             "return {\"tool_calls\": [{\"name\": " + json.dumps(tool_name)
