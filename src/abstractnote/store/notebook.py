@@ -619,10 +619,12 @@ class Notebook:
         return claim_chain(self, claim_id)
 
     def expand(self, note_ids: Optional[Sequence[str]] = None, entity_ids: Optional[Sequence[str]] = None,
-               as_of: Optional[str] = None) -> Dict[str, Any]:
+               as_of: Optional[str] = None, *, query: Optional[str] = None, budget_chars: Optional[int] = None
+               ) -> Dict[str, Any]:
+        """The standard recall packet within a character budget (:func:`abstractnote.recall.expand.expand`)."""
         from ..recall.expand import expand
 
-        return expand(self, note_ids or [], entity_ids or [], as_of)
+        return expand(self, note_ids or [], entity_ids or [], as_of, query=query, budget_chars=budget_chars)
 
     def write_insight(self, kind: str, title: str, body: str, evidence_note_ids: Optional[Sequence[str]] = None,
                       entity_ids: Optional[Sequence[str]] = None, run_id: Optional[str] = None) -> Dict[str, Any]:

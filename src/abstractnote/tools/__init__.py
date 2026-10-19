@@ -135,11 +135,13 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
         first (to find when something was first mentioned)."""
         return rec.note_search(ctx, query, since, until, kinds, entities, topics, limit, as_of, order)
 
-    @tool(name="note_expand", description="Entity cards, timelines, relations and then-versus-now around notes or entities.")
+    @tool(name="note_expand", description="The recall packet around notes and entities, within a size budget.")
     def note_expand(note_ids: Optional[List[str]] = None, entity_ids: Optional[List[str]] = None,
-                    as_of: Optional[str] = None) -> Dict[str, Any]:
-        """Entity cards, timelines, relations and then-versus-now around notes or entities."""
-        return rec.note_expand(ctx, note_ids, entity_ids, as_of)
+                    as_of: Optional[str] = None, query: Optional[str] = None,
+                    budget_chars: Optional[int] = None) -> Dict[str, Any]:
+        """Note excerpts around the query, one-line entity cards, and for the given entities their claim timelines,
+        then-versus-now, relations and neighbours, within budget_chars (default 24000)."""
+        return rec.note_expand(ctx, note_ids, entity_ids, as_of, query, budget_chars)
 
     @tool(name="note_changes", description="What the notebook learned since a cursor or a time.",
           when_to_use="First call of a session: new notes and entities, superseded beliefs, closed loops, failures.")

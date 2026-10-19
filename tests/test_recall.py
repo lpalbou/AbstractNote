@@ -177,14 +177,48 @@ def test_relation_timeline_and_claim_chain(nb):
 
 def test_expand_returns_cards_timelines_relations_neighbours_then_now(nb):
     h = history(nb)
-    out = note_expand(ToolContext(nb=nb), note_ids=[h["n1"]], entity_ids=[], as_of="")
-    ids_ = {c["entity_id"] for c in out["entities"]}
-    assert ids_ == {"ex:person-dana", "ex:org-acme", "ex:project-lut"}
-    assert out["relation_timelines"] and out["then_now"] and out["claims_timeline"]
+    out = note_expand(ToolContext(nb=nb), note_ids=[h["n1"]], entity_ids=["ex:person-dana", "ex:org-acme"], as_of="")
+    assert [e["entity_id"] for e in out["entities"][:2]] == ["ex:person-dana", "ex:org-acme"]
+    assert {e["entity_id"] for e in out["entities"]} == {"ex:person-dana", "ex:org-acme", "ex:project-lut"}
+    dana = out["entities"][0]
+    assert dana["focus"] is True and dana["line"].startswith("Dana (person): Works at Beta since March.")
+    assert {t["entity_id"] for t in out["claims_timeline"]} == {"ex:person-dana", "ex:org-acme"}  # focus only
+    works = [c for c in out["claims_timeline"][0]["claims"] if c["claim_id"] == h["works"]][0]
+    assert works["text"] == "Dana works at Acme" and works["closed"]["kind"] == "supersede"
+    assert out["relation_timelines"] and out["then_now"][0]["entity_id"] == "ex:person-dana"
     assert any(n["entity_id"] == "ex:org-beta" for n in out["neighbours"])
+    assert [n["note_id"] for n in out["notes"]] == [h["n1"]]
     early = note_expand(ToolContext(nb=nb), entity_ids=["ex:person-dana"], as_of="2025-02-01")
     tl = early["claims_timeline"][0]["claims"]
-    assert all(c["observed_at"] <= "2025-02-01T00:00:00Z" for c in tl)
+    assert tl and all(c["at"] <= "2025-02-01" for c in tl)
+    assert note_expand(ToolContext(nb=nb), note_ids=[h["n1"]])["claims_timeline"] == []  # no focus, no timelines
+
+
+def test_expand_selects_within_its_budget(nb):
+    """Eval REPORT 4.3 item 7: the packet was a dump (80-167k characters); it is now chosen within a budget."""
+    import json
+
+    from abstractnote.recall.expand import EXCERPT_CHARS, EXPAND_BUDGET_CHARS
+
+    h = history(nb)
+    filler = " ".join(f"Line {i} of the weekly minutes about logistics and rooms." for i in range(400))
+    long_id = nb.capture(filler + " The Pareto deadline moved to Friday. " + filler,
+                         occurred_at="2025-02-01T10:00:00Z").note_id
+    many = [nb.capture(f"Status {i}: " + filler, occurred_at=f"2025-02-{2 + i % 20:02d}T10:00:00Z").note_id
+            for i in range(60)]
+    out = nb.expand([long_id, *many, h["n1"]], ["ex:person-dana"], query="Pareto deadline")
+    size = len(json.dumps(out))
+    assert size <= EXPAND_BUDGET_CHARS and out["used_chars"] == size
+    first = out["notes"][0]
+    assert first["note_id"] == long_id and "Pareto deadline moved to Friday" in first["excerpt"]
+    assert len(first["excerpt"]) <= EXCERPT_CHARS
+    assert out["omitted"]["notes"] > 0 and 0 < len(out["notes"]) < 62
+    assert out["claims_timeline"][0]["entity_id"] == "ex:person-dana"  # the graph part still got its share
+    small = nb.expand([long_id, *many], ["ex:person-dana"], query="Pareto", budget_chars=5000)
+    assert len(json.dumps(small)) <= 5000 and small["entities"][0]["entity_id"] == "ex:person-dana"
+    # without a query the excerpt centres on the focus entity's name
+    named = nb.expand([h["n2"]], ["ex:org-beta"])
+    assert "Beta" in named["notes"][0]["excerpt"]
 
 
 def test_reflect_candidates_carry_their_rule(nb):

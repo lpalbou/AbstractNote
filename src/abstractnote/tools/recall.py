@@ -27,8 +27,10 @@ def note_search(ctx: ToolContext, query: str = "", since: Optional[str] = None, 
 
 
 def note_expand(ctx: ToolContext, note_ids: Optional[List[str]] = None, entity_ids: Optional[List[str]] = None,
-                as_of: Optional[str] = None) -> Dict[str, Any]:
-    return _expand.expand(ctx.nb, note_ids or [], entity_ids or [], _blank(as_of))
+                as_of: Optional[str] = None, query: Optional[str] = None,
+                budget_chars: Optional[int] = None) -> Dict[str, Any]:
+    return _expand.expand(ctx.nb, note_ids or [], entity_ids or [], _blank(as_of), query=_blank(query),
+                          budget_chars=int(budget_chars) if budget_chars not in (None, "") else None)
 
 
 def note_changes(ctx: ToolContext, since: Optional[str] = None, limit: int = 50) -> Dict[str, Any]:

@@ -3,16 +3,29 @@ timelines, neighbours, then-versus-now pairs, and the evidence chain of a claim.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from .. import ids
-from ..store.notes import _uj, clamp_limit
+from ..store.notes import _uj, clamp_limit, fts_terms
 from . import shapes
 from .then_now import relation_then_now, then_now
 
-MAX_EXPAND_ENTITIES = 10
 MAX_RELATION_PAIRS = 10
 CARD_NOTES = 10
+# The standard recall packet (note_expand): a budget, spent on what answers the question.
+EXPAND_BUDGET_CHARS = 24_000   # default size of the packet, as JSON characters
+MIN_BUDGET_CHARS, MAX_BUDGET_CHARS = 4_000, 200_000
+PACKET_OVERHEAD = 600          # the packet's own keys and counters
+NOTE_SHARE = 0.6               # notes may use up to this share of the budget before the graph parts
+EXCERPT_TOKENS = 64            # words around the match in a note excerpt (FTS5 snippet, its maximum)
+EXCERPT_CHARS = 600            # characters of a note excerpt
+ENTITY_SUMMARY_CHARS = 200     # characters of an entity summary on its one line
+MAX_FOCUS_ENTITIES = 5         # entities given by the caller that get timelines and then-versus-now
+MAX_ENTITY_LINES = 20          # one-line entity cards in a packet
+MAX_TIMELINE_CLAIMS = 12       # claims per timeline (the earliest and the latest half)
+MAX_TURNING_POINTS = 6
+MAX_NEIGHBOURS = 10
 
 
 def _members(nb: Any, entity_id: str) -> List[str]:
@@ -293,41 +306,205 @@ def neighbours(nb: Any, entity_ids: Sequence[str], at: Optional[str] = None, lim
     return ranked
 
 
-def expand(nb: Any, note_ids: Any = None, entity_ids: Any = None, as_of: Optional[str] = None) -> Dict[str, Any]:
-    """``note_expand``: cards, claim timelines, relation timelines, neighbours and then-versus-now
-    for the given entities plus the entities the given notes mention."""
+def _size(item: Any) -> int:
+    return len(json.dumps(item, default=str))
+
+
+class _Budget:
+    """Characters left for the packet (measured as JSON, the way the packet reaches a prompt)."""
+
+    def __init__(self, total: int) -> None:
+        self.left = total - PACKET_OVERHEAD
+
+    def take(self, item: Any) -> bool:
+        n = _size(item) + 2
+        if n > self.left:
+            return False
+        self.left -= n
+        return True
+
+
+def _excerpt(nb: Any, row: Any, match: Optional[str]) -> str:
+    """Words around the best match of ``match`` (an FTS5 query) in the note, else its start."""
+    if match:
+        hit = nb.store.q1("SELECT snippet(notes_fts, -1, '', '', '…', ?) FROM notes_fts WHERE notes_fts MATCH ? AND"
+                          " note_id=?", (EXCERPT_TOKENS, match, row["note_id"]))
+        if hit and hit[0] and hit[0].strip("… "):
+            return shapes.excerpt(hit[0], EXCERPT_CHARS)
+    return shapes.excerpt(row["text"], EXCERPT_CHARS)
+
+
+def _phrase(text: str) -> str:
+    words = "".join(ch if ch.isalnum() else " " for ch in str(text or "")).split()
+    return '"' + " ".join(words) + '"' if words else ""
+
+
+def _entity_line(nb: Any, eid: str, at: Optional[str], focus: bool) -> Optional[Dict[str, Any]]:
+    """One line for an entity as known at ``at``: name, kind, other names, latest summary, when seen."""
+    s = nb.store
+    row = s.entity_row(eid)
+    if row is None or (at and (row["first_seen"] or row["created_at"]) > at):
+        return None
+    ref = at or "9999-12-31T23:59:59Z"
+    members = s.merged_members(eid)
+    q = ",".join("?" for _ in members)
+    summary = s.q1(f"SELECT summary FROM entity_summaries WHERE entity_id IN ({q}) AND at<=? ORDER BY at DESC,"
+                   " revision_id DESC LIMIT 1", [*members, ref])
+    summary = summary[0] if summary else (row["summary"] if at is None else None)
+    stats = s.q1(f"SELECT MIN(at), MAX(at), COUNT(DISTINCT note_id) FROM entity_notes WHERE entity_id IN ({q}) AND"
+                 " at<=?", [*members, ref])
+    aliases = [a for m in members for a in s.aliases(m, at) if ids.fold(a) != ids.fold(row["name"])][:3]
+    line = f"{row['name']} ({row['kind']}" + (f"; also {', '.join(aliases)}" if aliases else "") + ")"
+    if summary:
+        line += ": " + shapes.excerpt(summary, ENTITY_SUMMARY_CHARS)
+    if stats and stats[0]:
+        line += f" [seen {stats[0][:10]} to {stats[1][:10]}, {int(stats[2] or 0)} notes]"
+    return {"entity_id": eid, "line": line, "focus": focus}
+
+
+def _claim_brief(nb: Any, c: Dict[str, Any]) -> Dict[str, Any]:
+    from .changes import claim_text
+
+    out = {"claim_id": c["claim_id"], "at": (c["observed_at"] or "")[:10], "text": claim_text(nb, c),
+           "status": c["status"], "note_id": c["note_id"]}
+    if c.get("closed"):
+        out["closed"] = {"at": (c["closed"]["at"] or "")[:10], "kind": c["closed"]["kind"],
+                         "note_id": c["closed"]["note_id"], "reason": c["closed"]["reason"]}
+    return out
+
+
+def _ends(items: List[Any], n: int) -> List[Any]:
+    """At most ``n`` items, the earliest and the latest kept (history order is the point)."""
+    if len(items) <= n:
+        return items
+    head = (n + 1) // 2
+    return items[:head] + items[len(items) - (n - head):]
+
+
+def expand(nb: Any, note_ids: Any = None, entity_ids: Any = None, as_of: Optional[str] = None, *,
+           query: Optional[str] = None, budget_chars: Optional[int] = None) -> Dict[str, Any]:
+    """``note_expand``: the standard recall packet. It selects rather than dumps: within
+    ``budget_chars`` (default :data:`EXPAND_BUDGET_CHARS`, measured as JSON) it spends, in order, on
+    the focus entities (``entity_ids``, the search's entity hits) as one line each, the notes in the
+    order given (best scored first) with an excerpt around the match of ``query`` (else of the focus
+    entities' names), the other entities those notes mention (one line each), then for the focus
+    entities only: claim timelines (earliest and latest kept), then-versus-now, the relations between
+    them and their neighbours; what is left goes to further notes. ``omitted`` counts what did not fit."""
     as_of_n = ids.optional_time(as_of, field="as_of")
-    wanted: List[str] = []
+    total = max(MIN_BUDGET_CHARS, min(int(budget_chars or EXPAND_BUDGET_CHARS), MAX_BUDGET_CHARS))
+    budget = _Budget(total)
+    s = nb.store
+    focus: List[str] = []
     for e in list(entity_ids or []):
-        if nb.store.entity_row(str(e)) is not None:
-            c = nb.store.canonical_at(str(e), as_of_n)
-            if c not in wanted:
-                wanted.append(c)
-    for nid in list(note_ids or []):
-        for r in nb.store.q("SELECT entity_id FROM entity_notes WHERE note_id=? ORDER BY entity_id", (str(nid),)):
-            c = nb.store.canonical_at(r[0], as_of_n)
-            if c not in wanted:
-                wanted.append(c)
-    wanted = wanted[:MAX_EXPAND_ENTITIES]
-    cards, timelines, thens = [], [], []
-    for e in wanted:
-        try:
-            cards.append(entity_card(nb, e, as_of_n))
-        except ValueError:
-            continue  # not known yet at as_of
+        if s.entity_row(str(e)) is not None:
+            c = s.canonical_at(str(e), as_of_n)
+            if c not in focus:
+                focus.append(c)
+    focus = focus[:MAX_FOCUS_ENTITIES]
+    rows = []
+    for nid in dict.fromkeys(str(n) for n in (note_ids or [])):
+        r = s.note_row(nid)
+        if r is not None and r["archived_at"] is None and (not as_of_n or r["occurred_at"] <= as_of_n):
+            rows.append(r)
+    mentioned: Dict[str, int] = {}
+    for r in rows:
+        for (e,) in s.q("SELECT entity_id FROM entity_notes WHERE note_id=? ORDER BY entity_id", (r["note_id"],)):
+            c = s.canonical_at(e, as_of_n)
+            if c not in focus:
+                mentioned[c] = mentioned.get(c, 0) + 1
+    terms = fts_terms(query or "")
+    names = " OR ".join(p for p in (_phrase(s.entity_row(e)["name"]) for e in focus) if p)
+    match = terms or names or None
+    omitted = {"notes": 0, "entities": 0, "claims": 0}
+    out: Dict[str, Any] = {"as_of": as_of_n, "budget_chars": total, "used_chars": 0, "notes": [], "entities": [],
+                           "claims_timeline": [], "relation_timelines": [], "neighbours": [], "then_now": [],
+                           "omitted": omitted}
+
+    def add(key: str, item: Any, counter: Optional[str] = None) -> bool:
+        if budget.take(item):
+            out[key].append(item)
+            return True
+        if counter:
+            omitted[counter] += 1
+        return False
+
+    known_focus = []
+    for e in focus:
+        line = _entity_line(nb, e, as_of_n, True)
+        if line is not None and add("entities", line, "entities"):
+            known_focus.append(e)
+    pending = list(rows)
+    note_cap = budget.left - int(total * (1 - NOTE_SHARE))
+    while pending and note_cap > 0:
+        r = pending[0]
+        item = {**shapes.note_ref(r), "excerpt": _excerpt(nb, r, match)}
+        if r["summary"]:
+            item["summary"] = shapes.excerpt(r["summary"], shapes.EXCERPT_CHARS)
+        n = _size(item) + 2
+        if n > note_cap or not add("notes", item):
+            break
+        note_cap -= n
+        pending.pop(0)
+    others = sorted(mentioned, key=lambda e: (-mentioned[e], e))
+    room = max(0, MAX_ENTITY_LINES - len(out["entities"]))
+    omitted["entities"] += max(0, len(others) - room)
+    for e in others[:room]:
+        line = _entity_line(nb, e, as_of_n, False)
+        if line is not None:
+            add("entities", line, "entities")
+    for e in known_focus:
         tl = claims_timeline(nb, e, until=as_of_n)
-        timelines.append({"entity_id": e, "claims": tl})
-        thens.append(then_now(nb, e))
+        kept = _ends(tl, MAX_TIMELINE_CLAIMS)
+        omitted["claims"] += len(tl) - len(kept)
+        entry = {"entity_id": e, "claims": []}
+        if not budget.take(entry):
+            omitted["claims"] += len(kept)
+            continue
+        out["claims_timeline"].append(entry)
+        for c in kept:
+            b = _claim_brief(nb, c)
+            if budget.take(b):
+                entry["claims"].append(b)
+            else:
+                omitted["claims"] += 1
+    for e in known_focus:
+        tn = then_now(nb, e)
+        add("then_now", {"entity_id": e,
+                         "earliest": {k: (tn["earliest"] or {}).get(k) for k in ("at", "summary", "note_id")}
+                         if tn["earliest"] else None,
+                         "latest": {k: (tn["latest"] or {}).get(k) for k in ("at", "summary", "note_id")}
+                         if tn["latest"] else None,
+                         "turning_points": [{k: t.get(k) for k in ("at", "kind", "text", "note_id")}
+                                            for t in _ends(tn["turning_points"], MAX_TURNING_POINTS)]})
     pairs = []
-    known = {c["entity_id"] for c in cards}
-    for i, a in enumerate(sorted(known)):
-        for b in sorted(known)[i + 1:]:
-            if nb.store.q1("SELECT 1 FROM relations WHERE (subject_id=? AND object_id=?) OR (subject_id=? AND"
-                           " object_id=?)", (a, b, b, a)):
+    for i, a in enumerate(sorted(known_focus)):
+        for b in sorted(known_focus)[i + 1:]:
+            if s.q1("SELECT 1 FROM relations WHERE (subject_id=? AND object_id=?) OR (subject_id=? AND object_id=?)",
+                    (a, b, b, a)):
                 pairs.append((a, b))
-    rel = [relation(nb, a, b, until=as_of_n) for a, b in pairs[:MAX_RELATION_PAIRS]]
-    return {"as_of": as_of_n, "entities": cards, "claims_timeline": timelines, "relation_timelines": rel,
-            "neighbours": neighbours(nb, list(known), as_of_n), "then_now": thens}
+    for a, b in pairs[:MAX_RELATION_PAIRS]:
+        rel = relation(nb, a, b, until=as_of_n)
+        add("relation_timelines", {"a": a, "b": b, "claims": [_claim_brief(nb, c)
+                                                             for c in _ends(rel["claims"], MAX_TIMELINE_CLAIMS)]})
+    for n in neighbours(nb, known_focus, as_of_n, limit=MAX_NEIGHBOURS) if known_focus else []:
+        add("neighbours", {"entity_id": n["entity_id"], "name": n["name"], "kind": n["kind"], "count": n["count"],
+                           "via": sorted({v["predicate"] for v in n["via"]})})
+    for r in pending:  # what is left of the budget goes to further notes
+        item = {**shapes.note_ref(r), "excerpt": _excerpt(nb, r, match)}
+        add("notes", item, "notes")
+    out["used_chars"] = total  # as wide as the final count can be
+    while _size(out) > total:  # the overhead estimate was short: drop from the least useful end
+        for key in ("neighbours", "relation_timelines", "notes", "then_now", "claims_timeline", "entities"):
+            if out[key]:
+                out[key].pop()
+                if key in ("notes", "entities"):
+                    omitted[key] += 1
+                break
+        else:
+            break
+    for _ in range(3):  # used_chars counts itself
+        out["used_chars"] = _size(out)
+    return out
 
 
 def claim_chain(nb: Any, claim_id: str) -> Dict[str, Any]:

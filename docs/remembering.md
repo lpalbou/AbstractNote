@@ -29,7 +29,7 @@ citations, and the web app renders that JSON.
 | Level | Budget | What runs | Returns |
 |---|---|---|---|
 | **quick** | under a second, no model | full-text (FTS5, BM25) plus vector search over notes, entities and claims, with a relevance floor; entities and statements grouped under the notes that carry them; relevance or earliest order; facets | hits with excerpts, matched entities with their first and latest date, matched claims, facets |
-| **standard** | seconds, one model call | quick retrieval, then graph expansion (entity cards as of the requested moment, claim timelines, neighbours, then-versus-now pairs), then one synthesis | an answer with citations, the evidence, the evolution summary, open loops, follow-ups |
+| **standard** | seconds, one model call | quick retrieval, then a recall packet chosen within a budget (24,000 characters by default): the best notes with excerpts around the matches, entity cards as of the requested moment as one line each, and for the entities the question is about their claim timelines, neighbours and then-versus-now pairs; then one synthesis | an answer with citations, the evidence, the evolution summary, open loops, follow-ups |
 | **deep** | minutes, several model calls, runs in the background | a mining plan (sub-questions, time slices, entities, contradictions), several retrieval rounds with findings per slice, a dossier | the dossier as an answer and as a stored `synthesis` note; the web app and the watch show it when it is ready |
 
 The level is a parameter everywhere: the Remember view has an effort dial, the watch asks at

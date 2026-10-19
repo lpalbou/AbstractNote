@@ -92,3 +92,21 @@ def test_eval_earliest_first_lists_the_mentions_in_history_order(eval_nb, probe)
     assert dates == sorted(dates)
     relevance = eval_nb.search(probe["q"], limit=10)
     assert [n["note_id"] for n in relevance["notes"]] != oracle  # the default order is not history order
+
+
+@pytest.mark.parametrize("with_query", [True, False])
+def test_eval_degenerate_standard_packet_stays_under_budget(eval_nb, with_query):
+    """REPORT 4.3 item 7: standard recall passed 80-167k characters; note_expand alone gave 144k here."""
+    from abstractnote.recall.expand import EXPAND_BUDGET_CHARS
+
+    case = _fixture()["standard_packet"]
+    out = eval_nb.expand(case["note_ids"], case["entity_ids"], query=case["question"] if with_query else None)
+    size = len(json.dumps(out, default=str))
+    assert size <= EXPAND_BUDGET_CHARS == 24_000 and out["used_chars"] == size
+    assert size < case["before_chars"] / 4
+    assert out["notes"] and out["notes"][0]["note_id"] == case["note_ids"][0]  # best scored first
+    assert all(isinstance(e["line"], str) and "\n" not in e["line"] for e in out["entities"])
+    focus = {eval_nb.store.canonical(e) for e in case["entity_ids"]}
+    assert {t["entity_id"] for t in out["claims_timeline"]} <= focus
+    hub = [t for t in out["claims_timeline"] if t["entity_id"] == "ex:software-agora-hub"]
+    assert hub and hub[0]["claims"]

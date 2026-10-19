@@ -163,5 +163,44 @@
     "castor"
    ]
   }
- ]
+ ],
+ "standard_packet": {
+  "about": "note_expand arguments of the degenerate standard recall (REPORT section 2: a 167k-character prompt, 144k of it from note_expand), from its run ledger",
+  "question": "What is the agora hub and how did the operator use it in July and August?",
+  "note_ids": [
+   "nt_cklkgqt7ug4bayizzxcwv6qczm",
+   "nt_aobep4efeixsdmwfiatqshqsoh",
+   "nt_zwksec3irj367kdmax2giavrse",
+   "nt_vcscpx2qumgc4p3gt2fqunw47n",
+   "nt_zv43l5gahuv3his32fu66rfnkr",
+   "nt_67qolx4him6eihyps6gsq7bbus",
+   "nt_mhiy6x7jajtmhk2ijew3xb65ib",
+   "nt_syskhkrnioyx7mh7lxuxu236a2",
+   "nt_ov3vcinxcqzwcu7arnstkdm5va",
+   "nt_vpbi2gf2hduav3cnmvfk5b2f34",
+   "nt_th4jdh5nyjxn6webcn2nqoad4x",
+   "nt_epd6w6q52r55x54uz7ensukawi",
+   "nt_lm3mrr7vaw5s4qd3j5ouewg7er",
+   "nt_4qpjqcqp5ugrn6ciccq2atvg4g",
+   "nt_akmbjez3oh5owzbzgcqy23t5b5",
+   "nt_pvevhnckdacuxklqzqwpqycdop",
+   "nt_urlsx6ajkr7jd3qg7aqp6zggqn",
+   "nt_7ehnnwnhflcyfax25cdiccf3tm",
+   "nt_jppbz46ddrxryuahcfzhhonhof",
+   "nt_mtazeukllirys2ycjcpfkvilix"
+  ],
+  "entity_ids": [
+   "ex:software-agora-hub",
+   "ex:software-abstractcode-agents",
+   "ex:person-operator-aa",
+   "ex:software-adversarial-sub-agent",
+   "ex:artifact-abstractcode-scripts-agora-fleet-collab-py",
+   "ex:event-vote-v-gtytw8",
+   "ex:software-gateway-hosted-resident",
+   "ex:artifact-adr-001",
+   "ex:concept-afchip",
+   "ex:software-abstractvideo"
+  ],
+  "before_chars": 144252
+ }
 }
