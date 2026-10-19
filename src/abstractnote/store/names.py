@@ -1,13 +1,15 @@
 """One canonical name per entity, at apply time and as a repair (docs/data-model.md "Identity").
 
 ``reuse_taken_names`` rewrites a new revision before it is stored: an ``entity.create`` whose canonical name
-(``ids.name_key``) or one of whose alias keys already belongs to a live entity becomes a reuse of that entity,
-whatever the model decided; the surface forms become aliases and the revision records a warning. Two entities
+(``ids.name_key``) already belongs to a live entity becomes a reuse of that entity, whatever the model decided;
+the surface forms become aliases and the revision records a warning. Two entities
 that differ only by case, spacing or punctuation are never created. This is deterministic normalisation, not an
-identity judgement (ADR 0004): ``Gateway`` and ``abstractgateway`` stay the model's and the review's call.
+identity judgement (ADR 0004): ``Gateway`` and ``abstractgateway`` stay the model's and the review's call, and so
+does a name that is only an alias of another entity (aliases are the model's words, and often loose: a project
+listed with its parts' names as aliases). Alias keys only produce candidates (``process.resolve``).
 
-``merge_plan`` lists the groups of live entities an older notebook holds under one canonical name (or alias
-key); ``Notebook.normalize_entities`` merges each group into its earliest entity.
+``merge_plan`` lists the groups of live entities an older notebook holds under one canonical name;
+``Notebook.normalize_entities`` merges each group into its earliest entity.
 """
 
 from __future__ import annotations
@@ -75,19 +77,13 @@ def reuse_taken_names(store: Any, rev: Dict[str, Any]) -> Dict[str, Any]:
         if name == "entity.create" and store.entity_row(p["entity_id"]) is None and p["entity_id"] not in created:
             surface = str(p.get("name") or "").strip()
             aliases = [str(a).strip() for a in p.get("aliases") or [] if str(a or "").strip()]
-            keys = [k for k in dict.fromkeys(ids.name_key(x) for x in [surface, *aliases]) if k]
-            holder, key = None, None
-            for k in keys:
-                holder = created_keys.get(k) or store.name_key_holder(k)
-                if holder:
-                    key = k
-                    break
+            key = ids.name_key(surface)
+            holder = created_keys.get(key) or store.name_key_holder(key)
             if holder is None:
                 created[p["entity_id"]] = {"kind": p["kind"], "name": ids.canonical_name(surface),
                                            "summary": p.get("summary"),
                                            "folds": {ids.fold(surface), *(ids.fold(a) for a in aliases)}}
-                for k in keys:
-                    created_keys.setdefault(k, p["entity_id"])
+                created_keys.setdefault(key, p["entity_id"])
                 out.append({"op": name, "payload": p})
                 continue
             redirect[p["entity_id"]] = holder
@@ -100,10 +96,7 @@ def reuse_taken_names(store: Any, rev: Dict[str, Any]) -> Dict[str, Any]:
                 view["summary"] = p["summary"]
                 out.append({"op": "entity.summary", "payload": {"entity_id": holder, "summary": p["summary"],
                                                                 "previous": None}})
-            if holder not in created:
-                created_keys.setdefault(key, holder)
-            sentence = (f"“{surface}” has the canonical name {key}, which {view['name']} ({holder}) "
-                        "already has; it was filed under that entity.")
+            sentence = f"“{surface}” has the canonical name {key}, which {holder} already has; it was filed there."
             if p.get("kind") != view["kind"]:
                 sentence += f" kind_conflict: the note said {p.get('kind')}, the notebook keeps {view['kind']}."
             warnings.append(sentence)
@@ -146,8 +139,8 @@ def reuse_taken_names(store: Any, rev: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def merge_plan(store: Any) -> List[Dict[str, Any]]:
-    """``[{into_id, from_ids, name, names}]``: each group of live entities sharing a canonical name or an alias
-    key, to be merged into its earliest entity. A pair a person separated again (an undone merge) stays apart."""
+    """``[{into_id, from_ids, name, names, kinds}]``: each group of live entities sharing a canonical name, to be
+    merged into its earliest entity. A pair a person separated again (an undone merge) stays apart."""
     plan = []
     for group in store.name_key_groups():
         into = group[0]
@@ -168,13 +161,15 @@ def merge_plan(store: Any) -> List[Dict[str, Any]]:
 def merge_ops(store: Any, into_id: str, from_id: str) -> Tuple[List[Dict[str, Any]], str]:
     """The ops of one normalisation merge (the merge plus the separated entry's names as aliases) and its summary."""
     into, frm = store.entity_row(into_id), store.entity_row(from_id)
-    reason = f"the same canonical name ({frm['name_key'] or frm['name']})"
-    if frm["name_key"] != into["name_key"]:
-        reason = f"a shared name ({frm['name_key']}, also a name of {into['name']})"
+    reason = f"the same canonical name ({into['name_key'] or into['name']})"
     ops: List[Dict[str, Any]] = [{"op": "entity.merge", "payload": {"from_id": from_id, "into_id": into_id,
                                                                     "reason": reason}}]
     names = [frm["display_name"] or frm["name"], *(a[0] for a in store.q(
         "SELECT alias FROM entity_aliases WHERE entity_id=? ORDER BY added_at, alias", (from_id,)))]
-    for alias in dict.fromkeys(names):
-        ops.append({"op": "entity.alias", "payload": {"entity_id": into_id, "alias": alias}})
+    known = {ids.fold(into["name"]), ids.fold(into["display_name"] or into["name"]), *(ids.fold(a[0]) for a in store.q(
+        "SELECT alias FROM entity_aliases WHERE entity_id=?", (into_id,)))}
+    for alias in names:
+        if str(alias or "").strip() and ids.fold(alias) not in known:
+            known.add(ids.fold(alias))
+            ops.append({"op": "entity.alias", "payload": {"entity_id": into_id, "alias": alias}})
     return ops, f"Joined {frm['display_name'] or frm['name']} into {into['name']}: {reason}."

@@ -130,14 +130,15 @@ def test_a_kind_disagreement_never_makes_a_second_entity(nb):
     assert nb.store.entity_brief("ex:concept-memory")["aliases"] == ["Memory module"]
 
 
-def test_an_alias_key_already_held_is_a_reuse_and_two_creates_of_one_name_are_one(nb):
+def test_two_creates_of_one_name_are_one_and_an_alias_never_forces_a_reuse(nb):
     nb.apply_revision(rev("rv_1", t(1), create("ex:software-observer", "observer")))
     out = nb.apply_revision(rev("rv_2", t(2), create("ex:software-abstractobserver", "AbstractObserver",
                                                       aliases=["Observer"]),
                                 create("ex:person-dana", "Dana"), create("ex:person-dana-2", "dana.")))
-    assert _live(nb) == [("ex:person-dana", "dana"), ("ex:software-observer", "observer")]
-    assert "AbstractObserver" in nb.store.entity_brief("ex:software-observer")["aliases"]
-    assert out["entities_created"] == ["ex:person-dana"]
+    # observer versus AbstractObserver is an identity judgement (ADR 0004): the model's and the review's
+    assert _live(nb) == [("ex:person-dana", "dana"), ("ex:software-abstractobserver", "abstractobserver"),
+                         ("ex:software-observer", "observer")]
+    assert out["entities_created"] == ["ex:software-abstractobserver", "ex:person-dana"]
 
 
 def test_identical_statement_after_the_reuse_is_reinforced_and_a_rename_onto_a_taken_name_is_refused(nb):
@@ -181,3 +182,117 @@ def test_candidates_offer_the_key_identical_entity_first(nb):
                                                  "aliases": ["Memory Palace"]}])
     assert [c["entity_id"] for c in out["mentions"][0]["candidates"]][:2] == ["ex:concept-memory",
                                                                             "ex:concept-a-memory-palace"]
+
+
+# ---------------------------------------------------------------------------- 3. repair of existing notebooks
+
+def _legacy(nb, r):
+    """Store and apply a revision the way AbstractNote did before canonical names (no apply-time reuse)."""
+    r = nb._rev_dict(r)
+    nb.store.insert_revision(r)
+    return nb._finish(r)
+
+
+def _legacy_world(nb):
+    from test_store_support import claim
+
+    _legacy(nb, rev("rv_1", t(1), create("ex:concept-memory", "Memory", summary="What the notebook keeps."),
+                    create("ex:software-abstractobserver", "AbstractObserver"), create("ex:org-acme", "Acme")))
+    _legacy(nb, rev("rv_2", t(2), create("ex:concept-memory-2", "memory"),
+                    create("ex:software-observer", "observer", aliases=["AbstractObserver"]),
+                    claim("cl_1", "ex:concept-memory-2", "ex:part_of", "ex:org-acme", at=t(2))))
+    _legacy(nb, rev("rv_3", t(3), create("ex:thing-memory", "MEMORY.", kind="thing")))
+
+
+def test_legacy_duplicates_are_marked_and_normalize_merges_them(nb):
+    _legacy_world(nb)
+    clashes = {r[0]: r[1] for r in nb.store.q("SELECT entity_id, key_clash_with FROM entities WHERE key_clash_with"
+                                               " IS NOT NULL")}
+    assert clashes == {"ex:concept-memory-2": "ex:concept-memory", "ex:thing-memory": "ex:concept-memory"}
+    dry = nb.normalize_entities("laurent", client="cli", dry_run=True)
+    assert dry["merges"] == [] and [(g["into_id"], g["from_ids"]) for g in dry["groups"]] == [
+        ("ex:concept-memory", ["ex:concept-memory-2", "ex:thing-memory"])]  # observer is only an alias
+    assert dry["groups"][0]["names"] == ["Memory", "memory", "MEMORY."]
+    assert len(nb.store.name_key_groups()) == 1  # a dry run changes nothing
+    nb.then_now("ex:concept-memory")  # fills the cache
+    out = nb.normalize_entities("laurent", client="cli")
+    assert [(m["from_id"], m["into_id"]) for m in out["merges"]] == [
+        ("ex:concept-memory-2", "ex:concept-memory"), ("ex:thing-memory", "ex:concept-memory")]
+    for m in out["merges"]:
+        r = nb.revision(m["revision_id"])
+        assert r["action"] == "entity.merge" and r["source"] == {"client": "cli", "account": "laurent"}
+    assert _live(nb) == [("ex:concept-memory", "memory"), ("ex:org-acme", "acme"),
+                         ("ex:software-abstractobserver", "abstractobserver"), ("ex:software-observer", "observer")]
+    card = nb.entity("ex:concept-memory")
+    assert card["merged_from"] == ["ex:concept-memory-2", "ex:thing-memory"]
+    assert [c["claim_id"] for c in card["beliefs"]] == ["cl_1"]  # the statement follows the merge
+    assert nb.store.entity_brief("ex:concept-memory")["aliases"] == []  # memory and MEMORY. are not other names
+    assert {a[0] for a in nb.store.q("SELECT alias FROM entity_aliases WHERE entity_id='ex:concept-memory'")} == {
+        "MEMORY."}  # the surface forms are kept (memory folds to Memory, the display name)
+    assert nb.store.q1("SELECT COUNT(*) FROM then_now_cache")[0] == 0
+    assert nb.store.name_key_groups() == [] and nb.normalize_entities("laurent")["merges"] == []
+    before = (_live(nb), nb.store.counts())
+    nb.rebuild()  # the legacy creates replay as marked duplicates, then the merges join them again
+    assert (_live(nb), nb.store.counts()) == before
+
+
+def test_a_normalisation_merge_is_undone_with_unmerge_and_stays_apart(nb):
+    _legacy_world(nb)
+    nb.normalize_entities(None, client="api")
+    nb.unmerge_entity("ex:concept-memory", "ex:concept-memory-2", "laurent", "they are different")
+    row = nb.store.entity_row("ex:concept-memory-2")
+    assert (row["merged_into"], row["name"], row["name_key"], row["key_clash_with"]) == (
+        None, "memory_2", "memory_2", None)  # a person never sees two entities named memory
+    assert nb.store.claim_row("cl_1")["subject_id"] == "ex:concept-memory-2"
+    assert [c["claim_id"] for c in nb.entity("ex:concept-memory-2")["beliefs"]] == ["cl_1"]
+    assert nb.normalize_entities(None)["merges"] == []  # separated by a person: not joined again
+
+
+def test_an_upgraded_notebook_is_repaired_at_its_next_write(tmp_path):
+    root = tmp_path / "nb"
+    with Notebook.open(root) as nb:
+        _legacy_world(nb)
+    conn = sqlite3.connect(str(root / "note.sqlite3"))
+    conn.execute("DROP INDEX idx_entities_name_key")
+    conn.execute("UPDATE entities SET name=display_name, name_key=NULL, display_name=NULL, key_clash_with=NULL")
+    conn.execute("UPDATE meta SET value='1' WHERE key='schema_version'")
+    conn.commit()
+    conn.close()
+    with Notebook.open(root) as nb:
+        assert nb.store.meta_get("name_key_repair") == "pending"
+        assert len(nb.store.name_key_groups()) == 1  # reads change nothing
+        nb.capture("A new note.", occurred_at=t(4))
+        assert nb.store.name_key_groups() == [] and nb.store.meta_get("name_key_repair") is None
+        sources = [r["source_json"] for r in nb.store.q("SELECT source_json FROM revisions WHERE action='entity.merge'")]
+        assert len(sources) == 2 and all('"migration"' in s for s in sources)
+
+
+def test_cli_normalize_dry_run_and_merge(tmp_path, capsys):
+    import json
+
+    from abstractnote.cli import main
+
+    root = tmp_path / "nb"
+    with Notebook.open(root) as nb:
+        _legacy_world(nb)
+    assert main(["normalize", "--notebook", str(root), "--dry-run"]) == 0
+    dry = json.loads(capsys.readouterr().out)
+    assert dry["dry_run"] is True and len(dry["groups"]) == 1 and dry["merges"] == []
+    assert main(["normalize", "--notebook", str(root), "--account", "laurent"]) == 0
+    done = json.loads(capsys.readouterr().out)
+    assert len(done["merges"]) == 2
+
+
+def test_dry_run_of_a_notebook_pinned_to_an_absent_model_and_its_merge_refused(tmp_path, capsys):
+    import json
+
+    from abstractnote.cli import main
+    from test_store_support import CountingEmbedder
+
+    root = tmp_path / "nb"
+    with Notebook.open(root, embedder=CountingEmbedder(model_id="some-gateway-model")) as nb:
+        _legacy_world(nb)
+    assert main(["normalize", "--notebook", str(root), "--dry-run"]) == 0
+    assert len(json.loads(capsys.readouterr().out)["groups"]) == 1
+    assert main(["normalize", "--notebook", str(root)]) == 2
+    assert "some-gateway-model" in capsys.readouterr().err

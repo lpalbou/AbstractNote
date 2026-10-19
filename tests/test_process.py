@@ -414,9 +414,8 @@ def test_a_mention_the_note_never_writes_is_left_out(nb):
     rev = nb.store.revision_row(out["revision_id"])
     ops = __import__("json").loads(rev["ops_json"])
     created = {o["payload"]["name"] for o in ops if o["op"] == "entity.create"}
-    # "Dana-Ng" is the same words as "Dana Ng", an alias of Dana: filed under Dana, not created again.
-    assert created == {"budget"}
-    assert any("“Dana Ng” has the canonical name dana_ng" in w for w in out["warnings"])
+    assert created == {"Dana Ng", "budget"}  # "Dana-Ng" is the same words as "Dana Ng" (an alias of Dana: the
+    # model's call, never a forced reuse)
     claims = [o["payload"] for o in ops if o["op"] == "claim.add"]
     assert len(claims) == 1 and claims[0]["object_literal"] == "LUT"
 

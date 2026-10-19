@@ -45,7 +45,7 @@ def test_merged_entries_list_and_read_as_themselves(gw):
     own = c.get("/api/gateway/note/entities/ex:person-d-ng", params={"as_merged": "true"}, headers=h)
     assert own.status_code == 200, own.text
     assert (own.json()["name"], own.json()["merged_into"], own.json()["merge"]["revision_id"]) == (
-        "D. Ng", "ex:person-dana", "rv_w3")
+        "d_ng", "ex:person-dana", "rv_w3")
     both = c.get("/api/gateway/note/entities/ex:person-d-ng", params={"as_merged": "true", "at": "2026-01-01"},
                  headers=h)
     assert both.status_code == 400

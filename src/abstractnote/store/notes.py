@@ -307,20 +307,18 @@ class NoteStore:
 
     def name_key_holder(self, key: str, exclude: Sequence[str] = (), conn: Optional[sqlite3.Connection] = None
                         ) -> Optional[str]:
-        """The live entity whose canonical name (``name_key``) or one of whose aliases (``alias_key``) is ``key``,
-        the name first and the earliest entity first; merged entries resolve to their surviving entity."""
+        """The live entity whose canonical name (``name_key``) is ``key``, the earliest first; None when there is
+        none. Aliases never decide here: an alias is the model's word for an entity (ADR 0004), and only
+        candidate generation matches on alias keys."""
         c = conn or self.conn
         if not key:
             return None
         with self.lock:
             rows = c.execute("SELECT entity_id FROM entities WHERE name_key=? AND merged_into IS NULL"
                              " ORDER BY key_clash_with IS NOT NULL, created_at, entity_id", (key,)).fetchall()
-            rows += c.execute("SELECT a.entity_id FROM entity_aliases a JOIN entities e ON e.entity_id=a.entity_id"
-                              " WHERE a.alias_key=? ORDER BY e.created_at, e.entity_id", (key,)).fetchall()
         for r in rows:
-            eid = self.canonical(r[0], c)
-            if eid not in exclude:
-                return eid
+            if r[0] not in exclude:
+                return r[0]
         return None
 
     def entity_brief(self, entity_id: str) -> Optional[Dict[str, Any]]:
@@ -335,41 +333,13 @@ class NoteStore:
         }
 
     def name_key_groups(self) -> List[List[str]]:
-        """Groups of live entities that share a canonical name or an alias key (two or more each), earliest
-        entity first; the groups :meth:`Notebook.normalize_entities` merges."""
-        live = self.q("SELECT entity_id, name_key FROM entities WHERE merged_into IS NULL"
-                      " ORDER BY created_at, recorded_at, entity_id")
-        order = {r[0]: i for i, r in enumerate(live)}
-        parent = {eid: eid for eid in order}
-
-        def find(x: str) -> str:
-            while parent[x] != x:
-                parent[x] = parent[parent[x]]
-                x = parent[x]
-            return x
-
-        def union(a: str, b: str) -> None:
-            ra, rb = find(a), find(b)
-            if ra != rb:
-                keep, other = (ra, rb) if order[ra] <= order[rb] else (rb, ra)
-                parent[other] = keep
-
-        by_key: Dict[str, str] = {}
-        keyed = [(r[1], r[0]) for r in live if r[1]]
-        for alias_key, eid in self.q("SELECT alias_key, entity_id FROM entity_aliases WHERE alias_key IS NOT NULL"
-                                     " AND alias_key!=''"):
-            c = self.canonical(eid)
-            if c in parent:
-                keyed.append((alias_key, c))
-        for key, eid in keyed:
-            if key in by_key:
-                union(by_key[key], eid)
-            else:
-                by_key[key] = eid
+        """Groups of live entities that share a canonical name (two or more each), earliest entity first: the
+        groups :meth:`Notebook.normalize_entities` merges."""
         groups: Dict[str, List[str]] = {}
-        for eid in order:
-            groups.setdefault(find(eid), []).append(eid)
-        return [sorted(g, key=order.__getitem__) for g in groups.values() if len(g) > 1]
+        for r in self.q("SELECT entity_id, name_key FROM entities WHERE merged_into IS NULL AND name_key IS NOT NULL"
+                        " ORDER BY created_at, recorded_at, entity_id"):
+            groups.setdefault(r[1], []).append(r[0])
+        return [g for g in groups.values() if len(g) > 1]
 
     # ------------------------------------------------------------------ claims helpers
 

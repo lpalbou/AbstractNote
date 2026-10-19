@@ -263,6 +263,24 @@ async def note_entities(
         q=q, kind=kind, sort=sort, cursor=cursor, limit=limit, include_merged=include_merged or None))))
 
 
+class NormalizeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dry_run: bool = False
+
+
+@router.post("/entities/normalize")
+async def note_entities_normalize(request: Request, body: Optional[NormalizeBody] = None) -> Dict[str, Any]:
+    """User action: merge the entities that share a canonical name into the earliest one (one reversible
+    ``entity.merge`` revision each); ``dry_run`` only lists the groups."""
+    dry_run = bool(body and body.dry_run)
+
+    def work(nb, svc, p):
+        return _call(nb, "normalize_entities", _account(p), client=action_client(request), dry_run=dry_run)
+
+    return await _run(request, work)
+
+
 @router.get("/entities/{entity_id}")
 async def note_entity(request: Request, entity_id: str, at: Optional[str] = None,
                       as_received: Optional[str] = None, as_merged: bool = False) -> Dict[str, Any]:

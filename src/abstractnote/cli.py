@@ -93,6 +93,11 @@ def build_parser() -> argparse.ArgumentParser:
     _common(p)
     p.add_argument("--reembed", action="store_true", help="recompute every vector with the given embedder")
 
+    p = sub.add_parser("normalize", help="merge the entities that share a canonical name (one reversible merge each)")
+    _common(p)
+    p.add_argument("--dry-run", action="store_true", help="only list the groups that would be merged")
+    p.add_argument("--account", help="who asked, recorded in each merge's source")
+
     p = sub.add_parser("process", help="process queued notes now")
     _common(p)
     p.add_argument("--local", action="store_true", help="run the flows here (headless)")
@@ -181,6 +186,13 @@ def _cmd_process(args: argparse.Namespace) -> Any:
     return _runner(args).run_drain(max_items=args.max_items, budget_s=args.budget_s)
 
 
+def _cmd_normalize(args: argparse.Namespace) -> Any:
+    # A dry run needs no embedder: a notebook pinned to a model that is not available here opens read-only for
+    # meaning, which is enough to list the groups; the merges themselves need the notebook's model.
+    with _open(args) as nb:
+        return nb.normalize_entities(args.account, client="cli", dry_run=args.dry_run)
+
+
 def _cmd_bundle(args: argparse.Namespace) -> Any:
     try:
         from .flows.bundle import pack
@@ -230,6 +242,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         elif args.command == "rebuild":
             with _open(args) as nb:
                 out = nb.rebuild(reembed=args.reembed, embedder=_embedder(args))
+        elif args.command == "normalize":
+            out = _cmd_normalize(args)
         elif args.command == "process":
             out = _cmd_process(args)
         elif args.command == "bundle":

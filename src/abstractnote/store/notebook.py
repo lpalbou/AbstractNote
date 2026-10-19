@@ -36,8 +36,9 @@ from .embeddings import (
     vector_key,
 )
 from .kg import ClaimStore, claim_assertion, kinds_from_index
-from .names import reuse_taken_names
+from .names import merge_ops, merge_plan, reuse_taken_names
 from .notes import NoteStore, _j, _uj, entity_text, note_vector_text
+from .schema import NAME_KEY_REPAIR_META
 
 NOTE_DB = "note.sqlite3"
 KG_DB = "kg.sqlite3"
@@ -104,6 +105,7 @@ class Notebook:
         from .queue import Queue
 
         self.queue = Queue(store)
+        self._normalizing = False
         from .vector_index import NoteVectorIndex
 
         self.note_vectors = NoteVectorIndex(store)
@@ -300,7 +302,11 @@ class Notebook:
         without its embedder cannot write, and the write itself says so). Read paths never call it."""
         if self.cache.embedder is None:
             return []
-        return self.recover()
+        done = self.recover()
+        if self.store.meta_get(NAME_KEY_REPAIR_META) == "pending" and not self._normalizing:
+            # A notebook upgraded from before canonical names: merge what shares one, once (the repair).
+            self.normalize_entities(None, client="migration")
+        return done
 
     def revision(self, revision_id: str) -> Optional[Dict[str, Any]]:
         row = self.store.revision_row(revision_id)
@@ -357,6 +363,38 @@ class Notebook:
         return self._user_revision("entity.unmerge", f"{entity_id}|{from_id}", [{"op": "entity.unmerge", "payload": {
             "entity_id": entity_id, "from_id": from_id, "reason": reason or "undone by the user"}}], account,
             f"Separated {row['name']} again.", client=client, occurred_at=occurred_at)
+
+    def normalize_entities(self, account: Optional[str], *, client: str = "cli", dry_run: bool = False
+                           ) -> Dict[str, Any]:
+        """Merge every group of live entities that share a canonical name into the earliest one
+        (``abstractnote normalize``, ``POST /note/entities/normalize``).
+
+        One ``entity.merge`` revision per merged entry, source ``{client, account}``, each reversible with
+        :meth:`unmerge_entity`; the merged entry's names stay as aliases, and reads follow the merge for its
+        statements, relations, notes and tasks. ``dry_run`` only lists the groups. Returns ``{dry_run, groups:
+        [{into_id, from_ids, name, names, kinds}], merges: [{from_id, into_id, revision_id}]}``.
+        """
+        plan = merge_plan(self.store)
+        out: Dict[str, Any] = {"dry_run": dry_run, "groups": plan, "merges": []}
+        if dry_run:
+            return out
+        self.require_embedder()
+        self._normalizing = True
+        try:
+            self.recover_pending()
+            for group in plan:
+                for from_id in group["from_ids"]:
+                    ops, summary = merge_ops(self.store, group["into_id"], from_id)
+                    res = self._user_revision("entity.merge", f"{group['into_id']}|{from_id}|normalize", ops,
+                                              account, summary, client=client)
+                    out["merges"].append({"from_id": from_id, "into_id": group["into_id"],
+                                          "revision_id": res["revision_id"]})
+            with self.store.tx() as c:
+                c.execute("DELETE FROM then_now_cache")
+                c.execute("DELETE FROM meta WHERE key=?", (NAME_KEY_REPAIR_META,))
+        finally:
+            self._normalizing = False
+        return out
 
     # ------------------------------------------------------------------ capture and filing (0002)
 
