@@ -194,6 +194,11 @@ def test_pinned_reads_on_an_empty_notebook(gw):
         r = c.get(path, headers=h)
         assert r.status_code == 200, (path, r.text)
         assert keys <= set(r.json()), (path, r.json())
+    # every list answers {items, next_cursor} (api.md; review 02 m2)
+    for path in ("notes", "entities", "tasks", "cues", "topics", "insights", "revisions"):
+        r = c.get(f"/api/gateway/note/{path}", headers=h)
+        assert r.status_code == 200, (path, r.text)
+        assert set(r.json()) == {"items", "next_cursor"} and r.json()["next_cursor"] is None, (path, r.json())
 
 
 def test_unknown_ids_are_404_and_bad_input_is_400(gw):

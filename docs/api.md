@@ -103,7 +103,9 @@ bodies cannot set it (an unknown field such as `client` is refused with 422).
 | `GET /note/settings` and `PUT /note/settings` | per-notebook settings: filing model, answering model, reflect schedule, inline processing default | |
 | `POST /note/processor/ensure` | create the processor and reflect automations if missing; returns their ids | |
 
-Response envelopes are plain JSON objects; lists return `{items, next_cursor}`. Times are ISO
+Response envelopes are plain JSON objects; every list (`/notes`, `/entities`, `/revisions`,
+`/tasks`, `/cues`, `/topics`, `/insights`) returns `{items, next_cursor}`, with `next_cursor` null
+when there is no further page (the last four never page; `limit` bounds them). Times are ISO
 8601 UTC. Errors use the gateway's error shape, `{"detail": "<one sentence>"}`: `401` without a
 valid sign-in, `404` for an id that is not in the caller's notebook, `400` for bad input, `501`
 for a read the installed `abstractnote` does not provide.

@@ -152,8 +152,10 @@ def action_client(request: Request) -> str:
 
 
 def _items(value: Any) -> Dict[str, Any]:
+    """Every list answers ``{items, next_cursor}`` (api.md); ``next_cursor`` is null when the list
+    does not page."""
     if isinstance(value, dict) and "items" in value:
-        return value
+        return {**value, "next_cursor": value.get("next_cursor")}
     return {"items": list(value or []), "next_cursor": None}
 
 
@@ -194,8 +196,8 @@ async def note_list(
     kind: Optional[str] = None, topic: Optional[str] = None, entity: Optional[str] = None,
     status: Optional[str] = None, cursor: Optional[str] = None, limit: int = Query(50, ge=1, le=500),
 ) -> Dict[str, Any]:
-    return await _run(request, lambda nb, svc, p: _call(nb, "notes", **_clean(
-        q=q, since=since, until=until, kind=kind, topic=topic, entity=entity, status=status, cursor=cursor, limit=limit)))
+    return await _run(request, lambda nb, svc, p: _items(_call(nb, "notes", **_clean(
+        q=q, since=since, until=until, kind=kind, topic=topic, entity=entity, status=status, cursor=cursor, limit=limit))))
 
 
 @router.get("/notes/{note_id}")
@@ -254,8 +256,8 @@ async def note_entities(
     request: Request, q: Optional[str] = None, kind: Optional[str] = None, sort: Optional[str] = None,
     cursor: Optional[str] = None, limit: int = Query(50, ge=1, le=500),
 ) -> Dict[str, Any]:
-    return await _run(request, lambda nb, svc, p: _call(nb, "entities", **_clean(
-        q=q, kind=kind, sort=sort, cursor=cursor, limit=limit)))
+    return await _run(request, lambda nb, svc, p: _items(_call(nb, "entities", **_clean(
+        q=q, kind=kind, sort=sort, cursor=cursor, limit=limit))))
 
 
 @router.get("/entities/{entity_id}")
@@ -403,8 +405,8 @@ async def note_day(request: Request, day: str, tz: Optional[str] = None) -> Dict
 async def note_revisions(request: Request, since: Optional[str] = None, until: Optional[str] = None,
                          entity: Optional[str] = None, cursor: Optional[str] = None,
                          limit: int = Query(50, ge=1, le=500)) -> Dict[str, Any]:
-    return await _run(request, lambda nb, svc, p: _call(nb, "revisions", **_clean(
-        since=since, until=until, entity=entity, cursor=cursor, limit=limit)))
+    return await _run(request, lambda nb, svc, p: _items(_call(nb, "revisions", **_clean(
+        since=since, until=until, entity=entity, cursor=cursor, limit=limit))))
 
 
 @router.get("/topics")
