@@ -51,6 +51,14 @@ AbstractNote integration); the web app is `@abstractframework/note` on npm.
 - **Install**: the documentation describes the published packages; installing from source checkouts
   is the contributor path.
 
+### Fixed
+
+- **Processing after an upgrade**: the background processing and the weekly reflection kept the
+  version of AbstractNote they were set up with, so after an upgrade notes stayed queued. Opening
+  the web app now repairs them (or press Repair in Settings, Queue; `POST /note/processor/ensure`
+  through the API), keeping your schedules and a paused state; `GET /note/status` and
+  `GET /note/queue` say whether each one can run.
+
 ## [0.1.0] - 2026-10-19
 
 The first version: the `abstractnote` package on PyPI and the `@abstractframework/note` web app on npm;

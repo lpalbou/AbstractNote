@@ -90,7 +90,10 @@ is missing, or call `POST /api/gateway/note/processor/ensure` with your account 
 - **Check**: `abstractnote status` (or `GET /api/gateway/note/queue`) shows `queued`,
   `processing` and `failed`, and `automations.processor_id`.
 - **Cause and fix**: with no `processor_id`, the processor automation does not exist yet: open
-  the web app or call `processor/ensure` as above. With a processor, notes are processed up to 20 every two minutes,
+  the web app or call `processor/ensure` as above. When `automations.processor.healthy` is false (for
+  example after an upgrade: `reason` names the old workflow version), the processor cannot run; open the
+  web app (it repairs on load, or press Repair in Settings, Queue) or call `processor/ensure`, which
+  replaces it. With a processor, notes are processed up to 20 every two minutes,
   one at a time, highest priority first; imports wait behind live notes by design. Headless, run
   `process --local` again until the queue is empty.
 

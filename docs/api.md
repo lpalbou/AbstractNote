@@ -59,7 +59,8 @@ starts a drain with reasoning on.
 
 Run the processor now: `POST /api/gateway/automations/{processor_id}/commands
 {"command_id": "<uuid>", "type": "automation.run_now"}` (the id comes from `GET /api/gateway/note/status`;
-a `409 automation_busy` answer means a drain is already running).
+a `409 automation_busy` answer means a drain is already running). When `automations.processor.healthy` is
+false, call `POST /api/gateway/note/processor/ensure` first: `run_now` on a stopped automation does nothing.
 
 Every run start also carries `input_data.session_id` equal to the request's `session_id` (the gateway
 does not forward the run's session to the flow). Run errors appear in `output` as text starting with
@@ -72,7 +73,7 @@ signed-in principal for their own notebook. The few write actions are bookkeepin
 
 | Method and path | Purpose | Main parameters |
 |---|---|---|
-| `GET /note/status` | notebook health: counts, queue state, processor and reflect automation ids, model settings, store versions, embedding pin | |
+| `GET /note/status` | notebook health: counts, queue state, the processor and reflect automations (ids and health, see the shapes below), model settings, store versions, embedding pin | |
 | `GET /note/changes` | since you last looked: new notes, new entities, superseded claims, closed loops, failed notes, insights since a cursor; the default screen for humans and the first call for agents | `since (cursor or ISO), limit, as_received` |
 | `GET /note/overview` | the landing data: recent notes, active entities, unacknowledged insights, today's resurfacing, activity sparkline | `days` |
 | `GET /note/notes` | list notes | `q, since, until, kind, topic, entity, status, cursor, limit` |
@@ -122,7 +123,7 @@ bodies cannot set it (an unknown field such as `client` is refused with 422).
 | `POST /note/queue/{note_id}/retry` | re-queue a failed note | |
 | `POST /note/notes/{note_id}/archive` | archive a note (never delete) | |
 | `GET /note/settings` and `PUT /note/settings` | per-notebook settings: filing model, answering model, reflect schedule, processor schedule (`{every, max_items}`, default `2m` and 20; `max_items` 1 to 200), inline processing default; the automations take them when `processor/ensure` creates them | |
-| `POST /note/processor/ensure` | create the processor and reflect automations if missing; returns their ids | |
+| `POST /note/processor/ensure` | create the processor and reflect automations if missing, repair them when unhealthy (another workflow version after an upgrade, failed, archived, gone), keep them otherwise; says what it did for each (shape below) | |
 
 Three dates (data-model.md "Time"): `at` asks what was true or known as of a moment of history (the
 authored and valid dates); `as_received` (ISO) asks what the archive held on a date: only the notes received
@@ -155,7 +156,10 @@ Pinned response shapes (clients decode these strictly; absent lists mean empty):
 | `ReviewSide` | `{type, id, name, kind, note_ids}` (`type` `entity`: `name` its display name, `kind` its entity kind, `note_ids` its newest notes; `type` `claim`: `name` the statement in plain words, `kind` null, `note_ids` the note it came from) |
 | `POST /note/review/{id}/confirm` | the revision result (`{revision_id, summary, entities_merged, ...}`) plus `review_id` |
 | `GET /note/entities/{id}?as_merged=true` | `{entity_id, kind, name, aliases, summary, first_seen, last_seen, note_count, merged_into, merged_at, merge: {revision_id, at, recorded_at, reason, summary, note_id} or null, notes: [NoteRef]}` (the entry's own name, aliases, summary and notes; `merge` is the revision that joined it into `merged_into`, null when it is not merged; `at` is refused with 400) |
-| `GET /note/queue` | `{stats: {queued, processing, failed, by_priority, oldest_enqueued_at}, failed: [{note_id, title, occurred_at, last_error, failed_at, failures}], waiting: [{note_id, title, occurred_at, priority, state, attempts, next_attempt_at}], automations: {processor_id, reflect_id}, processor: {max_items, interval}}` (`processor` is what the processor automation was created with while it exists, otherwise the `processor_schedule` setting it will be created with; `interval` is a duration such as `2m`) |
+| `GET /note/queue` | `{stats: {queued, processing, failed, by_priority, oldest_enqueued_at}, failed: [{note_id, title, occurred_at, last_error, failed_at, failures}], waiting: [{note_id, title, occurred_at, priority, state, attempts, next_attempt_at}], automations: Automations, processor: {max_items, interval}}` (`processor` is what the processor automation was created with while it exists, otherwise the `processor_schedule` setting it will be created with; `interval` is a duration such as `2m`) |
+| `Automations` (`GET /note/status`, `GET /note/queue`) | `{processor_id, reflect_id, processor: AutomationHealth, reflect: AutomationHealth}` |
+| `AutomationHealth` | `{id, state, target, healthy, reason, paused}`: `state` is the automation's state (`active`, `paused`, `failed`, `completed`, `archived`) or `missing` (never created, or gone); `target` the workflow it runs (`abstractnote@<version>:note-drain`); `healthy` is true only when it is active or paused AND runs the version of the note workflows this gateway serves; `reason` one sentence when it is not (null otherwise); `paused` whether the user paused it. Unhealthy = `POST /note/processor/ensure` repairs it |
+| `POST /note/processor/ensure` | `{processor_id, reflect_id, created, processor: EnsureAction, reflect: EnsureAction}`; `EnsureAction` = `{id, action, reason, previous_id?}`: `action` `created` (there was none), `kept` (healthy) or `recreated` (the previous one, `previous_id`, was archived and replaced; `reason` is its health reason); `created` lists the flows of every new automation (`[]` when both were kept). `503` when the note workflows are not loaded: nothing is archived |
 | `note-capture` output | `{response, note_id, status, revision_summary?}` |
 | `note-recall` output | `{response, answer, evidence: [NoteRef], evolution, open_loops, follow_ups, dossier_note_id?, hits, effort}` |
 
