@@ -43,6 +43,11 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 - **Imported notes are filed too**: an imported note now gets the same quick filing as a note you
   send (its kind and up to four topics) when it is understood, and `abstractnote refile --missing
   --local` files the notes that were understood before, a batch at a time, saying how many are left.
+  The same repair runs through the server (`POST /note/refile` with `{"missing": true}`), each note
+  filed on your own runtime, and `GET /note/refile` says how far it got.
+- **A note found unchanged is not read again for the same reason**: when a note read again because
+  an idea it relies on changed comes out the same, the notebook remembers what it was read against,
+  so the next change wave from that idea passes it by without a model call.
 - **A note read while the notebook changed is read again**: when a statement a note builds on is
   withdrawn while the note is being understood, nothing of that reading is kept and the note goes
   back to the queue once, at its place, with the reason shown in the queue; the next reading is made

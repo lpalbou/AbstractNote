@@ -126,6 +126,6 @@ notebook pinned to an embedding server is opened with the same `--embed-base-url
 Processing an import runs through the same `note-process` flow as live notes. An import skips the
 quick filing a live capture gets, so its processing files it first (one more small call: kind and up
 to 4 topics, thinking off; cognition.md "note-process" step 0); notes understood before that are filed
-with `abstractnote refile --missing --local`. Expect roughly three model calls per note; with a small local model this is a few seconds per note, so a corpus of a
+with `abstractnote refile --missing --local` (or, on a gateway, `POST /note/refile` with `{"missing": true}`). Expect roughly three model calls per note; with a small local model this is a few seconds per note, so a corpus of a
 few thousand notes takes hours. Run `abstractnote process --local` on the machine that holds the
 model, or let the gateway's processor automation drain the queue over time.

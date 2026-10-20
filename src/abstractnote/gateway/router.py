@@ -846,3 +846,7 @@ async def note_processor_ensure(request: Request) -> Dict[str, Any]:
 from .consolidation import router as _consolidation_router  # noqa: E402  (GET /note/consolidation, backlog 0032)
 
 router.include_router(_consolidation_router)
+
+from .refile import router as _refile_router  # noqa: E402  (POST/GET /note/refile: the refile --missing repair)
+
+router.include_router(_refile_router)

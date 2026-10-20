@@ -95,7 +95,8 @@ flowchart TD
    `note_file` with the kind, up to 4 topics, the title when the note has none, the language and the one line,
    never the urgency (the note keeps its place in the queue). A filing that fails fails the note (its sentence
    in `queue_errors`), never a silent skip. A note filed at capture goes straight on. The notes understood
-   before this step existed are filed by `abstractnote refile --missing` (api.md "CLI"): the same `note-file`
+   before this step existed are filed by `abstractnote refile --missing` (api.md "CLI") or `POST /note/refile`
+   (the same repair on the gateway, each note one run on your runtime): the same `note-file`
    flow per note, oldest first, within `--max-items` and `--budget-s`, one `refile_runs` row per repair updated
    after every note (`done`, `filed`, `skipped` with each reason, `kinds`, `not_reached`) and closed
    `completed`, `completed_with_gaps` or `interrupted`, with one sentence of what is left (ADR 0007).

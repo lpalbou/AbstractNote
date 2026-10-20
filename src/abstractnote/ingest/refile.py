@@ -68,20 +68,61 @@ def notice(done: int, skipped: int, not_reached: int) -> Optional[str]:
     return f"{words} still without a kind ({' and '.join(why)}); run it again to file them."
 
 
-def refile_missing(nb: Any, file_one: Callable[[str], Dict[str, Any]], *, max_items: int = DEFAULT_MAX_ITEMS,
-                   budget_s: float = DEFAULT_BUDGET_S, model: Optional[str] = None,
-                   clock: Callable[[], float] = time.monotonic) -> Dict[str, Any]:
-    """File up to ``max_items`` understood notes without a kind within ``budget_s`` seconds; ``file_one(note_id)``
-    runs the note-file flow for one note and answers its output (``{filed, kind, topics}``) or raises with the
-    reason. Returns the closed ``refile_runs`` row plus ``notice``."""
+def open_refile(nb: Any, *, max_items: int = DEFAULT_MAX_ITEMS, budget_s: float = DEFAULT_BUDGET_S,
+                model: Optional[str] = None) -> Dict[str, Any]:
+    """Open one repair's ``refile_runs`` row (status ``running``) and answer it; :func:`refile_missing` with its
+    ``refile_id`` does the filing (the gateway answers the open row at once and files in the background)."""
     max_items = max(1, int(max_items))
     budget_s = float(budget_s)
     total = int(nb.store.q1(f"SELECT COUNT(*) {MISSING_SQL}")[0])
-    todo = missing(nb, max_items)
     refile_id = "rf_" + uuid.uuid4().hex[:16]
     with nb.store.tx() as c:
         c.execute("INSERT INTO refile_runs(refile_id, started_at, status, total, max_items, budget_s, model)"
                   " VALUES (?,?,?,?,?,?,?)", (refile_id, ids.utc_now(), "running", total, max_items, budget_s, model))
+    return refile_row(nb, refile_id)
+
+
+def refile_row(nb: Any, refile_id: str) -> Dict[str, Any]:
+    """One repair's row, ``{refile_id, started_at, finished_at, status, total, done, filed, skipped, kinds,
+    not_reached, max_items, budget_s, seconds, model, notice}``."""
+    out = _row(nb, refile_id)
+    out["notice"] = (notice(out["done"], len(out["skipped"]), out["not_reached"])
+                     if out["status"] != "running" else None)
+    return out
+
+
+def latest_refile(nb: Any) -> Optional[Dict[str, Any]]:
+    """The newest repair's row, None when none ran."""
+    r = nb.store.q1("SELECT refile_id FROM refile_runs ORDER BY started_at DESC, rowid DESC LIMIT 1")
+    return refile_row(nb, r[0]) if r else None
+
+
+def interrupt_running(nb: Any, keep: Any = ()) -> int:
+    """Close as ``interrupted`` every ``running`` repair not in ``keep`` (the ones this process is still filing):
+    a row left running by a process that stopped. Returns how many were closed."""
+    rows = [r[0] for r in nb.store.q("SELECT refile_id FROM refile_runs WHERE status='running'") if r[0] not in keep]
+    for refile_id in rows:
+        row = _row(nb, refile_id)
+        _update(nb, refile_id, finished_at=ids.utc_now(), status="interrupted",
+                not_reached=max(0, int(row["total"]) - len(row["filed"]) - len(row["skipped"])))
+        _log.warning("refile %s was left running by a stopped process: closed as interrupted", refile_id)
+    return len(rows)
+
+
+def refile_missing(nb: Any, file_one: Callable[[str], Dict[str, Any]], *, max_items: int = DEFAULT_MAX_ITEMS,
+                   budget_s: float = DEFAULT_BUDGET_S, model: Optional[str] = None,
+                   clock: Callable[[], float] = time.monotonic, refile_id: Optional[str] = None) -> Dict[str, Any]:
+    """File up to ``max_items`` understood notes without a kind within ``budget_s`` seconds; ``file_one(note_id)``
+    runs the note-file flow for one note and answers its output (``{filed, kind, topics}``) or raises with the
+    reason. Returns the closed ``refile_runs`` row plus ``notice``. ``refile_id``: a row :func:`open_refile`
+    opened (its count and budget are used)."""
+    if refile_id is None:
+        refile_id = open_refile(nb, max_items=max_items, budget_s=budget_s, model=model)["refile_id"]
+    opened = _row(nb, refile_id)
+    if opened["status"] != "running":
+        raise ValueError("That repair is closed already.")
+    max_items, budget_s, total = int(opened["max_items"]), float(opened["budget_s"]), int(opened["total"])
+    todo = missing(nb, max_items)
     start = clock()
     filed: List[Dict[str, Any]] = []
     skipped: List[Dict[str, Any]] = []
@@ -124,8 +165,7 @@ def refile_missing(nb: Any, file_one: Callable[[str], Dict[str, Any]], *, max_it
         if not_reached and status != "interrupted":
             _log.warning("refile %s: %d notes without a kind were not reached (count %d, budget %.0f s)", refile_id,
                          not_reached, max_items, budget_s)
-    out = _row(nb, refile_id)
-    out["notice"] = notice(done, len(skipped), out["not_reached"])
+    out = refile_row(nb, refile_id)
     out["response"] = (f"Filed {len(filed)} {'note' if len(filed) == 1 else 'notes'}."
                        + (" " + out["notice"] if out["notice"] else ""))
     return out
