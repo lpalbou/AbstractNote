@@ -463,7 +463,7 @@ def test_a_model_merge_with_a_shared_key_applies_once_per_note(nb):
 
 # --------------------------------------------------------------------------- D2 unrelated supersessions
 
-def test_a_supersession_of_another_subject_or_predicate_is_a_new_statement(nb):
+def test_a_supersession_of_another_subject_is_new_and_another_spelling_adopts_the_predicate(nb):
     _, o = castor(nb, T22, "Llama")
     [c22] = o["claims_added"]
     ext = extraction([mention("m1", "Pollux", "project")],
@@ -477,14 +477,19 @@ def test_a_supersession_of_another_subject_or_predicate_is_a_new_statement(nb):
 
     out = run(nb, "Pollux runs on Qwen, unlike Castor.", T26, ext, link)[3]
     assert out["claims_superseded"] == [] and row(nb, c22)["status"] == "active"
-    assert any("another subject or relation" in w for w in out["warnings"])
+    assert any("about another subject" in w for w in out["warnings"])
+    # The same subject under another predicate spelling: the model's index decides that it is the same fact, and
+    # the statement adopts the existing predicate (retro-design-review 2.6; R1, 2026-10-20), never a second slot.
     ext2 = extraction([mention("m1", "Castor", "project")],
-                      [stmt("m1", "ex:hosted_by", "OVH", literal=True, evidence="Castor is hosted by OVH")])
-    out2 = run(nb, "Castor is hosted by OVH.", T26, ext2, lambda p, c: {
+                      [stmt("m1", "ex:model", "Qwen", literal=True, evidence="Castor's model is Qwen")])
+    out2 = run(nb, "Castor's model is Qwen.", T26, ext2, lambda p, c: {
         "mentions": [ml("m1", "reuse", cand_index(c, "m1", CASTOR))],
         "claims": [{"index": 0, "relation_to_existing": "supersedes", "existing": claim_index(p, c, c22),
-                    "reason": "?"}], "tasks": [], "revision_summary": "Host."})[3]
-    assert out2["claims_superseded"] == [] and row(nb, c22)["status"] == "active"
+                    "reason": "?"}], "tasks": [], "revision_summary": "Model."})[3]
+    assert out2["claims_superseded"] == [c22] and row(nb, c22)["status"] == "superseded"
+    [new] = out2["claims_added"]
+    assert nb.store.claim_row(new)["predicate"] == "ex:runs_on" and out2["predicates_adopted"] == 1
+    assert any(w.startswith("predicate_adopted: ex:model -> ex:runs_on") for w in out2["warnings"])
 
 
 def test_no_window_ever_ends_before_it_starts(nb):

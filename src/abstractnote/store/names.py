@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .. import ids
 
 _ENTITY_FIELDS = ("entity_id", "from_id", "into_id", "subject_id", "object_id")
+CLOSE_MATCH = "skos:closeMatch"  # the review item process/revise.py records for a match kept apart
 
 
 def strip_kind_suffix(name: Any) -> str:
@@ -59,12 +60,19 @@ def _holder_view(store: Any, eid: str, created: Dict[str, Dict[str, Any]]) -> Di
                       *(ids.fold(a[0]) for a in store.q("SELECT alias FROM entity_aliases WHERE entity_id=?", (eid,)))}}
 
 
-def _identical_active(store: Any, subject: str, predicate: str, obj_id: Optional[str], literal: Optional[str]
-                      ) -> Optional[str]:
+def _identical_active(store: Any, subject: str, predicate: str, obj_id: Optional[str], literal: Optional[str],
+                      at: Optional[str] = None) -> Optional[str]:
+    """The same statement already believed on ``at`` (its window open then or starting later, never retracted;
+    the covering one first), as ``process.revise`` finds it; without ``at``, the one active now."""
     s = store.merged_members(store.canonical(subject))
-    sql = (f"SELECT claim_id FROM claims WHERE status='active' AND valid_until IS NULL AND predicate=? AND"
-           f" subject_id IN ({','.join('?' for _ in s)})")
-    params: List[Any] = [predicate, *s]
+    if at:
+        sql = (f"SELECT claim_id, valid_from FROM claims WHERE status!='retracted' AND (valid_until IS NULL OR"
+               f" valid_until>?) AND predicate=? AND subject_id IN ({','.join('?' for _ in s)})")
+        params: List[Any] = [at, predicate, *s]
+    else:
+        sql = (f"SELECT claim_id, valid_from FROM claims WHERE status='active' AND valid_until IS NULL AND predicate=?"
+               f" AND subject_id IN ({','.join('?' for _ in s)})")
+        params = [predicate, *s]
     if obj_id:
         o = store.merged_members(store.canonical(obj_id))
         sql += f" AND object_id IN ({','.join('?' for _ in o)})"
@@ -72,8 +80,40 @@ def _identical_active(store: Any, subject: str, predicate: str, obj_id: Optional
     else:
         sql += " AND object_id IS NULL AND object_literal=?"
         params.append(literal)
-    row = store.q1(sql + " ORDER BY observed_at LIMIT 1", params)
-    return row[0] if row else None
+    rows = store.q(sql + " ORDER BY observed_at, claim_id", params)
+    covering = [r for r in rows if not at or r[1] is None or r[1] <= at]
+    return (covering or rows)[0][0] if rows else None
+
+
+def _summary_dated_after(store: Any, holder: str, at: Optional[str]) -> bool:
+    """Whether the holder's current summary (the latest dated one) describes a later day than ``at``: a summary
+    written for an earlier date is then dated knowledge to keep (ADR 0008 §2), not a replacement of the card."""
+    row = store.q1("SELECT at FROM entity_summaries WHERE entity_id=? ORDER BY at DESC, rowid DESC LIMIT 1", (holder,))
+    return bool(at and row and str(row[0])[:10] > str(at)[:10])
+
+
+def _alias_close_matches(store: Any, rev: Dict[str, Any], eid: str, name: str, aliases: List[str],
+                         taken: set) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """ADR 0008 §6 (retro-B fix 7): a created entity one of whose aliases is a live entity's canonical name is kept
+    apart (the model created it) with a ``skos:closeMatch`` review item to that entity, never a silent duplicate."""
+    ops: List[Dict[str, Any]] = []
+    warnings: List[str] = []
+    at = rev.get("at")
+    for alias in aliases:
+        holder = store.name_key_holder(ids.name_key(alias))
+        if holder is None or holder == eid:
+            continue
+        cid = ids.claim_id(rev.get("note_id") or rev.get("revision_id") or "", eid, CLOSE_MATCH, holder)
+        if cid in taken:
+            continue
+        taken.add(cid)
+        ops.append({"op": "claim.add", "payload": {
+            "claim_id": cid, "subject_id": eid, "predicate": CLOSE_MATCH, "object_id": holder, "object_literal": None,
+            "certainty": "possible", "stance": "assert", "observed_at": at, "valid_from": at, "valid_until": None,
+            "evidence": alias, "note_id": rev.get("note_id")}})
+        warnings.append(f"“{name}” has the alias “{alias}”, the canonical name of {holder}; the match is kept for "
+                        "review.")
+    return ops, warnings
 
 
 def reuse_taken_names(store: Any, rev: Dict[str, Any]) -> Dict[str, Any]:
@@ -93,6 +133,7 @@ def reuse_taken_names(store: Any, rev: Dict[str, Any]) -> Dict[str, Any]:
     warnings: List[str] = list(rev.get("warnings") or [])
     out: List[Dict[str, Any]] = []
     mentioned: set = set()
+    close_ids = {op["payload"].get("claim_id") for op in ops_in if op["op"] == "claim.add"}
     for op in ops_in:
         name, p = op["op"], dict(op.get("payload") or {})
         remapped = False
@@ -116,6 +157,9 @@ def reuse_taken_names(store: Any, rev: Dict[str, Any]) -> Dict[str, Any]:
                                            "folds": {ids.fold(surface), *(ids.fold(a) for a in aliases)}}
                 created_keys.setdefault(key, p["entity_id"])
                 out.append({"op": name, "payload": p})
+                extra, said = _alias_close_matches(store, rev, p["entity_id"], surface, aliases, close_ids)
+                out.extend(extra)
+                warnings.extend(said)
                 continue
             redirect[p["entity_id"]] = holder
             view = _holder_view(store, holder, created)
@@ -123,10 +167,14 @@ def reuse_taken_names(store: Any, rev: Dict[str, Any]) -> Dict[str, Any]:
                 if alias and ids.fold(alias) not in view["folds"]:
                     view["folds"].add(ids.fold(alias))
                     out.append({"op": "entity.alias", "payload": {"entity_id": holder, "alias": alias}})
-            if p.get("summary") and not view.get("summary") and holder not in created:
-                view["summary"] = p["summary"]
+            retro = holder not in created and _summary_dated_after(store, holder, rev.get("at"))
+            if p.get("summary") and holder not in created and (not view.get("summary") or retro):
+                # kept when the holder has none, and when the holder's current summary describes a later day: the
+                # note's own summary is the entity as of its date (dated history; the card stays the latest)
+                previous = view.get("summary")
+                view["summary"] = view.get("summary") or p["summary"]
                 out.append({"op": "entity.summary", "payload": {"entity_id": holder, "summary": p["summary"],
-                                                                "previous": None}})
+                                                                "previous": previous}})
             sentence = f"“{surface}” has the canonical name {key}, which {holder} already has; it was filed there."
             if p.get("kind") != view["kind"]:
                 sentence += f" kind_conflict: the note said {p.get('kind')}, the notebook keeps {view['kind']}."
@@ -153,11 +201,16 @@ def reuse_taken_names(store: Any, rev: Dict[str, Any]) -> Dict[str, Any]:
             if remapped and store.entity_row(p["subject_id"]) is not None and (
                     not p.get("object_id") or store.entity_row(p["object_id"]) is not None):
                 same = _identical_active(store, p["subject_id"], p["predicate"], p.get("object_id"),
-                                         p.get("object_literal"))
+                                         p.get("object_literal"), rev.get("at"))
                 if same:
                     claim_redirect[p["claim_id"]] = same
                     out.append({"op": "claim.reinforce", "payload": {"claim_id": same,
                                                                      "note_id": p.get("note_id")}})
+                    from ..process.revise import start_earlier_op  # the dated placement (no import cycle at load)
+                    moved = start_earlier_op(store, store.claim_row(same), rev["at"], p.get("note_id"),
+                                             p.get("evidence"), "an earlier note says it already held")
+                    if moved is not None:
+                        out.append(moved)
                     continue
         if name in ("claim.supersede", "claim.retract", "claim.reinforce") and p.get("claim_id") is None:
             continue  # its statement was left out above

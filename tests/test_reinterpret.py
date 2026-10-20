@@ -244,6 +244,13 @@ def test_f2_name_match_marks_and_the_duplicate_is_retired(nb):
     pre = nb.entity(dup_plan, as_received=before)
     assert pre["note_count"] == 1 and pre["first_seen"] == D20
     assert a["note_id"] in {n["note_id"] for n in nb.entity(hcp)["notes"]}
+    # integration R1 x R2: the close-match review item day 5 raised for the duplicate (R1's alias rule) is answered by
+    # the re-reading: it neither keeps the duplicate alive nor stays in review; the re-reading raises none for it.
+    # MUTATION: drop the CLOSE_MATCH exclusion in plan_reinterpretation, _ReinterpretBuilder.alias_matches or the
+    # retired skip in review._close_matches.
+    sides = {x["id"] for it in nb.review()["items"] for x in it.get("sides") or []}
+    assert not set(dups) & sides
+    assert not any("matches" in w and "kept for review" in w for w in r["out"]["warnings"])
 
 
 def test_an_alias_key_equal_to_a_later_entry_name_marks_it(nb):

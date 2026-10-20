@@ -185,7 +185,7 @@ class Archive:
                 continue
             for op in json.loads(r["ops_json"]):
                 p = op.get("payload") or {}
-                if op.get("op") == "claim.insert_before" and p.get("after_claim_id") == cid \
+                if op.get("op") in ("claim.insert_before", "claim.start_earlier") and p.get("after_claim_id") == cid \
                         and state["status"] != "retracted" and p.get("after_valid_until"):
                     # the belief before a retrospective statement: its window now ends where that one starts
                     if state["valid_until"] is None or state["valid_until"] > p["after_valid_until"]:
@@ -225,8 +225,36 @@ class Archive:
         self._claim_states[cid] = state
         return state
 
+    def claim_start(self, row: Any) -> Dict[str, Any]:
+        """``{observed_at, valid_from}`` of a claim as the archive at R held it: a ``claim.start_earlier`` (an earlier
+        note moving the belief's start back) counts only when its revision belongs; the start is replayed from the
+        claim's own ``claim.add`` and the moves that do belong."""
+        cid = row["claim_id"]
+        moves = [] if not row["observed_at"] else self.store.q(
+            "SELECT revision_id, ops_json FROM revisions WHERE applied_index=1 AND ops_json LIKE ? ORDER BY seq",
+            (f'%"claim.start_earlier"%"{cid}"%',))
+        if not moves or all(r["revision_id"] in self.revisions for r in moves):
+            return {"observed_at": row["observed_at"], "valid_from": row["valid_from"]}
+        start = {"observed_at": row["observed_at"], "valid_from": row["valid_from"]}
+        added = self.store.revision_row(row["revision_id"])
+        for op in json.loads(added["ops_json"]) if added else []:
+            p = op.get("payload") or {}
+            if op.get("op") == "claim.add" and p.get("claim_id") == cid:
+                start = {"observed_at": p.get("observed_at"), "valid_from": p.get("valid_from")}
+        for r in moves:
+            if r["revision_id"] not in self.revisions:
+                continue
+            for op in json.loads(r["ops_json"]):
+                p = op.get("payload") or {}
+                if op.get("op") == "claim.start_earlier" and p.get("claim_id") == cid:
+                    if p.get("observed_at") and (not start["observed_at"] or p["observed_at"] < start["observed_at"]):
+                        start["observed_at"] = p["observed_at"]
+                    if start["valid_from"] and p.get("valid_from") and p["valid_from"] < start["valid_from"]:
+                        start["valid_from"] = p["valid_from"]
+        return start
+
     def claim_dict(self, row: Any) -> Dict[str, Any]:
-        out = {**self.store.claim_dict(row), **self.claim_state(row)}
+        out = {**self.store.claim_dict(row), **self.claim_start(row), **self.claim_state(row)}
         revised = [x for x in self.later_reinterpret().get(row["claim_id"], []) if x["op"] == "claim.revise"]
         if revised:  # read again in place after R: the archive shows the reading it held (the first one revised)
             prev = revised[0].get("previous") or {}

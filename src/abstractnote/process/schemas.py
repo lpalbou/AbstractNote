@@ -24,7 +24,9 @@ URGENCIES = ["bulk", "normal", "high", "urgent"]
 CERTAINTIES = ["stated", "probable", "possible", "reported", "disputed"]
 STANCES = ["assert", "revise", "retract"]
 MENTION_DECISIONS = ["reuse", "create", "merge", "unsure"]
-CLAIM_RELATIONS = ["new", "restates", "refines", "supersedes", "contradicts"]
+#: ``earlier_state_of`` (appended, ADR 0008 §2): the statement is an earlier state of a LATER existing statement
+#: about the same subject; it is placed before it (``claim.insert_before``), never closing it.
+CLAIM_RELATIONS = ["new", "restates", "refines", "supersedes", "contradicts", "earlier_state_of"]
 REFLECTION_KINDS = ["warning", "reminder", "connection", "contradiction", "evolution"]
 
 
@@ -125,7 +127,8 @@ LINKING: Dict[str, Any] = _o({
     "claims": _a(_o({
         "index": {"type": "integer", "description": "index of the claim in the extraction"},
         "relation_to_existing": _e(CLAIM_RELATIONS),
-        "existing": {"type": ["integer", "null"], "description": "index of the existing claim in the packet"},
+        "existing": {"type": ["integer", "null"], "description": "the # number of the existing statement in the "
+                     "packet (for earlier_state_of: a statement of the LATER block)"},
         "reason": _s("short"),
     }, {"existing": None, "reason": ""})),
     "tasks": _a(_o({
@@ -192,8 +195,12 @@ REFLECTIONS: Dict[str, Any] = _o({
 ENTITY_SUMMARIES: Dict[str, Any] = _o({
     "summaries": _a(_o({
         "index": {"type": "integer", "description": "index of the entry in the list"},
-        "summary": _s("at most two sentences, third person, present tense"),
-    })),
+        # Before the summary (written first): the ties the notes marked ``new`` add, which the summary must account
+        # for (R1, live S4: the model kept the old sentence and left the new project out). Not stored.
+        "ties": _a(_s(), "each project, organisation or person a note marked new ties the entry to, with the "
+                         "entry's role in it and its date; empty when no note is new"),
+        "summary": _s("at most two sentences, third person, present tense, naming every tie listed in ties"),
+    }, {"ties": []})),
 })
 
 SCHEMAS: Dict[str, Dict[str, Any]] = {
@@ -400,6 +407,7 @@ class Reflections(_M):
 
 class EntitySummary(_M):
     index: int
+    ties: List[str] = Field(default_factory=list)
     summary: str
 
 

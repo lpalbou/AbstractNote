@@ -446,8 +446,13 @@ else:
         merged["document_date"] = dated[0]
     if warnings:
         merged["warnings"] = warnings
-names = [{"ref": m.get("ref"), "name": m.get("name"), "kind": m.get("kind"), "aliases": m.get("aliases") or []}
-         for m in merged.get("mentions") or []]
+slots = {}
+for c in merged.get("claims") or []:
+    for end in (c.get("subject"), None if c.get("object_is_literal") else c.get("object")):
+        if end is not None and c.get("predicate") and c.get("predicate") not in slots.setdefault(str(end), []):
+            slots[str(end)].append(c.get("predicate"))
+names = [{"ref": m.get("ref"), "name": m.get("name"), "kind": m.get("kind"), "aliases": m.get("aliases") or [],
+          "predicates": slots.get(str(m.get("ref")), [])} for m in merged.get("mentions") or []]
 return {"extraction": merged, "mentions": names}
 '''
 
@@ -478,7 +483,7 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
         {"note_id": ("string", S("note_id")), "max_chars": ("number", SECTION_CHARS)},
         [("note", "object"), ("sections", "array"), ("similar_notes", "array"),
          ("candidate_entities", "array"), ("open_tasks", "array"), ("topics", "array"),
-         ("vocabulary", "array")],
+         ("vocabulary", "array"), ("context", "object")],
         after=("thinking", "exec-out"),
     )
     f.code(
@@ -550,7 +555,8 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
     )
     f.code(
         "link_parts", "What linking sees",
-        packet_code(["clip", "note_envelope", "note_header", "claim_line", "candidate_card", "link_batches"],
+        packet_code(["clip", "later_than", "predicate_terms", "slot_first", "note_envelope", "note_header",
+                     "claim_line", "candidate_card", "link_batches"],
                     "return {\"items\": link_batches(note, extraction, resolved, open_tasks)}"),
         inputs={"note": ("object", (ctx, "note")), "extraction": ("object", ("merge", "extraction")),
                 "resolved": ("array", (res, "mentions")), "open_tasks": ("array", (ctx, "open_tasks"))},

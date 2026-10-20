@@ -75,10 +75,19 @@ flowchart TD
     A --> Z[on_flow_end revision summary]
 ```
 
-1. **Context** (`note_context`): what the notebook already knows that is relevant: the nearest
-   notes, entities whose names or aliases appear in the text or whose embeddings are close,
-   their current summaries and their most recent active claims, the open tasks that mention
-   them, and the topic vocabulary. This is the "look at the existing knowledge" step.
+1. **Context** (`note_context`): what the notebook already knows that is relevant, **as of the note's
+   date** (ADR 0008 §2; `as_of` = the note's `occurred_at`): the nearest notes, entities whose names or
+   aliases appear in the text or whose embeddings are close, each as it was known then (its latest summary
+   dated on or before that day, its statements believed then: observed by that day, or said by a later note
+   to hold already then) and, apart, what was recorded LATER (statements and summaries of a later day), the
+   open tasks that mention them, and the topic vocabulary. A note written after everything sees no LATER part
+   at all. It also returns `context`, the digest of what the note is understood against
+   (`{as_of, entities, claims, summaries, later_claims, omitted}`: the entity ids and claim ids shown, the
+   revision of the summary shown for each entity, the later claims offered, and per entity what the linking
+   cards' budget left out); `note_resolve_candidates` adds its candidates to the same digest, which the packet
+   row keeps and the built revision carries (`context`, ADR 0008 §3, next to `used`: the entities, statements
+   and tasks the revision's ops resolved to, `revise.used_of`). This is the "look at the existing knowledge"
+   step.
 2. **Extract** (`Extraction` schema), once per section: summary, mentions (name, kind, aliases
    seen, role in the note), claims (subject, predicate, object, literal flag, certainty, stance,
    evidence excerpt, optional validity dates), tasks (opened, completed), time references, and
@@ -86,13 +95,22 @@ flowchart TD
    "Prompts and bounds"); the predicate vocabulary from the AbstractSemantics registry is in the
    static system prompt and `ex:` is allowed for the rest.
 3. **Resolve candidates** (`note_resolve_candidates`): for every mention, up to three existing
-   entities with their kind, aliases, summary, last seen date, how they matched, and their most
-   recent active claims.
+   entities with their kind, aliases, summary and statements as known on the note's date, their LATER
+   block, last seen date and how they matched (`matched_by`, and `match`: `alias` when the mention's name or
+   an alias has the canonical name key of the entity's name or one of its aliases). An alias match is always a
+   candidate, past the three if need be (ADR 0008 §6), and the packet records it (`alias_matches`). Each
+   mention carries the predicates of the note's statements about it (`predicates`, from the merge step): every
+   statement of a candidate on those predicates, believed then or LATER, is in the packet (indexed, so the
+   linking can name it), whatever the per-card count; the others fill the card up to its bound, those whose
+   predicate shares a word with the note's first (a ranking only, never a decision).
 4. **Link** (`Linking` schema), once per part of at most 15 mentions: the model decides, per
    mention, `reuse` (a candidate index), `create`, or `merge` (two candidate indexes); per
-   claim, whether it `restates` an existing claim (reinforce), `refines` it (new claim, old stays
-   active), `supersedes` it (close the old one) or `contradicts` it (both stay, marked disputed),
-   naming the existing claim by its `#` index in the packet; per task, open or close by index, quoting
+   claim, whether it `restates` an existing claim (reinforce; for a LATER one, its start moves back to the
+   note's date), `refines` it (new claim, old stays active), `supersedes` it (close the old one),
+   `contradicts` it (both stay, marked disputed) or is `earlier_state_of` a LATER one (the same kind of
+   fact with the value it had before: placed before it, never closing it), naming the existing claim by its
+   `#` index in the packet (the index decides, whatever the predicate is called: a statement linked this way
+   to a statement of the same subject under another spelling adopts the existing predicate); per task, open or close by index, quoting
    the note's words that say it is done (`evidence`).
    Each part carries the claims whose subject is one of its mentions (the first part also the
    tasks and the open tasks they may close); claim, task and packet indexes stay those of the
@@ -109,9 +127,11 @@ flowchart TD
    marks the note `processed`. The checks (data-model.md "Identity and de-duplication" and "Time"): a merge applies
    only with the same kind, a shared name or alias key, fewer than 5 notes on the merged entry and one merge per
    entry per note (else a close match for review); values (numbers, versions, ids, links, tokens, the generic
-   words list) are literals, never entities; `supersedes`/`contradicts` only on the same resolved subject and
-   predicate; time-aware placement: a note older than the statement it supersedes is inserted before it as the
-   earlier belief (`claim.insert_before`), never closing it; a task closes only with the note's own words and never
+   words list) are literals, never entities; `supersedes`/`contradicts`/`earlier_state_of` only on the same resolved subject (the named
+   statement's predicate is adopted when the spelling differs, `predicate_adopted`); time-aware placement: a
+   note older than the statement it supersedes, and a statement `earlier_state_of` a later one, is inserted
+   before it as the earlier belief (`claim.insert_before`), never closing it; an older note restating a belief
+   moves its start back (`claim.start_earlier`); a task closes only with the note's own words and never
    from an older note; a stated `document_date` redates a note whose date is approximate (`note.redate`); no window
    ends before it starts. A note older than what is known about an entity marks it (stale summary, then-versus-now
    dropped, `graph_version`) for the consolidation. The response lists created and merged entities, claims added and superseded, and
@@ -444,7 +464,7 @@ Schema enums)
 {"mentions": [{"ref": "m1", "decision": "reuse|create|merge|unsure", "candidate": 0,
                "merge_candidates": [0, 1], "name": "preferred name", "kind": "person|org|project|concept|place|event|artifact|software|thing",
                "aliases": ["..."], "summary": "what the entity is on the note's date, one or two sentences: for create and unsure, and for a reused entity whose description this note changes; otherwise null (a missing one is a warning, never a failed note)", "reason": "short"}],
- "claims": [{"index": 0, "relation_to_existing": "new|restates|refines|supersedes|contradicts",
+ "claims": [{"index": 0, "relation_to_existing": "new|restates|refines|supersedes|contradicts|earlier_state_of",
              "existing": 0, "reason": "short"}],
  "tasks": [{"index": 0, "closes_open_task": 0, "evidence": "the note's words that say it is done"}],
  "revision_summary": "one sentence"}
@@ -465,8 +485,15 @@ and merged into the flow schemas by `flows.build.load_schemas`)
 flow schemas by `flows.build.flow_schemas`)
 
 ```json
-{"summaries": [{"index": 0, "summary": "at most two sentences, third person, present tense"}]}
+{"summaries": [{"index": 0, "ties": ["each project, organisation or person a note marked new ties the entry to, with its role and date"],
+                "summary": "at most two sentences, third person, present tense, naming every tie listed in ties"}]}
 ```
+
+`ties` (default `[]`) is written before the summary: the prompt asks the model to read every note the packet marks
+`new` (one the current summary does not account for yet, which may be dated earlier) and list what it ties the entry
+to, then to name every listed tie in the summary while keeping it a dated description of what the entry is (the
+current role and the new ties first; older detail stays in the history). It is a scaffold for the answer: nothing
+stores it or compares it with the summary's words (ADR 0004).
 
 ## Prompts and bounds
 
@@ -541,9 +568,10 @@ sections, each read whole).
 
 | Packet | Bound (`abstractnote.process.packets`) |
 |---|---|
-| Extraction orientation | names and kinds of at most 15 known entities (no claims), the predicates of their current statements (at most 15, the most used first; `schema:mentions` never), at most 50 topics (the note's own first, then the most used), 5 similar notes by title and date, 8 open tasks, one line each |
-| Candidates per mention | 3 (`note_resolve_candidates`) |
-| Candidate card | name, kind, up to 5 aliases, summary (at most 240 characters; `[LATER]` when it was written on a later day than the note), last seen, and at most 3 active claims as one line each, those with a predicate the note also uses first (`LATER than this note` when first seen on a later day) |
+| Extraction orientation | names and kinds of at most 15 known entities, the predicates of their statements (at most 15, the most used first; `schema:mentions` never), their statement slots as `- subject predicate value (date)` with the predicate spelled as stored, the latest value per subject and predicate, believed then and recorded later apart (at most 30, `KNOWN_SLOTS`; the rest counted on a line), at most 50 topics (the note's own first, then the most used), 5 similar notes by title and date, 8 open tasks, one line each |
+| Candidates per mention | 3 (`note_resolve_candidates`), plus every alias match past them |
+| Candidate card | name, kind, up to 5 aliases, the summary as known on the note's date (at most 240 characters; "nothing was recorded about it by this note's date" when none), last seen when not later than the note; the statements believed then (`#index subject predicate value (since date)`, or `(from date to date)`, or `(stated later, said to hold since date)`): every one on a predicate the note uses, then the others up to 3 in all, the rest counted (`(+n more not shown)`); then, when the notebook recorded more after the note's date, the block `LATER (recorded after this note's date — do not restate; say if a statement is an earlier state of one of these):` with every later statement on the note's predicates and the others up to 12 (`LATER_CLAIMS_PER_CANDIDATE`), in date order, and the latest 2 later summaries (`summary as of date: ...`), the rest counted on a line |
+| Omissions | what a linking card leaves out is counted per entity in the packet digest (`omitted`) and said in the revision (`packet_omitted: ...`), never only in the prompt (root ADR-0026) |
 | Mentions per linking call | 15; the rest go to further calls for the same note, merged back |
 | Statement lines | subject, predicate, object, certainty, stance, evidence (at most 200 characters) |
 | Open tasks in linking | only when the note has tasks, at most 8 |
@@ -555,8 +583,16 @@ names nothing although it has text, even when read a second time."). `note_apply
 leaves out, with a warning, a mention whose name and aliases never occur as whole words in the
 note's own text (its title and header do not count: names copied from the context packet are
 refused); a statement about it is skipped, one pointing at it keeps the name as text. A reused
-entity gains only the aliases the linking lists for it, and `unsure` without a candidate is
-created as new with a warning. The prompts also state: reuse an entity only when the mention
+entity gains only the aliases the linking lists for it (the prompt asks to list every name the note uses for
+it that the candidate does not have yet, such as an older name or an abbreviation), and `unsure` without a
+candidate is created as new with a warning. A mention created apart from (or reused as another entity than) a
+candidate that matched it by name or alias key is kept apart with a `skos:closeMatch` review item to that
+candidate, and so is a created entity one of whose aliases is a live entity's canonical name (ADR 0008 §6). In
+time (data-model.md "Retrospective insertion"): `earlier_state_of` must name a statement first seen after the
+note's date and not said to hold already on it, about the same subject (else a warning and `new`); a `new`
+statement beside LATER statements on its subject and predicate is kept and said (`parallel_belief: ...`); a
+`supersedes` of a statement no longer believed on the note's date is kept as new with a warning; one that
+empties the replaced statement's window (the same time) says so. The prompts also state: reuse an entity only when the mention
 names that very thing (a part, version, file or tool of X is a new entity related to X); one to
 three topics; no statement whose only content is that the text mentions something (`schema:mentions`, `ex:mentions` or any other word for it), and
 `dcterms:hasPart` only when stated; proposals and plans are `possible`; a superseded statement
@@ -571,11 +607,15 @@ summaries, a third of those dates after the note); one or two sentences, at most
 is never a sentence about the note or one event ("Dana confirmed the schedule"): the linking
 rewrites a reused entity's summary only when the note changes what it is, folding the new fact into
 the current description, and answers null when the entity only did something (that is a statement).
-The candidate card marks a summary written on a later day than the note `[LATER]` and such statements
-`LATER than this note` (`context.summary_at`, the history date of the current summary); the prompt
-says to use them only to recognise the entity, so an earlier note describes the entity from itself
-and the earlier statements (its summary is stored at its own date; the latest stays current). The
-consolidation's summary prompt asks for the same description in the present tense.
+The candidate card shows the summary as known on the note's date and puts later summaries and statements
+in the LATER block (`context.entity_view` with `as_of`); the linking message ends with "Write every summary as
+of <the note's date>, this note's date: what the entity was then, from this note and what was known then; never
+use what was recorded later.", and the prompt says to use the LATER block only to recognise the entity and to
+place a statement, never in a summary. So an earlier note describes the entity as of its date (its summary is
+stored at its own date in the summary history; the latest dated one stays current), and when a reused candidate
+had no summary by then, the prompt asks for one. A create that the canonical name rewrites into a reuse
+(data-model.md "Entity") keeps its summary as dated history when the entity's current summary describes a later
+day. The consolidation's summary prompt asks for the same description in the present tense.
 
 ## Prompt cache, thinking and output caps
 

@@ -1,7 +1,7 @@
 """Summaries say what an entity IS, and an earlier note never uses later knowledge (eval2 D4, W25).
 
-The linking card marks a candidate's summary written on a later day than the note ``[LATER]`` and such
-statements ``LATER than this note``; the linking and consolidation prompts ask for a dated description of the
+The linking card shows a candidate as known on the note's date and puts what was recorded on a later day in a
+labelled LATER block (ADR 0008 §2; a raw card whose summary is later still marks it ``[LATER]``); the linking and consolidation prompts ask for a dated description of the
 entity (kind, role, relations), never a sentence about the note or one event, within the packet's summary
 clip. Part 2 drives the generated note-process flow headless on the real note tools with a ScriptedLLM that
 answers only when the packet carries the labels it should."""
@@ -86,8 +86,11 @@ def test_an_earlier_note_sees_the_later_summary_marked_and_keeps_its_own_dated_s
             assert "no existing entity matched" in prompt
             return {"mentions": [{"ref": "m1", "decision": "create", "name": "Castor", "kind": "project",
                                   "summary": S26}], "claims": [], "tasks": [], "revision_summary": "Castor."}
-        # the 2022 note: the 2026 summary and statement are labelled, so the model can describe 2022 Castor
-        assert "[LATER] " + S26 in prompt and "LATER than this note" in prompt
+        # the 2022 note: the 2026 summary and statement are in the labelled LATER block (ADR 0008 §2), nothing is
+        # shown as known then, and the message asks for the entity as of 2022, so the model can describe 2022 Castor
+        assert packets.LATER_LABEL in prompt and "summary as of 2026-03-01: " + S26 in prompt
+        assert "nothing was recorded about it by this note's date" in prompt and "[LATER]" not in prompt
+        assert "Write every summary as of 2022-03-01, this note's date" in prompt
         return {"mentions": [{"ref": "m1", "decision": "reuse", "candidate": 0, "summary": S22}],
                 "claims": [{"index": 0, "relation_to_existing": "supersedes", "existing": 0, "reason": "older model"}],
                 "tasks": [], "revision_summary": "Castor's earlier model."}

@@ -466,6 +466,7 @@ class NoteStore:
             "entities_created": [], "entities_merged": [], "claims_added": [], "claims_reinforced": [],
             "claims_superseded": [], "claims_retracted": [], "tasks_opened": [], "tasks_closed": [],
             "touched_entities": [], "touched_claims": [], "claims_inserted_before": [], "retro_entities": [],
+            "claims_started_earlier": [],
         }
         with self.tx() as c:
             row = c.execute("SELECT applied_index FROM revisions WHERE revision_id=?", (rev["revision_id"],)).fetchone()
@@ -608,8 +609,8 @@ class NoteStore:
         out = []
         for r in rows:
             d = arch.claim_dict(r)
-            if d["valid_until"] is None or d["valid_until"] > at:
-                out.append(d)
+            if (d["valid_until"] is None or d["valid_until"] > at) and (d["valid_from"] is None or d["valid_from"] <= at):
+                out.append(d)  # a start an earlier note moved back counts only when that note was received
         return out
 
     def graph(self, *, focus: Optional[Sequence[str]] = None, at: Optional[str] = None, depth: int = 1,
@@ -1706,6 +1707,35 @@ class _OpContext:
                 " WHERE claim_id=? AND status NOT IN ('retracted', 'reinterpreted') AND (valid_until IS NULL OR"
                 " valid_until>?)",
                 (p["claim_id"], end, p.get("reason"), self.rid, p["after_claim_id"], end))
+            if cur.rowcount:
+                self.stats["claims_superseded"].append(p["after_claim_id"])
+            self._dirty_claim_relation(prev)
+
+    def op_claim_start_earlier(self, p: Dict[str, Any]) -> None:
+        """An earlier note shows a belief already held on its date (ADR 0008 §2, R1): the claim's ``observed_at``
+        and ``valid_from`` move back to that date, never later (a claim without a known start keeps none); the
+        belief before it in its history, whose window covered that date, now ends there (``after_claim_id``).
+        The relation's ``first_seen`` follows (``refresh_relation``: the earliest ``observed_at``)."""
+        row = self._claim(p["claim_id"])
+        at = p["observed_at"]
+        cur = self.c.execute(
+            "UPDATE claims SET observed_at=CASE WHEN observed_at>? THEN ? ELSE observed_at END, valid_from=CASE WHEN"
+            " valid_from IS NOT NULL AND valid_from>? THEN ? ELSE valid_from END WHERE claim_id=? AND"
+            " status!='retracted'", (at, at, p.get("valid_from") or at, p.get("valid_from") or at, p["claim_id"]))
+        if cur.rowcount:
+            self.stats["claims_started_earlier"].append(p["claim_id"])
+        self._dirty_claim_relation(row)
+        if ids.parse_time(row["observed_at"]) - ids.parse_time(at) > RETRO_MIN_GAP:
+            # a retrospective insertion (live notes minutes apart are not, as for mentions)
+            self.retro.update(x for x in (row["subject_id"], row["object_id"]) if x)
+        if p.get("after_claim_id") and p.get("after_valid_until"):
+            prev = self._claim(p["after_claim_id"])
+            end = self.window_end(prev, p["after_valid_until"])
+            cur = self.c.execute(
+                "UPDATE claims SET status=CASE WHEN status='active' THEN 'superseded' ELSE status END,"
+                " superseded_by=COALESCE(superseded_by, ?), valid_until=?, closed_reason=COALESCE(?, closed_reason),"
+                " closed_revision_id=? WHERE claim_id=? AND status!='retracted' AND (valid_until IS NULL OR"
+                " valid_until>?)", (p["claim_id"], end, p.get("reason"), self.rid, p["after_claim_id"], end))
             if cur.rowcount:
                 self.stats["claims_superseded"].append(p["after_claim_id"])
             self._dirty_claim_relation(prev)

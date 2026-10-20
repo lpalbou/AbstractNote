@@ -92,7 +92,8 @@ One canonical name per entity is a deterministic guarantee, applied when a revis
 (`Notebook.apply_revision`, `abstractnote.store.names`): an `entity.create` whose canonical name a
 live entity already has becomes a reuse of that entity, whatever the model decided. The surface forms
 become its aliases, later ops of the revision follow it (an identical statement reinforces the
-existing one, a statement linking the entity to itself is left out), the revision records a warning
+existing one, and moves its start back when the note is older; a statement linking the entity to itself is left
+out; the create's summary is kept as dated history when the entity's current summary describes a later day), the revision records a warning
 (with `kind_conflict` when the kinds differ: the existing kind is kept, never a second entity), and
 the stored revision is the rewritten one, so a replay agrees. A rename onto a canonical name another
 live entity has is refused (that is a merge). Aliases never force a reuse: an alias is the model's
@@ -129,8 +130,8 @@ graph.
 | `object_id` or `object_literal` | an entity, or a literal value (text, number, date) |
 | `certainty` | `stated`, `probable`, `possible`, `reported`, `disputed` (tokens, not numbers) |
 | `stance` | `assert`, `revise`, `retract`: what the note does to earlier knowledge |
-| `observed_at` | the note's `occurred_at` |
-| `valid_from`, `valid_until` | the validity window; `valid_from` defaults to `observed_at` for state claims and is null for timeless facts or for a statement that stopped before its note was written (`valid_until` earlier than the note); `valid_until` is set when a later note supersedes or retracts the claim, when the claim is an earlier belief placed before a later one (`claim.insert_before`: the later one's start), and equals `valid_from` when you retract it ("never true"); it is never earlier than `valid_from` |
+| `observed_at` | the note's `occurred_at`; moved back to an earlier note's date when that note restates or refines the claim (`claim.start_earlier`, never later) |
+| `valid_from`, `valid_until` | the validity window; `valid_from` defaults to `observed_at` for state claims and is null for timeless facts or for a statement that stopped before its note was written (`valid_until` earlier than the note); `valid_until` is set when a later note supersedes or retracts the claim, when the claim is an earlier belief placed before a later one (`claim.insert_before`: the later one's start; a Linking `earlier_state_of`), and equals `valid_from` when you retract it ("never true"); it is never earlier than `valid_from`. An earlier note that restates or refines the claim moves `valid_from` back to its date when it was later (`min`, never later; no start stays no start) |
 | `status` | `active`, `superseded`, `retracted`, `reinterpreted` (the note was understood again and its new reading does not make this statement: an empty window, never a belief; see "Re-understanding") |
 | `superseded_by` | the claim that replaced it |
 | `evidence` | the verbatim excerpt of the note that supports the claim |
@@ -178,6 +179,7 @@ Operations:
 | `claim.retract` | `{claim_id, reason, valid_until?}` (without `valid_until`, the window closes at the revision's time) |
 | `claim.reinforce` | `{claim_id, note_id}` (the same statement seen again) |
 | `claim.insert_before` | `{claim_id, before_claim_id, valid_until, reason, after_claim_id?, after_valid_until?}`: the claim just added by this revision comes from a note older than `before_claim_id`, the belief it gives way to; it is closed at `valid_until` (that belief's start) and superseded by it, which stays untouched; `after_claim_id`, the belief before it, now ends at `after_valid_until` (this claim's start) and is superseded by it (see Time) |
+| `claim.start_earlier` | `{claim_id, note_id, observed_at, valid_from, previous_observed_at, previous_valid_from, subject_id, predicate, object_id, object_literal, certainty, stance, evidence, reason, after_claim_id?, after_valid_until?}`: an earlier note shows the belief already held on its date: `observed_at` and `valid_from` move back to it (`min`, never later; a claim without a start keeps none), the relation's `first_seen` follows; `after_claim_id`, the belief before it whose window covered that date, now ends there; the statement's content rides along for AbstractMemory (see "AbstractMemory projection"); emitted after the `claim.reinforce` |
 | `topic.assign` | `{note_id, topic}` (stored under the topic's canonical name; processing keeps the first 3 per note) |
 | `topic.unassign` | `{note_id, topic}`: the note leaves the topic as stored (`abstractnote normalize-topics`) |
 | `task.open` / `task.close` / `task.drop` | `{task_id, text, due?, by_note_id?}` |
@@ -352,12 +354,48 @@ built from later ones, while live notes arrive too. History adapts; nothing is r
     [2022, 2024), 2024 holds [2024, 2026), 2026 is the active belief.
   - `contradicts` with `t_new < t_old` is the earlier belief the same way, unless the model marked the statement
     `disputed` and the two dates are at most 30 days apart: then it is a dispute (both kept, marked disputed).
+  - `earlier_state_of` (ADR 0008 §2): the linking packet shows each candidate as known on the note's date and,
+    apart and labelled LATER, every statement recorded after it; the model names a LATER statement by index
+    when the note's statement is the same kind of fact with the value it had before (an intern in 2022, a head
+    of research in 2024, a director in 2026). It is placed like an older `supersedes` (`claim.insert_before`,
+    never closing the later belief). The named statement must be about the same resolved subject and LATER
+    than the note (first seen on a later day, and not said to hold already on the note's date); otherwise a
+    warning and the statement is `new`. A `supersedes` that names a statement whose history (its supersession
+    lineage) holds a statement after the note's date is placed the same way, so a note dated between two
+    beliefs lands between them whichever of the two it names.
+  - One predicate per fact: a statement linked by index (`supersedes`, `contradicts`, `earlier_state_of`) to a
+    statement of the same subject whose predicate is spelled differently ADOPTS the existing predicate, with a
+    `predicate_adopted: <new> -> <existing>` warning (the model's index decides, never the strings; ADR 0004),
+    when both values are of the same kind (two texts, or two entities); a text linked to an entity relation
+    (`role "intern"` before `leads zorn_labs`) keeps its own predicate, with a warning, and the link holds the
+    history: a lineage follows supersession links on the same subject across predicates.
+    A `new` statement on a subject and predicate whose LATER statements the packet showed is kept (a relation
+    that adds up has many values) and said: `parallel_belief: ...` in the warnings, counted in the result.
+  - **Earlier evidence moves a belief back.** `restates` (or `refines`, or an identical statement found by
+    resolution) from a note OLDER than the belief: `claim.reinforce` plus `claim.start_earlier`: the belief's
+    `observed_at` and `valid_from` move back to the note's date, never later (a claim said to hold since 2020
+    restated by a 2022 note keeps 2020), the belief before it in its lineage is narrowed to end there, and the
+    relation's `first_seen` follows. When another state of that belief began between the note's date and the
+    belief's (2022 restates a 2026 value after a 2024 one), the start does not move over it: the note's
+    statement is its own earlier belief, placed before that state. A move of minutes (live notes out of order,
+    within a day) is applied but not a retrospective mark. The archive as received before the earlier note
+    shows the belief's previous start.
+  - A `supersedes` naming a statement no longer believed on the note's date (it ended, or was retracted, since
+    the note was read) closes nothing: the statement is kept as new with a warning. A supersession at the very
+    time the replaced statement began leaves it an empty window and says so ("same day").
+  - "Known then" (the packet): a statement first seen on or before the note's day, or recorded later but said to
+    hold already then (`valid_from` on or before the note's date: "stated later, said to hold since ..."),
+    whose window covers the note's date.
   - A window never ends before it starts: a closing date earlier than the closed claim's `valid_from` closes it
     empty (at `valid_from`), in the builder (so the note index and AbstractMemory agree) and again in the
     projection (for replays of earlier revisions); an extracted end before an extracted start is ignored.
 - **Tasks**: an older note cannot close a task opened later; a later note can (see Task).
 - **Entities**: `first_seen` moves back to the older note (it is the earliest mention); the graph as of T shows
   the entity from then.
+- **Summaries are dated knowledge**: a summary an older note writes describes the entity as of that note's date
+  (the linking packet shows the summary as known then and later ones only in the LATER block) and is stored at the
+  note's date in the summary history; the current summary stays the latest dated one. A create that the canonical
+  name turns into a reuse keeps its summary that way when the entity's current summary describes a later day.
 - **Retrospective marks** (`meta.retro`, written in the projection transaction): a note that mentions an entity
   already seen more than a day later (live notes a few minutes out of order are not), a `claim.insert_before` (its subject, object and neighbours) or a `note.redate`
   marks the entities: their summaries are stale (until a summary recorded after the mark is the current one, the
@@ -466,7 +504,7 @@ reflected in the note index and the graph views, and in the triple store only th
 | Same words again | exact `text_norm` hash equal to an earlier note | a new note; the earlier one is the strongest `ex:revisits` candidate; the answer says "you noted this on <date>" |
 | Near-duplicate note | vector cosine over note embeddings, threshold 0.92 | kept as a distinct note, linked with `ex:revisits` to the earlier one: a revisit is a signal, not noise |
 | Same canonical name | `name_key` of the mention's name equal to a live entity's: deterministic normalisation (case, spacing, punctuation, NFKC), not an identity judgement | always the first candidate; a create of that name is filed under the existing entity at apply time (warning, `kind_conflict` when the kinds differ); older notebooks repaired by `normalize_entities` |
-| Entity | candidates from exact key match on names and aliases (`name_key`, `alias_key`), full-text on name and aliases, vector k-nearest on entity embeddings; the model decides `same`, `different`, `unsure` per mention and may propose a merge of two existing entities (`Gateway` versus `abstractgateway` is this level) | `entity.create`, `entity.alias`, `entity.merge` ops |
+| Entity | candidates from exact key match on names and aliases (`name_key`, `alias_key`; always a candidate, `match: alias`, past the per-mention count), full-text on name and aliases, vector k-nearest on entity embeddings; the model decides `same`, `different`, `unsure` per mention and may propose a merge of two existing entities (`Gateway` versus `abstractgateway` is this level) | `entity.create`, `entity.alias`, `entity.merge` ops; a mention created apart from an alias-key candidate (or reused as another entity), and a created entity whose alias is a live entity's canonical name, get a `skos:closeMatch` review item to it (ADR 0008 §6) |
 | Model merge (guard) | a proposed merge is applied only when the two entities have the same kind, share a name or alias key, the merged entry has fewer than 5 notes and neither was merged earlier in the same note (no chains); structural checks, never a reading of the names | otherwise a `skos:closeMatch` claim from the entry to merge to the other: a review item ("kept for review"), confirmed by a person |
 | Values are not entities | a mention whose whole name is a bare number, a version (`0.9.0`, `v15`), a message or thread id (`c1234`, `dm#7`, `dm:a--b`), a link, an invite or hash token, or one word of the editable list `abstractnote/process/generic_words.txt` (`time`, `model`, `provider`, `triggers` ...): shape checks and an explicit list (operator ruling 2026-10-20), never a reading of meaning | never an entity: its statements keep it as a literal object (a statement whose subject it is is left out), with a warning |
 | Claim | same `(subject, predicate, object)` after resolution | `claim.reinforce` instead of a new claim |
@@ -499,7 +537,16 @@ still open and leaves everything else untouched), and records a journal
 with the note index. A `claim.insert_before` closes the OLDER copy the same way (never the later belief), and moves
 the window of the belief before it back with `ClaimStore.narrow_assertion` (`valid_until` only, earlier only, with
 its own closure record): AbstractMemory has no public method for an already-closed window yet, so AbstractNote
-writes that one column of its own triple store's table (a seam: an additive AbstractMemory method should replace it). AbstractMemory lowercases subjects, predicates and objects that are not
+writes that one column of its own triple store's table (a seam: an additive AbstractMemory method should replace it).
+A `claim.start_earlier` cannot widen the assertion either (its content, `observed_at` and `valid_from`, is
+append-only): the earlier evidence is an ADDITIVE assertion of the same statement for the moved part of the
+window, `[new start, previous start)`, observed at the earlier note's date, with provenance naming the earlier
+note's revision and `attributes.earlier_evidence_of` = the claim; its id is deterministic from the claim, the
+earlier note and the new start. `ClaimStore.active_claim_ids(at)` reads such an assertion as the claim it moved
+back, so `TripleQuery(active_at=...)` agrees with the note index on the whole window. A claim without a known
+start moves only its `observed_at` in the note index and adds nothing. The belief before it is narrowed like an
+insert_before's. Accepted limit: a moved-back claim later closed BEFORE its previous start keeps the additive
+assertion's end (the closure applies to the claim's own assertion only). AbstractMemory lowercases subjects, predicates and objects that are not
 literals; the note index keeps the original case, and every AbstractMemory query from AbstractNote
 passes `owner_id="abstractnote"`.
 

@@ -21,15 +21,27 @@ or ``new`` (claims) with a warning. Mapping:
   both only against a statement on the same subject and predicate (eval2 D2);
   an identical active statement (same subject, predicate and object after
   resolution) is always reinforced rather than duplicated;
-- time: a note OLDER than the statement it supersedes (or contradicts, unless the
+- time (ADR 0008 §2): a note OLDER than the statement it supersedes (or contradicts, unless the
   model marked it disputed within :data:`DISPUTE_WINDOW`) never closes it: its
-  statement is placed as the earlier belief (``claim.add`` + ``claim.insert_before``);
+  statement is placed as the earlier belief (``claim.add`` + ``claim.insert_before``), and so is
+  ``earlier_state_of`` (a statement the model says is an earlier state of a LATER one, same
+  subject, the existing statement after the note); an older note's ``restates`` / ``refines``
+  (or an identical statement) moves the belief's start back to the note's date
+  (``claim.reinforce`` + ``claim.start_earlier``), never later; a statement linked to an existing
+  one on the same subject under another predicate spelling adopts the existing predicate
+  (``predicate_adopted``: the model's index decides, never the string);
   a document date stated in the text of a note whose date is approximate moves the
   note first (``note.redate``); no window ever ends before it starts;
 - tasks: ``task.close`` of the open task named by index, only with the note's own
   words saying it is done and never from a note older than the task (eval2 D3),
   else ``task.open`` (and ``task.close`` when the note reports it done);
-- topics -> ``topic.assign``; the note summary -> ``note.summary``.
+- topics -> ``topic.assign``; the note summary -> ``note.summary``;
+- a mention created (or reused as another entity) although a candidate matched it by an exact name or
+  alias key is kept apart with a ``skos:closeMatch`` review item to that candidate (ADR 0008 §6).
+
+The built revision also carries ``context`` (the digest the note was understood against, ``seen``) and
+``used`` (:func:`used_of` its ops: the entities, claims and tasks it resolved to): the dependency record
+of ADR 0008 §3 (the invalidation keys on ``used``).
 """
 
 from __future__ import annotations
@@ -45,6 +57,7 @@ from ..store.names import strip_kind_suffix
 from ..store.notes import _TakenIds
 from . import schemas
 from .context import empty_packet, load_packet, words
+from .packets import later_than
 from .demote import literal_reason
 from .merge import merge_extractions
 from .vocabulary import normalize_predicate
@@ -72,6 +85,8 @@ class _Builder:
         self.packet = packet
         self.ops: List[Dict[str, Any]] = []
         self.warnings: List[str] = []
+        # statements the linking named that are no longer believed on the note's date (ADR 0008 §5, review 4.1)
+        self.stale_context: List[str] = []
         self.taken = _TakenIds(nb.store)
         self.refmap: Dict[str, str] = {}
         self.claim_ids: set = set()
@@ -308,12 +323,7 @@ class _Builder:
                 eid = self.create(kind, name, [m.name, *m.aliases, *((lm.aliases if lm else []) or [])], summary)
                 self.stats["created"][eid] = m.ref
                 if close_to:
-                    cid = ids.claim_id(self.note_id, eid, CLOSE_MATCH, close_to)
-                    self.claim_ids.add(cid)
-                    self.ops.append(_op("claim.add", claim_id=cid, subject_id=eid, predicate=CLOSE_MATCH,
-                                        object_id=close_to, object_literal=None, certainty="possible",
-                                        stance="assert", observed_at=self.at, valid_from=self.at, valid_until=None,
-                                        evidence=m.name, note_id=self.note_id))
+                    self.close_match(eid, close_to, m.name)
             else:
                 # A reused entity gains only the aliases the linking lists for it (backlog 0024):
                 # the mention's own spelling may name a part or a namesake, not the entity.
@@ -330,17 +340,55 @@ class _Builder:
                                             previous=current))
             self.refmap[m.ref] = eid
             self.mention(eid)
+            self.alias_review(m, eid, decision)
         about = json.loads(self.note["about_json"]) if self.note["about_json"] else None
         if about and about.get("kind") == "entity" and self.nb.store.entity_row(about["id"]) is not None:
             self.mention(self.nb.store.canonical(about["id"]))
 
+    def close_match(self, eid: str, other: str, evidence: str) -> bool:
+        """A ``skos:closeMatch`` statement from ``eid`` to ``other`` (a review item); False when this revision
+        already has it."""
+        cid = ids.claim_id(self.note_id, eid, CLOSE_MATCH, other)
+        if cid in self.claim_ids:
+            return False
+        self.claim_ids.add(cid)
+        self.ops.append(_op("claim.add", claim_id=cid, subject_id=eid, predicate=CLOSE_MATCH, object_id=other,
+                            object_literal=None, certainty="possible", stance="assert", observed_at=self.at,
+                            valid_from=self.at, valid_until=None, evidence=evidence, note_id=self.note_id))
+        return True
+
+    def alias_matches(self, ref: str) -> List[str]:
+        """The candidates that matched mention ``ref`` by an exact name or alias key (the packet's)."""
+        return list((self.packet.get("alias_matches") or {}).get(ref) or [])
+
+    def alias_review(self, m: Any, eid: str, decision: str) -> None:
+        """ADR 0008 §6: a candidate that matched the mention by an exact name or alias key and that the decision did
+        not make this entity (created apart, or another candidate reused) is kept as a close match for review."""
+        if decision == "merge":
+            return  # the model related the two records itself (merged, or kept for review by the merge guard)
+        paired = {frozenset((op["payload"]["subject_id"], op["payload"]["object_id"])) for op in self.ops
+                  if op["op"] == "claim.add" and op["payload"].get("predicate") == CLOSE_MATCH}
+        for other in self.alias_matches(m.ref):
+            other = self.nb.store.canonical(other)
+            if other == eid or self.nb.store.entity_row(other) is None or other in self.merged \
+                    or frozenset((eid, other)) in paired:
+                continue
+            if self.close_match(eid, other, m.name):
+                self.warnings.append(f"{m.name}: a name or alias matches {other} exactly, but it was "
+                                     + ("linked to another entry" if decision == "reuse" and eid not in self.stats["created"]
+                                        else "created apart")
+                                     + "; the match is kept for review.")
+
     # ---------------------------------------------------------------- claims
     def identical_active(self, subject: str, predicate: str, obj_id: Optional[str], literal: Optional[str]
                          ) -> Optional[str]:
+        """The statement already believed with the same subject, predicate and object (after resolution) whose
+        window is still open on the note's date or starts after it, never retracted: the one covering the note's
+        date first, else the earliest later one. None: the statement is new."""
         s = self.nb.store.merged_members(self.nb.store.canonical(subject))
-        sql = (f"SELECT claim_id FROM claims WHERE status='active' AND valid_until IS NULL AND predicate=? AND"
-               f" subject_id IN ({','.join('?' for _ in s)})")
-        params: List[Any] = [predicate, *s]
+        sql = (f"SELECT claim_id, valid_from FROM claims WHERE status!='retracted' AND (valid_until IS NULL OR"
+               f" valid_until>?) AND predicate=? AND subject_id IN ({','.join('?' for _ in s)})")
+        params: List[Any] = [self.at, predicate, *s]
         if obj_id:
             o = self.nb.store.merged_members(self.nb.store.canonical(obj_id))
             sql += f" AND object_id IN ({','.join('?' for _ in o)})"
@@ -348,8 +396,9 @@ class _Builder:
         else:
             sql += " AND object_id IS NULL AND object_literal=?"
             params.append(literal)
-        row = self.nb.store.q1(sql + " ORDER BY observed_at LIMIT 1", params)
-        return row[0] if row else None
+        rows = self.nb.store.q(sql + " ORDER BY observed_at, claim_id", params)
+        covering = [r for r in rows if r[1] is None or r[1] <= self.at]
+        return (covering or rows)[0][0] if rows else None
 
     def _time(self, value: Optional[str], what: str, i: int) -> Optional[str]:
         if value in (None, ""):
@@ -390,9 +439,6 @@ class _Builder:
             predicate, w = normalize_predicate(c.predicate)
             if w:
                 self.warnings.append(w)
-            cid = ids.claim_id(self.note_id, subject, predicate, obj_id or literal)
-            if cid in self.claim_ids:
-                continue
             lc = by_index.get(i)
             relation = lc.relation_to_existing if lc else "new"
             existing = None
@@ -406,11 +452,38 @@ class _Builder:
                     self.warnings.append(f"Statement {i} was marked {relation} without naming the existing statement;"
                                          " it was treated as new.")
                 relation = "new"
-            if relation in ("supersedes", "contradicts") and not self.same_statement_slot(existing, subject, predicate):
-                # eval2 D2: only a statement about the same subject and relation can replace or dispute it
-                self.warnings.append(f"Statement {i} was linked to an existing statement about another subject or "
-                                     "relation; it was kept as new.")
-                relation, existing = "new", None
+            ex_row = self.nb.store.claim_row(existing) if existing else None
+            if relation == "earlier_state_of":
+                why = self.not_later(ex_row)
+                if why:  # ADR 0008 §2: the model named a statement that is not LATER than this note
+                    self.warnings.append(f"Statement {i} was marked an earlier state of a statement that {why}; it "
+                                         "was treated as new.")
+                    relation, existing, ex_row = "new", None, None
+            elif relation == "supersedes" and ex_row is not None and self.later_in_lineage(ex_row):
+                relation = "earlier_state_of"  # an older note never closes a later belief: it is placed before it
+            elif relation == "contradicts" and ex_row is not None and self.at < ex_row["observed_at"] \
+                    and not self.still_disputed(c.certainty, existing):
+                relation = "earlier_state_of"  # an older note's view is the earlier belief, not a dispute
+            if relation in ("supersedes", "contradicts", "earlier_state_of") and ex_row is not None:
+                if not self.same_subject(ex_row, subject):
+                    # eval2 D2: only a statement about the same subject can replace, dispute or follow it
+                    self.warnings.append(f"Statement {i} was linked to an existing statement about another subject; "
+                                         "it was kept as new.")
+                    relation, existing, ex_row = "new", None, None
+                elif ex_row["predicate"] != predicate and (ex_row["object_id"] is None) == (obj_id is None):
+                    # The model's index says it is the same fact (ADR 0004, retro-design-review 2.6): the notebook
+                    # keeps one predicate per fact, the existing one.
+                    self.warnings.append(f"predicate_adopted: {predicate} -> {ex_row['predicate']} (statement {i} "
+                                         "is the same fact as the existing statement it names).")
+                    predicate = ex_row["predicate"]
+                elif ex_row["predicate"] != predicate:
+                    # a value of another kind (a text against an entity: "intern" before "leads Zorn Labs"): the
+                    # statement keeps its predicate and is linked across the two (structural: object kinds only)
+                    self.warnings.append(f"Statement {i} is linked to an existing statement under another predicate "
+                                         f"({ex_row['predicate']}) with another kind of value; it keeps {predicate}.")
+            cid = ids.claim_id(self.note_id, subject, predicate, obj_id or literal)
+            if cid in self.claim_ids:
+                continue
             given_from = self._time(c.valid_from, "valid_from", i)
             valid_from: Optional[str] = given_from or self.at
             valid_until = self._time(c.valid_until, "valid_until", i)
@@ -424,14 +497,14 @@ class _Builder:
                            object_literal=literal, certainty=c.certainty, stance=c.stance, observed_at=self.at,
                            valid_from=valid_from, valid_until=valid_until, evidence=c.evidence or None,
                            note_id=self.note_id)
-            same = self.identical_active(subject, predicate, obj_id, literal)
             reason = (lc.reason if lc and lc.reason else "")
             if relation == "restates":
-                self.ops.append(_op("claim.reinforce", claim_id=existing, note_id=self.note_id))
+                self.reinforce(existing, payload, i, reason)
                 continue
+            same = self.identical_active(subject, predicate, obj_id, literal)
             if same:
                 # The very statement is already believed: reinforce it instead of duplicating it.
-                self.ops.append(_op("claim.reinforce", claim_id=same, note_id=self.note_id))
+                self.reinforce(same, payload, i, reason)
                 if relation == "supersedes" and existing != same:
                     if self.at >= self.nb.store.claim_row(existing)["observed_at"]:
                         self.ops.append(_op("claim.supersede", claim_id=existing, by_claim_id=same,
@@ -442,18 +515,25 @@ class _Builder:
                                              "replace; that statement stays.")
                 continue
             self.claim_ids.add(cid)
-            older = existing is not None and self.at < self.nb.store.claim_row(existing)["observed_at"]
-            if relation == "contradicts" and older and not self.still_disputed(c.certainty, existing):
-                relation = "supersedes"  # an older note's view is the earlier belief, not a dispute
             if relation == "contradicts":
                 payload["certainty"] = "disputed"
                 payload["disputes"] = existing
                 self.ops.append(_op("claim.add", **payload))
-            elif relation == "supersedes" and older:
-                self.insert_before(payload, existing, reason or "an earlier belief, replaced later")
+            elif relation == "earlier_state_of":
+                self.insert_before(payload, existing, reason or "an earlier state, replaced later")
+            elif relation == "supersedes" and not self.believed_on_note_date(ex_row):
+                # nothing to close: the statement it names already ended by this note's date (or was retracted)
+                self.warnings.append(f"Statement {i} would replace a statement that is no longer believed on this "
+                                     "note's date; it was kept as new.")
+                self.stale_context.append(existing)
+                self.ops.append(_op("claim.add", **payload))
             elif relation == "supersedes":
                 self.ops.append(_op("claim.add", **payload))
                 reason = reason or "a later note changed it"
+                if self.closing_at(existing) == ex_row["valid_from"]:
+                    # B P1d: the replaced statement began at this very time; its window is empty, and that is said
+                    self.warnings.append(f"Statement {i} replaces a statement that began at the same time (same day);"
+                                         " the replaced one now holds an empty window.")
                 if c.stance == "retract":
                     self.ops.append(_op("claim.retract", claim_id=existing, reason=reason,
                                         valid_until=self.closing_at(existing)))
@@ -462,14 +542,84 @@ class _Builder:
                                         valid_until=self.closing_at(existing)))
             else:
                 self.ops.append(_op("claim.add", **payload))
+                if relation == "refines" and ex_row is not None and self.at < ex_row["observed_at"]:
+                    # the earlier note shows the refined belief already held on its date
+                    op = self.start_earlier_op(ex_row, payload, reason or "an earlier note refines it")
+                    if op is not None:
+                        self.ops.append(op)
+                elif relation == "new":
+                    self.parallel_belief(i, payload)
+
+    # ---------------------------------------------------------------- reinforcement by an earlier note
+    def reinforce(self, claim_id: str, payload: Dict[str, Any], i: int, reason: str) -> None:
+        """``claim.reinforce`` of an existing belief; from a note OLDER than it, the belief's start moves back to
+        the note's date (``claim.start_earlier``, never later). When an earlier state of that belief began after
+        this note's date, the statement is instead placed as its own earlier belief before that state."""
+        row = self.nb.store.claim_row(claim_id)
+        if row is None or row["status"] == "retracted" or not (self.at < row["observed_at"]):
+            self.ops.append(_op("claim.reinforce", claim_id=claim_id, note_id=self.note_id))
+            return
+        between = [r for r in self.lineage(row) if r["claim_id"] != row["claim_id"]
+                   and self.at < r["observed_at"] < row["observed_at"]]
+        if between:
+            if payload["claim_id"] not in self.claim_ids:
+                self.claim_ids.add(payload["claim_id"])
+                self.warnings.append(f"Statement {i}: the belief it restates began later than this note, after "
+                                     "another state; it was placed as its own earlier belief.")
+                self.insert_before(payload, claim_id, reason or "the same value before a later state")
+            return
+        self.ops.append(_op("claim.reinforce", claim_id=claim_id, note_id=self.note_id))
+        op = self.start_earlier_op(row, payload, reason or "an earlier note says it already held")
+        if op is not None:
+            self.ops.append(op)
+
+    def start_earlier_op(self, row: Any, payload: Dict[str, Any], reason: str) -> Optional[Dict[str, Any]]:
+        return start_earlier_op(self.nb.store, row, self.at, self.note_id, payload.get("evidence"), reason)
+
+    def parallel_belief(self, i: int, payload: Dict[str, Any]) -> None:
+        """A ``new`` statement on a subject and predicate whose LATER statements the packet showed (the S1 failure:
+        a retro value beside the later ones): kept (the model decides; a relation that adds up is many values),
+        and said in the revision (``parallel_belief``) so it is visible and countable, never silent."""
+        shown = set(self.packet.get("existing_claims") or [])
+        if not shown:
+            return
+        canon = self.nb.store.canonical
+        members = self.nb.store.merged_members(canon(payload["subject_id"]))
+        q = ",".join("?" for _ in members)
+        rows = self.nb.store.q(f"SELECT claim_id, observed_at FROM claims WHERE status!='retracted' AND predicate=?"
+                               f" AND subject_id IN ({q}) ORDER BY observed_at", [payload["predicate"], *members])
+        later = [r[0] for r in rows if r[0] in shown and later_than(r[1], self.at)]
+        if later:
+            idx = [str((self.packet.get("existing_claims") or []).index(x)) for x in later]
+            self.warnings.append(f"parallel_belief: statement {i} was kept as new beside the later statement"
+                                 f"{'s' if len(idx) > 1 else ''} #{', #'.join(idx)} on the same subject and "
+                                 f"predicate (the linking named no earlier state).")
 
     # ---------------------------------------------------------------- time-aware placement
-    def same_statement_slot(self, existing: Optional[str], subject: str, predicate: str) -> bool:
-        row = self.nb.store.claim_row(existing) if existing else None
-        if row is None:
-            return False
+    def same_subject(self, row: Any, subject: str) -> bool:
         canon = self.nb.store.canonical
-        return canon(row["subject_id"]) == canon(subject) and row["predicate"] == predicate
+        return row is not None and canon(row["subject_id"]) == canon(subject)
+
+    def believed_on_note_date(self, row: Any) -> bool:
+        return row is not None and row["status"] == "active" and (row["valid_until"] is None
+                                                                  or row["valid_until"] > self.at)
+
+    def later_in_lineage(self, row: Any) -> bool:
+        """Whether the belief history ``row`` belongs to holds a statement first seen after this note's date."""
+        return any(self.at < r["observed_at"] for r in self.lineage(row))
+
+    def not_later(self, row: Any) -> Optional[str]:
+        """Why ``row`` cannot be the LATER statement of an ``earlier_state_of`` (None: it can): it must be first seen
+        after this note's date and not be said to hold already on it."""
+        if row is None:
+            return "is not in the context"
+        if row["status"] == "retracted":
+            return "was retracted"
+        if not (self.at < row["observed_at"]):
+            return "is not later than this note"
+        if row["valid_from"] is not None and row["valid_from"] <= self.at:
+            return "is said to hold already on this note's date"
+        return None
 
     def closing_at(self, existing: str) -> str:
         """When this note closes an existing statement: its date, never before the statement's own start (an empty
@@ -484,26 +634,7 @@ class _Builder:
         return certainty == "disputed" and ids.parse_time(t_old) - ids.parse_time(self.at) <= DISPUTE_WINDOW
 
     def lineage(self, anchor: Any) -> List[Any]:
-        """The beliefs one statement belongs to: the claims linked to it by supersession (both ways), on the same
-        subject and predicate, retracted ones left out."""
-        s = self.nb.store
-        members = set(s.merged_members(s.canonical(anchor["subject_id"])))
-        seen = {anchor["claim_id"]: anchor}
-        todo = [anchor]
-        while todo:
-            x = todo.pop()
-            linked = list(s.q("SELECT * FROM claims WHERE superseded_by=?", (x["claim_id"],)))
-            if x["superseded_by"]:
-                nxt = s.claim_row(x["superseded_by"])
-                if nxt is not None:
-                    linked.append(nxt)
-            for r in linked:
-                if r["claim_id"] in seen or r["status"] == "retracted" or r["predicate"] != anchor["predicate"] \
-                        or r["subject_id"] not in members:
-                    continue
-                seen[r["claim_id"]] = r
-                todo.append(r)
-        return list(seen.values())
+        return lineage_of(self.nb.store, anchor)
 
     def insert_before(self, payload: Dict[str, Any], existing: str, reason: str) -> None:
         """A statement from a note OLDER than the belief it relates to (data-model.md "Time"): it is placed in its
@@ -591,6 +722,55 @@ class _Builder:
                 self.ops.append(_op("topic.assign", note_id=self.note_id, topic=tt))
 
 
+def lineage_of(store: Any, anchor: Any) -> List[Any]:
+    """The beliefs one statement belongs to: the claims linked to it by supersession (both ways) on the same
+    subject, retracted ones left out. Any predicate: a statement the model linked by index to one with another
+    kind of value keeps its own predicate (``Builder.claims``), and that link is part of the history."""
+    members = set(store.merged_members(store.canonical(anchor["subject_id"])))
+    seen = {anchor["claim_id"]: anchor}
+    todo = [anchor]
+    while todo:
+        x = todo.pop()
+        linked = list(store.q("SELECT * FROM claims WHERE superseded_by=?", (x["claim_id"],)))
+        if x["superseded_by"]:
+            nxt = store.claim_row(x["superseded_by"])
+            if nxt is not None:
+                linked.append(nxt)
+        for r in linked:
+            if r["claim_id"] in seen or r["status"] == "retracted" or r["subject_id"] not in members:
+                continue
+            seen[r["claim_id"]] = r
+            todo.append(r)
+    return list(seen.values())
+
+
+def start_earlier_op(store: Any, row: Any, at: str, note_id: Optional[str], evidence: Optional[str], reason: str
+                     ) -> Optional[Dict[str, Any]]:
+    """``claim.start_earlier``: the belief ``row`` was already held on ``at`` (an earlier note's date). Its
+    ``observed_at`` becomes ``at`` and its ``valid_from`` the earlier of its own and ``at`` (never later; a statement
+    without a known start keeps none); the belief before it in its lineage whose window covered ``at`` now ends
+    there. The payload carries the statement's content for AbstractMemory, which records the earlier evidence as
+    an additive assertion (data-model.md "AbstractMemory projection"). None when ``row`` is not later than ``at``."""
+    if not (at < row["observed_at"]):
+        return None
+    if any(r["claim_id"] != row["claim_id"] and at < r["observed_at"] < row["observed_at"] for r in lineage_of(store, row)):
+        return None  # an earlier state of it began after ``at``: moving its start back would overlap that state
+    start = row["valid_from"]
+    new_from = start if (start is None or start <= at) else at
+    p: Dict[str, Any] = dict(
+        claim_id=row["claim_id"], note_id=note_id, observed_at=at, valid_from=new_from,
+        previous_observed_at=row["observed_at"], previous_valid_from=start, subject_id=row["subject_id"],
+        predicate=row["predicate"], object_id=row["object_id"], object_literal=row["object_literal"],
+        certainty=row["certainty"], stance=row["stance"], evidence=evidence, reason=reason)
+    if new_from != start:
+        prev = [r for r in lineage_of(store, row) if r["claim_id"] != row["claim_id"] and r["observed_at"] <= at
+                and (r["valid_until"] is None or r["valid_until"] > at)]
+        if prev:
+            pr = max(prev, key=lambda r: (r["observed_at"], r["seq"] or 0))
+            p.update(after_claim_id=pr["claim_id"], after_valid_until=max(at, pr["valid_from"]) if pr["valid_from"] else at)
+    return _op("claim.start_earlier", **p)
+
+
 def placeholder_summary(role: str, note: Any) -> str:
     """A summary for a created entity the model left without one: its role in the note, as a sentence,
     else where it was first seen. Never a failed note (backlog 0024)."""
@@ -632,6 +812,45 @@ def _note_missing_summaries(b: "_Builder", ext: schemas.Extraction, link: schema
                           + "; the earlier summary was kept.")
 
 
+def used_of(ops: Sequence[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """What a revision USED (ADR 0008 §3-4, retro-design-review 3.1): the entities it mentioned, created,
+    aliased, summarised, merged or made the subject or object of a statement; the existing statements it related
+    to (reinforced, closed, placed before or after, moved back, disputed); the tasks it opened or closed. Read from
+    the ops alone, so it is computed again from a stored (rewritten) revision. Invalidation keys on this, never
+    on what the packet merely showed (``context``)."""
+    ents: List[str] = []
+    claims: List[str] = []
+    tasks: List[str] = []
+    added = set()
+
+    def put(lst: List[str], x: Any) -> None:
+        if x and x not in lst:
+            lst.append(str(x))
+
+    for op in ops or []:
+        name, p = op.get("op"), op.get("payload") or {}
+        if name in ("entity.mention", "entity.create", "entity.alias", "entity.summary", "entity.rename"):
+            put(ents, p.get("entity_id"))
+        elif name == "entity.merge":
+            put(ents, p.get("into_id"))
+            put(ents, p.get("from_id"))
+        elif name == "claim.add":
+            added.add(p.get("claim_id"))
+            put(ents, p.get("subject_id"))
+            put(ents, p.get("object_id"))
+            put(claims, p.get("disputes"))
+        elif name in ("claim.reinforce", "claim.supersede", "claim.retract", "claim.start_earlier"):
+            put(claims, p.get("claim_id"))
+            put(claims, p.get("by_claim_id"))
+            put(claims, p.get("after_claim_id"))
+        elif name == "claim.insert_before":
+            put(claims, p.get("before_claim_id"))
+            put(claims, p.get("after_claim_id"))
+        elif name in ("task.open", "task.close", "task.drop"):
+            put(tasks, p.get("task_id"))
+    return {"entities": ents, "claims": [c for c in claims if c not in added], "tasks": tasks}
+
+
 def _validated(extraction: Any, linking: Any) -> Tuple[schemas.Extraction, schemas.Linking]:
     if isinstance(extraction, list):
         extraction, _ = merge_extractions(extraction)
@@ -660,10 +879,16 @@ def build_revision(nb: Any, note_id: str, extraction: Any, linking: Any, *, atte
     b.tasks(ext, link)
     b.topics(ext)
     b.ops.append(_op("note.summary", note_id=note_id, summary=ext.summary or None, kind=None, language=None))
+    digest = (packet or {}).get("digest")
+    omitted = {e: n for e, n in ((digest or {}).get("omitted") or {}).items() if any((n or {}).values())}
+    if omitted:  # ADR-0026: what the packet budget left out is said in the revision too, not only in a prompt
+        b.warnings.append("packet_omitted: " + "; ".join(
+            f"{e} " + ", ".join(f"{k.replace('_omitted', '').replace('_', ' ')} {v}" for k, v in sorted(n.items()) if v)
+            for e, n in sorted(omitted.items())) + " (not shown to the linking for space).")
     summary = (link.revision_summary or "").strip() or (ext.summary or "").strip() or "Read the note."
     return {"revision_id": ids.revision_id_for_note(note_id, attempt), "note_id": note_id, "attempt": attempt,
             "at": b.at, "run_id": run_id, "ops": b.ops, "summary": summary,
-            "warnings": b.warnings}
+            "warnings": b.warnings, "context": digest, "used": used_of(b.ops), "stale_context": b.stale_context}
 
 
 def apply_note_revision(nb: Any, note_id: str, extraction: Any, linking: Any, *, run_id: Optional[str] = None
@@ -682,7 +907,7 @@ def apply_note_revision(nb: Any, note_id: str, extraction: Any, linking: Any, *,
         out = nb.apply_revision({"revision_id": done[0], "at": nb.store.revision_row(done[0])["at"]})
         out["warnings"] = list(out.get("warnings") or []) + ["This note was already processed; the earlier revision stands."]
         out["already_applied"] = True
-        return out
+        return with_retro_counts(nb, out)
     attempt = nb.queue.attempt_for(note_id)
     while True:
         row = nb.store.revision_row(ids.revision_id_for_note(note_id, attempt))
@@ -690,7 +915,30 @@ def apply_note_revision(nb: Any, note_id: str, extraction: Any, linking: Any, *,
             break
         attempt += 1
     rev = build_revision(nb, note_id, extraction, linking, attempt=attempt, run_id=run_id)
-    return nb.apply_revision(rev)
+    return _with_stale(with_retro_counts(nb, nb.apply_revision(rev)), rev.get("stale_context"))
+
+
+def _with_stale(out: Dict[str, Any], built: Optional[Sequence[str]]) -> Dict[str, Any]:
+    """``stale_context`` = the statements this note named that are no longer believed: found when the revision was
+    built (closed by the note's date, R1) or when it was applied (closed since the note was read, R2)."""
+    stale = list(dict.fromkeys([*(built or []), *(out.get("stale_context") or [])]))
+    if stale:
+        out["stale_context"] = stale
+    return out
+
+
+def with_retro_counts(nb: Any, out: Dict[str, Any]) -> Dict[str, Any]:
+    """The apply result with what the dated placement did, read from the stored revision: the beliefs moved back
+    (``claims_started_earlier``), the statements that adopted an existing predicate and the new statements kept
+    beside later ones (from the revision's warnings), and ``used`` (:func:`used_of`)."""
+    stored = nb.revision(out["revision_id"]) if out.get("revision_id") else None
+    ops = (stored or {}).get("ops") or []
+    out["claims_started_earlier"] = [op["payload"]["claim_id"] for op in ops if op["op"] == "claim.start_earlier"]
+    warnings = list(out.get("warnings") or [])
+    out["predicates_adopted"] = sum(1 for w in warnings if str(w).startswith("predicate_adopted:"))
+    out["parallel_beliefs"] = sum(1 for w in warnings if str(w).startswith("parallel_belief:"))
+    out["used"] = used_of(ops)
+    return out
 
 
 # ============================================================================ ADR 0008: a note understood again
@@ -717,6 +965,15 @@ class _ReinterpretBuilder(_Builder):
         nid = note["note_id"]
         self.own_claims = {r[0] for r in nb.store.q("SELECT claim_id FROM claims WHERE note_id=?", (nid,))}
         self.own_tasks = {r[0] for r in nb.store.q("SELECT task_id FROM tasks WHERE note_id=?", (nid,))}
+        cq = ",".join("?" for _ in self.chain)
+        self.own_entities = {r[0] for r in nb.store.q(
+            f"SELECT entity_id FROM entities WHERE created_revision_id IN ({cq})", list(self.chain))} if chain else set()
+
+    def alias_matches(self, ref: str) -> List[str]:
+        """The close-match review (ADR 0008 §6) leaves out the entries the note's own previous reading created: the
+        new reading that names another entry for them is the answer (they are retired when nothing else uses
+        them), not a question for review."""
+        return [x for x in super().alias_matches(ref) if self.nb.store.canonical(x) not in self.own_entities]
 
     def existing_claim(self, index: Optional[int]) -> Optional[str]:
         cid = super().existing_claim(index)
@@ -987,8 +1244,8 @@ def plan_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any, 
                                          f" processing; not assigned: {p['topic']}.")
                 continue
             topics.add(t)
-        elif name in ("entity.create", "entity.merge", "claim.revise"):
-            changes += 1
+        elif name in ("entity.create", "entity.merge", "claim.revise", "claim.start_earlier"):
+            changes += 1  # claim.start_earlier (R1): this reading moves a belief back, an effect the old one lacked
         elif name in ("entity.summary", "note.summary", "entity.alias", "entity.rename"):
             summary_ops += 1
         out.append({"op": name, "payload": p})
@@ -1053,10 +1310,14 @@ def plan_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any, 
             continue
         members = s.merged_members(eid)
         mq = ",".join("?" for _ in members)
+        # a close-match review item (R1, ADR 0008 §6) between this entry and one the new reading now uses is the
+        # question the new reading answered: it does not keep the entry alive (the review skips retired entries)
+        rq = ",".join("?" for _ in referenced) or "NULL"
         elsewhere = s.q1(f"SELECT 1 FROM entity_notes WHERE entity_id IN ({mq}) AND note_id!=? LIMIT 1",
                          [*members, note_id]) or s.q1(
             f"SELECT 1 FROM claims WHERE (subject_id IN ({mq}) OR object_id IN ({mq})) AND (note_id IS NULL OR"
-            f" note_id!=?) AND status!=? LIMIT 1", [*members, *members, note_id, REINTERPRETED])
+            f" note_id!=?) AND status!=? AND NOT (predicate=? AND (subject_id IN ({rq}) OR object_id IN ({rq})))"
+            f" LIMIT 1", [*members, *members, note_id, REINTERPRETED, CLOSE_MATCH, *referenced, *referenced])
         if elsewhere:
             continue
         post.append(_op("entity.retire", entity_id=eid, reason=reason or "only an earlier reading of this note made it"))
@@ -1067,7 +1328,8 @@ def plan_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any, 
                                     (note_id,))}
     unchanged = (changes == 0 and not any(diff.values()) and mentions == old_mentions and topics == old_topics)
     result: Dict[str, Any] = {"unchanged": unchanged, "summary_only": unchanged and summary_ops > 0,
-                              "previous_revision_id": current, "diff": diff, "warnings": list(built["warnings"])}
+                              "previous_revision_id": current, "diff": diff, "warnings": list(built["warnings"]),
+                              "stale_context": list(b.stale_context)}
     if unchanged:
         return result
     summary = (link.revision_summary or "").strip() or (ext.summary or "").strip() or "Read the note again."
@@ -1099,7 +1361,7 @@ def apply_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any,
                 "claims_superseded": [], "claims_retracted": [], "tasks_opened": [], "tasks_closed": [],
                 "claims_inserted_before": [], "retrospective": [], "warnings": plan["warnings"], "marked": 0,
                 "reinterpret_marked": {"count": 0, "notes": [], "by_entity": []}}
-    out = nb.apply_revision(plan["revision"])
+    out = _with_stale(with_retro_counts(nb, nb.apply_revision(plan["revision"])), plan["stale_context"])
     _consume(nb, note_id, pass_id, "reinterpreted", out["revision_id"], before)
     out.update({"reinterpreted": True, "unchanged": False, "previous_revision_id": plan["previous_revision_id"],
                 "diff": plan["diff"]})

@@ -108,6 +108,32 @@ def claim_assertion(payload: Dict[str, Any], rev: Dict[str, Any], subject_kind: 
     )
 
 
+#: Attribute naming the claim an earlier-evidence assertion belongs to (``claim.start_earlier``).
+EARLIER_OF_ATTR = "earlier_evidence_of"
+
+
+def earlier_evidence_assertion(payload: Dict[str, Any], rev: Dict[str, Any], subject_kind: Optional[str],
+                               object_kind: Optional[str]) -> Optional[TripleAssertion]:
+    """The additive assertion of a ``claim.start_earlier``: the same statement from the earlier note, valid from the
+    new start to the claim's previous start (``observed_at`` = the earlier note's date). None when the window did
+    not move (no known start, or it already covered the date): nothing to add. Its id is deterministic from the
+    claim and the earlier note, so a replay adds nothing twice."""
+    start, before = payload.get("valid_from"), payload.get("previous_valid_from")
+    if not start or not before or start >= before:
+        return None
+    base = claim_assertion({**payload, "valid_from": start, "valid_until": before,
+                            "observed_at": payload["observed_at"],
+                            "claim_id": ids.claim_id(payload.get("note_id") or rev.get("note_id") or "",
+                                                     payload["claim_id"], "claim.start_earlier", start)},
+                           rev, subject_kind, object_kind)
+    attrs = dict(base.attributes or {})
+    attrs[EARLIER_OF_ATTR] = payload["claim_id"]
+    return TripleAssertion(
+        subject=base.subject, predicate=base.predicate, object=base.object, scope=base.scope, owner_id=base.owner_id,
+        observed_at=base.observed_at, valid_from=base.valid_from, valid_until=base.valid_until,
+        confidence=base.confidence, provenance=base.provenance, attributes=attrs, assertion_id=base.assertion_id)
+
+
 def label_assertion(entity_id: str, predicate: str, value: str, kind: str, rev: Dict[str, Any]) -> TripleAssertion:
     literal = kind in ("name", "alias")
     attrs: Dict[str, Any] = {KIND_ATTR: kind}
@@ -186,6 +212,20 @@ class ClaimStore:
                     closes.append({"assertion_id": p["after_claim_id"], "valid_until": p["after_valid_until"],
                                    "kind": "supersede", "narrow": True,
                                    "reason": p.get("reason") or "replaced by an earlier-found belief",
+                                   "replacement_ids": (p["claim_id"],)})
+            elif name == "claim.start_earlier":
+                # TripleAssertion content is append-only: the earlier evidence is an ADDITIVE assertion of the same
+                # statement for the moved part of the window [new start, old start), pointing at the claim
+                # (``earlier_evidence_of``), so ``active_at`` agrees with the note index; the belief before it is
+                # narrowed like an insert_before's (data-model.md "AbstractMemory projection").
+                earlier = earlier_evidence_assertion(p, rev, kinds.get(p["subject_id"]),
+                                                     kinds.get(p.get("object_id") or ""))
+                if earlier is not None:
+                    adds.append(earlier)
+                if p.get("after_claim_id") and p.get("after_valid_until"):
+                    closes.append({"assertion_id": p["after_claim_id"], "valid_until": p["after_valid_until"],
+                                   "kind": "supersede", "narrow": True,
+                                   "reason": p.get("reason") or "an earlier note shows the later belief held then",
                                    "replacement_ids": (p["claim_id"],)})
             elif name == "claim.retract":
                 closes.append({"assertion_id": p["claim_id"], "valid_until": p.get("valid_until") or rev["at"],
@@ -273,8 +313,10 @@ class ClaimStore:
         """Note-index claim ids AbstractMemory considers active at ``at`` (a copy written by a re-understanding names
         its claim in ``attributes.claim_id``)."""
         rows = self.query(active_at=ids.normalize_time(at, field="at"))
-        return sorted({(a.attributes or {}).get(CLAIM_ATTR) or a.assertion_id for a in rows
-                       if (a.attributes or {}).get(KIND_ATTR) == "claim"})
+        # an earlier-evidence assertion (claim.start_earlier) stands for the claim it moved back; a copy written by
+        # a re-understanding names its claim
+        return sorted({(a.attributes or {}).get(EARLIER_OF_ATTR) or (a.attributes or {}).get(CLAIM_ATTR)
+                       or a.assertion_id for a in rows if (a.attributes or {}).get(KIND_ATTR) == "claim"})
 
     def count(self) -> int:
         return len(self.query())
@@ -287,7 +329,7 @@ def kinds_from_index(conn: sqlite3.Connection, rev: Dict[str, Any]) -> Dict[str,
     """Entity kinds needed to type a revision's claim assertions."""
     wanted = set()
     for op in rev.get("ops") or []:
-        if op["op"] in ("claim.add", "claim.revise", "claim.reopen"):
+        if op["op"] in ("claim.add", "claim.revise", "claim.reopen", "claim.start_earlier"):
             p = op.get("payload") or {}
             p = p.get("assertion") or p if op["op"] != "claim.add" else p
             wanted.add(p["subject_id"])

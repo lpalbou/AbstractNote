@@ -1,10 +1,17 @@
 """``note_context``: what the notebook already knows that is relevant to one note.
 
 The packet lists candidate entities (exact name or alias found in the note's
-words, then vector neighbours of the note), their active claims and the open
+words, then vector neighbours of the note), their claims and the open
 tasks, each with an ``index``. The Linking step refers to existing claims and
 open tasks only by those indexes; the packet is stored so that
 ``note_apply_revision`` can check every reference by set membership.
+
+Context is dated (ADR 0008 §2): the note's ``occurred_at`` is ``as_of``. A candidate shows what was KNOWN
+THEN (its claims observed on or before the note's day whose window covers it, and its latest summary dated on
+or before it) and, separately, what was recorded LATER (claims and summaries of a later day), each later claim
+indexed so the linking can say a statement is an earlier state of it. The packet keeps the digest of what the
+note was understood against (:func:`context_digest`: ``{as_of, entities, claims, summaries, ...}``), the
+dependency record a revision stores (ADR 0008 §3).
 """
 
 from __future__ import annotations
@@ -18,13 +25,19 @@ from ..ingest.dates import date_basis, is_approximate
 from ..ingest.normalise import DEFAULT_SECTION_CHARS, sections
 from ..recall.shapes import excerpt
 from ..store.embeddings import top_k
-from .packets import CLAIMS_PER_CANDIDATE
+from .packets import LATER_CLAIMS_PER_CANDIDATE, LATER_SUMMARIES_PER_CANDIDATE, later_than, slot_first
 from .vocabulary import predicate_words, vocabulary
 
 MAX_CANDIDATE_ENTITIES = 15
-#: Active claims attached to each candidate entity (and indexed in the packet): the most recent
-#: few, one line each in the prompts (backlog 0024 bounds the packet, never the note's text).
-MAX_CLAIMS_PER_ENTITY = CLAIMS_PER_CANDIDATE
+#: Claims known on the note's date attached to each candidate entity (and indexed in the packet): the most
+#: recent few (backlog 0024 bounds the packet, never the note's text). ``note_context`` attaches this many so
+#: the extraction packet can show the entity's statement slots (predicate spelling and value).
+MAX_CLAIMS_PER_ENTITY = 8
+#: Claims recorded LATER than the note attached to each candidate (ADR 0008 §2), the earliest later first: a
+#: budget selection, never a cut of a claim; how many were left out is recorded on the view and in the digest.
+LATER_CLAIMS_PER_ENTITY = LATER_CLAIMS_PER_CANDIDATE
+#: Summaries recorded for a later day than the note, the latest ones (older later ones are counted, not shown).
+LATER_SUMMARIES_PER_ENTITY = LATER_SUMMARIES_PER_CANDIDATE
 MAX_OPEN_TASKS = 20
 SIMILAR_NOTES = 5
 ENTITY_VECTOR_MIN = 0.3
@@ -49,59 +62,188 @@ def save_packet(nb: Any, note_id: str, packet: Dict[str, Any]) -> None:
                               (note_id, ids.utc_now(), json.dumps(packet, sort_keys=True)))
 
 
-def empty_packet() -> Dict[str, Any]:
-    return {"candidate_entities": [], "existing_claims": [], "open_tasks": [], "mentions": {}}
+def empty_packet(as_of: Optional[str] = None) -> Dict[str, Any]:
+    return {"candidate_entities": [], "existing_claims": [], "open_tasks": [], "mentions": {}, "alias_matches": {},
+            "digest": empty_digest(as_of)}
+
+
+def empty_digest(as_of: Optional[str]) -> Dict[str, Any]:
+    """What a note is understood against (ADR 0008 §3): the note's date, the entities and claims shown, the
+    summary (its revision) shown for each entity as known then, the later claims offered, and what the packet
+    budget left out (counts per entity)."""
+    return {"as_of": as_of, "entities": [], "claims": [], "summaries": {}, "later_claims": [], "omitted": {}}
+
+
+def context_digest(nb: Any, note_id: str) -> Optional[Dict[str, Any]]:
+    """The digest stored with the note's context packet (``note_context`` then ``note_resolve_candidates``), or
+    None when the note's context was never looked up. A packet stored before the digest existed raises: it
+    cannot say what the note was understood against."""
+    packet = load_packet(nb, note_id)
+    if packet is None:
+        return None
+    if not isinstance(packet.get("digest"), dict):
+        raise ValueError("The note's stored context has no digest; look its context up again.")
+    return packet["digest"]
+
+
+def record_view(packet: Dict[str, Any], view: Dict[str, Any], omissions: bool = True) -> None:
+    """Add one candidate view to the packet's digest (entities, claims, the known-then summary and, for the
+    linking candidates (``omissions``), what the budget left out of the card: the largest count over the mentions
+    that show the entity)."""
+    d = packet.setdefault("digest", empty_digest(None))
+    eid = view["entity_id"]
+    if eid not in d["entities"]:
+        d["entities"].append(eid)
+    if view.get("summary_revision_id"):
+        d["summaries"][eid] = view["summary_revision_id"]
+    for c in view.get("active_claims") or []:
+        if c["claim_id"] not in d["claims"]:
+            d["claims"].append(c["claim_id"])
+    for c in view.get("later_claims") or []:
+        if c["claim_id"] not in d["claims"]:
+            d["claims"].append(c["claim_id"])
+        if c["claim_id"] not in d["later_claims"]:
+            d["later_claims"].append(c["claim_id"])
+    left = {k: int(view.get(k) or 0) for k in ("known_claims_omitted", "later_claims_omitted",
+                                                 "later_summaries_omitted")}
+    if omissions and any(left.values()):
+        prev = d["omitted"].get(eid) or {}
+        d["omitted"][eid] = {k: max(int(prev.get(k) or 0), v) for k, v in left.items()}
 
 
 # ----------------------------------------------------------------------------- views
 
-def claim_view(nb: Any, row: Any, index: int) -> Dict[str, Any]:
+def claim_view(nb: Any, row: Any, index: int, as_of: Optional[str] = None) -> Dict[str, Any]:
+    """One claim as the packets show it. The line names the predicate as it is spelled (``ex:annual_budget``),
+    so a note about the same slot can reuse the spelling (the model links by index, never by the string)."""
     subject = nb.store._name(row["subject_id"]) or row["subject_id"]
     obj = (nb.store._name(row["object_id"]) or row["object_id"]) if row["object_id"] else row["object_literal"]
     literal = row["object_id"] is None
-    line = f"{subject} {predicate_words(row['predicate'])} " + (f"\u201c{obj}\u201d" if literal else str(obj))
+    line = f"{subject} {row['predicate']} " + (f"\u201c{obj}\u201d" if literal else str(obj))
     return {"index": index, "claim_id": row["claim_id"], "subject": subject, "predicate": row["predicate"],
             "object": obj, "object_is_literal": literal, "observed_at": row["observed_at"],
-            "certainty": row["certainty"], "evidence": row["evidence"], "line": line}
+            "valid_from": row["valid_from"], "valid_until": row["valid_until"], "status": row["status"],
+            "certainty": row["certainty"], "evidence": row["evidence"], "line": line,
+            "later": later_than(row["observed_at"], as_of)}
 
 
-def active_claim_rows(nb: Any, entity_id: str, limit: int = MAX_CLAIMS_PER_ENTITY) -> List[Any]:
+def _members_sql(nb: Any, entity_id: str) -> tuple:
     members = nb.store.merged_members(nb.store.canonical(entity_id))
     q = ",".join("?" for _ in members)
+    return f"(subject_id IN ({q}) OR object_id IN ({q}))", [*members, *members]
+
+
+def active_claim_rows(nb: Any, entity_id: str, limit: Optional[int] = MAX_CLAIMS_PER_ENTITY,
+                      as_of: Optional[str] = None) -> List[Any]:
+    """Claims of an entity believed on ``as_of`` as known then, the most recent first: not retracted, the window
+    covering ``as_of``, and either observed on or before its day or said (by a later note) to hold already then
+    (``valid_from <= as_of``, retro-design-review 2.2); without ``as_of``, the claims active now. ``limit`` None:
+    all of them."""
+    where, params = _members_sql(nb, entity_id)
+    tail = " LIMIT ?" if limit is not None else ""
+    lim = [int(limit)] if limit is not None else []
+    if not as_of:
+        return nb.store.q(f"SELECT * FROM claims WHERE status='active' AND valid_until IS NULL AND {where}"
+                          f" ORDER BY observed_at DESC, claim_id{tail}", [*params, *lim])
     return nb.store.q(
-        f"SELECT * FROM claims WHERE status='active' AND valid_until IS NULL AND (subject_id IN ({q}) OR object_id IN"
-        f" ({q})) ORDER BY observed_at DESC, claim_id LIMIT ?", [*members, *members, int(limit)])
+        f"SELECT * FROM claims WHERE status!='retracted' AND (substr(observed_at,1,10)<=? OR (valid_from IS NOT NULL"
+        f" AND valid_from<=?)) AND (valid_until IS NULL OR valid_until>?) AND {where}"
+        f" ORDER BY observed_at DESC, claim_id{tail}", [str(as_of)[:10], as_of, as_of, *params, *lim])
+
+
+def later_claim_rows(nb: Any, entity_id: str, as_of: Optional[str], limit: Optional[int] = LATER_CLAIMS_PER_ENTITY
+                     ) -> tuple:
+    """``(rows, total)``: claims of an entity recorded on a later day than ``as_of`` and not believed then
+    (retracted ones left out), the earliest first, at most ``limit`` (None: all); ``total`` counts them all (the
+    omission is recorded, ADR-0026)."""
+    if not as_of:
+        return [], 0
+    where, params = _members_sql(nb, entity_id)
+    cond = (f"status!='retracted' AND substr(observed_at,1,10)>? AND NOT (valid_from IS NOT NULL AND valid_from<=? AND"
+            f" (valid_until IS NULL OR valid_until>?)) AND {where}")
+    args = [str(as_of)[:10], as_of, as_of, *params]
+    total = nb.store.q1(f"SELECT COUNT(*) FROM claims WHERE {cond}", args)[0]
+    tail = " LIMIT ?" if limit is not None else ""
+    rows = nb.store.q(f"SELECT * FROM claims WHERE {cond} ORDER BY observed_at, seq, claim_id{tail}",
+                      [*args, *([int(limit)] if limit is not None else [])])
+    return rows, int(total or 0)
 
 
 def summary_at(nb: Any, entity_id: str) -> Optional[str]:
     """History date (``at``) of the entity's CURRENT summary, the one ``entities.summary`` shows (the latest in
-    history time, as ``op_entity_summary`` picks it); None when it has none recorded. The linking packet marks
-    a summary dated after the note's own date as LATER (eval2 D4: an earlier note must not use later knowledge)."""
+    history time, as ``op_entity_summary`` picks it); None when it has none recorded."""
     row = nb.store.q1("SELECT at FROM entity_summaries WHERE entity_id=? ORDER BY at DESC, rowid DESC LIMIT 1",
                       (entity_id,))
     return row[0] if row else None
 
 
-def entity_view(nb: Any, entity_id: str) -> Dict[str, Any]:
+def entity_view(nb: Any, entity_id: str, as_of: Optional[str] = None) -> Dict[str, Any]:
+    """An entity as a packet shows it. With ``as_of`` (the note's date) its summary is the latest one dated on or
+    before that day (None when nothing was written by then) and ``later_summaries`` lists those of later days
+    (the latest :data:`LATER_SUMMARIES_PER_ENTITY`, the rest counted in ``later_summaries_omitted``)."""
     e = nb.store.entity_row(entity_id)
-    return {"entity_id": e["entity_id"], "name": e["name"], "kind": e["kind"], "aliases": nb.store.aliases(entity_id),
-            "summary": e["summary"], "summary_at": summary_at(nb, entity_id), "last_seen": e["last_seen"]}
+    view = {"entity_id": e["entity_id"], "name": e["name"], "kind": e["kind"], "aliases": nb.store.aliases(entity_id),
+            "summary": e["summary"], "summary_at": summary_at(nb, entity_id), "last_seen": e["last_seen"],
+            "first_seen": e["first_seen"]}
+    rows = nb.store.q("SELECT at, summary, revision_id FROM entity_summaries WHERE entity_id=? ORDER BY at, rowid",
+                      (entity_id,))
+    current = nb.store.q1("SELECT revision_id FROM entity_summaries WHERE entity_id=? ORDER BY at DESC, rowid DESC"
+                          " LIMIT 1", (entity_id,))
+    view["summary_revision_id"] = current[0] if current else None
+    if not as_of:
+        return view
+    then = [r for r in rows if not later_than(r[0], as_of)]
+    later = [r for r in rows if later_than(r[0], as_of)]
+    if rows:  # a summary written for a later day is not what was known then
+        view.update(summary=then[-1][1] if then else None, summary_at=then[-1][0] if then else None,
+                    summary_revision_id=then[-1][2] if then else None)
+    shown = later[-LATER_SUMMARIES_PER_ENTITY:] if LATER_SUMMARIES_PER_ENTITY else []
+    view["later_summaries"] = [{"at": r[0], "summary": r[1], "revision_id": r[2]} for r in shown]
+    view["later_summaries_omitted"] = len(later) - len(shown)
+    view["as_of"] = as_of
+    return view
+
+
+def _index(nb: Any, packet: Dict[str, Any], row: Any, views: List[Dict[str, Any]], as_of: Optional[str]
+           ) -> Dict[str, Any]:
+    cid = row["claim_id"]
+    if cid in packet["existing_claims"]:
+        idx = packet["existing_claims"].index(cid)
+    else:
+        idx = len(packet["existing_claims"])
+        packet["existing_claims"].append(cid)
+        views.append(claim_view(nb, row, idx, as_of))
+    return claim_view(nb, row, idx, as_of)
 
 
 def attach_claims(nb: Any, packet: Dict[str, Any], entity_id: str, views: List[Dict[str, Any]],
-                  limit: int = MAX_CLAIMS_PER_ENTITY) -> List[Dict[str, Any]]:
-    """Active claims of an entity (most recent first) as indexed views, appending new ones to the packet."""
-    out = []
-    for row in active_claim_rows(nb, entity_id, limit):
-        cid = row["claim_id"]
-        if cid in packet["existing_claims"]:
-            idx = packet["existing_claims"].index(cid)
-        else:
-            idx = len(packet["existing_claims"])
-            packet["existing_claims"].append(cid)
-            views.append(claim_view(nb, row, idx))
-        out.append(claim_view(nb, row, idx))
-    return out
+                  limit: int = MAX_CLAIMS_PER_ENTITY, as_of: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Claims of an entity believed on the note's date as known then (most recent first) as indexed views,
+    appending new ones to the packet."""
+    return [_index(nb, packet, row, views, as_of) for row in active_claim_rows(nb, entity_id, limit, as_of)]
+
+
+def dated_view(nb: Any, packet: Dict[str, Any], entity_id: str, views: List[Dict[str, Any]], as_of: Optional[str],
+               known_limit: int = MAX_CLAIMS_PER_ENTITY, predicates: Sequence[str] = (), omissions: bool = True
+               ) -> Dict[str, Any]:
+    """A candidate entity as known on ``as_of`` plus its LATER block (claims recorded later), each claim indexed in
+    the packet, recorded in the packet's digest. The claims on ``predicates`` (the slots the note writes to) are
+    all kept, known then and later; the others fill up to ``known_limit`` / :data:`LATER_CLAIMS_PER_ENTITY`
+    (those sharing a predicate word first); what is left out is counted on the view (``known_claims_omitted``,
+    ``later_claims_omitted``) and in the digest's ``omitted``."""
+    view = entity_view(nb, entity_id, as_of)
+    known = active_claim_rows(nb, entity_id, None, as_of)
+    pick = slot_first([dict(r) for r in known], predicates, known_limit)
+    keep = {c["claim_id"] for c in pick}
+    view["active_claims"] = [_index(nb, packet, r, views, as_of) for r in known if r["claim_id"] in keep]
+    view["known_claims_omitted"] = len(known) - len(keep)
+    later, _total = later_claim_rows(nb, entity_id, as_of, None)
+    pick = slot_first([dict(r) for r in later], predicates, LATER_CLAIMS_PER_ENTITY)
+    keep = {c["claim_id"] for c in pick}
+    view["later_claims"] = [_index(nb, packet, r, views, as_of) for r in later if r["claim_id"] in keep]
+    view["later_claims_omitted"] = len(later) - len(keep)
+    record_view(packet, view, omissions)
+    return view
 
 
 # ----------------------------------------------------------------------------- name index
@@ -216,7 +358,9 @@ def note_context(nb: Any, note_id: str, max_chars: Optional[int] = None) -> Dict
                             "summary": excerpt(n["summary"] or n["one_line"] or n["text"], 200),
                             "score": round(score, 4)})
 
-    packet = empty_packet()
+    as_of = row["occurred_at"]
+    note["as_of"] = as_of
+    packet = empty_packet(as_of)
     ordered: List[tuple] = []
     if about and about["kind"] == "entity" and nb.store.entity_row(about["id"]) is not None:
         ordered.append((nb.store.canonical(about["id"]), "about"))
@@ -233,9 +377,10 @@ def note_context(nb: Any, note_id: str, max_chars: Optional[int] = None) -> Dict
         if eid in packet["candidate_entities"] or len(candidates) >= MAX_CANDIDATE_ENTITIES:
             continue
         packet["candidate_entities"].append(eid)
-        view = entity_view(nb, eid)
-        view.update({"index": len(candidates), "matched_by": how,
-                     "active_claims": attach_claims(nb, packet, eid, claim_views)})
+        # the extraction packet shows names and statement slots (its own bound, said in its text); omissions that
+        # matter are those of the linking cards (note_resolve_candidates)
+        view = dated_view(nb, packet, eid, claim_views, as_of, omissions=False)
+        view.update({"index": len(candidates), "matched_by": how})
         candidates.append(view)
 
     task_rows: List[Any] = []
@@ -263,4 +408,4 @@ def note_context(nb: Any, note_id: str, max_chars: Optional[int] = None) -> Dict
     save_packet(nb, note_id, packet)
     return {"note": note, "sections": secs, "similar_notes": similar, "candidate_entities": candidates,
             "existing_claims": claim_views, "open_tasks": open_tasks, "topics": nb.store.topic_names(),
-            "vocabulary": vocabulary()}
+            "vocabulary": vocabulary(), "context": packet["digest"]}

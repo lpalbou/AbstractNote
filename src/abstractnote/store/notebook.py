@@ -65,9 +65,10 @@ PACKET_KEYS = ("candidate_entities", "existing_claims", "mentions")
 def context_digest(store: NoteStore, note_row: Any, packet: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """The dependency record of a revision (ADR 0008 §3, ``revisions.context_json``): what it SAW, ``{as_of,
     entities, claims, summaries: {entity_id: revision_id}, notes (the similar notes shown), mention_queries,
-    looked_up}``, from the stored context
-    packet as the apply finds it (``note_context`` and ``note_resolve_candidates`` both add to it; R1's digest
-    ``packet.context``, when present, is merged in). A packet without its keys is an error (never a silent empty
+    later_claims, omitted, looked_up}``, from the stored context packet as the apply finds it (``note_context`` and
+    ``note_resolve_candidates`` both add to it; the dated digest of ``process.context`` (``packet.digest``, or the
+    revision builder's ``context``) is merged in: its as_of, entities, claims, known-then summaries, the LATER
+    claims offered and what the packet budget left out). A packet without its keys is an error (never a silent empty
     record); a note applied without any packet records ``looked_up: false``. What the revision USED is
     ``note_dependencies``, the invalidation key."""
     as_of = note_row["occurred_at"]
@@ -78,7 +79,7 @@ def context_digest(store: NoteStore, note_row: Any, packet: Optional[Dict[str, A
     if missing:
         raise RuntimeError("The note's stored context has no " + ", ".join(missing)
                            + "; it cannot record what the revision depended on (ADR 0008).")
-    r1 = packet.get("context") if isinstance(packet.get("context"), dict) else {}
+    r1 = next((d for d in (packet.get("context"), packet.get("digest")) if isinstance(d, dict)), {})
     entities: List[str] = []
     for eid in [*(r1.get("entities") or []), *packet["candidate_entities"],
                 *(e for ids_ in packet["mentions"].values() for e in ids_)]:
@@ -97,6 +98,7 @@ def context_digest(store: NoteStore, note_row: Any, packet: Optional[Dict[str, A
     notes = [n for n in [*(r1.get("notes") or []), *(packet.get("similar_notes") or [])] if n]
     return {"as_of": r1.get("as_of") or as_of, "entities": entities, "claims": claims, "summaries": summaries,
             "notes": list(dict.fromkeys(notes)), "mention_queries": list(packet.get("mention_queries") or []),
+            "later_claims": list(r1.get("later_claims") or []), "omitted": dict(r1.get("omitted") or {}),
             "looked_up": True}
 
 
@@ -277,13 +279,18 @@ class Notebook:
             # One canonical name per entity: a create of a taken canonical name becomes a reuse, whatever
             # the model decided (store.names); the stored revision is the rewritten one, so a replay agrees.
             rev = reuse_taken_names(self.store, rev)
-            if rev.get("note_id") and rev.get("action") in (None, REINTERPRET_ACTION) and rev.get("context") is None:
+            given = rev.get("context")
+            if rev.get("note_id") and rev.get("action") in (None, REINTERPRET_ACTION) and (
+                    given is None or "looked_up" not in given):
                 from ..process.context import load_packet
 
                 note_row = self.store.note_row(rev["note_id"])
                 if note_row is None:
                     raise ValueError("That note is not in this notebook.")
-                rev = {**rev, "context": context_digest(self.store, note_row, load_packet(self, rev["note_id"]))}
+                packet = load_packet(self, rev["note_id"])
+                if isinstance(given, dict) and packet is not None:  # R1's digest, from the revision builder
+                    packet = {**packet, "context": given}
+                rev = {**rev, "context": context_digest(self.store, note_row, packet)}
             self.store.insert_revision(rev)
             return self._finish(rev, _fail_after_index=_fail_after_index)
 

@@ -13,4 +13,5 @@ Tasks in the note:
 Open tasks it may close:
 {{batch.open_tasks}}
 
+{{batch.as_of}}
 {{batch.header}}
