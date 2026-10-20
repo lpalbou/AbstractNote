@@ -2197,8 +2197,10 @@ three topics; no statement whose only content is that the text mentions somethin
 is written with `stance: retract` and its end date, the replacing one with `stance: revise`.
 
 **Entity summaries (eval2 D4).** A summary says what the entity IS on the note's date: its kind,
-its role or what it is for, and who or what it belongs to, works with or is part of; only a fact
-that can change (a status, an owner, a version, a role) carries its date ("since 2026-10"); one or two sentences, at most about 240 characters
+its role or what it is for, and who or what it belongs to, works with or is part of; the summary is
+stored at the note's date, so it carries a date only when the text gives one for a fact, and never a
+date after the note's (a gpt-oss-120b run that was asked to date changing facts dated 61 % of its
+summaries, a third of those dates after the note); one or two sentences, at most about 240 characters
 (the card's clip, so a summary is always shown whole; the consolidation leaves out one over 600). It
 is never a sentence about the note or one event ("Dana confirmed the schedule"): the linking
 rewrites a reused entity's summary only when the note changes what it is, folding the new fact into
@@ -2861,8 +2863,8 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 
 ### Changed
 - **What a thing is**: the description of a person, project or tool now says what it is (its kind,
-  its role or purpose, and what it belongs to or works with), with the date of a fact that can
-  change, instead of the latest thing that happened to it. It is rewritten only when a note changes
+  its role or purpose, and what it belongs to or works with), instead of the latest thing
+  that happened to it. It is rewritten only when a note changes
   what the thing is, and a note dated before what the notebook learned later describes the thing
   as it stood then.
 - **Statements**: understanding a note now names how two things relate with a specific verb (runs
