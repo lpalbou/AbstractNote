@@ -91,9 +91,12 @@ flowchart LR
 ### Clients
 
 - **Web app** (`web/`): a browser app served by the gateway at `/apps/note/`, like the other
-  framework apps. Three views: **Capture** (a chat where you send notes and attachments and get
-  a filing answer), **Graph** (explore entities and relationships, scrub through time, see what
-  happened on a day), and **Remember** (search by cue and effort, revisit, then-versus-now).
+  framework apps. Four views: **Capture** (a chat where you send notes and attachments and get
+  a filing answer), **Remember** (what changed, cue cards by category, ask by effort,
+  then-versus-now), **Explore** (the graph: entities, relationships and themes, scrub through
+  time, see what happened on a day) and **Processing** (what the notebook is doing with your
+  notes, live: the queue and its pace, the notes being understood step by step, failures to
+  retry, the helpers' health, and the consolidation with its progress, ETA and schedule).
 - **Apple Watch app** (`watch/apple/`): dictate or type a note and send it, ask a quick question,
   see what resurfaced today. Shares the gateway client conventions of the AbstractAssistant
   watch app.

@@ -20,7 +20,7 @@ the parts fit; the topic pages go deeper into one area each and link back to it.
 |---|---|
 | [data-model.md](data-model.md) | Notes, attachments, entities, claims, revisions, time semantics, de-duplication and the AbstractMemory projection. |
 | [cognition.md](cognition.md) | The flows (capture, process, drain, recall, mine, reflect), the queue, the schemas and prompts, headless execution. |
-| [remembering.md](remembering.md) | How recall is designed around cues and effort; the Capture, Remember and Explore views; agents as users. |
+| [remembering.md](remembering.md) | How recall is designed around cues and effort; the Capture, Remember, Explore and Processing views; agents as users. |
 | [clients.md](clients.md) | The web app, the Apple Watch app, the iPhone plan, sign-in and isolation. |
 | [importers.md](importers.md) | Turning Claude Code sessions, an agora hub database, Markdown trees and files into notes. |
 

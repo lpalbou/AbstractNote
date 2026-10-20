@@ -28,9 +28,21 @@ API, read the note API for views, and never send user, tenant or runtime identif
 - Served by the gateway at `/apps/note/` through the app proxy. The app's Node server answers the
   mount header, relays `/api/*` to the gateway with the session cookie, binds `127.0.0.1`, and
   uses relative URLs and the shared shell, as the app-server contract requires.
-- Three views, in the tab order **Capture**, **Remember**, **Explore** (the graph; its route stays
-  `#/graph`) (see [remembering.md](remembering.md)), plus a small **Settings** drawer (filing model, answering model, inline processing, reflect schedule,
-  location, queue status with retry, manage connection). Location is off until you turn on the
+- Four views, in the tab order **Capture**, **Remember**, **Explore** (the graph; its route stays
+  `#/graph`) and **Processing** (see [remembering.md](remembering.md)), plus a small **Settings**
+  drawer (filing model, answering model, inline processing, reflect and consolidation schedules,
+  location, queue status with retry, manage connection).
+- **Processing** shows, on one screen that never scrolls as a page, what the notebook is doing with
+  your notes: one sentence with a live dot (understanding at a pace with the time left, paused,
+  stopped and needing a repair, consolidating, or up to date) with Process now, the Automatic
+  understanding switch, Repair and Reflect now; the notes being understood right now with their
+  step (Reading, Extracting, Linking, Applying) and a Cancel with inline confirmation; the
+  consolidation with its stages, "Summaries · 72 of 140", time left, last run, what is waiting,
+  Consolidate now and its schedule (12 h, 1 d, 7 d, off); the pace over the last two hours and the
+  queue by priority with "Move to front"; the notes just understood; and what needs attention
+  (failed notes with Retry, helpers needing a repair). It re-reads `GET /note/processing` three
+  seconds after each answer with `If-None-Match`, pauses while the tab is hidden, and keeps the
+  last answer on a failure. On phones the sections become a pill row, one at a time. Location is off until you turn on the
   Location switch in Settings (kept per browser, and offered only on a secure page); Capture then
   attaches it to notes.
 - Sign-in and the top-right corner are the framework's (ui-kit): `useGatewayConnection` with the

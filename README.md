@@ -82,7 +82,7 @@ gateway, the web app and the watch app.
 
 | Client | Where | What it does |
 |---|---|---|
-| Web app | [`web/`](web/) (`@abstractframework/note`) | Capture (a chat with attachments), Remember (since you last looked, cue cards, ask by effort, then and now), Explore (entities and links through time), and a Settings panel |
+| Web app | [`web/`](web/) (`@abstractframework/note`) | Capture (a chat with attachments), Remember (since you last looked, cue cards, ask by effort, then and now), Explore (entities and links through time), Processing (what the notebook is doing with your notes, live: the queue and its pace, the notes being understood, failures, and the scheduled consolidation), and a Settings panel |
 | Apple Watch app | [`watch/apple/`](watch/apple/README.md) | Note, Ask, Today, Settings; watch-only, watchOS 26 or later |
 | Command line | `abstractnote` | Headless capture, search, processing, imports, rebuild, JSON output for scripts and agents |
 

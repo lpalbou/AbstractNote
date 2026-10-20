@@ -143,6 +143,16 @@ the notebook's reply. With "Instant linking" on (Settings) the note is processed
 otherwise the app re-reads the note until it is. Nothing uses system vocabulary: no run ids, no
 ledger, no gateway.
 
+## The Processing view
+
+Remembering has a cost in time, and the Processing view shows it honestly: what the notebook is
+doing with your notes right now, how fast, what is waiting and what went wrong, without system
+vocabulary. It also owns the consolidation: the scheduled pass that joins duplicate entries,
+recomputes the themes and names the new or stale ones, refreshes entity summaries that are older
+than what is known about them, refreshes then-and-now, and looks back for insights. Each stage
+reports n of m with a time left measured from its own pace, and "Consolidate now" runs it at
+once (see [cognition.md](cognition.md), "note-consolidate").
+
 ## For agents and entities
 
 - `note_changes` (since you last looked) is the first call of a session; `note_search` at quick
