@@ -28,8 +28,12 @@ a drain is understood twice, and the structured-output lane corrupts one link an
    the context recorded in the revision", never "final". The revision log stays the truth (ADR 0003):
    a re-interpretation is a new revision (`note.reinterpret`) that supersedes the previous one's effects
    (its claims close with the closure kind `reinterpreted`, its tasks and mentions are replaced, entities
-   it alone created and that nothing references any more are retired); the as-received axis still shows
-   what the notebook believed before.
+   it alone created and that nothing references any more are retired, its topics and mentions are
+   soft-removed so the as-received axis still shows what the notebook believed before). The inverse of every
+   op is explicit (a table in data-model.md), and a re-interpretation that keeps a statement with the same
+   subject, predicate and object but another certainty or window updates that claim rather than adding a
+   second one. In AbstractMemory the closure kind is `reinterpreted` (an additive kind, released before
+   AbstractNote depends on it); it is never written as a retraction.
 2. **Context as of the note's date.** The packets a note is understood with show the notebook as it was
    known at the note's date (claims and summaries observed on or before it) and, separately and labelled,
    what was recorded LATER. The model may use the later block only to say that a statement is an earlier
@@ -41,13 +45,20 @@ a drain is understood twice, and the structured-output lane corrupts one link an
 3. **Every revision records what it depended on**: the entities, claims and summaries it saw (and the
    `as_of` date), so that a new earlier note can name exactly which later interpretations it invalidates.
 4. **Invalidation is dependency-bounded and forward-only.** When a note with date t is applied and
-   touches entities E, the later notes whose revisions depended on E, or whose mentions now match
-   E's names or aliases, are marked for re-understanding with the reason and the note that caused it.
-   Notes earlier than t are never affected (their context excludes later knowledge), so a pass that
-   re-understands marked notes in ascending date, each once, terminates; a re-interpretation may mark
-   later notes again, never earlier ones.
+   touches entities E, the later notes whose revisions USED E (an entity the revision reused, created,
+   or made the subject or object of a claim or task; not merely a candidate the packet showed), or
+   whose mentions now match E's names or aliases, are marked for re-understanding with the reason and
+   the note that caused it. Notes earlier than t are never affected (their context excludes later
+   knowledge); two notes with the same date are ordered by their received time. A person's re-date or
+   archive of a note marks dependents forward from the earlier of the old and the new date. A pass
+   re-understands marked notes in ascending date, each once; a re-interpretation may mark later notes
+   again, never earlier ones, so the pass terminates, and a second pass without new earlier notes makes
+   no model call (the unchanged check is a structural comparison of the ops, not a model answer).
 5. **Re-understanding is a visible consolidation stage** ("Re-understanding 12 notes", with progress,
-   ETA, what changed and what did not), scheduled like the rest of the consolidation and triggerable;
+   ETA, what changed and what did not), scheduled like the rest of the consolidation and triggerable.
+   The count and the reasons are readable before the run; the stage runs under the consolidation's
+   budget contract (ADR 0007: a budget stop leaves `left_out` equal to what is still pending, never a
+   silent end); a claim that a live note closed meanwhile is refused with a warning, never dropped;
    communities recompute after every import batch or drain that made them due; themes, then-and-now and
    summaries are rebuilt views of the dated history.
 6. **Identity across time.** A mention whose name or alias equals a live entity's canonical name or
@@ -69,8 +80,11 @@ of that project, bounded by dependency, in history order, with progress shown. E
 graph can change after an ingest, and the then-and-now, themes and summaries must be read as views
 over the dated history, which is what makes "how the notebook understood this over time" answerable.
 The revision log grows (one revision per re-interpretation); the as-received axis makes the growth
-useful. The schema gains the dependency record and the re-understanding marks; AbstractMemory gains
-the closure kind `reinterpreted` through the existing `close_assertion`.
+useful. The schema gains the dependency record and the re-understanding marks (a migration flag marks
+revisions written before the record existed: they are re-understood on their first mark). AbstractMemory
+gains the additive closure kind `reinterpreted` (a change and release of abstractmemory that precedes the
+AbstractNote release depending on it); closures of that kind are not turning points in then-and-now.
+Adversarial review: untracked/reviews/retro-design-review.md (2026-10-20).
 
 ## Validation
 
