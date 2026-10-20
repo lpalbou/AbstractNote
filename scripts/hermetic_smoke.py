@@ -20,7 +20,10 @@ What it checks (exit 1 on the first failure, with the reason):
     delta as ``kind: retracted`` in plain words (no vocabulary term);
   - the reflect automation has not run on its own (its first occurrence is one interval away), its
     "Reflect now" (``automation.run_now``) occurrence completes, every processor occurrence completed,
-    and no run in the account's plane is ``failed`` (review 02 M1).
+    and no run in the account's plane is ``failed`` (review 02 M1);
+  - the consolidate automation (0032) is created healthy on its ``1d`` schedule without running, "Consolidate
+    now" completes one consolidation, and ``GET /note/processing`` then reports ``consolidation.last.status ==
+    "completed"`` with no consolidation running.
 
 Every response it sees is written as a fixture ``<name>.json`` = ``{request, status, body}`` with
 credentials removed, for the clients' tests (review 01 S5).
@@ -317,7 +320,8 @@ def main() -> int:
         check(status == 200 and health.get("healthy") is True and health.get("state") == "active"
               and health.get("id") == ens[f"{kind}_id"], f"the {kind} automation is not healthy: {health}")
     status, kept = call(gw, "POST", "/api/gateway/note/processor/ensure", token=a, fixture="note_processor_ensure_kept_200")
-    check(status == 200 and [(kept.get(k) or {}).get("action") for k in ("processor", "reflect")] == ["kept", "kept"]
+    check(status == 200 and [(kept.get(k) or {}).get("action") for k in ("processor", "reflect", "consolidate")]
+          == ["kept", "kept", "kept"]
           and kept.get("processor_id") == proc and kept.get("created") == [], f"a second ensure did not keep both: {kept}")
     report["automations_health"] = {k: autos[k]["target"] for k in ("processor", "reflect")}
     # Every tool a flow's tool_calls nodes use is allowed by the automations' run input (a tool missing
@@ -325,7 +329,7 @@ def main() -> int:
     used = flow_tools()
     every = set().union(*used.values()) if used else set()
     check(len(used) >= 4 and "note_communities_recompute" in every, f"no tool_calls nodes found under {FLOWS_JSON}: {used}")
-    for kind in ("processor", "reflect"):
+    for kind in ("processor", "reflect", "consolidate"):
         status, got = call(gw, "GET", f"/api/gateway/automations/{ens[f'{kind}_id']}", token=a)
         allowed = set(((((got or {}).get("definition") or {}).get("target") or {}).get("input_data") or {})
                       .get("_runtime", {}).get("allowed_tools") or [])
@@ -402,6 +406,29 @@ def main() -> int:
         failed = failed_runs(gw, token)
         check(not failed, f"{who}'s plane has failed runs: {failed}")
     report["automations"] = {"reflect": occ.get("status"), "processor_occurrences": len(drains), "failed_runs": 0}
+
+    # consolidation (0032): created on its schedule without running; "Consolidate now" completes one
+    consolidate = ens["consolidate_id"]
+    status, view = call(gw, "GET", "/api/gateway/note/consolidation", token=a, fixture="note_consolidation_200")
+    auto = (view or {}).get("automation") or {}
+    check(status == 200 and auto.get("id") == consolidate and auto.get("healthy") is True
+          and auto.get("schedule") == {"every": "1d"} and view.get("last") is None,
+          f"the consolidation is not ready: {status} {view}")
+    seen = len(occurrences(gw, a, consolidate))
+    check(seen == 0, "the consolidate automation ran at creation (its first run is one interval away)")
+    run_now(gw, a, consolidate, fixture="automation_consolidate_run_now_200")
+    occ = wait_occurrence(gw, a, consolidate, seen=seen)
+    check(occ.get("status") == "completed", f"the consolidation ended {occ.get('status')}: {occ.get('failure')}")
+    status, page = call(gw, "GET", "/api/gateway/note/processing", token=a, fixture="note_processing_consolidated_200")
+    cons = (page or {}).get("consolidation") or {}
+    last = cons.get("last") or {}
+    check(status == 200 and last.get("status") == "completed" and cons.get("run") is None,
+          f"GET /note/processing does not report the consolidation as completed: {status} {cons}")
+    for who, token in (("alice", a), ("bob", b)):
+        failed = failed_runs(gw, token)
+        check(not failed, f"{who}'s plane has failed runs after the consolidation: {failed}")
+    report["consolidation"] = {k: last.get(k) for k in ("status", "merges", "communities", "labelled",
+                                                        "summaries_refreshed", "insights")}
     print(json.dumps(report, indent=2))
     return 0
 

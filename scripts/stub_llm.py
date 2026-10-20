@@ -5,8 +5,9 @@
 
 Answers ``POST /v1/chat/completions`` with a JSON object valid for whichever AbstractNote schema
 the request asks for (QuickFiling, Extraction, Linking, Answer, MiningPlan, SliceFindings,
-Dossier, Reflections): the schema is read from the request (``response_format``, or the JSON Schema
-block AbstractCore writes into the prompt for providers without native structured output) and
+Dossier, Reflections, CommunityLabels, EntitySummaries): the schema is read from the request
+(``response_format``, or the JSON Schema block AbstractCore writes into the prompt for providers
+without native structured output) and
 recognised by its exact top-level property names; a request without one gets a short sentence.
 ``GET /v1/models`` lists one model, ``note-stub``. Development and smoke tests only.
 """
@@ -56,6 +57,9 @@ ANSWERS: Dict[str, Dict[str, Any]] = {
     "Dossier": {"title": "Dana and the LUT budget", "narrative": "Dana asked for the Pareto by Friday.", "timeline": [],
                 "evolution": "", "contradictions": [], "forgotten": [], "suggestions": [], "confidence": "low"},
     "Reflections": {"items": []},
+    # The consolidation (0032): names nothing and refreshes nothing (valid, empty), so its loops end at once.
+    "CommunityLabels": {"communities": []},
+    "EntitySummaries": {"summaries": []},
 }
 # Schema recognition: the top-level property names of the schema the request carries, compared exactly.
 SIGNATURES = [
@@ -67,6 +71,8 @@ SIGNATURES = [
     ("Dossier", {"title", "narrative", "timeline", "evolution", "contradictions", "forgotten", "suggestions", "confidence"}),
     ("Answer", {"answer", "evidence", "evolution", "open_loops", "follow_ups"}),
     ("Reflections", {"items"}),
+    ("CommunityLabels", {"communities"}),
+    ("EntitySummaries", {"summaries"}),
 ]
 # AbstractCore's prompted structured output (providers without native response_format, which is what the
 # runtime sends to an openai-compatible endpoint): the JSON Schema follows this sentence in the last user
