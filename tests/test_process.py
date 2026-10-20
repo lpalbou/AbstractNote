@@ -121,9 +121,9 @@ def test_merge_keeps_both_records(nb):
     seed(nb)
     # an earlier note created a second record for Dana
     ext0 = extraction([mention("m1", "D. Ng", "person")])
-    run(nb, "D. Ng called.", "2026-01-02T10:00:00Z", ext0,
-        lambda p, c: {"mentions": [ml("m1", "create", name="D. Ng", kind="person")], "claims": [], "tasks": [],
-                      "revision_summary": "A call."})
+    run(nb, "D. Ng called.", "2026-01-02T10:00:00Z", ext0,  # its record also knows the name Dana Ng (a shared key)
+        lambda p, c: {"mentions": [ml("m1", "create", name="D. Ng", kind="person", aliases=["Dana Ng"])],
+                      "claims": [], "tasks": [], "revision_summary": "A call."})
     ext = extraction([mention("m1", "Dana", "person", ["D. Ng"])])
 
     def link(packet, cands):
@@ -218,7 +218,8 @@ def test_task_close_by_index(nb):
     def link(packet, cands):
         [task] = [t for t in packet["open_tasks"] if t["text"] == "Send Dana the Pareto"]
         return {"mentions": [ml("m1", "reuse", cand_index(cands, "m1", "ex:person-dana"))], "claims": [],
-                "tasks": [{"index": 0, "closes_open_task": task["index"]}], "revision_summary": "Pareto sent."}
+                "tasks": [{"index": 0, "closes_open_task": task["index"], "evidence": "Sent the Pareto"}],
+                "revision_summary": "Pareto sent."}
 
     note_id, _, _, out = run(nb, "Sent the Pareto to Dana.", "2026-01-08T10:00:00Z", ext, link)
     assert len(out["tasks_closed"]) == 1 and out["tasks_opened"] == []

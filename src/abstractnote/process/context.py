@@ -14,6 +14,7 @@ import re
 from typing import Any, Dict, List, Optional, Sequence
 
 from .. import ids
+from ..ingest.dates import date_basis, is_approximate
 from ..ingest.normalise import DEFAULT_SECTION_CHARS, sections
 from ..recall.shapes import excerpt
 from ..store.embeddings import top_k
@@ -190,6 +191,9 @@ def note_context(nb: Any, note_id: str, max_chars: Optional[int] = None) -> Dict
                          "extracted_by": a["extracted_by"]} for a in atts],
         "chars": sum(s["chars"] for s in secs), "about": about,
     }
+    basis = date_basis(row)
+    if is_approximate(basis):  # only then: the header says so and extraction may give the text's own date
+        note.update({"date_basis": basis, "date_approximate": True})
 
     vector = nb.cache.get(row["vector_key"]) if row["vector_key"] else None
     similar: List[Dict[str, Any]] = []

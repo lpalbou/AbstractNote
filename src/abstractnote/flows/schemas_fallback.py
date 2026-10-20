@@ -85,7 +85,10 @@ EXTRACTION = _obj({
     }, ["text", "status"])),
     "time_refs": _arr(_obj({"text": _str(), "iso": _nullable_str("ISO or null")}, ["text"])),
     "topics": _arr(_str()),
-})
+    "document_date": {**_obj({"iso": _str("ISO date"), "basis": {"type": "string", "enum": ["stated in the text"]},
+                              "quote": _str("the exact words that state the date")}),
+                      "type": ["object", "null"]},
+}, ["summary", "mentions", "claims", "tasks", "time_refs", "topics"])
 
 LINKING = _obj({
     "mentions": _arr(_obj({
@@ -108,6 +111,7 @@ LINKING = _obj({
     "tasks": _arr(_obj({
         "index": {"type": "integer"},
         "closes_open_task": {"type": ["integer", "null"], "description": "index of the open task it closes"},
+        "evidence": _str("the note's exact words that say the open task is done"),
     }, ["index"])),
     "revision_summary": _str("one sentence"),
 })

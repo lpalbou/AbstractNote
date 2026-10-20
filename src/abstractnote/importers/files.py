@@ -2,9 +2,11 @@
 
 The bytes are stored directly in the notebook (no upload limit applies: this runs on the machine
 that holds the files) and their text is extracted by the core lane's extractors at capture.
-``occurred_at`` = the photo's EXIF date when Pillow is installed and the file has one, else the
-file's modification time. ``source.origin`` = ``{path, sha256, date_basis}``; the source key is the content
-hash, so the same file imported again (from anywhere) is a duplicate.
+``occurred_at`` = the date the file carries in its own metadata (:func:`abstractnote.ingest.dates.detect_file_date`,
+shared with capture: a photo's EXIF date when Pillow is installed, an XMP creation date, a PDF's ``/CreationDate``,
+an Office document's ``core.xml`` created date), else the file's modification time. ``source.origin`` =
+``{path, sha256, date_basis}``; the source key is the content hash, so the same file imported again (from anywhere)
+is a duplicate.
 """
 
 from __future__ import annotations
@@ -14,30 +16,11 @@ import mimetypes
 from pathlib import Path
 from typing import Iterator, Optional, Sequence
 
-from . import ImportReport, NoteDraft, in_window, iso_from_epoch, iso_utc
+from ..ingest.dates import detect_file_date
+from . import ImportReport, NoteDraft, in_window
 
 IMPORTER = "files"
 SKIPPED_NAMES = frozenset({".DS_Store", "Thumbs.db"})
-
-
-def _exif_date(path: Path) -> Optional[str]:
-    try:
-        from PIL import Image  # optional
-    except ImportError:
-        return None
-    try:
-        with Image.open(path) as img:
-            exif = img.getexif()
-            raw = exif.get(36867) or exif.get(306)  # DateTimeOriginal, DateTime
-    except Exception:  # noqa: BLE001 - not an image, or unreadable EXIF
-        return None
-    if not raw:
-        return None
-    try:
-        day, time_ = str(raw).strip().split(" ", 1)
-        return iso_utc(day.replace(":", "-") + "T" + time_ + "+00:00")
-    except ValueError:
-        return None
 
 
 def _walk(paths: Sequence[str | Path]) -> Iterator[Path]:
@@ -61,13 +44,12 @@ def drafts(*, report: ImportReport, paths: Sequence[str | Path], since: Optional
         if not data:
             report.skip("empty")
             continue
-        exif = _exif_date(path)
-        occurred, basis = (exif, "exif") if exif else (iso_from_epoch(path.stat().st_mtime), "file_mtime")
+        mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        occurred, basis = detect_file_date(path, mime)  # a path always has a date (its modification time last)
         if not in_window(occurred, since, until):
             report.skip("outside_window")
             continue
         digest = hashlib.sha256(data).hexdigest()
-        mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         source = {"client": "importer", "importer": IMPORTER, "origin": {"path": str(path.resolve()), "sha256": digest,
                                                                          "date_basis": basis}}
         yield NoteDraft(IMPORTER, digest, "", occurred, "file", path.name, source,

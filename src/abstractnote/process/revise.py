@@ -7,34 +7,56 @@ or ``new`` (claims) with a warning. Mapping:
 - mention ``reuse`` -> the candidate entity, plus ``entity.alias`` for new names
   and ``entity.summary`` when the model rewrote the summary;
 - ``create`` -> ``entity.create`` (id minted from the chosen name and kind);
-- ``merge`` -> ``entity.merge`` (second candidate into the first) and reuse;
+- ``merge`` -> ``entity.merge`` (second candidate into the first) and reuse, only when
+  the two share a name or alias key, have the same kind, the merged entry has fewer
+  than :data:`MERGE_REVIEW_NOTES` notes and neither was merged earlier in the note;
+  otherwise a ``skos:closeMatch`` claim for review (eval2 D1);
 - ``unsure`` -> ``entity.create`` plus a ``skos:closeMatch`` claim to the candidate;
+- a mention named by a number, a version, a message id, a link, a token or one generic
+  word (:mod:`abstractnote.process.demote`) is a literal, never an entity (eval2 D8);
 - claim ``new``/``refines`` -> ``claim.add``; ``restates`` -> ``claim.reinforce``;
   ``supersedes`` -> ``claim.add`` + ``claim.supersede`` (``valid_until`` = the
   note's ``occurred_at``; ``claim.retract`` when the note's stance is retract);
   ``contradicts`` -> ``claim.add`` marked disputed against the existing claim;
+  both only against a statement on the same subject and predicate (eval2 D2);
   an identical active statement (same subject, predicate and object after
   resolution) is always reinforced rather than duplicated;
-- tasks: ``task.close`` of the open task named by index, else ``task.open``
-  (and ``task.close`` when the note reports it done);
+- time: a note OLDER than the statement it supersedes (or contradicts, unless the
+  model marked it disputed within :data:`DISPUTE_WINDOW`) never closes it: its
+  statement is placed as the earlier belief (``claim.add`` + ``claim.insert_before``);
+  a document date stated in the text of a note whose date is approximate moves the
+  note first (``note.redate``); no window ever ends before it starts;
+- tasks: ``task.close`` of the open task named by index, only with the note's own
+  words saying it is done and never from a note older than the task (eval2 D3),
+  else ``task.open`` (and ``task.close`` when the note reports it done);
 - topics -> ``topic.assign``; the note summary -> ``note.summary``.
 """
 
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .. import ids
+from ..ingest.dates import CONTENT, date_basis, is_approximate
 from ..ingest.normalise import normalize_topic, text_norm
 from ..store.names import strip_kind_suffix
 from ..store.notes import _TakenIds
 from . import schemas
 from .context import empty_packet, load_packet, words
+from .demote import literal_reason
 from .merge import merge_extractions
 from .vocabulary import normalize_predicate
 
 CLOSE_MATCH = "skos:closeMatch"
+#: A model merge of an entry with at least this many notes goes to review instead (eval2 D1).
+MERGE_REVIEW_NOTES = 5
+#: A ``contradicts`` from an older note stays a dispute only when the model marked it disputed and the two
+#: statements are at most this far apart; otherwise the older one is the earlier belief (data-model.md "Time").
+DISPUTE_WINDOW = timedelta(days=30)
+#: A stated document date moves the note only when it differs from the stand-in date by more than this.
+REDATE_MIN = timedelta(days=1)
 
 
 def _op(op_name: str, **payload: Any) -> Dict[str, Any]:
@@ -58,6 +80,7 @@ class _Builder:
         self.dropped: Dict[str, str] = {}
         self._note_words: Optional[str] = None
         self.stats = {"created": {}}
+        self.merged: set = set()  # entities a merge of this revision already involves (no chains, eval2 D1)
 
     # ---------------------------------------------------------------- helpers
     def candidate(self, ref: str, index: Optional[int]) -> Optional[str]:
@@ -116,6 +139,78 @@ class _Builder:
                             summary=(summary or None)))
         return eid
 
+    # ---------------------------------------------------------------- guards (eval2 D1)
+    def name_keys(self, eid: str) -> set:
+        """Canonical name keys of an entity and the entries merged into it: its name and aliases."""
+        keys: set = set()
+        for m in self.nb.store.merged_members(self.nb.store.canonical(eid)):
+            row = self.nb.store.entity_row(m)
+            if row is None:
+                continue
+            keys.update(k for k in (row["name_key"], ids.name_key(row["display_name"] or row["name"])) if k)
+            keys.update(r[0] for r in self.nb.store.q("SELECT alias_key FROM entity_aliases WHERE entity_id=? AND"
+                                                      " alias_key IS NOT NULL", (m,)))
+        return keys
+
+    def merge_refusal(self, into_id: str, from_id: str) -> Optional[str]:
+        """Why a model merge of ``from_id`` into ``into_id`` is not applied (None: apply it). Structural only: the
+        kinds, a shared name or alias key, the size of the merged entry, one merge per entry per note."""
+        a, b = self.nb.store.entity_row(into_id), self.nb.store.entity_row(from_id)
+        if {into_id, from_id} & self.merged:
+            return "one merge per entry in a note"
+        if a["kind"] != b["kind"]:
+            return "their kinds differ"
+        if not (self.name_keys(into_id) & self.name_keys(from_id)):
+            return "they share no name"
+        if int(b["note_count"] or 0) >= MERGE_REVIEW_NOTES:
+            return f"{b['display_name'] or b['name']} has {int(b['note_count'])} notes"
+        return None
+
+    def review_merge(self, into_id: str, from_id: str, name: str, why: str) -> None:
+        """A merge kept for review: a ``skos:closeMatch`` statement from the entry to merge to the one it would join
+        (the review list shows it; confirming it merges them)."""
+        cid = ids.claim_id(self.note_id, from_id, CLOSE_MATCH, into_id)
+        if cid not in self.claim_ids:
+            self.claim_ids.add(cid)
+            self.ops.append(_op("claim.add", claim_id=cid, subject_id=from_id, predicate=CLOSE_MATCH,
+                                object_id=into_id, object_literal=None, certainty="possible", stance="assert",
+                                observed_at=self.at, valid_from=self.at, valid_until=None, evidence=name,
+                                note_id=self.note_id))
+        self.warnings.append(f"{name}: the two entries were not merged ({why}); the match is kept for review.")
+
+    # ---------------------------------------------------------------- the note's own date
+    def phrase_in_note(self, text: str) -> bool:
+        ws = words(str(text or ""))
+        return bool(ws) and (" " + " ".join(ws) + " ") in self.note_words()
+
+    def redate(self, ext: schemas.Extraction) -> None:
+        """``note.redate`` when the note's date is a stand-in and its text states its own date (the quote must be
+        the note's words); the revision, its statements and its mentions then carry the stated date."""
+        dd = ext.document_date
+        if dd is None:
+            return
+        basis = date_basis(self.note)
+        if not is_approximate(basis):
+            if basis != CONTENT:
+                self.warnings.append("The note's date is not approximate; the date its text states was not used.")
+            return
+        try:
+            to = ids.normalize_time(dd.iso, field="document date")
+        except ValueError:
+            self.warnings.append(f"The document date {dd.iso!r} is not a date; it was ignored.")
+            return
+        if not self.phrase_in_note(dd.quote):
+            self.warnings.append("The document date is not quoted from the note's words; it was ignored.")
+            return
+        if to > ids.utc_now():
+            self.warnings.append("The document date is in the future; it was ignored.")
+            return
+        if abs(ids.parse_time(to) - ids.parse_time(self.at)) <= REDATE_MIN:
+            return
+        self.ops.append(_op("note.redate", note_id=self.note_id, **{"from": self.at}, to=to, basis=CONTENT,
+                            quote=dd.quote.strip()))
+        self.at = to
+
     # ---------------------------------------------------------------- mentions
     def note_words(self) -> str:
         """The note's own words (text and extracted attachment text, not its title or header), as
@@ -166,6 +261,11 @@ class _Builder:
                 self.dropped[m.ref] = m.name
                 self.warnings.append(f"{m.name} is not written in the note; it was left out.")
                 continue
+            why = literal_reason(m.name)
+            if why:  # a value, not a thing (eval2 D8): its statements keep it as text
+                self.dropped[m.ref] = m.name
+                self.warnings.append(f"“{m.name}” is {why}, not an entry; it was kept as text.")
+                continue
             lm = by_ref.get(m.ref)
             if lm is not None:
                 lm = self.without_kind_suffix(lm)
@@ -183,7 +283,12 @@ class _Builder:
                 a = self.candidate(m.ref, mc[0]) if len(mc) == 2 else None
                 b = self.candidate(m.ref, mc[1]) if len(mc) == 2 else None
                 if a and b and a != b:
-                    self.ops.append(_op("entity.merge", from_id=b, into_id=a, reason=lm.reason or "same entity"))
+                    refused = self.merge_refusal(a, b)
+                    if refused is None:
+                        self.ops.append(_op("entity.merge", from_id=b, into_id=a, reason=lm.reason or "same entity"))
+                        self.merged.update({a, b})
+                    else:
+                        self.review_merge(a, b, m.name, refused)
                     eid = a
                 else:
                     eid = self.candidate(m.ref, lm.candidate)
@@ -301,13 +406,26 @@ class _Builder:
                     self.warnings.append(f"Statement {i} was marked {relation} without naming the existing statement;"
                                          " it was treated as new.")
                 relation = "new"
-            valid_from = self._time(c.valid_from, "valid_from", i) or self.at
+            if relation in ("supersedes", "contradicts") and not self.same_statement_slot(existing, subject, predicate):
+                # eval2 D2: only a statement about the same subject and relation can replace or dispute it
+                self.warnings.append(f"Statement {i} was linked to an existing statement about another subject or "
+                                     "relation; it was kept as new.")
+                relation, existing = "new", None
+            given_from = self._time(c.valid_from, "valid_from", i)
+            valid_from: Optional[str] = given_from or self.at
             valid_until = self._time(c.valid_until, "valid_until", i)
+            if valid_until and valid_from and valid_until < valid_from:
+                if given_from:  # never a negative window
+                    self.warnings.append(f"Statement {i} ends before it starts; its end was ignored.")
+                    valid_until = None
+                else:  # it stopped before this note was written: when it started is not known
+                    valid_from = None
             payload = dict(claim_id=cid, subject_id=subject, predicate=predicate, object_id=obj_id,
                            object_literal=literal, certainty=c.certainty, stance=c.stance, observed_at=self.at,
                            valid_from=valid_from, valid_until=valid_until, evidence=c.evidence or None,
                            note_id=self.note_id)
             same = self.identical_active(subject, predicate, obj_id, literal)
+            reason = (lc.reason if lc and lc.reason else "")
             if relation == "restates":
                 self.ops.append(_op("claim.reinforce", claim_id=existing, note_id=self.note_id))
                 continue
@@ -315,25 +433,104 @@ class _Builder:
                 # The very statement is already believed: reinforce it instead of duplicating it.
                 self.ops.append(_op("claim.reinforce", claim_id=same, note_id=self.note_id))
                 if relation == "supersedes" and existing != same:
-                    reason = (lc.reason if lc and lc.reason else "a later note changed it")
-                    self.ops.append(_op("claim.supersede", claim_id=existing, by_claim_id=same, reason=reason,
-                                        valid_until=self.at))
+                    if self.at >= self.nb.store.claim_row(existing)["observed_at"]:
+                        self.ops.append(_op("claim.supersede", claim_id=existing, by_claim_id=same,
+                                            reason=reason or "a later note changed it",
+                                            valid_until=self.closing_at(existing)))
+                    else:
+                        self.warnings.append(f"Statement {i}: this note is older than the statement it would "
+                                             "replace; that statement stays.")
                 continue
             self.claim_ids.add(cid)
+            older = existing is not None and self.at < self.nb.store.claim_row(existing)["observed_at"]
+            if relation == "contradicts" and older and not self.still_disputed(c.certainty, existing):
+                relation = "supersedes"  # an older note's view is the earlier belief, not a dispute
             if relation == "contradicts":
                 payload["certainty"] = "disputed"
                 payload["disputes"] = existing
                 self.ops.append(_op("claim.add", **payload))
+            elif relation == "supersedes" and older:
+                self.insert_before(payload, existing, reason or "an earlier belief, replaced later")
             elif relation == "supersedes":
                 self.ops.append(_op("claim.add", **payload))
-                reason = (lc.reason if lc and lc.reason else "a later note changed it")
+                reason = reason or "a later note changed it"
                 if c.stance == "retract":
-                    self.ops.append(_op("claim.retract", claim_id=existing, reason=reason, valid_until=self.at))
+                    self.ops.append(_op("claim.retract", claim_id=existing, reason=reason,
+                                        valid_until=self.closing_at(existing)))
                 else:
                     self.ops.append(_op("claim.supersede", claim_id=existing, by_claim_id=cid, reason=reason,
-                                        valid_until=self.at))
+                                        valid_until=self.closing_at(existing)))
             else:
                 self.ops.append(_op("claim.add", **payload))
+
+    # ---------------------------------------------------------------- time-aware placement
+    def same_statement_slot(self, existing: Optional[str], subject: str, predicate: str) -> bool:
+        row = self.nb.store.claim_row(existing) if existing else None
+        if row is None:
+            return False
+        canon = self.nb.store.canonical
+        return canon(row["subject_id"]) == canon(subject) and row["predicate"] == predicate
+
+    def closing_at(self, existing: str) -> str:
+        """When this note closes an existing statement: its date, never before the statement's own start (an empty
+        window, never a negative one; the same value reaches the note index and AbstractMemory)."""
+        start = self.nb.store.claim_row(existing)["valid_from"]
+        return start if start and start > self.at else self.at
+
+    def still_disputed(self, certainty: str, existing: str) -> bool:
+        """An older note's ``contradicts`` stays a dispute only when the model marked it disputed and the two
+        statements are at most :data:`DISPUTE_WINDOW` apart."""
+        t_old = self.nb.store.claim_row(existing)["observed_at"]
+        return certainty == "disputed" and ids.parse_time(t_old) - ids.parse_time(self.at) <= DISPUTE_WINDOW
+
+    def lineage(self, anchor: Any) -> List[Any]:
+        """The beliefs one statement belongs to: the claims linked to it by supersession (both ways), on the same
+        subject and predicate, retracted ones left out."""
+        s = self.nb.store
+        members = set(s.merged_members(s.canonical(anchor["subject_id"])))
+        seen = {anchor["claim_id"]: anchor}
+        todo = [anchor]
+        while todo:
+            x = todo.pop()
+            linked = list(s.q("SELECT * FROM claims WHERE superseded_by=?", (x["claim_id"],)))
+            if x["superseded_by"]:
+                nxt = s.claim_row(x["superseded_by"])
+                if nxt is not None:
+                    linked.append(nxt)
+            for r in linked:
+                if r["claim_id"] in seen or r["status"] == "retracted" or r["predicate"] != anchor["predicate"] \
+                        or r["subject_id"] not in members:
+                    continue
+                seen[r["claim_id"]] = r
+                todo.append(r)
+        return list(seen.values())
+
+    def insert_before(self, payload: Dict[str, Any], existing: str, reason: str) -> None:
+        """A statement from a note OLDER than the belief it relates to (data-model.md "Time"): it is placed in its
+        interval of the belief's history as the earlier belief: ``valid_until`` = the start of the next later
+        belief, superseded by it (never closing it), and the belief before it, if any, now ends where it starts.
+        Ops: ``claim.add`` then ``claim.insert_before``."""
+        rows = self.lineage(self.nb.store.claim_row(existing))
+        key = lambda r: (r["observed_at"], r["seq"] or 0)  # noqa: E731
+        later = sorted((r for r in rows if r["observed_at"] > self.at), key=key)
+        succ = later[0]
+        start = payload["valid_from"]
+        end = succ["valid_from"] or succ["observed_at"]
+        if start and end < start:
+            end = start  # an empty window, never a negative one
+        if payload["valid_until"] is None or payload["valid_until"] > end:
+            payload["valid_until"] = None  # closed by claim.insert_before at ``end`` (close_assertion, older copy)
+        self.ops.append(_op("claim.add", **payload))
+        ib: Dict[str, Any] = dict(claim_id=payload["claim_id"], before_claim_id=succ["claim_id"], valid_until=end,
+                                  reason=reason)
+        cut = start or self.at
+        prev = [r for r in rows if r["observed_at"] <= self.at and r["claim_id"] != succ["claim_id"]
+                and (r["valid_until"] is None or r["valid_until"] > cut)]
+        if prev:
+            p = max(prev, key=key)
+            p_start = p["valid_from"]
+            ib.update(after_claim_id=p["claim_id"], after_valid_until=max(cut, p_start) if p_start else cut)
+        self.ops.append(_op("claim.insert_before", **ib))
 
     # ---------------------------------------------------------------- tasks, topics, summary
     def tasks(self, ext: schemas.Extraction, link: schemas.Linking) -> None:
@@ -357,6 +554,8 @@ class _Builder:
                     due = ids.normalize_time(t.due, field="due date")
                 except ValueError:
                     self.warnings.append(f"Task {i}: the due date {t.due!r} is not a date; it was ignored.")
+            if target:
+                target = self.checked_close(i, target, lt)
             if target and target not in closed:
                 closed.add(target)
                 self.ops.append(_op("task.close", task_id=target, by_note_id=self.note_id, text=t.text))
@@ -368,6 +567,20 @@ class _Builder:
             self.ops.append(_op("task.open", task_id=tid, text=t.text, due=due, note_id=self.note_id))
             if t.status == "done":
                 self.ops.append(_op("task.close", task_id=tid, by_note_id=self.note_id, text=t.text))
+
+    def checked_close(self, i: int, target: str, lt: schemas.TaskLink) -> Optional[str]:
+        """eval2 D3: an open task is closed only when the linking quotes the note's own words saying it is done and
+        the note is not older than the task; otherwise the task stays open (this note's task is kept as its own)."""
+        if not self.phrase_in_note(lt.evidence):
+            self.warnings.append(f"Task {i}: closing an open task needs the note's words that say it is done; the "
+                                 "open task stays open.")
+            return None
+        opened = self.nb.store.q1("SELECT opened_at FROM tasks WHERE task_id=?", (target,))
+        if opened is not None and opened[0] and self.at < opened[0]:
+            self.warnings.append(f"Task {i}: this note is older than the open task it would close; the open task "
+                                 "stays open.")
+            return None
+        return target
 
     def topics(self, ext: schemas.Extraction) -> None:
         seen = set()
@@ -440,6 +653,7 @@ def build_revision(nb: Any, note_id: str, extraction: Any, linking: Any, *, atte
     b.warnings.extend(str(w) for w in (flags or []) if isinstance(w, str) and w.strip())
     if packet is None and (link.mentions or link.claims or link.tasks):
         b.warnings.append("The note's context was not looked up first, so every reference was treated as new.")
+    b.redate(ext)  # first: the mentions, statements and tasks then carry the note's stated date
     b.mentions(ext, link)
     b.claims(ext, link)
     _note_missing_summaries(b, ext, link)
@@ -448,7 +662,7 @@ def build_revision(nb: Any, note_id: str, extraction: Any, linking: Any, *, atte
     b.ops.append(_op("note.summary", note_id=note_id, summary=ext.summary or None, kind=None, language=None))
     summary = (link.revision_summary or "").strip() or (ext.summary or "").strip() or "Read the note."
     return {"revision_id": ids.revision_id_for_note(note_id, attempt), "note_id": note_id, "attempt": attempt,
-            "at": note["occurred_at"], "run_id": run_id, "ops": b.ops, "summary": summary,
+            "at": b.at, "run_id": run_id, "ops": b.ops, "summary": summary,
             "warnings": b.warnings}
 
 

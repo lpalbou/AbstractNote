@@ -58,7 +58,11 @@ def note_header(note: Dict[str, Any], part: int = 0, parts: int = 1) -> str:
     if str(n.get("title") or "").strip():
         bits.append("“" + clip(n.get("title"), 160) + "”")
     when = str(n.get("occurred_at") or "")[:16].replace("T", " ")
-    if when:
+    if when and n.get("date_approximate"):
+        # A stand-in date (a file date, a commit, a session start): the text may state the real one.
+        bits.append("written about " + when + " (now, for this note; this date is approximate, from the "
+                    + str(n.get("date_basis") or "import").replace("_", " ") + ")")
+    elif when:
         bits.append("written " + when + " (now, for this note)")
     extra = []
     if n.get("kind"):

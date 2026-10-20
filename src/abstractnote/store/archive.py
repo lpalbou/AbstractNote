@@ -143,7 +143,20 @@ class Archive:
                 continue
             for op in json.loads(r["ops_json"]):
                 p = op.get("payload") or {}
+                if op.get("op") == "claim.insert_before" and p.get("after_claim_id") == cid \
+                        and state["status"] != "retracted" and p.get("after_valid_until"):
+                    # the belief before a retrospective statement: its window now ends where that one starts
+                    if state["valid_until"] is None or state["valid_until"] > p["after_valid_until"]:
+                        state = {"status": "superseded", "valid_until": p["after_valid_until"],
+                                 "superseded_by": p.get("claim_id")}
+                    continue
                 if p.get("claim_id") != cid:
+                    continue
+                if op.get("op") == "claim.insert_before" and state["status"] == "active":
+                    until = p.get("valid_until")
+                    if state["valid_until"] is not None and (until is None or state["valid_until"] < until):
+                        until = state["valid_until"]
+                    state = {"status": "superseded", "valid_until": until, "superseded_by": p.get("before_claim_id")}
                     continue
                 if op.get("op") == "claim.supersede" and state["status"] == "active":
                     state = {"status": "superseded", "valid_until": state["valid_until"] or p.get("valid_until"),

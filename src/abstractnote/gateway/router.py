@@ -369,6 +369,24 @@ async def note_review_confirm(request: Request, review_id: str, body: Optional[C
     return await _run(request, work)
 
 
+class RedateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    occurred_at: str
+    reason: str = ""
+
+
+@router.post("/notes/{note_id}/redate")
+async def note_redate(request: Request, note_id: str, body: RedateBody) -> Dict[str, Any]:
+    """Set when a note happened ("Set the date"): a revision with the signed-in account (data-model.md "Time")."""
+    def work(nb, svc, p):
+        _require(nb, "note", note_id, "note")
+        return _call(nb, "redate_note", note_id, body.occurred_at, _account(p), body.reason,
+                     client=action_client(request))
+
+    return await _run(request, work)
+
+
 # --------------------------------------------------------------------------- claims, tasks, cues
 
 

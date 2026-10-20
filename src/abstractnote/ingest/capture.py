@@ -19,6 +19,7 @@ from ..model import FILING_KINDS, URGENCY_PRIORITY, CaptureResult, Location, Pro
 from ..store.notes import _j, note_vector_text
 from ..store.queue import PRIORITY_NORMAL
 from .blobs import BlobStore
+from .dates import detect_file_date
 from .extract import extract, guess_mime
 from .normalise import normalize_topic, text_norm
 
@@ -97,6 +98,15 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
     src = _source(source, "importer" if importer else default_client, account)
     if importer:
         src["importer"] = importer
+    if not occurred_at and atts:
+        # No date from the caller: the first attachment that carries one in its own metadata dates the note
+        # (EXIF, XMP, PDF or Office creation date; the same detect_file_date as ``abstractnote import files``).
+        for a in atts:
+            found = detect_file_date(a["data"], a.get("mime"), a.get("filename"))
+            if found:
+                occurred = found[0]
+                src.setdefault("origin", {})["date_basis"] = found[1]
+                break
     loc = _location(location)
     about_ref = _about(nb, about)
     norm = text_norm(text)

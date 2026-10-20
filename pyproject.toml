@@ -54,7 +54,7 @@ where = ["src"]
 include = ["abstractnote*"]
 
 [tool.setuptools.package-data]
-abstractnote = ["flows/json/*.json", "process/prompts/*.md"]
+abstractnote = ["flows/json/*.json", "process/prompts/*.md", "process/generic_words.txt"]
 
 [tool.ruff]
 line-length = 110

@@ -88,8 +88,8 @@ def review_world(nb):
                                              "claims": [], "tasks": [], "revision_summary": "Maybe Acme."})
     [close_claim] = o["claims_added"]
     run(nb, "D. Ng called.", "2026-01-02T10:00:00Z", extraction([m("m1", "D. Ng", "person")]),
-        lambda p, c: {"mentions": [ml("m1", "create", name="D. Ng", kind="person")], "claims": [], "tasks": [],
-                      "revision_summary": "A call."})
+        lambda p, c: {"mentions": [ml("m1", "create", name="D. Ng", kind="person", aliases=["Dana Ng"])],
+                      "claims": [], "tasks": [], "revision_summary": "A call."})  # a shared name key: merge applies
     merge_note, _, _, _ = run(
         nb, "Dana (D. Ng) confirmed by mail.", "2026-01-07T10:00:00Z",
         extraction([m("m1", "Dana", "person", ["D. Ng"])]),

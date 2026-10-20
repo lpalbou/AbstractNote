@@ -11,7 +11,7 @@ Give the preferred `name` (as the author writes it), its `kind`, `aliases` (only
 
 For each statement that relates to an existing one (by its `index` number) give `relation_to_existing`: `new`, `restates` (the same statement seen again), `refines` (adds detail; the old one stays true), `supersedes` (the old one is no longer true: a replaced decision, a changed value, a statement marked retract or revise) or `contradicts` (both are kept and marked disputed), with `existing` = the `#` number of the existing statement, and a `reason` of two to five words. List only statements that restate, refine, supersede or contradict an existing statement: every statement you leave out is new.
 
-List under `tasks` only the tasks (by their `index` number) that report an open task done, with `closes_open_task` = the `#` number of that open task.
+List under `tasks` only the tasks (by their `index` number) that report an open task done, with `closes_open_task` = the `#` number of that open task and `evidence` = the note's exact words that say it is done (a short verbatim excerpt). Without such words in the note, do not close it: a plan, a wish, a condition or a quote is not completion.
 
 End with `revision_summary`: one sentence saying what this note changed. When the message is one part of a long note, decide only the mentions, statements and tasks it lists.
 
@@ -22,6 +22,6 @@ Rules:
 - When unsure whether two things are the same, say `unsure` rather than guessing.
 
 The answer has this shape (values are illustrations):
-{"mentions": [{"ref": "m1", "decision": "reuse", "candidate": 0, "aliases": ["Dana Ng"], "summary": "Dana Ng, a colleague at Acme, leads the LUT budget review.", "reason": "same person"}, {"ref": "m2", "decision": "create", "name": "Pareto chart", "kind": "artifact", "summary": "The Pareto chart Dana asked for the LUT budget."}], "claims": [{"index": 1, "relation_to_existing": "supersedes", "existing": 3, "reason": "new deadline"}], "tasks": [{"index": 0, "closes_open_task": 2}], "revision_summary": "Dana now wants the Pareto chart by Friday."}
+{"mentions": [{"ref": "m1", "decision": "reuse", "candidate": 0, "aliases": ["Dana Ng"], "summary": "Dana Ng, a colleague at Acme, leads the LUT budget review.", "reason": "same person"}, {"ref": "m2", "decision": "create", "name": "Pareto chart", "kind": "artifact", "summary": "The Pareto chart Dana asked for the LUT budget."}], "claims": [{"index": 1, "relation_to_existing": "supersedes", "existing": 3, "reason": "new deadline"}], "tasks": [{"index": 0, "closes_open_task": 2, "evidence": "sent Dana the Pareto"}], "revision_summary": "Dana now wants the Pareto chart by Friday."}
 
 Output JSON only, matching the schema, written compactly on one line (no indentation).

@@ -390,7 +390,8 @@ def test_changes_cursor_never_loses_or_repeats(nb):
 def test_pinned_shapes_of_note_tasks_overview(nb):
     h = history(nb)
     note = nb.note(h["n1"])
-    assert set(note) == {"note_id", "title", "text", "kind", "occurred_at", "received_at", "status", "topics",
+    assert set(note) == {"note_id", "title", "text", "kind", "occurred_at", "date_basis", "date_approximate",
+                         "received_at", "status", "topics",
                          "summary", "source", "location", "attachments", "revision", "entities", "claims", "revisits",
                          "insight"}
     assert note["revision"]["note_id"] == h["n1"] and note["revisits"] == [] and note["insight"] is None

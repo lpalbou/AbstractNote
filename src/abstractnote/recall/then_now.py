@@ -1,6 +1,7 @@
 """Then versus now: the earliest and latest understanding of an entity (or a relationship) and the
-turning points between them, each with the note that caused it. Deterministic; cached per entity
-revision count (``then_now_cache``)."""
+turning points between them, each with the note that caused it, in history order (``occurred_at`` and
+validity windows, never the order notes were received or applied). Deterministic; cached per entity
+revision count (``then_now_cache``; a retrospective insertion drops the card)."""
 
 from __future__ import annotations
 
@@ -44,7 +45,10 @@ def then_now(nb: Any, entity_id: str) -> Dict[str, Any]:
                  f" v.revision_id=c.closed_revision_id WHERE (c.subject_id IN ({q}) OR c.object_id IN ({q}))",
                  [*members, *members]):
         d = s.claim_dict(r)
-        turning.append({"at": r["closed_at"], "kind": "retract" if r["status"] == "retracted" else "supersede",
+        # History time: a belief replaced later ends at its window's end (a retrospective note closes an older
+        # copy at the LATER belief's date), never at the time the closing revision was applied.
+        ended = r["valid_until"] if r["status"] == "superseded" and r["valid_until"] else r["closed_at"]
+        turning.append({"at": ended, "kind": "retract" if r["status"] == "retracted" else "supersede",
                         "text": _claim_line(d) + (f" (replaced: {r['closed_reason']})" if r["closed_reason"] else ""),
                         "claim_id": r["claim_id"], "superseded_by": r["superseded_by"],
                         "note_id": r["closing_note"], "revision_id": r["closed_revision_id"]})

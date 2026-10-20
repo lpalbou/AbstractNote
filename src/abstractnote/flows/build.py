@@ -441,6 +441,9 @@ else:
                 warnings.append(w)
     merged = {"summary": " ".join(summaries), "mentions": mentions, "claims": claims,
               "tasks": tasks, "time_refs": time_refs, "topics": topics}
+    dated = [part.get("document_date") for part in parts if isinstance(part.get("document_date"), dict)]
+    if dated:
+        merged["document_date"] = dated[0]
     if warnings:
         merged["warnings"] = warnings
 names = [{"ref": m.get("ref"), "name": m.get("name"), "kind": m.get("kind"), "aliases": m.get("aliases") or []}

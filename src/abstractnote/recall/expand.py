@@ -197,7 +197,8 @@ def _claim_events(nb: Any, rows: Iterable[Any]) -> List[Dict[str, Any]]:
         closed = None
         if r["closed_revision_id"]:
             rv = nb.store.revision_row(r["closed_revision_id"])
-            closed = {"revision_id": r["closed_revision_id"], "at": rv["at"] if rv else None,
+            ended = r["valid_until"] if r["status"] == "superseded" and r["valid_until"] else None
+            closed = {"revision_id": r["closed_revision_id"], "at": ended or (rv["at"] if rv else None),
                       "note_id": rv["note_id"] if rv else None, "reason": r["closed_reason"],
                       "kind": "retract" if r["status"] == "retracted" else "supersede"}
         d["closed"] = closed

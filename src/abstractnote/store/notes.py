@@ -84,6 +84,11 @@ def note_vector_text(title: Optional[str], text: str, attachment_texts: Sequence
     return joined[:budget]  # embedder input bound; the stored note is never cut
 
 
+#: Meta entry written by :meth:`NoteStore.mark_retro` (retrospective insertions; data-model.md "Time").
+RETRO_META = "retro"
+RETRO_EVENTS_KEPT = 500
+
+
 class NoteStore:
     """SQLite note index. Thread-safe through one RLock around the connection."""
 
@@ -384,7 +389,7 @@ class NoteStore:
         stats: Dict[str, Any] = {
             "entities_created": [], "entities_merged": [], "claims_added": [], "claims_reinforced": [],
             "claims_superseded": [], "claims_retracted": [], "tasks_opened": [], "tasks_closed": [],
-            "touched_entities": [], "touched_claims": [],
+            "touched_entities": [], "touched_claims": [], "claims_inserted_before": [], "retro_entities": [],
         }
         with self.tx() as c:
             row = c.execute("SELECT applied_index FROM revisions WHERE revision_id=?", (rev["revision_id"],)).fetchone()
@@ -898,7 +903,7 @@ class NoteStore:
         for name, values in (
             ("notes", rng("occurred_at", "notes", "AND archived_at IS NULL")),
             ("revisions", rng("at", "revisions", "AND applied_index=1")),
-            ("entities_created", rng("created_at", "entities")),
+            ("entities_created", rng("COALESCE(first_seen, created_at)", "entities")),
             ("claims_superseded", rng("valid_until", "claims", "AND status='superseded'")),
         ):
             for v in values:
@@ -909,6 +914,68 @@ class NoteStore:
                 buckets[b][name] += 1
         return {"granularity": granularity, "since": since_n, "until": until_n,
                 "buckets": [{"bucket": k, **v} for k, v in sorted(buckets.items())]}
+
+    # ------------------------------------------------------------------ retrospective insertion
+
+    def mark_retro(self, c: sqlite3.Connection, entity_ids: Iterable[str], revision_id: Optional[str],
+                   note_id: Optional[str], recorded_at: str) -> None:
+        """Record a retrospective insertion (material older than what was known about these entities) in the
+        ``retro`` meta entry, inside the caller's transaction: bump ``graph_version``, mark each entity's summary
+        stale as of this revision's sequence number (cleared by a later summary that is the current one), log the
+        event (communities count them since their last computation) and drop the entities' then-versus-now
+        cards. See :meth:`retro_state`."""
+        eids = sorted({e for e in entity_ids if e})
+        if not eids:
+            return
+        seq_row = c.execute("SELECT seq FROM revisions WHERE revision_id=?", (revision_id,)).fetchone() \
+            if revision_id else None
+        seq = int(seq_row[0]) if seq_row else int(c.execute("SELECT COALESCE(MAX(seq), 0) FROM revisions")
+                                                     .fetchone()[0])
+        row = c.execute("SELECT value FROM meta WHERE key=?", (RETRO_META,)).fetchone()
+        state = _uj(row[0], {}) if row else {}
+        state = state if isinstance(state, dict) else {}
+        marks = dict(state.get("stale_summaries") or {})
+        for e in eids:
+            marks[e] = max(int(marks.get(e) or 0), seq)
+        current = self.current_summary_seqs(c, list(marks))
+        marks = {e: q for e, q in marks.items() if current.get(e, 0) <= q}  # refreshed since: no longer stale
+        events = list(state.get("events") or [])
+        events.append({"revision_id": revision_id, "note_id": note_id, "recorded_at": recorded_at,
+                       "entities": len(eids)})
+        state.update({"graph_version": int(state.get("graph_version") or 0) + 1,
+                      "insertions": int(state.get("insertions") or 0) + 1,
+                      "events": events[-RETRO_EVENTS_KEPT:], "stale_summaries": marks})
+        c.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (RETRO_META, _j(state)))
+        keys = ["entity:" + e for e in eids]
+        c.execute(f"DELETE FROM then_now_cache WHERE key IN ({','.join('?' for _ in keys)})", keys)
+
+    def current_summary_seqs(self, c: sqlite3.Connection, entity_ids: Sequence[str]) -> Dict[str, int]:
+        """Revision sequence number of each entity's CURRENT summary (the latest in history time, the one
+        ``entities.summary`` shows), 0 when it has none."""
+        out: Dict[str, int] = {}
+        for e in entity_ids:
+            r = c.execute("SELECT v.seq FROM entity_summaries s JOIN revisions v ON v.revision_id=s.revision_id"
+                          " WHERE s.entity_id=? ORDER BY s.at DESC, s.rowid DESC LIMIT 1", (e,)).fetchone()
+            out[e] = int(r[0]) if r else 0
+        return out
+
+    def retro_state(self, *, threshold: int) -> Dict[str, Any]:
+        """``{graph_version, insertions, stale_summaries: [{entity_id, marked_seq}], retro_notes_since_communities,
+        communities_due, threshold}``: what retrospective insertions left to refresh (read only)."""
+        with self.lock:
+            state = self.meta_get(RETRO_META, {}) or {}
+            marks = dict(state.get("stale_summaries") or {})
+            current = self.current_summary_seqs(self.conn, list(marks))
+        stale = [{"entity_id": e, "marked_seq": int(q)} for e, q in sorted(marks.items())
+                 if current.get(e, 0) <= int(q) and self.entity_row(e) is not None
+                 and self.entity_row(e)["merged_into"] is None]
+        meta = self.meta_get("communities", {}) or {}
+        computed = meta.get("computed_at") if isinstance(meta, dict) else None
+        since = [ev for ev in state.get("events") or [] if not computed or str(ev.get("recorded_at") or "") > computed]
+        notes = len({ev.get("note_id") or ev.get("revision_id") for ev in since})
+        return {"graph_version": int(state.get("graph_version") or 0), "insertions": int(state.get("insertions") or 0),
+                "stale_summaries": stale, "retro_notes_since_communities": notes,
+                "communities_due": notes >= int(threshold), "threshold": int(threshold)}
 
     def counts(self) -> Dict[str, int]:
         def n(sql: str) -> int:
@@ -976,6 +1043,7 @@ class _OpContext:
         self.dirty_entities: set = set()
         self.dirty_relations: set = set()
         self.dirty_relation_entities: set = set()
+        self.retro: set = set()
 
     def apply(self, op: str, p: Dict[str, Any]) -> None:
         fn = getattr(self, "op_" + op.replace(".", "_"), None)
@@ -1106,13 +1174,17 @@ class _OpContext:
 
     def op_entity_mention(self, p: Dict[str, Any]) -> None:
         eid = p["entity_id"]
-        self._require_entity(eid)
+        row = self._require_entity(eid)
         note_id = p.get("note_id") or self.note_id
         at = self.at
         if note_id:
             nrow = self.c.execute("SELECT occurred_at FROM notes WHERE note_id=?", (note_id,)).fetchone()
             if nrow:
                 at = nrow[0]
+        if row["last_seen"] and row["last_seen"] > at and eid not in self.stats["entities_created"]:
+            # A note older than what is already known about the entity: a retrospective insertion
+            # (Notebook.after_retro_insert marks its summary stale and drops its then-versus-now card).
+            self.retro.add(eid)
         self.c.execute("INSERT OR IGNORE INTO entity_notes(entity_id, note_id, at, revision_id) VALUES (?,?,?,?)",
                        (eid, note_id, at, self.rid))
         self.dirty_entities.add(eid)
@@ -1173,22 +1245,56 @@ class _OpContext:
             self.dirty_entities.add(row["object_id"])
             self.dirty_relations.add((row["subject_id"], row["object_id"], row["predicate"]))
 
+    @staticmethod
+    def window_end(row: Any, until: Optional[str]) -> Optional[str]:
+        """``until`` never before the claim's ``valid_from`` (none: no known start, nothing to clamp): a window
+        closed before it opened is an empty window, never a negative one."""
+        start = row["valid_from"]
+        return start if (until and start and until < start) else until
+
     def op_claim_supersede(self, p: Dict[str, Any]) -> None:
         row = self._claim(p["claim_id"])
         cur = self.c.execute(
             "UPDATE claims SET status='superseded', superseded_by=?, valid_until=COALESCE(valid_until, ?),"
             " closed_reason=?, closed_revision_id=? WHERE claim_id=? AND status='active'",
-            (p.get("by_claim_id"), p["valid_until"], p.get("reason"), self.rid, p["claim_id"]))
+            (p.get("by_claim_id"), self.window_end(row, p["valid_until"]), p.get("reason"), self.rid, p["claim_id"]))
         if cur.rowcount:
             self.stats["claims_superseded"].append(p["claim_id"])
         self._dirty_claim_relation(row)
+
+    def op_claim_insert_before(self, p: Dict[str, Any]) -> None:
+        """A statement from a note OLDER than the belief it gives way to (docs/data-model.md "Time"): the claim
+        just added is the earlier belief, closed at the later one's date and superseded by it; the later belief
+        is untouched. ``after_claim_id`` is the belief before it, whose window now ends where this one starts."""
+        row = self._claim(p["claim_id"])
+        self._claim(p["before_claim_id"])
+        end = self.window_end(row, p["valid_until"])
+        cur = self.c.execute(
+            "UPDATE claims SET status='superseded', superseded_by=?, valid_until=CASE WHEN valid_until IS NULL OR"
+            " valid_until>? THEN ? ELSE valid_until END, closed_reason=?, closed_revision_id=? WHERE claim_id=? AND"
+            " status='active'", (p["before_claim_id"], end, end, p.get("reason"), self.rid, p["claim_id"]))
+        if cur.rowcount:
+            self.stats["claims_inserted_before"].append(p["claim_id"])
+        self._dirty_claim_relation(row)
+        self.retro.update(x for x in (row["subject_id"], row["object_id"]) if x)
+        if p.get("after_claim_id"):
+            prev = self._claim(p["after_claim_id"])
+            end = self.window_end(prev, p.get("after_valid_until") or row["valid_from"] or row["observed_at"])
+            cur = self.c.execute(
+                "UPDATE claims SET status=CASE WHEN status='active' THEN 'superseded' ELSE status END,"
+                " superseded_by=?, valid_until=?, closed_reason=COALESCE(?, closed_reason), closed_revision_id=?"
+                " WHERE claim_id=? AND status!='retracted' AND (valid_until IS NULL OR valid_until>?)",
+                (p["claim_id"], end, p.get("reason"), self.rid, p["after_claim_id"], end))
+            if cur.rowcount:
+                self.stats["claims_superseded"].append(p["after_claim_id"])
+            self._dirty_claim_relation(prev)
 
     def op_claim_retract(self, p: Dict[str, Any]) -> None:
         row = self._claim(p["claim_id"])
         cur = self.c.execute(
             "UPDATE claims SET status='retracted', valid_until=COALESCE(valid_until, ?), closed_reason=?,"
             " closed_revision_id=? WHERE claim_id=? AND status!='retracted'",
-            (p.get("valid_until") or self.at, p.get("reason"), self.rid, p["claim_id"]))
+            (self.window_end(row, p.get("valid_until") or self.at), p.get("reason"), self.rid, p["claim_id"]))
         if cur.rowcount:
             self.stats["claims_retracted"].append(p["claim_id"])
         self._dirty_claim_relation(row)
@@ -1259,6 +1365,32 @@ class _OpContext:
         self.c.execute("UPDATE queue SET state='done', leased_by=NULL, lease_until=NULL, next_attempt_at=NULL"
                        " WHERE note_id=? AND state IN ('queued','failed')", (note_id,))
 
+    def op_note_redate(self, p: Dict[str, Any]) -> None:
+        """Move a note in history time (``{note_id, from, to, basis, quote?, reason?}``): its ``occurred_at``, the
+        dates of its mentions, its topics' ranges, its queue place, and the statements and tasks it wrote that
+        carried the old date. ``source.redated`` records the basis (``content`` or ``user``)."""
+        note_id = p.get("note_id") or self.note_id
+        row = self.c.execute("SELECT occurred_at, source_json FROM notes WHERE note_id=?", (note_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"The note {note_id} is not in this notebook.")
+        old, new = p["from"], p["to"]
+        src = _uj(row["source_json"], {}) or {}
+        src["redated"] = {"basis": p["basis"], "from": old, "to": new, "revision_id": self.rid}
+        self.c.execute("UPDATE notes SET occurred_at=?, source_json=? WHERE note_id=?", (new, _j(src), note_id))
+        self.c.execute("UPDATE queue SET occurred_at=? WHERE note_id=?", (new, note_id))
+        for (eid,) in self.c.execute("SELECT entity_id FROM entity_notes WHERE note_id=?", (note_id,)).fetchall():
+            self.dirty_entities.add(eid)
+            self.retro.add(eid)
+        self.c.execute("UPDATE entity_notes SET at=? WHERE note_id=?", (new, note_id))
+        for cr in self.c.execute("SELECT * FROM claims WHERE note_id=? AND observed_at=?", (note_id, old)).fetchall():
+            self.c.execute("UPDATE claims SET observed_at=?, valid_from=CASE WHEN valid_from=? THEN ? ELSE valid_from"
+                           " END WHERE claim_id=?", (new, old, new, cr["claim_id"]))
+            self._dirty_claim_relation(cr)
+        self.c.execute("UPDATE claim_reinforcements SET at=? WHERE note_id=? AND at=?", (new, note_id, old))
+        self.c.execute("UPDATE tasks SET opened_at=? WHERE note_id=? AND opened_at=?", (new, note_id, old))
+        for (topic,) in self.c.execute("SELECT topic FROM note_topics WHERE note_id=?", (note_id,)).fetchall():
+            self.s.refresh_topic(self.c, topic)
+
     # --- end of revision
     def finish(self) -> None:
         if self.dirty_relation_entities:
@@ -1280,6 +1412,10 @@ class _OpContext:
                            (key, eid))
             self.s.refresh_entity_fts(self.c, eid)
         self.stats["touched_entities"] = sorted(stat_targets)
+        if self.retro:
+            retro = sorted({self.s.canonical(e, self.c) for e in self.retro})
+            self.stats["retro_entities"] = retro
+            self.s.mark_retro(self.c, retro, self.rid, self.note_id, self.recorded_at)
         if self.note_id and not self.rev.get("action"):
             self.c.execute("UPDATE notes SET status=CASE WHEN status='archived' THEN status ELSE 'processed' END,"
                            " processed_at=? WHERE note_id=?", (self.recorded_at, self.note_id))

@@ -148,6 +148,17 @@ class ClaimStore:
                 closes.append({"assertion_id": p["claim_id"], "valid_until": p["valid_until"], "kind": "supersede",
                                "reason": p.get("reason") or "superseded by a later note",
                                "replacement_ids": (p["by_claim_id"],) if p.get("by_claim_id") else ()})
+            elif name == "claim.insert_before":
+                # The older copy closes at the later belief's date (that belief is never closed by an older note);
+                # the belief before it, already closed later, has its window moved back to where this one starts.
+                closes.append({"assertion_id": p["claim_id"], "valid_until": p["valid_until"], "kind": "supersede",
+                               "reason": p.get("reason") or "an earlier belief, replaced later",
+                               "replacement_ids": (p["before_claim_id"],)})
+                if p.get("after_claim_id") and p.get("after_valid_until"):
+                    closes.append({"assertion_id": p["after_claim_id"], "valid_until": p["after_valid_until"],
+                                   "kind": "supersede", "narrow": True,
+                                   "reason": p.get("reason") or "replaced by an earlier-found belief",
+                                   "replacement_ids": (p["claim_id"],)})
             elif name == "claim.retract":
                 closes.append({"assertion_id": p["claim_id"], "valid_until": p.get("valid_until") or rev["at"],
                                "kind": "retract", "reason": p.get("reason") or "retracted", "replacement_ids": ()})
@@ -173,6 +184,8 @@ class ClaimStore:
                 c = dict(c, kind="retract")
             if self.store.close_assertion(c["assertion_id"], c["valid_until"]):
                 closed += 1
+            elif c.get("narrow") and self.narrow_assertion(c["assertion_id"], c["valid_until"]):
+                closed += 1
             self.journal.append_closure(ClosureRecord(
                 assertion_id=c["assertion_id"], kind=c["kind"], reason=c["reason"],
                 replacement_ids=tuple(c["replacement_ids"]), observed_at=_journal_time(rev["recorded_at"]),
@@ -182,6 +195,27 @@ class ClaimStore:
                 closure_id=ids.closure_id(rev["revision_id"], c["assertion_id"], c["kind"]),
             ))
         return {"added": len(adds), "closed": closed}
+
+    def narrow_assertion(self, assertion_id: str, valid_until: str) -> bool:
+        """Move an already-closed window EARLIER (a retrospective note placed between two beliefs). The only
+        in-place change besides ``close_assertion``, and like it limited to ``valid_until``: the content, provenance,
+        FTS row and vector are untouched. AbstractMemory has no public method for it (``close_assertion`` only
+        closes open windows), so this writes the store's own table through its connection; a store without them
+        fails loudly (seam: an additive ``narrow_assertion`` in AbstractMemory should replace this)."""
+        store = self.store
+        table, conn, lock = store._table, store._conn, store._lock  # noqa: SLF001 - see the docstring
+        with lock:
+            cur = conn.cursor()
+            cur.execute("BEGIN IMMEDIATE")
+            try:
+                cur.execute(f"UPDATE {table} SET valid_until=? WHERE assertion_id=? AND valid_until IS NOT NULL AND"
+                            " valid_until>?", (valid_until, assertion_id, valid_until))
+                changed = int(cur.rowcount or 0) > 0
+                cur.execute("COMMIT")
+            except BaseException:
+                cur.execute("ROLLBACK")
+                raise
+        return changed
 
     # ------------------------------------------------------------------ reads
 

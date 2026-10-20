@@ -60,6 +60,9 @@ def merge_extractions(parts: Sequence[Dict[str, Any]]) -> Tuple[Dict[str, Any], 
                     warnings.append(w)
         merged = {"summary": " ".join(summaries), "mentions": mentions, "claims": claims, "tasks": tasks,
                   "time_refs": time_refs, "topics": topics}
+        dated = [p.get("document_date") for p in parts if isinstance(p.get("document_date"), dict)]
+        if dated:
+            merged["document_date"] = dated[0]  # the first section that states the note's own date
         if warnings:
             merged["warnings"] = warnings
     names = [{"ref": m.get("ref"), "name": m.get("name"), "kind": m.get("kind"), "aliases": m.get("aliases") or []}

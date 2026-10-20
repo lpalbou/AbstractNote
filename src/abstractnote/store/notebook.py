@@ -56,6 +56,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "consolidate_schedule": {"every": "1d"},
 }
 PROCESSOR_MAX_ITEMS = 200
+#: Retrospective notes since the last community computation that make a recomputation due (retro_state).
+RETRO_COMMUNITY_NOTES = 20
 
 
 def _check_consolidate_schedule(value: Any) -> Dict[str, Any]:
@@ -294,6 +296,8 @@ class Notebook:
             "claims_retracted": result.get("claims_retracted", []),
             "tasks_opened": result.get("tasks_opened", []),
             "tasks_closed": result.get("tasks_closed", []),
+            "claims_inserted_before": result.get("claims_inserted_before", []),
+            "retrospective": result.get("retro_entities", []),
             "warnings": list(_uj(row["warnings_json"], []) or []),
         }
         if already_applied:
@@ -353,6 +357,45 @@ class Notebook:
         return self._user_revision("task.close", task_id, [{"op": "task.close", "payload": {
             "task_id": task_id, "text": row["text"], "by_note_id": None, "note": note}}], account, summary,
             client=client, occurred_at=occurred_at)
+
+    def redate_note(self, note_id: str, occurred_at: Any, account: Optional[str], reason: str = "", *,
+                    client: str = "web") -> Dict[str, Any]:
+        """Set when a note happened (``POST /note/notes/{id}/redate``): a user revision with one ``note.redate`` op
+        (basis ``user``). The note, its mentions, its topics' ranges and the statements and tasks it wrote with the
+        old date move to the new one; nothing else changes."""
+        from ..ingest.dates import USER
+
+        row = self.store.note_row(note_id)
+        if row is None:
+            raise ValueError("That note is not in this notebook.")
+        if occurred_at in (None, ""):
+            raise ValueError("Give the date the note was written.")
+        new = ids.normalize_time(occurred_at, field="occurred_at")
+        if new == row["occurred_at"]:
+            raise ValueError("The note already has that date.")
+        reason = str(reason or "").strip()
+        day = new[:10]
+        return self._user_revision("note.redate", note_id, [{"op": "note.redate", "payload": {
+            "note_id": note_id, "from": row["occurred_at"], "to": new, "basis": USER,
+            **({"reason": reason} if reason else {})}}], account,
+            f"Set the note's date to {day}." + (f" {reason}" if reason else ""), client=client)
+
+    def after_retro_insert(self, touched_entities: Iterable[str]) -> Dict[str, Any]:
+        """Record a retrospective insertion by hand (processing records it itself: a note older than what was
+        known about an entity, a statement placed before a later one, a redate): the entities' summaries are
+        marked stale, their then-versus-now cards dropped, ``graph_version`` bumped (:meth:`retro_state`)."""
+        eids = [self.store.canonical(e) for e in touched_entities if self.store.entity_row(e) is not None]
+        with self.store.tx() as c:
+            self.store.mark_retro(c, eids, None, None, ids.utc_now())
+        return self.retro_state()
+
+    def retro_state(self, threshold: Optional[int] = None) -> Dict[str, Any]:
+        """What retrospective insertions left to refresh (for the consolidation): ``{graph_version, insertions,
+        stale_summaries: [{entity_id, marked_seq}], retro_notes_since_communities, communities_due, threshold}``.
+        A summary stays stale until a summary recorded after the mark is the entity's current one;
+        ``communities_due`` once ``threshold`` (default :data:`RETRO_COMMUNITY_NOTES`) retrospective notes arrived
+        since the communities were last computed."""
+        return self.store.retro_state(threshold=RETRO_COMMUNITY_NOTES if threshold is None else int(threshold))
 
     def retract_claim(self, claim_id: str, account: Optional[str], reason: str, *, client: str = "web",
                       occurred_at: Optional[str] = None) -> Dict[str, Any]:
@@ -442,8 +485,11 @@ class Notebook:
 
     def note(self, note_id: str) -> Optional[Dict[str, Any]]:
         """A note in the pinned shape of ``GET /note/notes/{id}``: ``{note_id, title, text, kind, occurred_at,
-        received_at, status, topics, summary, source, location, attachments, revision, entities, claims, revisits,
-        insight}``.
+        date_basis, date_approximate, received_at, status, topics, summary, source, location, attachments, revision,
+        entities, claims, revisits, insight}``.
+
+        ``date_basis`` says how ``occurred_at`` was found (:func:`abstractnote.ingest.dates.date_basis`) and
+        ``date_approximate`` whether it is a stand-in a person may correct ("Set the date").
 
         ``revision`` is the note's applied revision (or null); ``revisits`` lists the notes linked to it by
         ``ex:revisits`` in either direction as ``NoteRef``; ``insight`` is ``{kind, evidence_note_ids, entity_ids,
@@ -465,9 +511,13 @@ class Notebook:
             " AND l.predicate='ex:revisits' UNION SELECT n.* FROM note_links l JOIN notes n"
             " ON n.note_id=l.src_note_id WHERE l.dst_note_id=? AND l.predicate='ex:revisits'"
             " ORDER BY occurred_at, note_id", (note_id, note_id))
+        from ..ingest.dates import date_basis, is_approximate
+
+        basis = date_basis(row)
         return {
             "note_id": row["note_id"], "title": row["title"], "text": row["text"], "kind": row["kind"],
-            "occurred_at": row["occurred_at"], "received_at": row["received_at"], "status": row["status"],
+            "occurred_at": row["occurred_at"], "date_basis": basis, "date_approximate": is_approximate(basis),
+            "received_at": row["received_at"], "status": row["status"],
             "topics": self.store.note_topics(note_id), "summary": row["summary"] or row["one_line"],
             "source": _uj(row["source_json"], {}), "location": _uj(row["location_json"]),
             "attachments": atts,

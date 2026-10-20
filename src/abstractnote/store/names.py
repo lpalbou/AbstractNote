@@ -100,7 +100,9 @@ def reuse_taken_names(store: Any, rev: Dict[str, Any]) -> Dict[str, Any]:
             if p.get(f) in redirect:
                 p[f] = redirect[p[f]]
                 remapped = True
-        for f in ("claim_id", "by_claim_id", "disputes"):
+        if name == "claim.insert_before" and p.get("claim_id") in claim_redirect:
+            continue  # its statement became a reinforcement of one already believed (or was left out)
+        for f in ("claim_id", "by_claim_id", "disputes", "before_claim_id", "after_claim_id"):
             if p.get(f) in claim_redirect:
                 p[f] = claim_redirect[p[f]]
         if name == "entity.create" and store.entity_row(p["entity_id"]) is None and p["entity_id"] not in created:

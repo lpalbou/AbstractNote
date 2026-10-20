@@ -8,8 +8,9 @@ Return one JSON object with these fields:
 - `tasks`: things to do (`open`) and things reported done (`done`), with a `due` date when one is given, else null;
 - `time_refs`: explicit time references ("last Tuesday", "in 2024") with their `iso` date when the note's own date resolves them, else null;
 - `topics`: one to three topics this text is about; reuse an existing topic only when it names exactly that.
+- `document_date`: only when the last line says the note's date is approximate AND this text itself states when it was written (a dated letter, a report's date line, "written on 3 March 2021"): `{"iso": "2021-03-03", "basis": "stated in the text", "quote": "<the exact words that state it>"}`. Otherwise leave it out. Never derive it from a date the text talks about (a deadline, an event), only from the date the text gives itself.
 
-Leave out a field that has its default: `object_is_literal` false, `certainty` stated, `stance` assert, `valid_from`, `valid_until`, `due` and `iso` null, `aliases` empty.
+Leave out a field that has its default: `object_is_literal` false, `certainty` stated, `stance` assert, `valid_from`, `valid_until`, `due`, `iso` and `document_date` null, `aliases` empty.
 
 Predicate vocabulary (use one of these CURIEs when it fits; otherwise write `ex:snake_case`):
 {{vocabulary}}

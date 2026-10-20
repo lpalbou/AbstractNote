@@ -96,7 +96,13 @@ EXTRACTION: Dict[str, Any] = _o({
     }, {"due": None})),
     "time_refs": _a(_o({"text": _s(), "iso": _ns("ISO or null")}, {"iso": None})),
     "topics": _a(_s()),
-})
+    # Appended (retrospective ingestion): only when the note's date is approximate and its text states its own date.
+    "document_date": {"type": ["object", "null"], "description": "the date the text itself says it was written, "
+                      "only when the note's date is marked approximate; else null",
+                      "properties": {"iso": _s("ISO date"), "basis": _e(["stated in the text"]),
+                                     "quote": _s("the exact words of the text that state the date")},
+                      "required": ["iso", "basis", "quote"]},
+}, {"document_date": None})
 
 LINKING: Dict[str, Any] = _o({
     "mentions": _a(_o({
@@ -122,7 +128,9 @@ LINKING: Dict[str, Any] = _o({
     "tasks": _a(_o({
         "index": {"type": "integer", "description": "index of the task in the extraction"},
         "closes_open_task": {"type": ["integer", "null"], "description": "index of the open task it closes"},
-    }, {"closes_open_task": None})),
+        # Appended (D3): a close is applied only with the note's own words saying it is done.
+        "evidence": _s("the note's exact words that say the open task is done"),
+    }, {"closes_open_task": None, "evidence": ""})),
     "revision_summary": _s("one sentence"),
 })
 
@@ -255,6 +263,12 @@ class TimeRef(_M):
     iso: Optional[str] = None
 
 
+class DocumentDate(_M):
+    iso: str
+    basis: Literal["stated in the text"] = "stated in the text"
+    quote: str = ""
+
+
 class Extraction(_M):
     summary: str = ""
     mentions: List[Mention] = Field(default_factory=list)
@@ -262,6 +276,7 @@ class Extraction(_M):
     tasks: List[ExtractedTask] = Field(default_factory=list)
     time_refs: List[TimeRef] = Field(default_factory=list)
     topics: List[str] = Field(default_factory=list)
+    document_date: Optional[DocumentDate] = None
 
 
 class MentionLink(_M):
@@ -291,6 +306,7 @@ class ClaimLink(_M):
 class TaskLink(_M):
     index: int
     closes_open_task: Optional[int] = None
+    evidence: str = ""
 
 
 class Linking(_M):

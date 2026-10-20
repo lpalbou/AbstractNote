@@ -40,7 +40,7 @@ URGENCY_PRIORITY: Dict[str, int] = {"bulk": 0, "normal": 1, "high": 2, "urgent":
 OP_NAMES = (
     "entity.create", "entity.alias", "entity.rename", "entity.summary", "entity.merge", "entity.unmerge",
     "entity.mention", "claim.add", "claim.supersede", "claim.retract", "claim.reinforce", "topic.assign",
-    "task.open", "task.close", "task.drop", "note.summary",
+    "task.open", "task.close", "task.drop", "note.summary", "claim.insert_before", "note.redate",
     "note.archive",
 )
 

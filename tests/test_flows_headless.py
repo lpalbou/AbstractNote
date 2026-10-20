@@ -183,7 +183,8 @@ def test_capture_inline_processes_and_acks(runner, doubles):
     (ack,) = doubles.args("note_queue_ack")
     assert ack == {"note_id": "nt_1", "outcome": "ok", "revision_id": "rv_nt_1"}
     (applied,) = doubles.args("note_apply_revision")
-    assert applied["extraction"] == EXTRACTION and applied["linking"] == LINKING
+    # the runtime fills the defaults a model may leave out (document_date: null)
+    assert applied["extraction"] == {**EXTRACTION, "document_date": None} and applied["linking"] == LINKING
 
 
 def test_a_failing_tool_ends_the_run_with_its_own_sentence(runner):
