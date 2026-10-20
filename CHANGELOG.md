@@ -8,8 +8,8 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 
 ### Changed
 - **What a thing is**: the description of a person, project or tool now says what it is (its kind,
-  its role or purpose, and what it belongs to or works with), with the date of a fact that can
-  change, instead of the latest thing that happened to it. It is rewritten only when a note changes
+  its role or purpose, and what it belongs to or works with), instead of the latest thing
+  that happened to it. It is rewritten only when a note changes
   what the thing is, and a note dated before what the notebook learned later describes the thing
   as it stood then.
 - **Statements**: understanding a note now names how two things relate with a specific verb (runs
