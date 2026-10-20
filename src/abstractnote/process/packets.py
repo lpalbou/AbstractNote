@@ -26,6 +26,9 @@ KNOWN_NAMES = 15
 SIMILAR_NOTES = 5
 OPEN_TASKS = 8
 TOPICS = 50  # the most used existing topics (eval2 D13), the note's own first
+#: Predicates of the known entities' current statements listed for extraction (eval2 D6: the same fact keeps
+#: the same predicate, so a later value can replace it), the most used first.
+KNOWN_PREDICATES = 15
 #: Characters kept of a summary, an evidence excerpt or a role in a packet line.
 SUMMARY_CHARS = 240
 EVIDENCE_CHARS = 200
@@ -93,6 +96,15 @@ def extraction_packet(note: Dict[str, Any], section: Dict[str, Any], parts: int,
             names.append(clip(e.get("name"), 80) + " — " + str(e.get("kind") or "thing"))
     if names:
         lines.append("Names already in the notebook that this text may use: " + "; ".join(names) + ".")
+    counts = {}
+    for e in (candidate_entities or [])[:KNOWN_NAMES]:
+        for cl in ((e.get("active_claims") or []) if isinstance(e, dict) else []):
+            pred = str(cl.get("predicate") or "").strip() if isinstance(cl, dict) else ""
+            if pred and pred != "schema:mentions":  # the prompt never asks for a mentions statement
+                counts[pred] = counts.get(pred, 0) + 1
+    if counts:
+        preds = [k for neg, k in sorted([(-n, k) for k, n in counts.items()])][:KNOWN_PREDICATES]
+        lines.append("Predicates the notebook already uses about these names: " + ", ".join(preds) + ".")
     own = [str(t) for t in (n.get("topics") or []) if str(t).strip()]
     rest = [str(t) for t in (topics or []) if str(t).strip() and str(t) not in own]
     shown = (own + rest)[:TOPICS]

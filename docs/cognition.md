@@ -430,12 +430,26 @@ Rules that every prompt states:
 Predicates outside the vocabulary are accepted as `ex:snake_case` and reported in the revision
 warnings so the vocabulary can grow deliberately.
 
+**Choosing a predicate (eval2 D6).** The eval2 notebook's claims collapsed onto a few generic
+predicates (`schema:mentions` 32 %, `schema:participant` 10 %, `schema:name` 8 %, `schema:nextItem` 5 %),
+so a later value rarely met the earlier one on the same predicate. The extraction prompt therefore
+says how to choose one, with examples and no closed list (the model decides): the relation the text
+states, read from the subject to the object (`X ex:depends_on Y`), never backwards; a CURIE only when
+its meaning is exactly that relation (`schema:participant` is taking part in an event or a project,
+`schema:nextItem` the next item of a sequence, names go in aliases); otherwise a specific `ex:` verb
+or attribute (`ex:maintains`, `ex:runs_on`, `ex:fixed_in`, `ex:status`, `ex:version`, ...); never a
+vague one when the text says how two things relate; a fact with one value at a time (status, version,
+owner, deadline, place) always takes the same predicate, while a relation that adds up is one statement
+per value. The extraction packet lists the predicates the notebook already uses about the names it
+shows (`packets.KNOWN_PREDICATES`), and the prompt asks to reuse them for the same relation, so a new
+status supersedes the old one on the same subject and predicate (the apply check).
+
 **Bounds.** Only the packet is bounded; the note's text is never cut (long notes are split into
 sections, each read whole).
 
 | Packet | Bound (`abstractnote.process.packets`) |
 |---|---|
-| Extraction orientation | names and kinds of at most 15 known entities (no claims), at most 50 topics (the note's own first, then the most used), 5 similar notes by title and date, 8 open tasks, one line each |
+| Extraction orientation | names and kinds of at most 15 known entities (no claims), the predicates of their current statements (at most 15, the most used first; `schema:mentions` never), at most 50 topics (the note's own first, then the most used), 5 similar notes by title and date, 8 open tasks, one line each |
 | Candidates per mention | 3 (`note_resolve_candidates`) |
 | Candidate card | name, kind, up to 5 aliases, summary (at most 240 characters; `[LATER]` when it was written on a later day than the note), last seen, and at most 3 active claims as one line each, those with a predicate the note also uses first (`LATER than this note` when first seen on a later day) |
 | Mentions per linking call | 15; the rest go to further calls for the same note, merged back |

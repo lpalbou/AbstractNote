@@ -79,7 +79,9 @@ EXTRACTION: Dict[str, Any] = _o({
     }, {"aliases": []})),
     "claims": _a(_o({
         "subject": _s("a mention ref"),
-        "predicate": _s("a CURIE from the vocabulary, or ex:snake_case"),
+        "predicate": _s("the stated relation from the subject to the object: a vocabulary CURIE that means exactly "
+                        "that, else a specific ex:snake_case verb or attribute; the same one for the same kind of "
+                        "fact"),
         "object": _s("a mention ref, or a literal value"),
         "object_is_literal": {"type": "boolean"},
         "certainty": _e(CERTAINTIES),

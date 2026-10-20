@@ -15,6 +15,13 @@ Leave out a field that has its default: `object_is_literal` false, `certainty` s
 Predicate vocabulary (use one of these CURIEs when it fits; otherwise write `ex:snake_case`):
 {{vocabulary}}
 
+Choosing a predicate:
+- Name the relation the text states, read from the subject to the object: `X ex:depends_on Y` says "X depends on Y". The subject is what the statement is about; never write the relation backwards.
+- Use a CURIE only when its meaning is exactly the stated relation: `schema:participant` is someone taking part in an event or a project, not any link between a person and a thing; `schema:nextItem` is the item after another in a list or a sequence; `schema:result` is the outcome of an action; `schema:location` is a place; names belong in `aliases`, not in `schema:name` statements. Otherwise write a specific `ex:` verb or attribute: `ex:maintains`, `ex:owned_by`, `ex:depends_on`, `ex:runs_on`, `ex:replaced_by`, `ex:fixed_in`, `ex:blocks`, `ex:requires`, `ex:released`, `ex:decided`, `ex:status`, `ex:version`, `ex:deadline`, `ex:cost` (examples, not a list to choose from).
+- Never a vague predicate (`ex:related_to`, `ex:about`, `ex:involves`, `ex:has`) when the text says how the two relate; two things named together with no stated relation give no statement.
+- A fact with one value at a time (a status, a version, an owner, a deadline, a place, what something runs on now) always takes the same predicate, so a later value can replace the earlier one; a relation that adds up (uses, depends on, takes part in, has part, has feature) is one statement per value.
+- When the context lists the predicates the notebook already uses about these names, use the same one for the same relation rather than a synonym.
+
 Rules:
 - Use only the note and the context given; never invent entities or dates. The note's own date is "now".
 - Keep names as written by the author; put variants in aliases.
@@ -23,6 +30,6 @@ Rules:
 - A text labelled "Answer by …" is what that author (usually an assistant) said in reply to the note's author: write its statements with `certainty: reported`, never as the note author's own.
 
 The answer has this shape (values are illustrations):
-{"summary": "Dana asked for the LUT Pareto by Friday.", "mentions": [{"ref": "m1", "name": "Dana", "kind": "person", "role": "asks for the Pareto"}, {"ref": "m2", "name": "LUT", "kind": "project", "aliases": ["the LUT work"], "role": "the project the Pareto is for"}], "claims": [{"subject": "m1", "predicate": "schema:participant", "object": "m2", "evidence": "Dana wants the Pareto"}, {"subject": "m2", "predicate": "ex:deadline", "object": "2026-10-23", "object_is_literal": true, "certainty": "probable", "evidence": "by Friday, I think"}], "tasks": [{"text": "Send Dana the LUT Pareto", "status": "open", "due": "2026-10-23"}], "time_refs": [{"text": "Friday", "iso": "2026-10-23"}], "topics": ["lut"]}
+{"summary": "Dana asked for the LUT Pareto by Friday.", "mentions": [{"ref": "m1", "name": "Dana", "kind": "person", "role": "asks for the Pareto"}, {"ref": "m2", "name": "LUT", "kind": "project", "aliases": ["the LUT work"], "role": "the project the Pareto is for"}, {"ref": "m3", "name": "Pareto", "kind": "artifact", "role": "the chart Dana wants"}], "claims": [{"subject": "m1", "predicate": "ex:asked_for", "object": "m3", "evidence": "Dana wants the Pareto"}, {"subject": "m3", "predicate": "schema:about", "object": "m2", "evidence": "the LUT Pareto"}, {"subject": "m3", "predicate": "ex:deadline", "object": "2026-10-23", "object_is_literal": true, "certainty": "probable", "evidence": "by Friday, I think"}], "tasks": [{"text": "Send Dana the LUT Pareto", "status": "open", "due": "2026-10-23"}], "time_refs": [{"text": "Friday", "iso": "2026-10-23"}], "topics": ["lut"]}
 
 Output JSON only, matching the schema, written compactly on one line (no indentation).
