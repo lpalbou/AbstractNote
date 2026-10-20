@@ -92,10 +92,11 @@ def test_the_consolidation_view_on_the_page_and_its_own_route(gw):
     c.post(ENSURE, headers=h)
     nb = notebook_for(_plane(gw, "alice"))
     view = c.get("/api/gateway/note/consolidation", headers=h).json()
-    assert set(view) == {"automation", "run", "last", "pending"}
+    assert set(view) == {"automation", "run", "last", "pending", "reinterpret"}
     assert set(view["automation"]) == {"id", "state", "paused", "healthy", "reason", "schedule"}
     assert view["run"] is None and view["last"] is None
-    assert view["pending"] == {"stale_labels": 0, "unlabelled": 0, "stale_summaries": 0}
+    assert view["pending"] == {"stale_labels": 0, "unlabelled": 0, "stale_summaries": 0, "reinterpret": 0}
+    assert view["reinterpret"]["pending"] == 0 and view["reinterpret"]["reasons"] == []
     cons.begin(nb)
     cons.progress(nb, "labels", 1, 4)
     page = c.get("/api/gateway/note/processing", headers=h).json()
@@ -108,7 +109,7 @@ def test_the_consolidation_view_on_the_page_and_its_own_route(gw):
     assert last["status"] == "completed" and (last["labelled"], last["communities"], last["insights"]) == (1, 2, 1)
     assert {"finished_at", "status", "merges", "communities", "labelled", "summaries_refreshed",
             "insights", "left_out", "budget_spent", "notice"} <= set(last)
-    assert last["notice"] is None and last["left_out"] == {"summaries": 0, "labels": 0, "reasons": []}
+    assert last["notice"] is None and last["left_out"] == {"summaries": 0, "labels": 0, "reinterpret": 0, "reasons": []}
 
 
 def test_a_run_with_gaps_says_so_and_agrees_with_pending(gw):

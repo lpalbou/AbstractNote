@@ -275,4 +275,6 @@ export type Consolidation = {
   last: { finished_at: string | null; status: string; merges: number | null; communities: number | null; labelled: number | null; summaries_refreshed: number | null; insights: number | null; left_out?: { summaries: number; labels: number; reinterpret?: number; reasons: string[] } | null; budget_spent?: boolean; notice?: string | null; reinterpreted?: number | null; unchanged?: number | null } | null;
   /** `reinterpret`: notes an earlier note changed, waiting to be understood again (ADR 0008). */
   pending: { stale_labels: number; unlabelled: number; stale_summaries: number; reinterpret?: number };
+  /** What waits to be understood again and why, before the stage runs (ADR 0008 §5; `GET /note/consolidation`). */
+  reinterpret?: { pending: number; by_entity: { entity_id: string; name: string; notes: number }[]; reasons: string[]; context_unknown: number; consumed_today: number; last_marked_at: string | null };
 };
