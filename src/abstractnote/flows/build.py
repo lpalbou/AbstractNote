@@ -968,6 +968,11 @@ def build_mine(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, An
     return f.finish()
 
 
+#: Insights of one kind a reflect run writes at most (eval2 D5); the model's further picks are dropped, as is a
+#: second pick of the same candidate.
+REFLECT_PER_KIND = 3
+
+
 def build_reflect(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, Any]:
     f = Flow(
         "note-reflect", "Reflect on your notes",
@@ -1011,12 +1016,15 @@ def build_reflect(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
         "chosen", "Chosen insights",
         "d = data if isinstance(data, dict) else {}\n"
         "by_index = {c.get(\"index\"): c for c in (candidates or []) if isinstance(c, dict)}\n"
-        "out, dropped = [], 0\n"
+        "out, dropped, used, per_kind = [], 0, set(), {}\n"
         "for it in d.get(\"items\") or []:\n"
         "    c = by_index.get(it.get(\"candidate\")) if isinstance(it, dict) else None\n"
-        "    if c is None:\n"
+        "    if c is None or c.get(\"index\") in used or per_kind.get(it.get(\"kind\"), 0) >= "
+        + str(REFLECT_PER_KIND) + ":\n"
         "        dropped += 1\n"
         "        continue\n"
+        "    used.add(c.get(\"index\"))\n"
+        "    per_kind[it.get(\"kind\")] = per_kind.get(it.get(\"kind\"), 0) + 1\n"
         "    out.append({\"kind\": it.get(\"kind\"), \"title\": str(it.get(\"title\") or \"\"), \"body\": str(it.get(\"body\") or \"\"),\n"
         "                \"evidence_note_ids\": list(c.get(\"note_ids\") or []), \"entity_ids\": list(c.get(\"entity_ids\") or [])})\n"
         "cap = int(limit or 10)\n"

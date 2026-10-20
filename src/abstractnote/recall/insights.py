@@ -15,7 +15,9 @@ def write_insight(nb: Any, kind: str, title: str, body: str, evidence_note_ids: 
                   entity_ids: Optional[Sequence[str]] = None, run_id: Optional[str] = None,
                   author: str = "abstractnote") -> Dict[str, Any]:
     """Store an insight (``dossier`` -> a ``synthesis`` note). Unknown evidence notes or entities are
-    left out and named in ``warnings``. Writing the same insight twice returns the same note."""
+    left out and named in ``warnings``. Writing the same insight twice returns the same note, and so does
+    an insight of the same kind about the same subject (the same evidence notes and entities) while an
+    earlier one is still unacknowledged, however it is worded (eval2 D5)."""
     nb.require_embedder()
     if kind not in INSIGHT_KINDS:
         raise ValueError(f"The insight kind must be one of {', '.join(INSIGHT_KINDS)}.")
@@ -43,6 +45,12 @@ def write_insight(nb: Any, kind: str, title: str, body: str, evidence_note_ids: 
     note_id = ids.note_id_for_insight(kind, title, body, evidence)
     if nb.store.note_row(note_id) is not None:
         return {"note_id": note_id, "status": "duplicate", "warnings": warnings}
+    if kind != "dossier" and (evidence or ents):
+        subject = (sorted(evidence), sorted(ents))
+        for r in nb.store.q("SELECT note_id, evidence_note_ids_json, entity_ids_json FROM notes WHERE insight_kind=?"
+                            " AND acked_at IS NULL AND archived_at IS NULL ORDER BY received_at, note_id", (kind,)):
+            if (sorted(json.loads(r[1] or "[]")), sorted(json.loads(r[2] or "[]"))) == subject:
+                return {"note_id": r[0], "status": "duplicate", "warnings": warnings}
     now = ids.utc_now()
     vtext = note_vector_text(title, body, [], 8000)
     [vkey] = nb.cache.ensure([vtext]) if vtext.strip() else [None]

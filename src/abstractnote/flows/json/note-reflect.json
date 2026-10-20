@@ -990,7 +990,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "d = data if isinstance(data, dict) else {}\nby_index = {c.get(\"index\"): c for c in (candidates or []) if isinstance(c, dict)}\nout, dropped = [], 0\nfor it in d.get(\"items\") or []:\n    c = by_index.get(it.get(\"candidate\")) if isinstance(it, dict) else None\n    if c is None:\n        dropped += 1\n        continue\n    out.append({\"kind\": it.get(\"kind\"), \"title\": str(it.get(\"title\") or \"\"), \"body\": str(it.get(\"body\") or \"\"),\n                \"evidence_note_ids\": list(c.get(\"note_ids\") or []), \"entity_ids\": list(c.get(\"entity_ids\") or [])})\ncap = int(limit or 10)\nreturn {\"items\": out[:cap], \"dropped\": dropped}\n"
+        "codeBody": "d = data if isinstance(data, dict) else {}\nby_index = {c.get(\"index\"): c for c in (candidates or []) if isinstance(c, dict)}\nout, dropped, used, per_kind = [], 0, set(), {}\nfor it in d.get(\"items\") or []:\n    c = by_index.get(it.get(\"candidate\")) if isinstance(it, dict) else None\n    if c is None or c.get(\"index\") in used or per_kind.get(it.get(\"kind\"), 0) >= 3:\n        dropped += 1\n        continue\n    used.add(c.get(\"index\"))\n    per_kind[it.get(\"kind\")] = per_kind.get(it.get(\"kind\"), 0) + 1\n    out.append({\"kind\": it.get(\"kind\"), \"title\": str(it.get(\"title\") or \"\"), \"body\": str(it.get(\"body\") or \"\"),\n                \"evidence_note_ids\": list(c.get(\"note_ids\") or []), \"entity_ids\": list(c.get(\"entity_ids\") or [])})\ncap = int(limit or 10)\nreturn {\"items\": out[:cap], \"dropped\": dropped}\n"
       }
     },
     {

@@ -4,6 +4,14 @@ Each function returns ``{"items": [...]}``; every item names the ``rule`` that
 produced it and carries ``note_ids`` and ``entity_ids`` so the reflect flow can
 write an insight with provenance. Thresholds are explicit constants; the model
 decides what deserves attention.
+
+Three guards keep a cue from repeating (eval2 D5): a candidate whose provenance (its ``note_ids`` and
+``entity_ids``, exactly what an insight written from it cites) already backs an UNACKNOWLEDGED insight is
+left out until that insight is acknowledged; an age counts from the LAST mention of the subject (a task:
+its note or the latest note that revisits it); and a date that is only an approximation
+(:data:`APPROXIMATE_AGE_BASES`: a commit, a file date, a store update, a session's last record, a last
+edit) never ages anything: such a task or question is not offered as old, is never ``stale``, and a quiet
+entity or topic whose last mention is approximate is not offered as gone quiet.
 """
 
 from __future__ import annotations
@@ -21,6 +29,10 @@ TASK_MENTIONS_MIN = 2          # an open task whose note was revisited this many
 SILENT_DAYS = 60               # an entity or topic with no note for this long has gone quiet
 RECENT_DAYS = 7                # "recent" notes for resurfacing
 STALE_DAYS = 60                # an open loop open this long is ``stale``: close it or let it age out
+#: ``source.origin.date_basis`` values that date an import only approximately (docs/importers.md "Dates"):
+#: nothing dated so ages into old, quiet or stale.
+APPROXIMATE_AGE_BASES = frozenset({"git_added", "bulk_commit", "file_mtime", "store_updated", "last_record",
+                                   "front_matter_modified"})
 
 
 def _now(now: Optional[str]) -> str:
@@ -39,13 +51,62 @@ def _since(since: Optional[str]) -> Optional[str]:
     return ids.optional_time(since, field="since")
 
 
-def loop_age(opened_at: Optional[str], now: str, closed_at: Optional[str] = None) -> Dict[str, Any]:
+def loop_age(opened_at: Optional[str], now: str, closed_at: Optional[str] = None, *,
+             approximate: bool = False) -> Dict[str, Any]:
     """``{age_days, stale}`` of an open loop: whole days since it opened (until it closed, for a closed
-    one); ``stale`` when it is still open after :data:`STALE_DAYS`."""
+    one); ``stale`` when it is still open after :data:`STALE_DAYS` and its date is not an approximation."""
     if not opened_at:
         return {"age_days": None, "stale": False}
     age = max(0, _days(opened_at, closed_at or now))
-    return {"age_days": age, "stale": closed_at is None and age >= STALE_DAYS}
+    return {"age_days": age, "stale": closed_at is None and age >= STALE_DAYS and not approximate}
+
+
+def date_is_approximate(source_json: Any) -> bool:
+    """True when a note's ``source.origin.date_basis`` is one of :data:`APPROXIMATE_AGE_BASES`."""
+    src = source_json if isinstance(source_json, dict) else (_uj(source_json, {}) or {})
+    origin = src.get("origin") if isinstance(src, dict) and isinstance(src.get("origin"), dict) else {}
+    return str(origin.get("date_basis") or "") in APPROXIMATE_AGE_BASES
+
+
+def note_date_is_approximate(nb: Any, note_id: Optional[str]) -> bool:
+    row = nb.store.q1("SELECT source_json FROM notes WHERE note_id=?", (note_id,)) if note_id else None
+    return bool(row) and date_is_approximate(row[0])
+
+
+def task_last_mention(nb: Any, task: Any) -> Tuple[str, bool]:
+    """``(at, approximate)`` of a task's last mention: its note, or the latest note that revisits that note
+    (the task's own ``opened_at`` when it has no note)."""
+    best, approx = task["opened_at"], note_date_is_approximate(nb, task["note_id"])
+    if task["note_id"]:
+        r = nb.store.q1("SELECT n.occurred_at, n.source_json FROM note_links l JOIN notes n ON n.note_id=l.src_note_id"
+                        " WHERE l.dst_note_id=? AND l.predicate='ex:revisits' AND n.archived_at IS NULL"
+                        " ORDER BY n.occurred_at DESC LIMIT 1", (task["note_id"],))
+        if r is not None and r[0] > best:
+            best, approx = r[0], date_is_approximate(r[1])
+    return best, approx
+
+
+def _provenance(note_ids: Any, entity_ids: Any) -> Tuple[frozenset, frozenset]:
+    return frozenset(str(n) for n in note_ids or []), frozenset(str(e) for e in entity_ids or [])
+
+
+def covered(nb: Any) -> set:
+    """Provenances (``(note ids, entity ids)``) of the unacknowledged reflect insights (dossiers aside)."""
+    out = set()
+    for r in nb.store.q("SELECT evidence_note_ids_json, entity_ids_json FROM notes WHERE insight_kind IS NOT NULL"
+                        " AND insight_kind!='dossier' AND acked_at IS NULL AND archived_at IS NULL"):
+        out.add(_provenance(_uj(r[0], []), _uj(r[1], [])))
+    return out
+
+
+def _fresh(nb: Any, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The candidates no unacknowledged insight already speaks for (same notes and entities)."""
+    done = covered(nb)
+    if not done:
+        return items
+    canon = nb.store.canonical
+    return [it for it in items
+            if _provenance(it.get("note_ids"), [canon(e) for e in it.get("entity_ids") or []]) not in done]
 
 
 def _entities_of_note(nb: Any, note_id: Optional[str]) -> List[str]:
@@ -67,14 +128,22 @@ def open_loops(nb: Any, limit: int = 20, since: Optional[str] = None, *, now: Op
     if since_n:
         sql += " AND opened_at>=?"
         params.append(since_n)
+    cutoff = _minus(now, OPEN_TASK_AGE_DAYS)
     for r in q(sql + " ORDER BY opened_at, task_id", params):
         mentions = 0
         if r["note_id"]:
             mentions = q("SELECT COUNT(*) FROM note_links WHERE dst_note_id=? AND predicate='ex:revisits'",
                          (r["note_id"],))[0][0]
-        rule = "task_mentioned_repeatedly" if mentions >= TASK_MENTIONS_MIN else f"open_task_older_than_{OPEN_TASK_AGE_DAYS}_days"
+        last, approx = task_last_mention(nb, r)
+        if mentions >= TASK_MENTIONS_MIN:
+            rule = "task_mentioned_repeatedly"
+        elif approx or last > cutoff:  # an approximate date never ages; age counts from the last mention
+            continue
+        else:
+            rule = f"open_task_older_than_{OPEN_TASK_AGE_DAYS}_days"
         items.append({"rule": rule, "kind": "task", "task_id": r["task_id"], "text": r["text"],
-                      "opened_at": r["opened_at"], **loop_age(r["opened_at"], now), "mentions": mentions + 1,
+                      "opened_at": r["opened_at"], "last_mentioned_at": last, "date_approximate": approx,
+                      **loop_age(last, now, approximate=approx), "mentions": mentions + 1,
                       "note_ids": [r["note_id"]] if r["note_id"] else [], "entity_ids": _entities_of_note(nb, r["note_id"])})
     sql = ("SELECT * FROM notes n WHERE n.kind='question' AND n.archived_at IS NULL AND n.occurred_at<=? AND NOT"
            " EXISTS (SELECT 1 FROM note_links l WHERE l.dst_note_id=n.note_id AND l.predicate IN"
@@ -84,12 +153,14 @@ def open_loops(nb: Any, limit: int = 20, since: Optional[str] = None, *, now: Op
         sql += " AND n.occurred_at>=?"
         params.append(since_n)
     for r in q(sql + " ORDER BY n.occurred_at, n.note_id", params):
+        if date_is_approximate(r["source_json"]):
+            continue
         items.append({"rule": "question_without_followup", "kind": "question", "text": r["title"] or
                       shapes.excerpt(r["text"], 160), "opened_at": r["occurred_at"],
                       **loop_age(r["occurred_at"], now), "note_ids": [r["note_id"]],
                       "entity_ids": _entities_of_note(nb, r["note_id"])})
     items.sort(key=lambda it: (0 if it["rule"] == "task_mentioned_repeatedly" else 1, it["opened_at"]))
-    return {"items": items[:limit]}
+    return {"items": _fresh(nb, items)[:limit]}
 
 
 def contradictions(nb: Any, limit: int = 20, since: Optional[str] = None) -> Dict[str, Any]:
@@ -121,7 +192,7 @@ def contradictions(nb: Any, limit: int = 20, since: Optional[str] = None) -> Dic
                           "text": " / ".join(_claim_line(c) for c in claims),
                           "note_ids": sorted({c["note_id"] for c in claims if c["note_id"]}),
                           "entity_ids": sorted({nb.store.canonical(c["subject_id"]) for c in claims})})
-    return {"items": items[:limit]}
+    return {"items": _fresh(nb, items)[:limit]}
 
 
 def _claim_line(c: Dict[str, Any]) -> str:
@@ -154,6 +225,8 @@ def resurface(nb: Any, limit: int = 20, since: Optional[str] = None, *, now: Opt
                 continue
             last_notes = [r[0] for r in q("SELECT note_id FROM entity_notes WHERE entity_id=? ORDER BY at DESC LIMIT 3",
                                           (eid,))]
+            if last_notes and note_date_is_approximate(nb, last_notes[0]):
+                continue  # gone quiet since an approximate date: not known to be quiet
             items.append({"rule": "silent_but_related", "kind": "entity", "entity_id": eid, "text": e["name"],
                           "last_seen": e["last_seen"], "silent_days": _days(e["last_seen"], now),
                           "related_to": sorted(via), "note_ids": last_notes, "entity_ids": [eid, *sorted(via)]})
@@ -161,12 +234,16 @@ def resurface(nb: Any, limit: int = 20, since: Optional[str] = None, *, now: Opt
                (recent_from,)):
         prev = q("SELECT MAX(n.occurred_at), GROUP_CONCAT(n.note_id) FROM note_topics t JOIN notes n ON"
                  " n.note_id=t.note_id WHERE t.topic=? AND n.occurred_at<?", (r[0], recent_from))[0]
+        latest = q("SELECT n.source_json FROM note_topics t JOIN notes n ON n.note_id=t.note_id WHERE t.topic=?"
+                   " AND n.occurred_at=?", (r[0], prev[0]))[:1] if prev[0] else []
+        if latest and date_is_approximate(latest[0][0]):
+            continue
         if prev[0] and prev[0] < _minus(recent_from, SILENT_DAYS):
             items.append({"rule": "topic_back_after_silence", "kind": "topic", "topic": r[0], "text": r[0],
                           "last_seen": prev[0], "silent_days": _days(prev[0], recent_from),
                           "note_ids": (prev[1] or "").split(",")[-3:], "entity_ids": []})
     items.sort(key=lambda it: -it["silent_days"])
-    return {"items": items[:limit]}
+    return {"items": _fresh(nb, items)[:limit]}
 
 
 def anniversary_rows(nb: Any, limit: int = 20, since: Optional[str] = None, *, now: Optional[str] = None
@@ -196,8 +273,10 @@ def anniversaries(nb: Any, limit: int = 20, since: Optional[str] = None, *, now:
     now_n = _now(now)
     items = []
     for r, rule in anniversary_rows(nb, limit, since, now=now_n):
+        if date_is_approximate(r["source_json"]):
+            continue  # a commit or file date has no anniversary
         ref = shapes.note_ref(r)
         items.append({"rule": rule, "kind": "note", **ref, "text": ref["title"] or ref["excerpt"],
                       "years_ago": int(now_n[:4]) - int(r["occurred_at"][:4]),
                       "note_ids": [r["note_id"]], "entity_ids": _entities_of_note(nb, r["note_id"])})
-    return {"items": items}
+    return {"items": _fresh(nb, items)}
