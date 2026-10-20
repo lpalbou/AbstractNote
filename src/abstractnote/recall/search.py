@@ -26,6 +26,7 @@ import math
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from .. import ids
+from ..process.demote import literal_reason
 from ..store.embeddings import top_k, vector_key
 from ..store.notes import clamp_limit, fts_terms
 from . import shapes
@@ -260,8 +261,8 @@ def search(nb: Any, query: str = "", *, since: Optional[str] = None, until: Opti
                 continue
             seen.add(canon)
             b = store.entity_brief(canon)
-            if not b:
-                continue
+            if not b or literal_reason(b.get("display_name") or b.get("name") or ""):
+                continue  # a value stored as an entity before the structural demotion is never an entity hit
             first, latest = _first_latest(store, canon, carriers[canon], note_rel)
             b.update({"score": round(rel, 4), "rrf": round(rrf, 6),
                       "matched_by": [m for m, ok in (("fts", eid in set(fts_e)), ("vector", eid in vec_e)) if ok],
