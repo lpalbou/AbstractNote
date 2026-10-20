@@ -10,7 +10,7 @@ from abstractnote.tools import TOOL_NAMES, bind, bound_notebook, tool_specs
 def test_bind_returns_every_tool_decorated_and_opens_lazily(tmp_path):
     root = tmp_path / "nb"
     tools = bind(root)
-    assert list(tools) == TOOL_NAMES and len(TOOL_NAMES) == 21
+    assert list(tools) == TOOL_NAMES and len(TOOL_NAMES) == 28
     assert not root.exists()  # nothing opened yet
     for name, fn in tools.items():
         td = fn._tool_definition

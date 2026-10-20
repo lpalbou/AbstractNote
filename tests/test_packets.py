@@ -164,6 +164,13 @@ def test_model_nodes_carry_static_system_prompts_thinking_and_caps():
 
     names = llm.pop(("note-reflect", "communities_names"))["data"]["pinDefaults"]
     assert names["system"] == LABEL_SYSTEM_PROMPT and names["max_output_tokens"] == 2048
+    # the consolidation (0032) names groups with the same step, and summarises with its own static prompt
+    from abstractnote.recall.consolidation import summary_system_prompt
+
+    again = llm.pop(("note-consolidate", "communities_names"))["data"]["pinDefaults"]
+    assert again["system"] == LABEL_SYSTEM_PROMPT and again["max_output_tokens"] == 2048
+    summaries = llm.pop(("note-consolidate", "summaries"))["data"]["pinDefaults"]
+    assert summaries["system"] == summary_system_prompt() and summaries["thinking"] == "off"
     assert set(llm) == set(steps)
     for key, step in steps.items():
         d = llm[key]["data"]["pinDefaults"]

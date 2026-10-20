@@ -136,7 +136,7 @@ def test_bundle_packs_and_loads(tmp_path):
     bundle = open_workflow_bundle(path)
     assert sorted(ep.flow_id for ep in bundle.manifest.entrypoints) == sorted(build.ENTRYPOINTS)
     assert set(bundle.manifest.flows) >= set(build.ALL_FLOWS)
-    assert set(bundle.manifest.metadata["automation_defaults"]) == {"note-drain", "note-reflect"}
+    assert set(bundle.manifest.metadata["automation_defaults"]) == {"note-drain", "note-reflect", "note-consolidate"}
 
 
 def test_schema_disagreement_is_refused(monkeypatch):

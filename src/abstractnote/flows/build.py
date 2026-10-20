@@ -25,7 +25,7 @@ from .schemas_fallback import SCHEMAS as FALLBACK_SCHEMAS
 JSON_DIR = Path(__file__).resolve().parent / "json"
 
 BUNDLE_ID = "abstractnote"
-ENTRYPOINTS = ["note-capture", "note-drain", "note-recall", "note-reflect"]
+ENTRYPOINTS = ["note-capture", "note-drain", "note-recall", "note-reflect", "note-consolidate"]
 INTERNAL_FLOWS = ["note-process", "note-mine"]
 ALL_FLOWS = ENTRYPOINTS + INTERNAL_FLOWS
 
@@ -34,6 +34,7 @@ INTERFACES = {
     "note-drain": ["abstractnote.drain.v1"],
     "note-recall": ["abstractnote.recall.v1", "abstractcode.agent.v1"],
     "note-reflect": ["abstractnote.reflect.v1"],
+    "note-consolidate": ["abstractnote.consolidate.v1"],
     "note-process": [],
     "note-mine": [],
 }
@@ -44,10 +45,14 @@ NOTE_TOOLS = [
     "note_queue_lease", "note_queue_ack", "note_queue_stats", "note_search", "note_expand",
     "note_changes", "note_entity", "note_timeline", "note_open_loops", "note_contradictions",
     "note_resurface", "note_anniversaries", "note_insight_write", "note_communities_recompute",
-    "note_communities_pending", "note_communities_label",
+    "note_communities_pending", "note_communities_label", "note_consolidation_begin", "note_consolidation_progress",
+    "note_consolidation_end", "note_entities_normalize", "note_entities_stale_summaries", "note_entities_set_summaries",
+    "note_then_now_refresh",
 ]
 
 DRAIN_DEFAULTS = {"max_items": 20, "budget_s": 90}
+#: The consolidation's run inputs (backlog 0032): its time budget and the reflect stage's insight limit.
+CONSOLIDATE_DEFAULTS = {"budget_s": 3600, "limit": 10}
 AUTOMATION_DEFAULTS = {
     "note-drain": {
         "schema_version": 1,
@@ -62,6 +67,13 @@ AUTOMATION_DEFAULTS = {
         "trigger": {"source_id": "schedule", "source_version": 2, "config": {"kind": "every", "every": "7d"}},
         "context": {"mode": "independent"},
         "input_data": {"limit": 10, "_runtime": {"allowed_tools": NOTE_TOOLS}},
+    },
+    "note-consolidate": {
+        "schema_version": 1,
+        "title": "Note consolidation",
+        "trigger": {"source_id": "schedule", "source_version": 2, "config": {"kind": "every", "every": "1d"}},
+        "context": {"mode": "independent"},
+        "input_data": {**CONSOLIDATE_DEFAULTS, "_runtime": {"allowed_tools": NOTE_TOOLS}},
     },
 }
 
@@ -79,6 +91,7 @@ STEP_SETTINGS: Dict[str, Dict[str, Any]] = {
     "mine_dossier": {"thinking": None, "max_output_tokens": 8192},
     "reflect": {"thinking": None, "max_output_tokens": 8192},
     "label_communities": {"thinking": "off", "max_output_tokens": 2048},
+    "entity_summaries": {"thinking": "off", "max_output_tokens": 3000},
 }
 
 
@@ -136,11 +149,13 @@ def _skeleton(schema: Any) -> Any:
 
 
 def flow_schemas() -> Dict[str, Dict[str, Any]]:
-    """Schemas owned next to the deterministic step they feed rather than in ``abstractnote.process.schemas``
-    (``CommunityLabels``: :mod:`abstractnote.recall.communities`, backlog 0030)."""
+    """Schemas outside ``abstractnote.process.schemas.SCHEMAS`` (the processing and recall steps):
+    ``CommunityLabels`` (:mod:`abstractnote.recall.communities`, backlog 0030) and ``EntitySummaries``
+    (``process.schemas.ENTITY_SUMMARIES``, the consolidation, backlog 0032)."""
+    from ..process.schemas import ENTITY_SUMMARIES
     from ..recall.communities import COMMUNITY_LABELS_SCHEMA
 
-    return {"CommunityLabels": COMMUNITY_LABELS_SCHEMA}
+    return {"CommunityLabels": COMMUNITY_LABELS_SCHEMA, "EntitySummaries": ENTITY_SUMMARIES}
 
 
 def load_schemas() -> Dict[str, Dict[str, Any]]:
@@ -1064,6 +1079,37 @@ def build_reflect(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
     return f.finish(automation_defaults=AUTOMATION_DEFAULTS["note-reflect"])
 
 
+#: The labelling step's view of the pending communities and the mapping of the model's answer back by index; the
+#: reflect flow and the consolidation run the same code (backlog 0030, 0032).
+LABEL_VIEW_CODE = (
+    "view = []\n"
+    "for p in items or []:\n"
+    "    if not isinstance(p, dict):\n"
+    "        continue\n"
+    "    view.append({\"index\": p.get(\"index\"), \"size\": p.get(\"size\"),\n"
+    "                 \"previous_label\": p.get(\"previous_label\"), \"previous_summary\": p.get(\"previous_summary\"),\n"
+    "                 \"entities\": [{\"name\": e.get(\"name\"), \"kind\": e.get(\"kind\"), \"notes\": e.get(\"note_count\"),\n"
+    "                               \"summary\": e.get(\"summary\")} for e in (p.get(\"top_entities\") or []) if isinstance(e, dict)],\n"
+    "                 \"statements\": [c.get(\"text\") for c in (p.get(\"claims\") or []) if isinstance(c, dict)],\n"
+    "                 \"notes\": [{\"title\": n.get(\"title\"), \"date\": str(n.get(\"occurred_at\") or \"\")[:10],\n"
+    "                            \"excerpt\": n.get(\"excerpt\")} for n in (p.get(\"excerpts\") or []) if isinstance(n, dict)]})\n"
+    "return {\"view\": view, \"any\": len(view) > 0}"
+)
+LABEL_MAP_CODE = (
+    "d = data if isinstance(data, dict) else {}\n"
+    "by_index = {p.get(\"index\"): p for p in (items or []) if isinstance(p, dict)}\n"
+    "out, seen = [], set()\n"
+    "for it in d.get(\"communities\") or []:\n"
+    "    p = by_index.get(it.get(\"index\")) if isinstance(it, dict) else None\n"
+    "    if p is None or p.get(\"community_id\") in seen:\n"
+    "        continue\n"
+    "    seen.add(p.get(\"community_id\"))\n"
+    "    out.append({\"community_id\": p.get(\"community_id\"), \"label\": str(it.get(\"label\") or \"\"),\n"
+    "                \"summary\": str(it.get(\"summary\") or \"\"), \"kind\": it.get(\"kind\")})\n"
+    "return {\"items\": out}"
+)
+
+
 def _label_communities(f: Flow, schemas: Dict[str, Any], prompts: Dict[str, str], after: tuple) -> None:
     """The reflect flow's last part (backlog 0030): find the communities again (no model), and when some have
     no name or a stale one, name them in ONE structured call and store the names. Communities are referred to by
@@ -1077,19 +1123,7 @@ def _label_communities(f: Flow, schemas: Dict[str, Any], prompts: Dict[str, str]
                           {"limit": ("number", cm.PENDING_LIMIT)}, [("items", "array"), ("count", "number")],
                           after=(recomputed, "exec-out"))
     f.code(
-        "communities_view", "What the model sees",
-        "view = []\n"
-        "for p in items or []:\n"
-        "    if not isinstance(p, dict):\n"
-        "        continue\n"
-        "    view.append({\"index\": p.get(\"index\"), \"size\": p.get(\"size\"),\n"
-        "                 \"previous_label\": p.get(\"previous_label\"), \"previous_summary\": p.get(\"previous_summary\"),\n"
-        "                 \"entities\": [{\"name\": e.get(\"name\"), \"kind\": e.get(\"kind\"), \"notes\": e.get(\"note_count\"),\n"
-        "                               \"summary\": e.get(\"summary\")} for e in (p.get(\"top_entities\") or []) if isinstance(e, dict)],\n"
-        "                 \"statements\": [c.get(\"text\") for c in (p.get(\"claims\") or []) if isinstance(c, dict)],\n"
-        "                 \"notes\": [{\"title\": n.get(\"title\"), \"date\": str(n.get(\"occurred_at\") or \"\")[:10],\n"
-        "                            \"excerpt\": n.get(\"excerpt\")} for n in (p.get(\"excerpts\") or []) if isinstance(n, dict)]})\n"
-        "return {\"view\": view, \"any\": len(view) > 0}",
+        "communities_view", "What the model sees", LABEL_VIEW_CODE,
         inputs={"items": ("array", (waiting, "items"))},
         outputs=[("view", "array"), ("any", "boolean")],
     )
@@ -1109,18 +1143,7 @@ def _label_communities(f: Flow, schemas: Dict[str, Any], prompts: Dict[str, str]
           system=cm.LABEL_SYSTEM_PROMPT, thinking=cfg["thinking"], max_output_tokens=cfg["max_output_tokens"])
     f.then("communities_any", "communities_names", "true")
     f.code(
-        "communities_labels", "Names by group",
-        "d = data if isinstance(data, dict) else {}\n"
-        "by_index = {p.get(\"index\"): p for p in (items or []) if isinstance(p, dict)}\n"
-        "out, seen = [], set()\n"
-        "for it in d.get(\"communities\") or []:\n"
-        "    p = by_index.get(it.get(\"index\")) if isinstance(it, dict) else None\n"
-        "    if p is None or p.get(\"community_id\") in seen:\n"
-        "        continue\n"
-        "    seen.add(p.get(\"community_id\"))\n"
-        "    out.append({\"community_id\": p.get(\"community_id\"), \"label\": str(it.get(\"label\") or \"\"),\n"
-        "                \"summary\": str(it.get(\"summary\") or \"\"), \"kind\": it.get(\"kind\")})\n"
-        "return {\"items\": out}",
+        "communities_labels", "Names by group", LABEL_MAP_CODE,
         inputs={"data": ("object", ("communities_names", "data")), "items": ("array", (waiting, "items"))},
         outputs=[("items", "array")],
     )
@@ -1135,6 +1158,321 @@ def _label_communities(f: Flow, schemas: Dict[str, Any], prompts: Dict[str, str]
     f.then("communities_named", "end_named")
 
 
+SUMMARY_VIEW_CODE = (
+    "view = []\n"
+    "for i, p in enumerate(items or []):\n"
+    "    if not isinstance(p, dict):\n"
+    "        continue\n"
+    "    view.append({\"index\": i, \"name\": p.get(\"name\"), \"kind\": p.get(\"kind\"), \"aliases\": p.get(\"aliases\") or [],\n"
+    "                 \"summary\": p.get(\"summary\"), \"statements\": p.get(\"claims\") or [], \"notes\": p.get(\"notes\") or []})\n"
+    "return {\"view\": view, \"any\": len(view) > 0}"
+)
+SUMMARY_MAP_CODE = (
+    "d = data if isinstance(data, dict) else {}\n"
+    "by_index = {i: p for i, p in enumerate(items or []) if isinstance(p, dict)}\n"
+    "out, seen = [], set()\n"
+    "for it in d.get(\"summaries\") or []:\n"
+    "    p = by_index.get(it.get(\"index\")) if isinstance(it, dict) else None\n"
+    "    if p is None or p.get(\"entity_id\") in seen:\n"
+    "        continue\n"
+    "    seen.add(p.get(\"entity_id\"))\n"
+    "    out.append({\"entity_id\": p.get(\"entity_id\"), \"summary\": str(it.get(\"summary\") or \"\")})\n"
+    "return {\"items\": out}"
+)
+
+
+def build_consolidate(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, Any]:
+    """note-consolidate (backlog 0032, docs/cognition.md): normalize -> communities -> labels (loop, 5 per call) ->
+    summaries (loop, 8 per call, budget-bounded) -> then_now -> reflect (subflow), each stage reporting its
+    progress. After ``begin`` no tool step raises: a failure is remembered (``cons_error``) and routed to one
+    failure path that closes the consolidation as failed and ends the run with the tool's sentence (inside a loop
+    a raising node would only end the iteration). A node that raises inside a loop round leaves the loop's
+    ``*_inflight`` flag set; the check after the loop ends the run the same way. A model call that fails ends the
+    run at once (an effect failure); its row stays open and reads as ``interrupted`` (gateway view, next begin)."""
+    from ..recall import communities as cm
+    from ..recall import consolidation as cons
+
+    f = Flow(
+        "note-consolidate", "Consolidate your notes",
+        "Merge duplicate entries, refresh the groups and their names, refresh stale summaries and the then-and-now "
+        "of what changed, then reflect; every stage reports its progress.",
+        interfaces=INTERFACES["note-consolidate"],
+    )
+    f.start([("budget_s", "number"), ("limit", "number"), ("thinking", "string"), *_model_pins()],
+            {**CONSOLIDATE_DEFAULTS, "thinking": "off", "provider": "", "model": ""})
+    S = lambda p: ("start", p)  # noqa: E731
+
+    f.code(
+        "thinking", "Thinking for this run",
+        "t = str(thinking or \"off\").strip().lower()\n"
+        "if t not in (\"on\", \"off\"):\n"
+        "    raise ValueError(\"Thinking must be on or off.\")\n"
+        "return {\"value\": t}",
+        inputs={"thinking": ("string", S("thinking"))}, outputs=[("value", "string")],
+    )
+    f.then("start", "thinking")
+    TH = ("thinking", "value")
+    begun = f.tool_step("begin", "Begin", "note_consolidation_begin", {},
+                        [("consolidation_id", "string"), ("planned_merges", "number"), ("pending", "object")],
+                        after=("thinking", "exec-out"))
+
+    # ---- the one failure path (entered from every step after begin)
+    f.get_var("fail_error", "cons_error", "")
+    f.code(
+        "fail_results", "What failed",
+        "e = str(error or \"\").strip() or \"The consolidation could not finish.\"\n"
+        "for prefix in (\"Runtime error: \", \"Execution error: \"):\n"
+        "    if e.startswith(prefix):\n"
+        "        e = e[len(prefix):]\n"
+        "return {\"results\": {\"error\": e}, \"message\": e}",
+        inputs={"error": ("string", ("fail_error", "value"))}, outputs=[("results", "object"), ("message", "string")],
+    )
+    failed_out = f._tool_nodes("fail_end", "Close as failed", "note_consolidation_end",
+                               {"status": ("string", "failed"), "results": ("object", ("fail_results", "results"))},
+                               [], after=("fail_results", "exec-out"), raising=False)
+    f.end("end_failed", "Stopped: the consolidation failed", {
+        "response": ("string", ("fail_results", "message")), "error": ("string", ("fail_results", "message")),
+        "success": ("boolean", False)})
+    f.then(failed_out, "end_failed")
+
+    def fail_from(node_id: str, handle: str, failure: tuple) -> None:
+        keep = f.set_var(f"{node_id}_keep_error", "Remember the failure", "cons_error", "")
+        f.wire(failure, keep, "value")
+        f.then(node_id, keep, handle)
+        f.then(keep, "fail_results")
+
+    def step(step_id: str, label: str, tool: str, args: Dict[str, Any], outputs: List[tuple],
+             after: tuple) -> tuple:
+        out = f._tool_nodes(step_id, label, tool, args, outputs, after, raising=False)
+        check = f.if_(f"{step_id}_failed", f"{label}: failed?", (out, "failed"))
+        f.then(out, check)
+        fail_from(check, "true", (out, "failure"))
+        return out, (check, "false")
+
+    def report(step_id: str, stage: str, done: Any, total: Any, after: tuple) -> tuple:
+        _, cont = step(step_id, f"Progress: {stage}", "note_consolidation_progress",
+                       {"stage": ("string", stage), "done": ("number", done), "total": ("number", total)},
+                       [("eta_s", "number")], after)
+        return cont
+
+    def flags(node_id: str, label: str, updates: Dict[str, Any], after: tuple) -> str:
+        f.code(f"{node_id}_values", label, "return {\"updates\": " + repr(updates) + "}", inputs={},
+               outputs=[("updates", "object")])
+        f.then(after[0], f"{node_id}_values", after[1])
+        f.set_vars(node_id, label, (f"{node_id}_values", "updates"))
+        f.then(f"{node_id}_values", node_id)
+        return node_id
+
+    f.code(
+        "init", "Budget",
+        "import time\n"
+        "budget = float(budget_s if budget_s is not None else 3600)\n"
+        "if budget <= 0:\n"
+        "    raise ValueError(\"budget_s must be above 0.\")\n"
+        "return {\"updates\": {\"cons_deadline\": time.time() + budget, \"cons_error\": \"\",\n"
+        "        \"labels_continue\": True, \"labels_done\": 0, \"labels_inflight\": False,\n"
+        "        \"sum_continue\": True, \"sum_done\": 0, \"sum_inflight\": False}}",
+        inputs={"budget_s": ("number", S("budget_s"))}, outputs=[("updates", "object")],
+    )
+    f.then(begun, "init")
+    f.set_vars("init_vars", "Remember the budget", ("init", "updates"))
+    f.then("init", "init_vars")
+
+    # ---- normalize
+    cont = report("p_norm_start", "normalize", 0, (begun, "planned_merges"), ("init_vars", "exec-out"))
+    norm, cont = step("normalize", "Merge duplicates", "note_entities_normalize", {}, [("merges", "number")], cont)
+    f.code("norm_total", "Merges", "return {\"done\": int(merges or 0), \"total\": max(int(merges or 0), int(planned or 0))}",
+           inputs={"merges": ("number", (norm, "merges")), "planned": ("number", (begun, "planned_merges"))},
+           outputs=[("done", "number"), ("total", "number")], exec_lane=False)
+    cont = report("p_norm_done", "normalize", ("norm_total", "done"), ("norm_total", "total"), cont)
+
+    # ---- communities
+    cont = report("p_comm_start", "communities", 0, 1, cont)
+    comm, cont = step("communities", "Find groups", "note_communities_recompute", {},
+                      [("communities", "number"), ("unlabelled", "number"), ("stale_labels", "number")], cont)
+    cont = report("p_comm_done", "communities", 1, 1, cont)
+    f.code("labels_total", "Groups to name", "return {\"total\": int(unlabelled or 0) + int(stale or 0)}",
+           inputs={"unlabelled": ("number", (comm, "unlabelled")), "stale": ("number", (comm, "stale_labels"))},
+           outputs=[("total", "number")], exec_lane=False)
+    cont = report("p_labels_start", "labels", 0, ("labels_total", "total"), cont)
+
+    # ---- labels (loop)
+    f.get_var("labels_go", "labels_continue", False)
+    f.while_("labels_loop", "While groups wait for a name", ("labels_go", "value"))
+    f.then(cont[0], "labels_loop", cont[1])
+    flags("labels_begin", "A naming round", {"labels_inflight": True, "labels_continue": False},
+          ("labels_loop", "loop"))
+    waiting, cont = step("communities_pending", "Groups to name", "note_communities_pending",
+                         {"limit": ("number", cons.LABEL_BATCH)}, [("items", "array"), ("count", "number")],
+                         ("labels_begin", "exec-out"))
+    f.code("communities_view", "What the model sees", LABEL_VIEW_CODE,
+           inputs={"items": ("array", (waiting, "items"))}, outputs=[("view", "array"), ("any", "boolean")])
+    f.then(cont[0], "communities_view", cont[1])
+    f.if_("communities_any", "Any to name?", ("communities_view", "any"))
+    f.then("communities_view", "communities_any")
+    flags("labels_none", "Nothing to name", {"labels_inflight": False, "labels_continue": False},
+          ("communities_any", "false"))
+    f.template("communities_prompt", "Naming prompt", cm.LABEL_TEMPLATE, {"communities": ("communities_view", "view")})
+    cfg = STEP_SETTINGS["label_communities"]
+    f.llm("communities_names", "Name the groups", schema=schemas["CommunityLabels"],
+          prompt=("communities_prompt", "result"), provider=S("provider"), model=S("model"),
+          system=cm.LABEL_SYSTEM_PROMPT, thinking=cfg["thinking"], max_output_tokens=cfg["max_output_tokens"],
+          thinking_from=TH)
+    f.then("communities_any", "communities_names", "true")
+    f.code("communities_labels", "Names by group", LABEL_MAP_CODE,
+           inputs={"data": ("object", ("communities_names", "data")), "items": ("array", (waiting, "items"))},
+           outputs=[("items", "array")])
+    f.then("communities_names", "communities_labels")
+    stored, cont = step("communities_label", "Keep the names", "note_communities_label",
+                        {"items": ("array", ("communities_labels", "items"))}, [("labelled", "array")],
+                        ("communities_labels", "exec-out"))
+    f.get_var("labels_so_far", "labels_done", 0)
+    f.get_var("labels_deadline", "cons_deadline", 0)
+    f.code(
+        "labels_count", "Named so far",
+        "import time\n"
+        "n = len(labelled or [])\n"
+        "done = int(so_far or 0) + n\n"
+        "return {\"done\": done, \"updates\": {\"labels_done\": done, \"labels_inflight\": False,\n"
+        "        \"labels_continue\": n > 0 and done < int(total or 0) and time.time() < float(deadline or 0)}}",
+        inputs={"labelled": ("array", (stored, "labelled")), "so_far": ("number", ("labels_so_far", "value")),
+                "total": ("number", ("labels_total", "total")), "deadline": ("number", ("labels_deadline", "value"))},
+        outputs=[("done", "number"), ("updates", "object")],
+    )
+    f.then(cont[0], "labels_count", cont[1])
+    cont = report("p_labels", "labels", ("labels_count", "done"), ("labels_total", "total"), ("labels_count", "exec-out"))
+    f.set_vars("labels_vars", "Remember the round", ("labels_count", "updates"))
+    f.then(cont[0], "labels_vars", cont[1])
+    # after the loop: a round that did not reach its end (a model call failed) ends the run
+    f.get_var("labels_unfinished", "labels_inflight", False)
+    f.if_("labels_broke", "Did naming stop half-way?", ("labels_unfinished", "value"))
+    f.then("labels_loop", "labels_broke", "done")
+    fail_from("labels_broke", "true", ("labels_broke_msg", "message"))
+    f.code("labels_broke_msg", "Naming failed", "return {\"message\": \"Naming the groups did not finish.\"}",
+           inputs={}, outputs=[("message", "string")], exec_lane=False)
+
+    # ---- summaries (loop)
+    first, cont = step("stale_count", "Summaries to refresh", "note_entities_stale_summaries",
+                       {"limit": ("number", 0)}, [("count", "number")], ("labels_broke", "false"))
+    cont = report("p_sum_start", "summaries", 0, (first, "count"), cont)
+    f.get_var("sum_go", "sum_continue", False)
+    f.while_("sum_loop", "While summaries are stale", ("sum_go", "value"))
+    f.then(cont[0], "sum_loop", cont[1])
+    flags("sum_begin", "A summary round", {"sum_inflight": True, "sum_continue": False}, ("sum_loop", "loop"))
+    batch, cont = step("stale", "Next stale summaries", "note_entities_stale_summaries",
+                       {"limit": ("number", cons.SUMMARY_BATCH)}, [("items", "array"), ("count", "number")],
+                       ("sum_begin", "exec-out"))
+    f.code("summary_view", "What the model sees", SUMMARY_VIEW_CODE,
+           inputs={"items": ("array", (batch, "items"))}, outputs=[("view", "array"), ("any", "boolean")])
+    f.then(cont[0], "summary_view", cont[1])
+    f.if_("summary_any", "Any stale?", ("summary_view", "any"))
+    f.then("summary_view", "summary_any")
+    flags("sum_none", "Nothing stale", {"sum_inflight": False, "sum_continue": False}, ("summary_any", "false"))
+    f.template("summary_prompt", "Summary prompt", cons.summary_template(), {"entries": ("summary_view", "view")})
+    cfg = STEP_SETTINGS["entity_summaries"]
+    f.llm("summaries", "Summarise the entries", schema=schemas["EntitySummaries"], prompt=("summary_prompt", "result"),
+          provider=S("provider"), model=S("model"), system=cons.summary_system_prompt(), thinking=cfg["thinking"],
+          max_output_tokens=cfg["max_output_tokens"], thinking_from=TH)
+    f.then("summary_any", "summaries", "true")
+    f.code("summary_items", "Summaries by entry", SUMMARY_MAP_CODE,
+           inputs={"data": ("object", ("summaries", "data")), "items": ("array", (batch, "items"))},
+           outputs=[("items", "array")])
+    f.then("summaries", "summary_items")
+    kept, cont = step("set_summaries", "Keep the summaries", "note_entities_set_summaries",
+                      {"items": ("array", ("summary_items", "items"))}, [("stored", "array")],
+                      ("summary_items", "exec-out"))
+    f.get_var("sum_so_far", "sum_done", 0)
+    f.get_var("sum_deadline", "cons_deadline", 0)
+    f.code(
+        "sum_count", "Refreshed so far",
+        "import time\n"
+        "n = len(stored or [])\n"
+        "done = int(so_far or 0) + n\n"
+        "left = int(count or 0) - len(items or [])\n"
+        "return {\"done\": done, \"total\": max(int(total or 0), done + max(left, 0)),\n"
+        "        \"updates\": {\"sum_done\": done, \"sum_inflight\": False,\n"
+        "        \"sum_continue\": n > 0 and left > 0 and time.time() < float(deadline or 0)}}",
+        inputs={"stored": ("array", (kept, "stored")), "so_far": ("number", ("sum_so_far", "value")),
+                "count": ("number", (batch, "count")), "items": ("array", (batch, "items")),
+                "total": ("number", (first, "count")), "deadline": ("number", ("sum_deadline", "value"))},
+        outputs=[("done", "number"), ("total", "number"), ("updates", "object")],
+    )
+    f.then(cont[0], "sum_count", cont[1])
+    cont = report("p_sum", "summaries", ("sum_count", "done"), ("sum_count", "total"), ("sum_count", "exec-out"))
+    f.set_vars("sum_vars", "Remember the round", ("sum_count", "updates"))
+    f.then(cont[0], "sum_vars", cont[1])
+    f.get_var("sum_unfinished", "sum_inflight", False)
+    f.if_("sum_broke", "Did summarising stop half-way?", ("sum_unfinished", "value"))
+    f.then("sum_loop", "sum_broke", "done")
+    f.code("sum_broke_msg", "Summarising failed", "return {\"message\": \"Refreshing the summaries did not finish.\"}",
+           inputs={}, outputs=[("message", "string")], exec_lane=False)
+    fail_from("sum_broke", "true", ("sum_broke_msg", "message"))
+
+    # ---- then and now
+    cont = report("p_tn_start", "then_now", 0, 0, ("sum_broke", "false"))
+    tn, cont = step("then_now", "Refresh then and now", "note_then_now_refresh", {}, [("refreshed", "number")], cont)
+    cont = report("p_tn_done", "then_now", (tn, "refreshed"), (tn, "refreshed"), cont)
+
+    # ---- reflect
+    cont = report("p_reflect_start", "reflect", 0, 1, cont)
+    f.subflow("reflect", "Reflect", "note-reflect", {
+        "limit": ("number", S("limit")), "provider": ("provider_text", S("provider")), "model": ("model", S("model")),
+    }, [("insight_note_ids", "array")])
+    f.then(cont[0], "reflect", cont[1])
+    f.code(
+        "reflect_outcome", "Reflected?",
+        "o = output if isinstance(output, dict) else {}\n"
+        "c = child_output if isinstance(child_output, dict) else {}\n"
+        "err = str(c.get(\"error\") or o.get(\"error\") or \"\")\n"
+        "for prefix in (\"Runtime error: \", \"Execution error: \"):\n"
+        "    if err.startswith(prefix):\n"
+        "        err = err[len(prefix):]\n"
+        "failed = c.get(\"success\") is False or o.get(\"success\") is False or bool(err)\n"
+        "written = o.get(\"insight_note_ids\") if isinstance(o.get(\"insight_note_ids\"), list) else []\n"
+        "return {\"failed\": failed, \"failure\": (err or \"The reflection could not finish.\") if failed else None,\n"
+        "        \"insights\": len(written)}",
+        inputs={"output": ("object", ("reflect", "output")), "child_output": ("object", ("reflect", "child_output"))},
+        outputs=[("failed", "boolean"), ("failure", "string"), ("insights", "number")],
+    )
+    f.then("reflect", "reflect_outcome")
+    f.if_("reflect_failed", "Reflection failed?", ("reflect_outcome", "failed"))
+    f.then("reflect_outcome", "reflect_failed")
+    fail_from("reflect_failed", "true", ("reflect_outcome", "failure"))
+    cont = report("p_reflect_done", "reflect", 1, 1, ("reflect_failed", "false"))
+
+    # ---- end
+    f.code("results", "Results",
+           "return {\"results\": {\"communities\": int(communities or 0), \"insights\": int(insights or 0)}}",
+           inputs={"communities": ("number", (comm, "communities")),
+                   "insights": ("number", ("reflect_outcome", "insights"))},
+           outputs=[("results", "object")], exec_lane=False)
+    ended, cont = step("finish", "Close the consolidation", "note_consolidation_end",
+                       {"status": ("string", "completed"), "results": ("object", ("results", "results"))},
+                       [("merges", "number"), ("labelled", "number"), ("summaries_refreshed", "number"),
+                        ("insights", "number"), ("communities", "number")], cont)
+    f.code(
+        "report", "Report",
+        "def n(x, one, many):\n"
+        "    x = int(x or 0)\n"
+        "    return str(x) + \" \" + (one if x == 1 else many)\n"
+        "msg = (\"Consolidated: \" + n(merges, \"merge\", \"merges\") + \", \" + n(labelled, \"group named\", \"groups named\")\n"
+        "       + \", \" + n(summaries, \"summary refreshed\", \"summaries refreshed\") + \", \"\n"
+        "       + n(insights, \"insight\", \"insights\") + \".\")\n"
+        "return {\"message\": msg}",
+        inputs={"merges": ("number", (ended, "merges")), "labelled": ("number", (ended, "labelled")),
+                "summaries": ("number", (ended, "summaries_refreshed")), "insights": ("number", (ended, "insights"))},
+        outputs=[("message", "string")],
+    )
+    f.then(cont[0], "report", cont[1])
+    f.end("end", "Done", {
+        "response": ("string", ("report", "message")), "consolidation": ("object", (ended, "tool_output")),
+        "consolidation_id": ("string", (begun, "consolidation_id")),
+        "insight_note_ids": ("array", ("reflect", "insight_note_ids")),
+    })
+    f.then("report", "end")
+    return f.finish(automation_defaults=AUTOMATION_DEFAULTS["note-consolidate"])
+
+
 BUILDERS = {
     "note-capture": build_capture,
     "note-process": build_process,
@@ -1142,6 +1480,7 @@ BUILDERS = {
     "note-recall": build_recall,
     "note-mine": build_mine,
     "note-reflect": build_reflect,
+    "note-consolidate": build_consolidate,
 }
 
 

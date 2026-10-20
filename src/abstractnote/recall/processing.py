@@ -51,6 +51,13 @@ STEP_OF_NODE: Dict[str, Dict[str, Optional[str]]] = {
                      "anniversaries": "search", "reflect": "synthesize", "write": "synthesize",
                      "communities": "search", "communities_pending": "search",
                      "communities_names": "synthesize", "communities_label": "synthesize"},
+    # The consolidation (backlog 0032) reports its own stages (GET /note/processing "consolidation"); it is not
+    # an active note run, so its nodes have no step here (its reflect subflow's steps are the child's).
+    "note-consolidate": {**{n: None for n in (
+        "begin", "fail_end", "p_norm_start", "normalize", "p_norm_done", "p_comm_start", "communities", "p_comm_done",
+        "p_labels_start", "communities_pending", "communities_names", "communities_label", "p_labels", "stale_count",
+        "p_sum_start", "stale", "summaries", "set_summaries", "p_sum", "p_tn_start", "then_now", "p_tn_done",
+        "p_reflect_start", "p_reflect_done", "finish")}, "reflect": CHILD},
 }
 
 BUCKET_S = 300

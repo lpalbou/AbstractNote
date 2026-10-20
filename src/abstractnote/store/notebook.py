@@ -52,8 +52,20 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     # Equal to abstractnote.flows.build DRAIN_DEFAULTS / the note-drain trigger (a test keeps them equal).
     "processor_schedule": {"every": "2m", "max_items": 20},
     "process_inline_default": False,
+    # The consolidation automation's interval (backlog 0032): "<n>h" or "<n>d", or "off" (kept paused).
+    "consolidate_schedule": {"every": "1d"},
 }
 PROCESSOR_MAX_ITEMS = 200
+
+
+def _check_consolidate_schedule(value: Any) -> Dict[str, Any]:
+    """``{every: "<n>h|d" | "off"}`` or a plain sentence (ValueError)."""
+    if not isinstance(value, dict) or set(value) != {"every"}:
+        raise ValueError("The consolidation schedule is {every}, for example {\"every\": \"1d\"} or \"off\".")
+    every = str(value["every"]).strip().lower()
+    if every != "off" and not (every[:-1].isdigit() and every[-1:] in ("h", "d") and int(every[:-1]) > 0):
+        raise ValueError("The consolidation interval must be a number of hours or days (12h, 1d, 7d) or off.")
+    return {"every": every}
 
 
 def _check_processor_schedule(value: Any) -> Dict[str, Any]:
@@ -548,15 +560,12 @@ class Notebook:
               now: Optional[str] = None) -> Dict[str, Any]:
         """``{items: [{task_id, note_id, text, status, due, closed_at, age_days, stale}]}`` (``status=None`` for
         all). ``age_days`` counts whole days since the task opened (until it closed); ``stale`` marks an open task
-        older than :data:`abstractnote.recall.reflect.STALE_DAYS` whose date is not an approximation (a commit or a
-        file date never makes a task stale)."""
-        from ..recall.reflect import loop_age, note_date_is_approximate
+        older than :data:`abstractnote.recall.reflect.STALE_DAYS`."""
+        from ..recall.reflect import loop_age
 
         now_n = ids.normalize_time(now) if now else ids.utc_now()
         keys = ("task_id", "note_id", "text", "status", "due", "closed_at")
-        return {"items": [{**{k: t[k] for k in keys},
-                           **loop_age(t["opened_at"], now_n, t["closed_at"],
-                                      approximate=note_date_is_approximate(self, t["note_id"]))}
+        return {"items": [{**{k: t[k] for k in keys}, **loop_age(t["opened_at"], now_n, t["closed_at"])}
                           for t in self.store.tasks(status=status, entity=entity, limit=limit)]}
 
     def insights(self, kind: Optional[str] = None, acked: Optional[bool] = None, limit: int = 50
@@ -766,6 +775,8 @@ class Notebook:
             raise ValueError(f"Unknown setting: {', '.join(unknown)}.")
         if "processor_schedule" in changes:
             changes = {**changes, "processor_schedule": _check_processor_schedule(changes["processor_schedule"])}
+        if "consolidate_schedule" in changes:
+            changes = {**changes, "consolidate_schedule": _check_consolidate_schedule(changes["consolidate_schedule"])}
         current = self.settings()
         current.update(changes)
         self.store.meta_set("settings", current)

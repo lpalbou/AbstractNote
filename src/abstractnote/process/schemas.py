@@ -175,6 +175,16 @@ REFLECTIONS: Dict[str, Any] = _o({
     })),
 })
 
+#: The consolidation's summary step (backlog 0032; abstractnote.recall.consolidation). Entries are referred to by
+#: their INDEX in the message, never by id (ADR 0004). Not in :data:`SCHEMAS` (the processing and recall steps):
+#: the flow generator adds it next to ``CommunityLabels`` (``flows.build.flow_schemas``).
+ENTITY_SUMMARIES: Dict[str, Any] = _o({
+    "summaries": _a(_o({
+        "index": {"type": "integer", "description": "index of the entry in the list"},
+        "summary": _s("at most two sentences, third person, present tense"),
+    })),
+})
+
 SCHEMAS: Dict[str, Dict[str, Any]] = {
     "QuickFiling": QUICK_FILING,
     "Extraction": EXTRACTION,
@@ -369,9 +379,19 @@ class Reflections(_M):
     items: List[Reflection] = Field(default_factory=list)
 
 
+class EntitySummary(_M):
+    index: int
+    summary: str
+
+
+class EntitySummaries(_M):
+    summaries: List[EntitySummary] = Field(default_factory=list)
+
+
 MODELS = {
     "QuickFiling": QuickFiling, "Extraction": Extraction, "Linking": Linking, "Answer": Answer,
     "MiningPlan": MiningPlan, "SliceFindings": SliceFindings, "Dossier": Dossier, "Reflections": Reflections,
+    "EntitySummaries": EntitySummaries,
 }
 
 

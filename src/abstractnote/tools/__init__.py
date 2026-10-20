@@ -24,7 +24,9 @@ TOOL_NAMES: List[str] = [
     "note_queue_lease", "note_queue_ack", "note_queue_stats", "note_search", "note_expand",
     "note_changes", "note_entity", "note_timeline", "note_open_loops", "note_contradictions",
     "note_resurface", "note_anniversaries", "note_insight_write", "note_communities_recompute",
-    "note_communities_pending", "note_communities_label",
+    "note_communities_pending", "note_communities_label", "note_consolidation_begin", "note_consolidation_progress",
+    "note_consolidation_end", "note_entities_normalize", "note_entities_stale_summaries", "note_entities_set_summaries",
+    "note_then_now_refresh",
 ]
 
 
@@ -68,6 +70,7 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
     from abstractcore.tools.core import tool
 
     from . import capture as cap
+    from . import consolidation as cons
     from . import process as proc
     from . import queue as que
     from . import recall as rec
@@ -203,6 +206,42 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
         """Store [{community_id, label (at most 4 words), summary (one sentence), kind}]."""
         return rec.note_communities_label(ctx, items)
 
+    @tool(name="note_consolidation_begin", description="Start a memory consolidation of the notebook (progress row).")
+    def note_consolidation_begin() -> Dict[str, Any]:
+        """Open a consolidation; returns its id, the planned merges and what is pending."""
+        return cons.note_consolidation_begin(ctx)
+
+    @tool(name="note_consolidation_progress", description="Record the progress of the running consolidation.")
+    def note_consolidation_progress(stage: str, done: int, total: int, note: Optional[str] = None) -> Dict[str, Any]:
+        """stage: normalize, communities, labels, summaries, then_now or reflect; done of total items."""
+        return cons.note_consolidation_progress(ctx, stage, done, total, note)
+
+    @tool(name="note_consolidation_end", description="Finish the running consolidation (completed or failed).")
+    def note_consolidation_end(status: str, results: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """status completed or failed; results: {communities, insights, error}."""
+        return cons.note_consolidation_end(ctx, status, results)
+
+    @tool(name="note_entities_normalize", description="Merge the entries that share a canonical name (no model).")
+    def note_entities_normalize() -> Dict[str, Any]:
+        """Merge duplicate entries; returns the number of merges."""
+        return cons.note_entities_normalize(ctx)
+
+    @tool(name="note_entities_stale_summaries",
+          description="Entries whose summary is empty, a placeholder or older than their notes, with evidence.")
+    def note_entities_stale_summaries(limit: int = 8) -> Dict[str, Any]:
+        """The next stale entries: name, kind, aliases, current summary, statements and note excerpts."""
+        return cons.note_entities_stale_summaries(ctx, limit)
+
+    @tool(name="note_entities_set_summaries", description="Store refreshed summaries of entries.")
+    def note_entities_set_summaries(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Store [{entity_id, summary}] as one revision (the summary history keeps every version)."""
+        return cons.note_entities_set_summaries(ctx, items)
+
+    @tool(name="note_then_now_refresh", description="Refresh the then-and-now of the entries a consolidation touched.")
+    def note_then_now_refresh() -> Dict[str, Any]:
+        """Recompute the then-versus-now caches of the touched entries."""
+        return cons.note_then_now_refresh(ctx)
+
     tools = {
         "note_capture": note_capture, "note_file": note_file, "note_context": note_context,
         "note_resolve_candidates": note_resolve_candidates, "note_apply_revision": note_apply_revision,
@@ -213,6 +252,11 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
         "note_anniversaries": note_anniversaries, "note_insight_write": note_insight_write,
         "note_communities_recompute": note_communities_recompute,
         "note_communities_pending": note_communities_pending, "note_communities_label": note_communities_label,
+        "note_consolidation_begin": note_consolidation_begin,
+        "note_consolidation_progress": note_consolidation_progress,
+        "note_consolidation_end": note_consolidation_end, "note_entities_normalize": note_entities_normalize,
+        "note_entities_stale_summaries": note_entities_stale_summaries,
+        "note_entities_set_summaries": note_entities_set_summaries, "note_then_now_refresh": note_then_now_refresh,
     }
     assert list(tools) == TOOL_NAMES
     return tools

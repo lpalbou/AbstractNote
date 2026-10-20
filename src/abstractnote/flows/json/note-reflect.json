@@ -3182,7 +3182,14 @@
           "note_insight_write",
           "note_communities_recompute",
           "note_communities_pending",
-          "note_communities_label"
+          "note_communities_label",
+          "note_consolidation_begin",
+          "note_consolidation_progress",
+          "note_consolidation_end",
+          "note_entities_normalize",
+          "note_entities_stale_summaries",
+          "note_entities_set_summaries",
+          "note_then_now_refresh"
         ]
       }
     }

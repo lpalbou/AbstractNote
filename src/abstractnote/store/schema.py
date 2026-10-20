@@ -3,7 +3,7 @@
 Truth tables (kept by a rebuild): ``meta``, ``notes``, ``attachments``,
 ``note_links``, ``queue``, ``revisions``, ``vectors`` (the embedding cache) and
 ``context_packets``. ``KEPT_TABLES`` (the graph communities, backlog 0030) are derived but hold the
-model's labels, so a rebuild keeps them too. Everything else is a projection of notes plus revisions
+model's labels, so a rebuild keeps them too, with the consolidation rows (bookkeeping, backlog 0032). Everything else is a projection of notes plus revisions
 and is recreated by ``Notebook.rebuild``.
 
 Vectors are float32 blobs; cosine search runs in Python over the filtered rows.
@@ -16,8 +16,9 @@ import sqlite3
 SCHEMA_VERSION = 2  # 2: entities.name_key/display_name/key_clash_with, entity_aliases.alias_key
 
 TRUTH_TABLES = ("meta", "notes", "attachments", "note_links", "queue", "revisions", "vectors", "context_packets")
-#: Derived tables a rebuild copies (entity ids are stable, and the community labels are the model's work).
-KEPT_TABLES = ("communities", "entity_communities")
+#: Derived tables a rebuild copies (entity ids are stable, and the community labels are the model's work), and the
+#: consolidation bookkeeping (its progress rows and the measured seconds per item the next ETA starts from).
+KEPT_TABLES = ("communities", "entity_communities", "consolidation_runs")
 
 DDL = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -333,6 +334,26 @@ CREATE TABLE IF NOT EXISTS entity_communities (
   community_id TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_entity_communities_community ON entity_communities(community_id);
+
+-- one row per memory consolidation (abstractnote.recall.consolidation); the open row has finished_at NULL
+CREATE TABLE IF NOT EXISTS consolidation_runs (
+  consolidation_id TEXT PRIMARY KEY,
+  started_at TEXT NOT NULL,
+  started_ts REAL NOT NULL,
+  updated_ts REAL NOT NULL,
+  finished_at TEXT,
+  status TEXT NOT NULL DEFAULT 'running',
+  stage TEXT,
+  stage_done INTEGER NOT NULL DEFAULT 0,
+  stage_total INTEGER NOT NULL DEFAULT 0,
+  stages_json TEXT NOT NULL DEFAULT '{}',
+  offered_json TEXT NOT NULL DEFAULT '[]',
+  touched_json TEXT NOT NULL DEFAULT '[]',
+  results_json TEXT,
+  error TEXT,
+  note TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_consolidation_runs_started ON consolidation_runs(started_ts);
 
 CREATE TABLE IF NOT EXISTS then_now_cache (
   key TEXT PRIMARY KEY,
