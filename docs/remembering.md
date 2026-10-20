@@ -79,10 +79,16 @@ last looked beside the cue cards, then the ask bar) fits a 1280x800 window; the 
    citation opens the note with its attachments and the revision it caused. "Save this answer"
    turns it into a note with provenance; the note dialog shows such notes as synthesis, never as
    something you wrote.
-4. **Then versus now**: for an entity or for a relationship between two entities, the earliest
-   and the latest summary side by side, with the turning points between them listed with their
-   notes. Cached per revision; the fastest way to see how your understanding of a person, a
-   project, an idea or a link evolved.
+4. **Then versus now**: for an entity or for a relationship between two entities, what the notebook
+   knew at the start and what it knows now side by side, with the turning points between them listed
+   with their notes. It is read from the dated history, not from the order notes arrived: "then" is the
+   earliest dated knowledge (the day of the first note about it, with the summary of that day, or
+   what that note said when it wrote none), so a 2022 archive imported after the 2026 notes moves
+   "then" to 2022; "now" is the current summary, the one written for the latest date. The turning
+   points are where something stopped being true and what replaced it (a role, an owner, a budget),
+   placed where the change happened, never where a summary was rewritten and never where a note was
+   only understood again. Cached per revision; the fastest way to see how your understanding of a
+   person, a project, an idea or a link evolved.
 5. **Why do I believe this**: every claim, and every sentence of an answer, opens its evidence
    chain: the claim, what it superseded or was superseded by, the notes, the attachment excerpt.
    One tap says "this is wrong" and writes a retract revision with your account as the source.
@@ -149,7 +155,13 @@ Remembering has a cost in time, and the Processing view shows it honestly: what 
 doing with your notes right now, how fast, what is waiting and what went wrong, without system
 vocabulary. It also owns the consolidation: the scheduled pass that joins duplicate entries,
 recomputes the themes and names the new or stale ones, refreshes entity summaries that are older
-than what is known about them, refreshes then-and-now, and looks back for insights. Each stage
+than what is known about them, refreshes then-and-now, and looks back for insights. A summary is
+written for a date: a note from 2022 describes the entity as it was in 2022 and stays in its
+history, and when earlier notes arrive the consolidation writes the current summary again from the
+whole dated history ("director since 2026, after joining as an intern in 2022"). The themes are also
+found again at the end of a processing batch that made them due (a note from an earlier date, a
+note understood again, or many new ones), and naming the groups that changed waits for the next
+consolidation. Each stage
 reports n of m with a time left measured from its own pace, and "Consolidate now" runs it at
 once (see [cognition.md](cognition.md), "note-consolidate"). When a pass could not refresh
 everything (the model gave no answer for some entries, or its time ran out), it says so in one

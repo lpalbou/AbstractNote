@@ -74,9 +74,9 @@ def entity_card(nb: Any, entity_id: str, at: Optional[str] = None, as_received: 
             mrow = s.entity_row(m)
             names.append(mrow["display_name"] or mrow["name"])
     aliases = distinct_names(names, exclude=[name])  # one per canonical name, never the entity's own
-    history = [{"at": r["at"], "summary": r["summary"], "note_id": r["note_id"], "revision_id": r["revision_id"]}
-               for r in s.q(f"SELECT * FROM entity_summaries WHERE entity_id IN ({q}) AND at<=? ORDER BY at, revision_id",
-                            [*members, ref])]
+    # dated knowledge order (store.notes.SUMMARY_ORDER): the date each summary describes, then the revision log
+    history = [{"at": r["at"], "summary": r["summary"], "note_id": r["note_id"], "revision_id": r["revision_id"],
+                "recorded_at": r["recorded_at"]} for r in s.summary_rows(members, at=ref)]
     summary = history[-1]["summary"] if history else (row["summary"] if at_n is None else None)
     notes = s.q(f"SELECT DISTINCT n.* FROM entity_notes en JOIN notes n ON n.note_id=en.note_id WHERE en.entity_id IN"
                 f" ({q}) AND en.at<=? AND n.archived_at IS NULL ORDER BY n.occurred_at DESC LIMIT ?",
@@ -134,9 +134,11 @@ def _archive_card(nb: Any, arch: Any, entity_id: str, at_n: Optional[str]) -> Di
             mrow = s.entity_row(m)
             names.append(mrow["display_name"] or arch.name(m, at_n) or mrow["name"])
     aliases = distinct_names(names, exclude=[name])
-    history = [{"at": r["at"], "summary": r["summary"], "note_id": r["note_id"], "revision_id": r["revision_id"]}
-               for r in s.q(f"SELECT * FROM entity_summaries WHERE entity_id IN ({q}) AND at<=? AND {in_rev}"
-                            " ORDER BY at, revision_id", [*members, ref, *p_rev])]
+    in_srev, p_srev = arch.revisions_in("s.revision_id")
+    history = [{"at": r["at"], "summary": r["summary"], "note_id": r["note_id"], "revision_id": r["revision_id"],
+                "recorded_at": r["recorded_at"]}
+               for r in s.summary_rows(members, at=ref, where=in_srev, params=p_srev,
+                                       superseded_within=arch.revisions_in("r2.revision_id"))]
     notes = s.q(f"SELECT DISTINCT n.* FROM entity_notes en JOIN notes n ON n.note_id=en.note_id WHERE en.entity_id IN"
                 f" ({q}) AND en.at<=? AND n.archived_at IS NULL AND {in_note} ORDER BY n.occurred_at DESC LIMIT ?",
                 [*members, ref, *p_note, CARD_NOTES])
@@ -355,9 +357,8 @@ def _entity_line(nb: Any, eid: str, at: Optional[str], focus: bool) -> Optional[
     ref = at or "9999-12-31T23:59:59Z"
     members = s.merged_members(eid)
     q = ",".join("?" for _ in members)
-    summary = s.q1(f"SELECT summary FROM entity_summaries WHERE entity_id IN ({q}) AND at<=? ORDER BY at DESC,"
-                   " revision_id DESC LIMIT 1", [*members, ref])
-    summary = summary[0] if summary else (row["summary"] if at is None else None)
+    srows = s.summary_rows(members, at=ref)
+    summary = srows[-1]["summary"] if srows else (row["summary"] if at is None else None)
     stats = s.q1(f"SELECT MIN(at), MAX(at), COUNT(DISTINCT note_id) FROM entity_notes WHERE entity_id IN ({q}) AND"
                  " at<=?", [*members, ref])
     every_alias = distinct_names([a for m in members for a in s.aliases(m, at)], exclude=[row["name"]])

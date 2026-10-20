@@ -691,6 +691,11 @@ def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, A
     for vid, name, default in (("r_processed", "drain_processed", 0), ("r_failed", "drain_failed", 0),
                                ("r_errors", "drain_errors", [])):
         f.get_var(vid, name, default)
+    # The end of the batch (ADR 0008 §5): the themes are found again when what was applied made them due (notes
+    # dated earlier than what was known, notes understood again, many revisions; no model). A failure is reported
+    # in the answer, never silent, and does not undo the notes processed.
+    themes = f._tool_nodes("communities", "Themes due?", "note_communities_recompute", {"only_if_due": ("boolean", True)},
+                           [("recomputed", "boolean")], ("drain_loop", "done"), raising=False)
     f.code(
         "report", "Report",
         "n = int(processed or 0)\n"
@@ -701,15 +706,27 @@ def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, A
         "    msg = \"Processed \" + str(n) + (\" note.\" if n == 1 else \" notes.\")\n"
         "    if k:\n"
         "        msg = msg[:-1] + \"; \" + str(k) + (\" could not be processed.\" if k > 1 else \" could not be processed.\")\n"
-        "return {\"message\": msg, \"processed\": n, \"failed\": k, \"errors\": list(errors or [])}",
+        "c = dict(themes) if isinstance(themes, dict) else {}\n"
+        "if themes_failed:\n"
+        "    c = {\"recomputed\": False, \"error\": str(themes_failure or \"\")}\n"
+        "    msg += \" The themes could not be updated: \" + str(themes_failure or \"no reason was given.\")\n"
+        "elif c.get(\"recomputed\"):\n"
+        "    g = int(c.get(\"communities\") or 0)\n"
+        "    w = int(c.get(\"labels_waiting\") or 0)\n"
+        "    msg += \" The themes were updated (\" + str(g) + (\" group\" if g == 1 else \" groups\")\n"
+        "    msg += ((\", \" + str(w) + \" to name next time).\") if w else \").\")\n"
+        "return {\"message\": msg, \"processed\": n, \"failed\": k, \"errors\": list(errors or []), \"communities\": c}",
         inputs={"processed": ("number", ("r_processed", "value")), "failed": ("number", ("r_failed", "value")),
-                "errors": ("array", ("r_errors", "value"))},
-        outputs=[("message", "string"), ("processed", "number"), ("failed", "number"), ("errors", "array")],
+                "errors": ("array", ("r_errors", "value")), "themes": ("object", (themes, "tool_output")),
+                "themes_failed": ("boolean", (themes, "failed")), "themes_failure": ("string", (themes, "failure"))},
+        outputs=[("message", "string"), ("processed", "number"), ("failed", "number"), ("errors", "array"),
+                 ("communities", "object")],
     )
-    f.then("drain_loop", "report", "done")
+    f.then(themes, "report")
     f.end("end", "Done", {
         "response": ("string", ("report", "message")), "processed": ("number", ("report", "processed")),
         "failed": ("number", ("report", "failed")), "errors": ("array", ("report", "errors")),
+        "communities": ("object", ("report", "communities")),
     })
     f.then("report", "end")
     return f.finish(automation_defaults=AUTOMATION_DEFAULTS["note-drain"])
@@ -1166,8 +1183,13 @@ SUMMARY_VIEW_CODE = (
     "for i, p in enumerate(items or []):\n"
     "    if not isinstance(p, dict):\n"
     "        continue\n"
-    "    view.append({\"index\": i, \"name\": p.get(\"name\"), \"kind\": p.get(\"kind\"), \"aliases\": p.get(\"aliases\") or [],\n"
-    "                 \"summary\": p.get(\"summary\"), \"statements\": p.get(\"claims\") or [], \"notes\": p.get(\"notes\") or []})\n"
+    "    e = {\"index\": i, \"name\": p.get(\"name\"), \"kind\": p.get(\"kind\"), \"aliases\": p.get(\"aliases\") or [],\n"
+    "         \"summary\": p.get(\"summary\"), \"as_of\": p.get(\"as_of\"), \"statements\": p.get(\"claims\") or [],\n"
+    "         \"history\": p.get(\"history\") or [], \"earlier\": p.get(\"earlier\") or [], \"notes\": p.get(\"notes\") or []}\n"
+    "    left = {k: v for k, v in (p.get(\"omitted\") or {}).items() if v}\n"
+    "    if left:\n"
+    "        e[\"omitted\"] = left\n"
+    "    view.append(e)\n"
     "return {\"view\": view, \"any\": len(view) > 0}"
 )
 

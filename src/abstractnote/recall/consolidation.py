@@ -16,13 +16,23 @@ Which summaries are stale is decided structurally, never from their wording (ADR
 - ``placeholder``: the summary is still the one the entry was created with, and the creating revision carries the
   revision builder's own warning that no summary was written (``process.revise``: "No summary was written for
   <name>; it was described from this note.");
+- ``retrospective``: a note dated earlier than what the notebook knew of the entry was applied after its current
+  summary (``Notebook.retro_state()["stale_summaries"]``, ADR 0008 §2): what the entry is now must be understood
+  again with that earlier foundation;
 - ``changed``: a note mention or a statement about the entry (or an entry merged into it) was recorded by a
-  revision after the revision of its latest summary. ``summary_revision_count`` is that summary revision's
+  revision after the revision of its CURRENT summary (the last one in dated order, ``store.notes.SUMMARY_ORDER``:
+  the one its card shows, not the one written last). ``summary_revision_count`` is that summary revision's
   sequence number in the revision log.
+
+The summary packet shows the entry's dated history, earliest first (``history``: the summaries each note wrote for
+its own date; ``earlier``: the statements that held once and ended), next to what holds now, so the model writes
+what the entry is now, having been what it was.
 
 A refreshed summary is an ``entity.summary`` op in a revision of its own (action ``entity.summary``, ``run_id`` =
 the consolidation id, source client ``consolidation``), so the summary history keeps every version and a rebuild
-replays it.
+replays it. Each op carries ``as_of`` = the latest dated knowledge it was derived from (the entry's last mention,
+or its current summary's date when later): the summary is dated there in the history, so it is the current one
+until a note dated later writes another, and a note dated in between is never hidden behind it.
 
 Nothing stops or is left out silently (ADR 0007, root ADR-0026). An entry or a group the model does not answer
 for, even when asked a second time, is *skipped for this run*: :func:`progress` records it on its stage
@@ -55,7 +65,10 @@ FINISHED = ("completed", "completed_with_gaps")
 SUMMARY_BATCH = 8            # entries per summary model call
 LABEL_BATCH = 5              # communities per labelling call (recall.communities.PENDING_LIMIT)
 PACKET_CLAIMS = 8            # statements shown per entry
-PACKET_NOTES = 3             # note excerpts shown per entry
+PACKET_NOTES = 5             # note excerpts shown per entry: the ones the current summary does not account for yet
+PACKET_NEW_NOTES = 3         # (at most this many, recorded after it, ``new``), the newest, the earliest, then newest
+PACKET_HISTORY = 6           # dated summaries shown per entry: the earliest and the latest ones (``omitted.history``)
+PACKET_EARLIER = 8           # ended statements shown per entry: the earliest and the latest ones (``omitted.earlier``)
 SUMMARY_MAX_CHARS = 600      # a longer answer is kept whole with an over_length warning (the prompt asks for two sentences)
 LAST_RUNS = 20               # finished rows kept per notebook (older ones are deleted)
 INTERRUPTED = "It stopped before finishing."
@@ -421,23 +434,30 @@ def _canon(nb: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
 
 
 def _stale(nb: Any) -> List[Dict[str, Any]]:
-    """Every live entry whose summary is empty, a placeholder or older than its notes and statements, in the order
-    they are refreshed: empty and placeholders first, then the most changed, then the most mentioned."""
+    """Every live entry whose summary is empty, a placeholder, behind an earlier note applied since (retrospective)
+    or older than its notes and statements, in the order they are refreshed: empty and placeholders first, then
+    the retrospective ones, then the most changed, then the most mentioned."""
+    from ..store.notes import claim_reinterpreted_sql
+
     s = nb.store
     canon, live = _canon(nb)
     seq_of = {r[0]: int(r[1]) for r in s.q("SELECT revision_id, seq FROM revisions WHERE applied_index=1")}
-    summaries: Dict[str, Tuple[int, str]] = {}
-    for r in s.q("SELECT entity_id, revision_id FROM entity_summaries"):
-        q = seq_of.get(r[1], 0)
-        if r[0] not in summaries or q >= summaries[r[0]][0]:
-            summaries[r[0]] = (q, r[1])
+    # the CURRENT summary of each entry: the last one in dated order (the one entities.summary shows), never the one
+    # written last: a retrospective note's own summary (an earlier date) must not hide that the entry changed, and
+    # a summary of a superseded interpretation is out of the history (store.notes.summary_superseded_sql)
+    summaries: Dict[str, Tuple[int, str]] = {e: (seq_of.get(r["revision_id"], 0), r["revision_id"])
+                                             for e, r in s.current_summaries().items()}
+    # retrospective insertions marked since the current summary (W23's marks; ADR 0008 §2)
+    retro = {x["entity_id"]: int(x["marked_seq"]) for x in nb.retro_state()["stale_summaries"]}
     new_notes: Dict[str, int] = {}
     for r in s.q("SELECT entity_id, revision_id FROM entity_notes"):
         e = canon.get(r[0], r[0])
         if e in live and seq_of.get(r[1], 0) > summaries.get(e, (0, ""))[0]:
             new_notes[e] = new_notes.get(e, 0) + 1
     new_claims: Dict[str, int] = {}
-    for r in s.q("SELECT subject_id, object_id, revision_id FROM claims WHERE status!='retracted'"):
+    # a claim its own note's re-interpretation closed is not counted again (its replacement is)
+    for r in s.q("SELECT c.subject_id, c.object_id, c.revision_id FROM claims c WHERE c.status!='retracted' AND NOT"
+                 f" {claim_reinterpreted_sql('c')}"):
         q = seq_of.get(r[2], 0)
         for x in {canon.get(r[0], r[0]), canon.get(r[1], r[1]) if r[1] else None}:
             if x and x in live and q > summaries.get(x, (0, ""))[0]:
@@ -460,19 +480,25 @@ def _stale(nb: Any) -> List[Dict[str, Any]]:
             names = {r["name"], r["display_name"] or r["name"], *s.aliases(eid)}
             if any(PLACEHOLDER_WARNING.format(name=n) in created_warnings[rid] for n in names):
                 reason = "placeholder"
+        if reason is None and eid in retro:
+            reason = "retrospective"
         if reason is None and (since["notes"] or since["claims"]):
             reason = "changed"
         if reason is None:
             continue
-        out.append({"entity_id": eid, "reason": reason, "since_summary": since, "summary_revision_count": seq,
-                    "note_count": int(r["note_count"] or 0)})
-    rank = {"empty": 0, "placeholder": 0, "changed": 1}
+        item = {"entity_id": eid, "reason": reason, "since_summary": since, "summary_revision_count": seq,
+                "note_count": int(r["note_count"] or 0)}
+        if eid in retro:
+            item["retro_marked_seq"] = retro[eid]
+        out.append(item)
+    rank = {"empty": 0, "placeholder": 0, "retrospective": 1, "changed": 2}
     out.sort(key=lambda x: (rank[x["reason"]], -(x["since_summary"]["notes"] + x["since_summary"]["claims"]),
                             -x["note_count"], x["entity_id"]))
     return out
 
 
 def _packet(nb: Any, item: Dict[str, Any], canon: Dict[str, str]) -> Dict[str, Any]:
+    from ..store.notes import claim_reinterpreted_sql
     from .changes import claim_text
     from .shapes import excerpt
 
@@ -481,25 +507,95 @@ def _packet(nb: Any, item: Dict[str, Any], canon: Dict[str, str]) -> Dict[str, A
     r = s.entity_row(eid)
     members = s.merged_members(eid)
     marks = ",".join("?" for _ in members)
-    claims = s.q(f"SELECT * FROM claims WHERE status='active' AND (subject_id IN ({marks}) OR object_id IN ({marks}))",
-                 [*members, *members])
+    claims = s.q(f"SELECT * FROM claims c WHERE c.status='active' AND (c.subject_id IN ({marks}) OR c.object_id IN"
+                 f" ({marks})) AND NOT {claim_reinterpreted_sql('c')}", [*members, *members])
+    now = ids.utc_now()
+    claims = [c for c in claims if not c["valid_until"] or c["valid_until"] > now]
+    # the strongest statements that hold now; among equals the most recent first (the past is in ``earlier`` and
+    # ``history``), so what the entry is now is never the part cut
     claims = sorted(claims, key=lambda c: (-int(c["reinforced_count"] or 0), _CERTAINTY_RANK.get(c["certainty"], 9),
-                                           c["observed_at"] or "", c["claim_id"]))
-    notes = s.q(f"SELECT DISTINCT n.* FROM entity_notes en JOIN notes n ON n.note_id=en.note_id WHERE en.entity_id IN"
-                f" ({marks}) AND n.archived_at IS NULL ORDER BY n.occurred_at DESC, n.note_id", [*members])
-    # a selection (the strongest statements, the newest notes), recorded: ``omitted`` counts what is not shown
+                                           _desc(c["observed_at"]), c["claim_id"]))
+    # the dated history, earliest first: what each note's summary said of the entry as of its own date ...
+    history: List[Dict[str, str]] = []
+    for h in s.summary_rows(members):
+        text = " ".join(str(h["summary"] or "").split())
+        if text and (not history or history[-1]["summary"] != text):
+            history.append({"date": _day(h["at"]), "summary": text})
+    history, history_omitted = _ends(history, PACKET_HISTORY)
+    # ... and what held once and ended (a belief replaced or whose window closed), in the order it held
+    ended = s.q(f"SELECT * FROM claims c WHERE (c.subject_id IN ({marks}) OR c.object_id IN ({marks})) AND c.valid_until"
+                f" IS NOT NULL AND c.valid_until<=? AND c.status IN ('active', 'superseded') AND NOT"
+                f" {claim_reinterpreted_sql('c')} ORDER BY COALESCE(c.valid_from, c.observed_at), c.claim_id",
+                [*members, *members, now])
+    earlier = [{"from": _day(c["valid_from"] or c["observed_at"]), "until": _day(c["valid_until"]),
+                "statement": claim_text(nb, c)} for c in ended if (c["valid_from"] or c["observed_at"]) != c["valid_until"]]
+    earlier, earlier_omitted = _ends(earlier, PACKET_EARLIER)
+    all_notes = list(s.q(f"SELECT n.*, MAX(v.seq) AS mention_seq FROM entity_notes en JOIN notes n ON"
+                         f" n.note_id=en.note_id LEFT JOIN revisions v ON v.revision_id=en.revision_id WHERE en.entity_id"
+                         f" IN ({marks}) AND n.archived_at IS NULL GROUP BY n.note_id ORDER BY n.occurred_at DESC,"
+                         f" n.note_id", members))
+    # what the current summary does not account for yet comes first (an earlier project's notes arriving later are
+    # what an entry must absorb, ADR 0008 §2), then the newest note, the earliest one, and the newest of the rest
+    since = int(item.get("summary_revision_count") or 0)
+    fresh = [n for n in all_notes if int(n["mention_seq"] or 0) > since]
+    chosen: List[Any] = fresh[:PACKET_NEW_NOTES]
+    for n in ([all_notes[0], all_notes[-1]] if all_notes else []) + all_notes:
+        if len(chosen) >= PACKET_NOTES:
+            break
+        if n["note_id"] not in {c["note_id"] for c in chosen}:
+            chosen.append(n)
+    new_ids = {n["note_id"] for n in fresh}
+    notes = sorted(chosen, key=lambda n: (_desc(n["occurred_at"]), n["note_id"]))  # newest first
     return {**item, "name": r["display_name"] or r["name"], "kind": r["kind"], "aliases": s.aliases(eid),
-            "summary": r["summary"], "claims": [claim_text(nb, c) for c in claims[:PACKET_CLAIMS]],
+            "summary": r["summary"], "as_of": _day(_as_of(nb, eid)),
+            "claims": [claim_text(nb, c) + (f" (since {_day(c['valid_from'])})" if c["valid_from"] else "")
+                       for c in claims[:PACKET_CLAIMS]],
+            "history": history, "earlier": earlier,
             "notes": [{"title": n["title"] or "", "date": str(n["occurred_at"] or "")[:10],
-                       "excerpt": excerpt(n["summary"] or n["one_line"] or n["text"])} for n in notes[:PACKET_NOTES]],
-            "omitted": {"claims": max(0, len(claims) - PACKET_CLAIMS), "notes": max(0, len(notes) - PACKET_NOTES)}}
+                       "excerpt": excerpt(n["summary"] or n["one_line"] or n["text"]),
+                       **({"new": True} if n["note_id"] in new_ids else {})} for n in notes],
+            # a selection, recorded (ADR 0007): what is not shown, by part
+            "omitted": {"claims": max(0, len(claims) - PACKET_CLAIMS), "notes": max(0, len(all_notes) - len(notes)),
+                        "history": history_omitted, "earlier": earlier_omitted}}
+
+
+def _desc(ts: Any) -> str:
+    """A sort key that orders ISO times newest first (each character inverted)."""
+    return "".join(chr(0x10FFFF - ord(ch)) for ch in str(ts or ""))
+
+
+def _day(ts: Any) -> str:
+    return str(ts or "")[:10]
+
+
+def _ends(items: List[Any], n: int) -> Tuple[List[Any], int]:
+    """The earliest item and the latest ``n - 1`` (the start and the recent past of a dated history), and how many
+    in between were left out (the packet's ``omitted``, shown to the model, never silent)."""
+    if len(items) <= n:
+        return items, 0
+    return [items[0], *items[len(items) - (n - 1):]], len(items) - n
+
+
+def _as_of(nb: Any, entity_id: str) -> Optional[str]:
+    """The latest dated knowledge of an entry (ADR 0008 §2): its last mention across the entries merged into it, or
+    its current summary's date when that is later; None when it has neither. A summary re-derived by the
+    consolidation is dated here (``entity.summary`` ``as_of``)."""
+    s = nb.store
+    members = s.merged_members(entity_id)
+    marks = ",".join("?" for _ in members)
+    last = s.q1(f"SELECT MAX(at) FROM entity_notes WHERE entity_id IN ({marks})", members)[0]
+    cur = s.current_summary_row(entity_id)
+    dates = [x for x in (last, cur["at"] if cur is not None else None) if x]
+    return max(dates) if dates else None
 
 
 def stale_summaries(nb: Any, limit: Any = SUMMARY_BATCH) -> Dict[str, Any]:
     """``{count, items, limit_applied}``: the next ``limit`` (0..50) stale entries as packets ``{entity_id, reason,
-    since_summary: {notes, claims}, summary_revision_count, note_count, name, kind, aliases, summary, claims: [line],
-    notes: [{title, date, excerpt}], omitted: {claims, notes}}`` (the strongest :data:`PACKET_CLAIMS` statements and
-    newest :data:`PACKET_NOTES` notes; ``omitted`` counts the rest). While a consolidation is open, an entry it was already offered is not offered
+    since_summary: {notes, claims}, summary_revision_count, note_count, name, kind, aliases, summary, as_of,
+    claims: [line], history: [{date, summary}], earlier: [{from, until, statement}], notes: [{title, date, excerpt,
+    new?}], omitted: {claims, notes, history, earlier}}`` (the strongest :data:`PACKET_CLAIMS` statements, the
+    :data:`PACKET_NOTES` notes chosen by :func:`_packet`, the ends of the dated history and of the ended statements;
+    ``omitted`` counts the rest by part). While a consolidation is open, an entry it was already offered is not offered
     again (so an entry the model skips cannot hold the loop), and ``count`` is what remains for it."""
     try:
         n = int(SUMMARY_BATCH if limit in (None, "") else limit)
@@ -520,7 +616,7 @@ def stale_summaries(nb: Any, limit: Any = SUMMARY_BATCH) -> Dict[str, Any]:
 
 def set_summaries(nb: Any, items: Sequence[Dict[str, Any]], *, account: Optional[str] = None) -> Dict[str, Any]:
     """Store ``[{entity_id, summary}]`` as one ``entity.summary`` revision (run_id = the open consolidation, when
-    there is one). An unknown or merged entry or an empty summary is left out (``left_out: [{entity_id, reason}]``);
+    there is one), each op dated ``as_of`` the entry's latest dated knowledge (:func:`_as_of`). An unknown or merged entry or an empty summary is left out (``left_out: [{entity_id, reason}]``);
     a summary over :data:`SUMMARY_MAX_CHARS` is kept whole and named in ``over_length`` (and in the revision's
     warnings); every warning is also logged on ``abstractnote.consolidation``. Returns ``{stored: [entity_id],
     revision_id, warnings, left_out, over_length}``."""
@@ -560,7 +656,11 @@ def set_summaries(nb: Any, items: Sequence[Dict[str, Any]], *, account: Optional
             warnings.append(f"over_length: the summary of {eid} has {len(text)} characters (more than"
                             f" {SUMMARY_MAX_CHARS}); it was kept whole.")
             over_length.append(eid)
-        ops.append({"op": "entity.summary", "payload": {"entity_id": eid, "summary": text}})
+        payload = {"entity_id": eid, "summary": text}
+        as_of = _as_of(nb, eid)
+        if as_of:
+            payload["as_of"] = as_of  # dated at the knowledge it was derived from (op_entity_summary)
+        ops.append({"op": "entity.summary", "payload": payload})
         stored.append(eid)
     for w in warnings:
         _log.warning("set_summaries: %s", w)

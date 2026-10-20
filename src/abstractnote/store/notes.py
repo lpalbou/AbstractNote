@@ -121,6 +121,35 @@ RETRO_EVENTS_KEPT = 500
 #: A note counts as retrospective for an entity when the entity was already seen more than this much later.
 RETRO_MIN_GAP = timedelta(days=1)
 
+#: The order of an entity's summaries (ADR 0008 §2): by the date each one describes (``entity_summaries.at``: the
+#: note's date, or for a consolidation summary the latest dated knowledge it was derived from), then by the revision
+#: log (``revisions.seq``), never by when it was written alone. The CURRENT summary (``entities.summary``) is the
+#: last one in this order; ``summary_history`` lists them in it.
+SUMMARY_ORDER = "s.at, COALESCE(v.seq, 0)"
+SUMMARY_ORDER_DESC = "s.at DESC, COALESCE(v.seq, 0) DESC"
+_SUMMARY_FROM = "entity_summaries s LEFT JOIN revisions v ON v.revision_id=s.revision_id"
+#: The revision that re-understands a note (ADR 0008 §1), as its ``action`` or as one of its ops.
+REINTERPRET = "note.reinterpret"
+#: The closure kind of a statement a re-understanding withdrew, stored as the claim's ``status`` (R2's
+#: ``op_claim_reinterpret``, same name and value as R2's constant in this module: one definition at the merge).
+REINTERPRETED = "reinterpreted"
+_IS_REINTERPRET = f"(r2.action='{REINTERPRET}' OR r2.ops_json LIKE '%\"{REINTERPRET}\"%')"
+
+
+def claim_reinterpreted_sql(alias: str = "c") -> str:
+    """SQL true for a claim (table alias ``alias``) closed because its own note was understood again (ADR 0008 §1:
+    the stored closure kind :data:`REINTERPRETED`, in ``claims.status``): a system event, not a change in what was
+    true, so it is no turning point, no earlier belief and no new statement in the dated history views."""
+    return f"({alias}.status='{REINTERPRETED}')"
+
+
+def summary_superseded_sql(within: str = "") -> str:
+    """SQL true for a summary (``s``, its revision ``v``) written by an interpretation of a note that a later
+    re-interpretation of the same note superseded (ADR 0008 §1): such a summary is out of the dated history and is
+    never the current one. ``within`` restricts the superseding revision (``r2``), e.g. to what an archive held."""
+    return (f"(v.note_id IS NOT NULL AND EXISTS (SELECT 1 FROM revisions r2 WHERE r2.note_id=v.note_id AND"
+            f" r2.seq>v.seq AND r2.abandoned=0 AND {_IS_REINTERPRET}{(' AND ' + within) if within else ''}))")
+
 
 class NoteStore:
     """SQLite note index. Thread-safe through one RLock around the connection."""
@@ -670,9 +699,8 @@ class NoteStore:
         for r in ranked:
             summary = r["summary"]
             if at_n and not arch:
-                srow = self.q1("SELECT summary FROM entity_summaries WHERE entity_id=? AND at<=? ORDER BY at DESC,"
-                               " revision_id DESC LIMIT 1", (r["entity_id"], at_n))
-                summary = srow[0] if srow else None
+                srow = self.current_summary_row(r["entity_id"], at=at_n)
+                summary = srow["summary"] if srow else None
             out_nodes.append({"id": r["entity_id"], "kind": r["kind"], "name": r["name"],
                               "display_name": r["display_name"] or r["name"],
                               "first_seen": r["first_seen"], "last_seen": r["last_seen"],
@@ -961,6 +989,69 @@ class NoteStore:
         return {"granularity": granularity, "since": since_n, "until": until_n,
                 "buckets": [{"bucket": k, **v} for k, v in sorted(buckets.items())]}
 
+    # ------------------------------------------------------------------ dated summaries
+
+    def summary_rows(self, entity_ids: Sequence[str], *, at: Optional[str] = None, where: str = "",
+                     params: Sequence[Any] = (), superseded_within: Tuple[str, Sequence[Any]] = ("", ()),
+                     conn: Optional[sqlite3.Connection] = None) -> List[sqlite3.Row]:
+        """The dated history of these entities' summaries (:data:`SUMMARY_ORDER`), the ones describing a date at or
+        before ``at`` when given; ``where`` adds a condition on ``s`` (the summary) or ``v`` (its revision). A summary
+        written by a superseded interpretation of its note (:func:`summary_superseded_sql`) is left out; with
+        ``superseded_within`` = (condition on ``r2``, params) only when the superseding revision satisfies it (an
+        archive as received keeps the summaries the archive had not seen superseded yet). Each row carries the
+        summary's columns plus ``seq`` and ``recorded_at`` of its revision."""
+        ids_ = list(entity_ids)
+        if not ids_:
+            return []
+        within, within_params = superseded_within
+        sql = (f"SELECT s.*, v.seq AS seq, v.recorded_at AS recorded_at FROM {_SUMMARY_FROM} WHERE s.entity_id IN"
+               f" ({','.join('?' for _ in ids_)}) AND NOT {summary_superseded_sql(within)}")
+        args: List[Any] = [*ids_, *within_params]
+        if at is not None:
+            sql += " AND s.at<=?"
+            args.append(at)
+        if where:
+            sql += f" AND ({where})"
+            args.extend(params)
+        sql += f" ORDER BY {SUMMARY_ORDER}"
+        c = conn or self.conn
+        with self.lock:
+            return list(c.execute(sql, args).fetchall())
+
+    def current_summary_row(self, entity_id: str, *, at: Optional[str] = None,
+                            conn: Optional[sqlite3.Connection] = None) -> Optional[sqlite3.Row]:
+        """The entity's current summary (as of ``at`` when given): the last one in :data:`SUMMARY_ORDER`."""
+        rows = self.summary_rows([entity_id], at=at, conn=conn)
+        return rows[-1] if rows else None
+
+    def current_summaries(self, conn: Optional[sqlite3.Connection] = None) -> Dict[str, sqlite3.Row]:
+        """``{entity_id: row}`` of every entity's current summary (one query; :meth:`current_summary_row`)."""
+        c = conn or self.conn
+        out: Dict[str, sqlite3.Row] = {}
+        with self.lock:
+            for r in c.execute(f"SELECT s.*, v.seq AS seq FROM {_SUMMARY_FROM} WHERE NOT {summary_superseded_sql()}"
+                               f" ORDER BY {SUMMARY_ORDER}").fetchall():
+                out[r["entity_id"]] = r  # the last in dated order wins
+        return out
+
+    def refresh_superseded_summaries(self, c: sqlite3.Connection, revision_id: str, note_id: Optional[str]) -> List[str]:
+        """After a re-interpretation of a note (ADR 0008 §1), the summaries its earlier interpretations wrote are out
+        of the dated history: every entity they described gets its current summary selected again (null when none
+        is left: the consolidation then writes one). Returns those entity ids. A no-op for any other revision."""
+        if not note_id:
+            return []
+        r = c.execute("SELECT action, ops_json FROM revisions WHERE revision_id=?", (revision_id,)).fetchone()
+        if r is None or not (r["action"] == REINTERPRET or
+                             any(op.get("op") == REINTERPRET for op in _uj(r["ops_json"], []) or [])):
+            return []
+        eids = [x[0] for x in c.execute("SELECT DISTINCT s.entity_id FROM entity_summaries s JOIN revisions v ON"
+                                        " v.revision_id=s.revision_id WHERE v.note_id=? AND v.revision_id!=?"
+                                        " ORDER BY s.entity_id", (note_id, revision_id)).fetchall()]
+        for eid in eids:
+            cur = self.current_summary_row(eid, conn=c)
+            c.execute("UPDATE entities SET summary=? WHERE entity_id=?", (cur["summary"] if cur else None, eid))
+        return eids
+
     # ------------------------------------------------------------------ retrospective insertion
 
     def mark_retro(self, c: sqlite3.Connection, entity_ids: Iterable[str], revision_id: Optional[str],
@@ -996,12 +1087,12 @@ class NoteStore:
         c.execute(f"DELETE FROM then_now_cache WHERE key IN ({','.join('?' for _ in keys)})", keys)
 
     def current_summary_seqs(self, c: sqlite3.Connection, entity_ids: Sequence[str]) -> Dict[str, int]:
-        """Revision sequence number of each entity's CURRENT summary (the latest in history time, the one
+        """Revision sequence number of each entity's CURRENT summary (the last in :data:`SUMMARY_ORDER`, the one
         ``entities.summary`` shows), 0 when it has none."""
         out: Dict[str, int] = {}
         for e in entity_ids:
-            r = c.execute("SELECT v.seq FROM entity_summaries s JOIN revisions v ON v.revision_id=s.revision_id"
-                          " WHERE s.entity_id=? ORDER BY s.at DESC, s.rowid DESC LIMIT 1", (e,)).fetchone()
+            r = c.execute(f"SELECT v.seq FROM {_SUMMARY_FROM} WHERE s.entity_id=? AND NOT {summary_superseded_sql()}"
+                          f" ORDER BY {SUMMARY_ORDER_DESC} LIMIT 1", (e,)).fetchone()
             out[e] = int(r[0]) if r else 0
         return out
 
@@ -1164,13 +1255,17 @@ class _OpContext:
         self.dirty_entities.add(eid)
 
     def op_entity_summary(self, p: Dict[str, Any]) -> None:
+        """A summary dated at the revision's ``at`` (a note's date), or at ``as_of`` when the op gives one (a
+        consolidation summary re-derived from the dated history is dated at the latest knowledge it was derived
+        from). The entity's current summary is then the last one in :data:`SUMMARY_ORDER` (ADR 0008 §2)."""
         eid = p["entity_id"]
         row = self._require_entity(eid)
+        at = ids.normalize_time(p["as_of"], field="as_of") if p.get("as_of") else self.at
         self.c.execute("INSERT OR IGNORE INTO entity_summaries(entity_id, revision_id, at, note_id, summary, previous)"
-                       " VALUES (?,?,?,?,?,?)", (eid, self.rid, self.at, self.note_id, p["summary"], row["summary"]))
-        latest = self.c.execute("SELECT summary FROM entity_summaries WHERE entity_id=? ORDER BY at DESC,"
-                                " rowid DESC LIMIT 1", (eid,)).fetchone()
-        self.c.execute("UPDATE entities SET summary=? WHERE entity_id=?", (latest[0] if latest else p["summary"], eid))
+                       " VALUES (?,?,?,?,?,?)", (eid, self.rid, at, self.note_id, p["summary"], row["summary"]))
+        latest = self.s.current_summary_row(eid, conn=self.c)
+        self.c.execute("UPDATE entities SET summary=? WHERE entity_id=?",
+                       (latest["summary"] if latest else p["summary"], eid))
         self.dirty_entities.add(eid)
 
     def op_entity_merge(self, p: Dict[str, Any]) -> None:
@@ -1478,6 +1573,8 @@ class _OpContext:
         _limits_log.warning("revision %s, note %s: %s", self.rid, self.note_id, warning)
 
     def finish(self) -> None:
+        # a re-interpretation takes its note's earlier summaries out of the dated history (current re-selected)
+        self.dirty_entities.update(self.s.refresh_superseded_summaries(self.c, self.rid, self.note_id))
         if self.dirty_relation_entities:
             self.s.refresh_relations_for(self.c, self.dirty_relation_entities)
         for s, o, p in sorted(self.dirty_relations):

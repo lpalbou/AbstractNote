@@ -44,7 +44,7 @@ STEP_OF_NODE: Dict[str, Dict[str, Optional[str]]] = {
                      "resolve": "resolve", "link": "link", "apply": "apply"},
     "note-capture": {"capture": "filing", "filing": "filing", "file": "filing", "process": CHILD,
                      "inline_ack": None},
-    "note-drain": {"lease": None, "process": CHILD, "ack": None},
+    "note-drain": {"lease": None, "process": CHILD, "ack": None, "communities": None},
     "note-recall": {"search": "search", "expand": "search", "synthesize": "synthesize", "mine": CHILD},
     "note-mine": {"search": "search", "step_search": "search", "plan": "synthesize", "findings": "synthesize",
                   "dossier": "synthesize", "write": "synthesize"},

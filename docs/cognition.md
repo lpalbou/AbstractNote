@@ -135,8 +135,27 @@ flowchart TD
     P --> K[tool note_queue_ack outcome, error?]
     K --> B{budget left?}
     B -- yes --> L
-    B -- no --> Z
+    B -- no --> C[tool note_communities_recompute only_if_due]
+    H -- none --> C
+    C --> Z
 ```
+
+- **Themes at the end of the batch** (ADR 0008 §5). Any ingest can change the groups, so every drain ends
+  with `note_communities_recompute {only_if_due: true}` (`recall.communities.refresh_if_due`): the
+  communities are found again (no model) when the batch made them due (`communities.due`): never computed
+  yet (and at least 3 live entities), at least one note dated earlier than what was known applied since the
+  last computation (`DUE_RETRO_NOTES = 1`, the retrospective marks of data-model.md "Retrospective
+  insertion"), a note understood again (`note.reinterpret`) since then, or `DUE_REVISIONS = 20` revisions
+  applied since then (or `DUE_REVISIONS_SHARE` = 10 % of the revisions at the last computation, when that
+  is more). "Since" is counted on the revision log's sequence (`seq_at_compute` in `meta.communities`).
+  Imports only queue their notes, so the drain that understands an import batch is where it ends. Naming
+  stays with the consolidation: a recompute keeps the label of every group that changed little and marks
+  stale the ones whose membership moved, and the drain's answer says what naming will cost:
+  `communities: {recomputed, due, reasons, revisions_since, retro_notes_since, reinterpreted_since,
+  labels_waiting, label_calls, ...the recompute counts}` (`revisions_since` = what made it due, counted
+  before the computation; `label_calls` = groups waiting for a name / 5). The response adds "The themes
+  were updated (4 groups, 2 to name next time)." A failure is said in the response ("The themes could not
+  be updated: ...") and does not fail the drain or undo its notes.
 
 - A lease lasts 15 minutes. Acknowledging a failure increments `attempts` and schedules a retry
   (after 1 minute, then after 10 minutes); the third failure sets the note to `failed`, visible in
@@ -294,14 +313,35 @@ keeps the notebook's derived memory fresh, in stages, each reporting its progres
 | `then_now` | `note_then_now_refresh`: the then-versus-now cache of every entry this run merged into or summarised | none |
 | `reflect` | the note-reflect flow as a subflow (open loops, tensions, resurfacing, anniversaries -> insights; its naming finds nothing left) | as note-reflect |
 
+Summaries are dated knowledge (ADR 0008 §2). Each summary describes the entry as of a date (`at`: the
+date of the note that wrote it), the summary history is ordered by that date and then by the revision log
+(`store.notes.SUMMARY_ORDER`), and the CURRENT summary (`entities.summary`, the card) is the last one in that
+order, never the one written last: a 2022 archive processed after the 2026 notes keeps its 2022 summary in
+the history and leaves the card to 2026. A summary written by an interpretation of a note that a later
+re-interpretation of the same note superseded (`note.reinterpret`, ADR 0008 §1) is out of the history and
+is never current (`store.notes.summary_superseded_sql`); applying the re-interpretation selects the current
+summary of the entries it described again (`refresh_superseded_summaries`). As received before the
+re-interpretation, the old summary is still what the archive held.
+
 A summary is stale when it is empty, when it is still the placeholder an entry was created with (the
 revision builder recorded "No summary was written for <name>; it was described from this note." and no
-summary was written since), or when a note mention or a statement about the entry (or an entry merged into
-it) was recorded by a revision after its latest summary's revision. Nothing reads the summary's wording
-(ADR 0004). Each entry handed to the model carries its name, kind, other names, current summary, its
-strongest statements in words (at most 8) and its 3 newest note excerpts; the prompt
-(`process/prompts/entity_summaries`) asks for at most two sentences, third person, present tense, nothing
-the statements and notes do not say. The answers are mapped back by index. Nothing stops or is left out
+summary was written since), when a note dated earlier than what the notebook knew of the entry was applied
+after its current summary (`retrospective`: `Notebook.retro_state()["stale_summaries"]`), or when a note
+mention or a statement about the entry (or an entry merged into it) was recorded by a revision after its
+CURRENT summary's revision (`changed`; a statement its own note's re-interpretation closed is not counted).
+They are refreshed in that order (empty and placeholders, retrospective, then the most changed). Nothing
+reads the summary's wording (ADR 0004). Each entry handed to the model carries its name, kind, other names,
+current summary, `as_of` (the date of its latest note), its strongest statements that hold now in words
+with the date each started (at most 8; among equals the most recent first), its dated history earliest first
+(`history`: the summaries of earlier dates, the earliest and the 5 latest; `earlier`: statements that held
+from one date until another and ended, the earliest and the 7 latest) and 5 note excerpts, newest first: up
+to 3 the current summary does not account for yet (mentioned by a revision recorded after it, marked `new`,
+even when dated earlier: an older project's notes are what the entry must absorb), then the newest note, the
+earliest one and the newest of the rest, with `omitted: {claims, notes, history, earlier}` counting
+what the selection left out (shown to the model when not zero); the prompt
+(`process/prompts/entity_summaries`) asks for at most two sentences, third person, present tense, what the
+entry is now having been what its history shows, nothing the message does not say. The answers are mapped
+back by index. Nothing stops or is left out
 silently (ADR 0007, the incident of 2026-10-20 where one empty answer ended the stage as "completed" with 536
 summaries stale): a round whose answer leaves out an offered entry or group (or answers it empty) asks once
 more with the same prompt; what is still unanswered is skipped for this run (reported with the round's
@@ -311,9 +351,12 @@ stage) and never offered again in the run, and the loop goes on. A summary over 
 {summaries, labels, reasons}` (the skipped items still pending, plus what the budget did not reach:
 `budget_spent`, `not_reached`) and closes the run as `completed_with_gaps` when anything was left out; the
 run's answer then reads "Consolidated with gaps: …" followed by the end-user notice ("12 summaries could not be
-refreshed this time; they will be tried again next time."). Each round's summaries are one revision (`action: entity.summary`,
-`run_id` = the consolidation id, source client `consolidation`), so the summary history keeps every version
-and a rebuild replays it.
+refreshed this time; they will be tried again next time."). Each round's summaries are one
+revision (`action: entity.summary`, `run_id` = the consolidation id, source client `consolidation`), each op
+dated `as_of` = the entry's latest dated knowledge (its last mention, or its current summary's date when
+later): the new summary is current until a note dated later writes one, and a note dated between that
+knowledge and the consolidation is never hidden behind it. The summary history keeps every version and a
+rebuild replays it.
 
 The start pins are `budget_s` (default 3600: the loops stop starting rounds after it), `limit` (the reflect
 stage's insight limit, default 10), `thinking` (`on` or `off`, default `off`, wired to both model steps) and

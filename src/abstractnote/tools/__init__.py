@@ -192,9 +192,11 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
 
     @tool(name="note_communities_recompute",
           description="Find the groups of entities the notes keep together (no model); returns counts.")
-    def note_communities_recompute(resolution: Optional[float] = None) -> Dict[str, Any]:
-        """Run community detection over the entity graph and store it (resolution: above 1 for smaller groups)."""
-        return rec.note_communities_recompute(ctx, resolution)
+    def note_communities_recompute(resolution: Optional[float] = None, only_if_due: Optional[bool] = None
+                                   ) -> Dict[str, Any]:
+        """Run community detection over the entity graph and store it (resolution: above 1 for smaller groups;
+        only_if_due: only when the notes applied since the last time made it due, the end of a drain)."""
+        return rec.note_communities_recompute(ctx, resolution, only_if_due)
 
     @tool(name="note_communities_pending", description="Groups of entities that still need a name, with evidence.")
     def note_communities_pending(limit: int = 5, exclude: Optional[List[str]] = None) -> Dict[str, Any]:

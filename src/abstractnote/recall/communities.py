@@ -24,6 +24,15 @@ overlaps most; the recompute response lists every kept, carried and dropped labe
 
 The tables are derived, but the labels are the model's work, so ``Notebook.rebuild`` keeps them
 (``schema.KEPT_TABLES``).
+
+Cadence (ADR 0008 §5): any ingest can change the groups, so besides the consolidation (every run) and the reflect
+flow, every drain ends with :func:`refresh_if_due`, which recomputes (no model) when the batch made them due
+(:func:`due`): never computed yet, a note dated earlier than what was known applied since the last computation
+(``Notebook.retro_state``; one is enough), a note understood again (``note.reinterpret``) since then, or as many
+revisions as :data:`DUE_REVISIONS` (or :data:`DUE_REVISIONS_SHARE` of the revision log when that is more). Naming is
+the costly part and stays with the consolidation: a recompute keeps the label of every group that changed little
+and marks stale only the ones whose membership moved, and the answer says how many groups wait for a name and how
+many naming calls that is (``label_calls``, :data:`PENDING_LIMIT` groups per call).
 """
 
 from __future__ import annotations
@@ -48,6 +57,11 @@ PENDING_LIMIT = 5               # communities handed to the model per reflect ru
 PENDING_CLAIMS = 8              # strongest statements per pending community
 PENDING_EXCERPTS = 3            # representative notes per pending community
 LABEL_MAX_WORDS = 4
+DUE_RETRO_NOTES = 1             # retrospective notes since the last computation that make it due (ADR 0008 §5)
+DUE_REVISIONS = 20              # ... or revisions applied since then
+DUE_REVISIONS_SHARE = 0.10      # ... or this share of the revisions applied at the last computation, when more
+#: The revision that re-understands a note (ADR 0008 §1); any since the last computation makes it due.
+REINTERPRET_ACTION = "note.reinterpret"
 COMMUNITY_KINDS = ["project", "theme", "people", "tooling", "process", "other"]
 
 #: Structured output of the labelling step (top-level field ``communities``, so no other schema has the same
@@ -234,6 +248,7 @@ def recompute(nb: Any, resolution: Any = None) -> Dict[str, Any]:
         "SELECT entity_id, note_count FROM entities WHERE merged_into IS NULL")}
     now = ids.utc_now()
     revisions = _revision_count(nb)
+    seq_at = int(nb.store.q1("SELECT COALESCE(MAX(seq), 0) FROM revisions WHERE applied_index=1")[0])
     with nb._apply_lock, nb.store.tx() as c:
         prev = {r["community_id"]: r for r in c.execute("SELECT * FROM communities").fetchall()}
         prev_meta = nb.store.meta_get("communities") or {}
@@ -309,7 +324,7 @@ def recompute(nb: Any, resolution: Any = None) -> Dict[str, Any]:
             carry["dropped"] = [{"community_id": cid, "label": p["label"]} for cid, p in sorted(prev.items())
                                 if p["label"] and cid not in used]
         c.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('communities', ?)", (json.dumps({
-            "computed_at": now, "resolution": res, "revision_count_at_compute": revisions,
+            "computed_at": now, "resolution": res, "revision_count_at_compute": revisions, "seq_at_compute": seq_at,
             "loose_ends": len(found["loose"]), "entities": g.number_of_nodes(), "edges": g.number_of_edges(),
             "networkx": version}),))
     if carry is not None:
@@ -319,6 +334,81 @@ def recompute(nb: Any, resolution: Any = None) -> Dict[str, Any]:
     return {"communities": len(found["groups"]), "loose_ends": len(found["loose"]), "entities": g.number_of_nodes(),
             "edges": g.number_of_edges(), **counts, "resolution": res, "computed_at": now, "networkx": version,
             "carry_over": carry}
+
+
+# --------------------------------------------------------------------------- cadence
+
+
+def due(nb: Any) -> Dict[str, Any]:
+    """Whether the communities should be found again now (no writes): ``{due, reasons, computed_at,
+    revisions_since, retro_notes_since, reinterpreted_since, revisions_threshold}``. ``reasons`` lists
+    ``never_computed``, ``earlier_notes`` (notes dated earlier than what was known, applied since the last
+    computation: ``Notebook.retro_state``), ``reinterpreted`` (notes understood again since) and ``revisions``
+    (``revisions_since`` reached ``revisions_threshold``)."""
+    from ..store.notes import RETRO_META
+
+    s = nb.store
+    meta = s.meta_get("communities") or {}
+    meta = meta if isinstance(meta, dict) else {}
+    computed = meta.get("computed_at")
+    revisions = _revision_count(nb)
+    at_compute = int(meta.get("revision_count_at_compute") or 0)
+    since = max(0, revisions - at_compute) if computed else revisions
+    # "since the last computation" by the revision log's sequence (exact: a computation and a revision recorded in
+    # the same second are told apart); a computation stored before seq_at_compute existed falls back to the time,
+    # inclusive, so nothing applied after it is missed
+    seq_at = meta.get("seq_at_compute")
+
+    def after(seq: Any, recorded_at: Any) -> bool:
+        if not computed:
+            return True
+        if isinstance(seq_at, int) and seq is not None:
+            return int(seq) > seq_at
+        return str(recorded_at or "") >= str(computed)
+
+    seq_of = {r[0]: int(r[1]) for r in s.q("SELECT revision_id, seq FROM revisions WHERE applied_index=1")}
+    # the retrospective insertions logged by W23's marks (the events Notebook.retro_state counts by time)
+    state = s.meta_get(RETRO_META, {}) or {}
+    events = state.get("events") if isinstance(state, dict) else None
+    retro_notes = {ev.get("note_id") or ev.get("revision_id") for ev in events or []
+                   if isinstance(ev, dict) and after(seq_of.get(ev.get("revision_id") or ""), ev.get("recorded_at"))}
+    reint = sum(1 for r in s.q("SELECT seq, recorded_at FROM revisions WHERE applied_index=1 AND (action=? OR"
+                               " ops_json LIKE ?)", (REINTERPRET_ACTION, f'%"{REINTERPRET_ACTION}"%'))
+                if after(r[0], r[1]))
+    threshold = max(DUE_REVISIONS, int(math.ceil(at_compute * DUE_REVISIONS_SHARE)))
+    live = int(s.q1("SELECT COUNT(*) FROM entities WHERE merged_into IS NULL")[0])
+    reasons: List[str] = []
+    if not computed and live >= MIN_COMMUNITY_SIZE:
+        reasons.append("never_computed")
+    if computed and len(retro_notes) >= DUE_RETRO_NOTES:
+        reasons.append("earlier_notes")
+    if computed and reint:
+        reasons.append("reinterpreted")
+    if computed and since >= threshold:
+        reasons.append("revisions")
+    return {"due": bool(reasons), "reasons": reasons, "computed_at": computed, "revisions_since": since,
+            "retro_notes_since": len(retro_notes) if computed else 0, "reinterpreted_since": reint,
+            "revisions_threshold": threshold}
+
+
+def refresh_if_due(nb: Any, resolution: Any = None) -> Dict[str, Any]:
+    """The end of a drain or an import batch (ADR 0008 §5): recompute when :func:`due` says so. Returns ``{recomputed,
+    due, reasons, revisions_since, retro_notes_since, reinterpreted_since, labels_waiting, label_calls}`` plus, when
+    it recomputed, the :func:`recompute` answer (``communities``, ``new``, ``stale_labels``, ``unlabelled`` ...).
+    ``revisions_since`` is what made it due (counted before the computation). ``labels_waiting`` = the groups that
+    wait for a name (stale or none), ``label_calls`` = the naming calls that is for the next consolidation."""
+    state = due(nb)
+    out: Dict[str, Any] = {"recomputed": False, **state}
+    if state["due"]:
+        res = recompute(nb, resolution)
+        out.update(res)
+        out["recomputed"] = True
+        _log.info("communities recomputed after a batch (%s): %d groups, %d revisions since the last time",
+                  ", ".join(state["reasons"]), res["communities"], state["revisions_since"])
+    waiting = len(pending_ids(nb))
+    out["labels_waiting"] = waiting
+    out["label_calls"] = int(math.ceil(waiting / PENDING_LIMIT)) if waiting else 0
+    return out
 
 
 # --------------------------------------------------------------------------- reads

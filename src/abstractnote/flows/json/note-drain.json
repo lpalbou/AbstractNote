@@ -1315,8 +1315,8 @@
       "id": "r_processed",
       "type": "get_var",
       "position": {
-        "x": 1440.0,
-        "y": 640.0
+        "x": 2880.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "get_var",
@@ -1350,8 +1350,8 @@
       "id": "r_failed",
       "type": "get_var",
       "position": {
-        "x": 1440.0,
-        "y": 960.0
+        "x": 2880.0,
+        "y": 640.0
       },
       "data": {
         "nodeType": "get_var",
@@ -1385,8 +1385,8 @@
       "id": "r_errors",
       "type": "get_var",
       "position": {
-        "x": 1440.0,
-        "y": 1280.0
+        "x": 2880.0,
+        "y": 960.0
       },
       "data": {
         "nodeType": "get_var",
@@ -1417,10 +1417,174 @@
       }
     },
     {
-      "id": "report",
+      "id": "communities_args",
       "type": "code",
       "position": {
         "x": 1920.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Themes due?: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "only_if_due",
+            "label": "only_if_due",
+            "type": "boolean"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox",
+          "only_if_due": true
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif only_if_due is not None and only_if_due != \"\":\n    arguments[\"only_if_due\"] = only_if_due\nreturn {\"tool_calls\": [{\"name\": \"note_communities_recompute\", \"call_id\": \"communities\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "communities",
+      "type": "tool_calls",
+      "position": {
+        "x": 2400.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Themes due?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_communities_recompute"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_communities_recompute"
+          ]
+        }
+      }
+    },
+    {
+      "id": "communities_out",
+      "type": "code",
+      "position": {
+        "x": 2880.0,
+        "y": 1280.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Themes due?: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "recomputed",
+            "label": "recomputed",
+            "type": "boolean"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          },
+          {
+            "id": "failed",
+            "label": "failed",
+            "type": "boolean"
+          },
+          {
+            "id": "failure",
+            "label": "failure",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_communities_recompute returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_communities_recompute failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_communities_recompute returned something other than an object.\"\nif failure is not None:\n    return {\"failed\": True, \"failure\": failure}\nreturn dict(out, tool_output=out, failed=False, failure=None)\n"
+      }
+    },
+    {
+      "id": "report",
+      "type": "code",
+      "position": {
+        "x": 3360.0,
         "y": 320.0
       },
       "data": {
@@ -1446,6 +1610,21 @@
             "id": "errors",
             "label": "errors",
             "type": "array"
+          },
+          {
+            "id": "themes",
+            "label": "themes",
+            "type": "object"
+          },
+          {
+            "id": "themes_failed",
+            "label": "themes_failed",
+            "type": "boolean"
+          },
+          {
+            "id": "themes_failure",
+            "label": "themes_failure",
+            "type": "string"
           },
           {
             "id": "permissions",
@@ -1478,21 +1657,26 @@
             "id": "errors",
             "label": "errors",
             "type": "array"
+          },
+          {
+            "id": "communities",
+            "label": "communities",
+            "type": "object"
           }
         ],
         "pinDefaults": {
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "n = int(processed or 0)\nk = int(failed or 0)\nif n == 0 and k == 0:\n    msg = \"Nothing to process.\"\nelse:\n    msg = \"Processed \" + str(n) + (\" note.\" if n == 1 else \" notes.\")\n    if k:\n        msg = msg[:-1] + \"; \" + str(k) + (\" could not be processed.\" if k > 1 else \" could not be processed.\")\nreturn {\"message\": msg, \"processed\": n, \"failed\": k, \"errors\": list(errors or [])}\n"
+        "codeBody": "n = int(processed or 0)\nk = int(failed or 0)\nif n == 0 and k == 0:\n    msg = \"Nothing to process.\"\nelse:\n    msg = \"Processed \" + str(n) + (\" note.\" if n == 1 else \" notes.\")\n    if k:\n        msg = msg[:-1] + \"; \" + str(k) + (\" could not be processed.\" if k > 1 else \" could not be processed.\")\nc = dict(themes) if isinstance(themes, dict) else {}\nif themes_failed:\n    c = {\"recomputed\": False, \"error\": str(themes_failure or \"\")}\n    msg += \" The themes could not be updated: \" + str(themes_failure or \"no reason was given.\")\nelif c.get(\"recomputed\"):\n    g = int(c.get(\"communities\") or 0)\n    w = int(c.get(\"labels_waiting\") or 0)\n    msg += \" The themes were updated (\" + str(g) + (\" group\" if g == 1 else \" groups\")\n    msg += ((\", \" + str(w) + \" to name next time).\") if w else \").\")\nreturn {\"message\": msg, \"processed\": n, \"failed\": k, \"errors\": list(errors or []), \"communities\": c}\n"
       }
     },
     {
       "id": "end",
       "type": "on_flow_end",
       "position": {
-        "x": 2400.0,
-        "y": 320.0
+        "x": 3840.0,
+        "y": 640.0
       },
       "data": {
         "nodeType": "on_flow_end",
@@ -1522,6 +1706,11 @@
             "id": "errors",
             "label": "errors",
             "type": "array"
+          },
+          {
+            "id": "communities",
+            "label": "communities",
+            "type": "object"
           }
         ],
         "outputs": []
@@ -1922,6 +2111,41 @@
       "targetHandle": "exec-in"
     },
     {
+      "id": "e-drain_loop-done-communities_args-exec-in",
+      "source": "drain_loop",
+      "sourceHandle": "done",
+      "target": "communities_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-communities_args-tool_calls-communities-tool_calls",
+      "source": "communities_args",
+      "sourceHandle": "tool_calls",
+      "target": "communities",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-communities_args-exec-out-communities-exec-in",
+      "source": "communities_args",
+      "sourceHandle": "exec-out",
+      "target": "communities",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-communities-results-communities_out-results",
+      "source": "communities",
+      "sourceHandle": "results",
+      "target": "communities_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-communities-exec-out-communities_out-exec-in",
+      "source": "communities",
+      "sourceHandle": "exec-out",
+      "target": "communities_out",
+      "targetHandle": "exec-in"
+    },
+    {
       "id": "e-r_processed-value-report-processed",
       "source": "r_processed",
       "sourceHandle": "value",
@@ -1943,9 +2167,30 @@
       "targetHandle": "errors"
     },
     {
-      "id": "e-drain_loop-done-report-exec-in",
-      "source": "drain_loop",
-      "sourceHandle": "done",
+      "id": "e-communities_out-tool_output-report-themes",
+      "source": "communities_out",
+      "sourceHandle": "tool_output",
+      "target": "report",
+      "targetHandle": "themes"
+    },
+    {
+      "id": "e-communities_out-failed-report-themes_failed",
+      "source": "communities_out",
+      "sourceHandle": "failed",
+      "target": "report",
+      "targetHandle": "themes_failed"
+    },
+    {
+      "id": "e-communities_out-failure-report-themes_failure",
+      "source": "communities_out",
+      "sourceHandle": "failure",
+      "target": "report",
+      "targetHandle": "themes_failure"
+    },
+    {
+      "id": "e-communities_out-exec-out-report-exec-in",
+      "source": "communities_out",
+      "sourceHandle": "exec-out",
       "target": "report",
       "targetHandle": "exec-in"
     },
@@ -1976,6 +2221,13 @@
       "sourceHandle": "errors",
       "target": "end",
       "targetHandle": "errors"
+    },
+    {
+      "id": "e-report-communities-end-communities",
+      "source": "report",
+      "sourceHandle": "communities",
+      "target": "end",
+      "targetHandle": "communities"
     },
     {
       "id": "e-report-exec-out-end-exec-in",

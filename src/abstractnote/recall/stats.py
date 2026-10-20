@@ -1,10 +1,13 @@
 """What the notebook has accumulated (``GET /note/stats``, ``Notebook.stats``; backlog 0030).
 
-Every number is counted by SQLite from the stored records; no model is involved. History time is used for
-activity (a note's ``occurred_at``, a revision's ``at``, an entity's ``created_at``, a statement's
+Every number is counted by SQLite from the stored records; no model is involved. History time ("happened") is
+used for activity (a note's ``occurred_at``, a revision's ``at``, an entity's ``first_seen`` (its earliest mention,
+which moves back when an earlier note arrives; ``created_at`` only for an entity no note mentions), a statement's
 ``observed_at``, a supersession's ``valid_until``), so an import of old material fills the weeks it describes.
-Weeks are named by their Monday (``YYYY-MM-DD``), months ``YYYY-MM``; the weekly list covers every week from
-the earliest to the latest dated record, empty weeks included.
+System time ("recorded") is counted beside it where both matter: ``recorded_weekly`` counts the notes received and
+the revisions recorded each week, and ``span`` gives both ranges, so a page can say "47 notes from 2022, recorded
+this week". Weeks are named by their Monday (``YYYY-MM-DD``), months ``YYYY-MM``; each weekly list covers every
+week from its earliest to its latest record, empty weeks included.
 """
 
 from __future__ import annotations
@@ -28,12 +31,21 @@ def _map(rows: Any) -> Dict[str, int]:
     return {str(r[0]): int(r[1]) for r in rows}
 
 
-def _weeks(q: Any) -> List[Dict[str, Any]]:
-    series = {
+#: System time ("recorded"): what reached the notebook and what it did, by the week it happened to the notebook.
+_RECORDED = {
+    "notes_received": f"SELECT {_WEEK.format(col='received_at')} AS w, COUNT(*) {_NOTES} GROUP BY w",
+    "revisions_recorded": f"SELECT {_WEEK.format(col='recorded_at')} AS w, COUNT(*) FROM revisions"
+                          " WHERE applied_index=1 GROUP BY w",
+}
+
+
+def _weeks(q: Any, series: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
+    series = series or {
         "notes": f"SELECT {_WEEK.format(col='occurred_at')} AS w, COUNT(*) {_NOTES} GROUP BY w",
         "revisions": f"SELECT {_WEEK.format(col='at')} AS w, COUNT(*) FROM revisions WHERE applied_index=1"
                      " GROUP BY w",
-        "new_entities": f"SELECT {_WEEK.format(col='created_at')} AS w, COUNT(*) FROM entities"
+        # where the entity was first seen (history time), not when its creating revision ran
+        "new_entities": f"SELECT {_WEEK.format(col='COALESCE(first_seen, created_at)')} AS w, COUNT(*) FROM entities"
                         " WHERE merged_into IS NULL GROUP BY w",
         "claims_added": f"SELECT {_WEEK.format(col='observed_at')} AS w, COUNT(*) FROM claims GROUP BY w",
         "claims_superseded": f"SELECT {_WEEK.format(col='valid_until')} AS w, COUNT(*) FROM claims"
@@ -129,11 +141,14 @@ def stats(nb: Any, *, now: Optional[str] = None) -> Dict[str, Any]:
                         " AND julianday(?) - julianday(last_seen) >= ?"
                         " ORDER BY note_count DESC, last_seen DESC, entity_id LIMIT ?",
                         (now_n, QUIET_MIN_NOTES, now_n, SILENT_DAYS, QUIET_LIMIT))]
+    received = q1(f"SELECT MIN(received_at), MAX(received_at) {_NOTES}")
     return {
         "generated_at": now_n,
-        "span": {"first_note_at": span[0], "last_note_at": span[1]},
+        "span": {"first_note_at": span[0], "last_note_at": span[1], "first_received_at": received[0],
+                 "last_received_at": received[1]},
         "totals": totals,
         "activity_weekly": _weeks(q),
+        "recorded_weekly": _weeks(q, _RECORDED),
         "entities_by_kind": _map(q("SELECT kind, COUNT(*) FROM entities WHERE merged_into IS NULL GROUP BY kind"
                                    " ORDER BY 2 DESC, 1")),
         "top_entities": top,
