@@ -190,14 +190,18 @@ def flow_schemas() -> Dict[str, Dict[str, Any]]:
 
 
 def load_schemas() -> Dict[str, Dict[str, Any]]:
-    """The structured-output schemas: the core lane's when importable, checked against ours, plus
-    :func:`flow_schemas` (refused when the core lane defines one of them differently)."""
+    """The structured-output schemas every ``llm_call`` node is handed: the core lane's when importable, checked
+    against ours, plus :func:`flow_schemas` (refused when the core lane defines one of them differently), each made
+    :func:`abstractnote.process.schemas.strict` (every property required, an optional one nullable: FIX1). This is
+    the one place a schema reaches a model."""
     out = _core_schemas()
     for name, schema in flow_schemas().items():
         if name in out and _skeleton(out[name]) != _skeleton(schema):
             raise RuntimeError(f"{name} differs between abstractnote.process.schemas and its flow-side definition")
         out[name] = schema
-    return out
+    from ..process.schemas import strict
+
+    return {name: strict(schema) for name, schema in out.items()}
 
 
 def _core_schemas() -> Dict[str, Dict[str, Any]]:

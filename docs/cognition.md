@@ -164,9 +164,11 @@ answers `reuse` with no candidate. An answer is invalid when:
   `merge` without two of them) or decides a mention the note does not have. Until 2026-10-20 such a decision was
   applied in part (the mention was created as new with a warning); it is now invalid;
 - an index is answered twice in contradiction: a mention with two decisions, a statement with two relations or
-  once naming an existing statement and once none, a task once closing an open task and once none. One statement
-  linked to several existing ones with the same relation (or one task closing several) is valid; the first link
-  is applied.
+  once naming an existing statement and once none, a task once closing an open task and once none (null, an
+  empty string and an empty list are the same absent value). One statement linked to several existing ones with
+  the same relation (or one task closing several) is valid; the first link is applied and the others are named in
+  a `multi_link` revision warning ("multi_link: statement 0 was linked to 2 existing statements; only the link to
+  #3 (supersedes) was applied, the link to #5 was not."), never dropped silently (ADR 0007).
 
 note-process checks every extraction (per section) and every linking (per part) in a code node that runs the very
 source of `validate.py`: an invalid answer is asked once more with a fresh call (a linking: the same message
@@ -235,7 +237,10 @@ flowchart TD
   the queue instead." in `queue_errors`, not counted as a failure.
 - A lease lasts 15 minutes. Acknowledging a failure increments `attempts` and schedules a retry
   (after 1 minute, then after 10 minutes); the third failure sets the note to `failed`, visible in
-  the web app's queue panel with the error, and offers a manual retry.
+  the web app's queue panel with the error, and offers a manual retry. A note with no text to read (no words,
+  no title, no extracted file text: `process.context.note_sections` finds no section; note-process stops with
+  "The note has no text to read.") fails at its first failure: `note_queue_ack` checks the stored note, records
+  the reason in `queue_errors` and `last_error` and sets it `failed` at once, since no retry can give it text.
 - An expired lease (the drain stopped, for example on a gateway restart) is not taken over at once:
   the next drain that leases counts it as a failure ("Processing stopped before it finished.") with
   the same backoff, and a drain retakes the note once that backoff has passed. It counts toward the
@@ -505,13 +510,23 @@ models from them and repairs invalid output. Python mirrors live in `abstractnot
  "document_date": {"iso": "ISO date", "basis": "stated in the text", "quote": "the exact words"} or null}
 ```
 
-Fields with a default may be left out by the model (the runtime fills the default): in
-Extraction `aliases` ([]), `object_is_literal` (false), `certainty` (stated), `stance` (assert),
-`valid_from`, `valid_until`, `due`, `iso` and `document_date` (null; given only when the header says the note's
-date is approximate and the text states its own date); in Linking `candidate` (null),
-`merge_candidates` ([]), `name` (""), `kind` (null), `aliases` ([]), `reason` (""), `existing`
-(null), `closes_open_task` (null) and `evidence` ("": a close without it is not applied). `claims` lists only the statements that relate to an
-existing one (a statement left out is `new`) and `tasks` only those that close an open task.
+**Every schema a model is handed is strict** (`process.schemas.strict`, applied once in `flows.build.load_schemas`,
+the source of every `llm_call` node's `resp_schema`): every property of every object, nested objects and array
+items included, is listed in `required`; a property that has a default in the definitions below becomes nullable
+(`"type": ["<t>", "null"]`, and `null` joins an enumeration), its description says "null when not applicable" (or
+"null when empty", `null means "stated"`), and its `default` is dropped. The model writes every field, null when it
+has nothing to say, and the parsing reads null as the default (the pydantic mirrors' `_null_means_default`;
+`validate.py` reads null as absent). Why: a remote structured-output decoder (OVH) writes an object's properties in
+alphabetical order and skips the optional ones (see "Validity" above). `tests/test_strict_schemas.py` fails on any
+sent schema with a property outside `required`, checks the schema AbstractCore's openai-compatible provider sends
+(the runtime's pydantic model, `model_json_schema()`), and compiles each schema with Outlines, the local MLX
+provider's constrained decoding. The nullable fields: in Extraction `aliases` (null = []), `object_is_literal`
+(false), `certainty` (stated), `stance` (assert), `valid_from`, `valid_until`, `due`, `iso` and `document_date`
+(null; given only when the header says the note's date is approximate and the text states its own date); in
+Linking `candidate`, `merge_candidates` ([]), `name` (""), `kind`, `aliases` ([]), `reason` (""), `existing`,
+`closes_open_task` and `evidence` ("": a close without it is not applied); in EntitySummaries `ties` ([]). `claims`
+lists only the statements that relate to an existing one (a statement left out is `new`) and `tasks` only those
+that close an open task.
 
 **Linking** (indexes refer to the candidate lists in the context packet; enumerations are JSON
 Schema enums)

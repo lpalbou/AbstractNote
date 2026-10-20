@@ -413,6 +413,9 @@ class _Builder:
         by_index: Dict[int, schemas.ClaimLink] = {}
         for lc in link.claims:
             by_index.setdefault(lc.index, lc)
+        self.extra_links("statement", "existing statements",
+                         [(lc.index, lc.relation_to_existing, lc.existing) for lc in link.claims],
+                         "only the link to #{first} ({relation}) was applied")
         for lc in link.claims:
             if not (0 <= lc.index < len(ext.claims)):
                 self.warnings.append(f"The linking named statement {lc.index}, which the extraction does not have.")
@@ -550,6 +553,27 @@ class _Builder:
                 elif relation == "new":
                     self.parallel_belief(i, payload)
 
+    def extra_links(self, what: str, targets: str, links: List[Tuple[int, str, Optional[int]]], applied: str) -> None:
+        """ADR 0007: one statement (or task) linked to SEVERAL existing statements (open tasks) is a valid answer
+        (validate.py), but the builder applies one link per index, the first; every other target is said in a
+        ``multi_link`` warning, never dropped silently. Identical repeats are not counted."""
+        seen: Dict[int, List[Tuple[str, Optional[int]]]] = {}
+        for index, relation, target in links:
+            if target is None:
+                continue
+            got = seen.setdefault(index, [])
+            if (relation, target) not in got:
+                got.append((relation, target))
+        for index, got in seen.items():
+            if len(got) < 2:
+                continue
+            first_rel, first = got[0]
+            rest = ", ".join(f"#{t} ({r})" if r != first_rel else f"#{t}" for r, t in got[1:])
+            self.warnings.append(f"multi_link: {what} {index} was linked to {len(got)} {targets}; "
+                                 + applied.format(first=first, relation=first_rel)
+                                 + f", the link{'s' if len(got) > 2 else ''} to {rest} {'were' if len(got) > 2 else 'was'}"
+                                 " not.")
+
     # ---------------------------------------------------------------- reinforcement by an earlier note
     def reinforce(self, claim_id: str, payload: Dict[str, Any], i: int, reason: str) -> None:
         """``claim.reinforce`` of an existing belief; from a note OLDER than it, the belief's start moves back to
@@ -668,6 +692,8 @@ class _Builder:
         by_index: Dict[int, schemas.TaskLink] = {}
         for lt in link.tasks:
             by_index.setdefault(lt.index, lt)
+        self.extra_links("task", "open tasks", [(lt.index, "closes", lt.closes_open_task) for lt in link.tasks],
+                         "only open task #{first} was considered for closing")
         closed: set = set()
         for i, t in enumerate(ext.tasks):
             if not t.text.strip():

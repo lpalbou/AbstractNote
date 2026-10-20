@@ -8319,12 +8319,14 @@
                       "description": "index of the entry in the list"
                     },
                     "ties": {
-                      "type": "array",
+                      "type": [
+                        "array",
+                        "null"
+                      ],
                       "items": {
                         "type": "string"
                       },
-                      "description": "each project, organisation or person a note marked new ties the entry to, with the entry's role in it and its date; empty when no note is new",
-                      "default": []
+                      "description": "each project, organisation or person a note marked new ties the entry to, with the entry's role in it and its date; empty when no note is new; null when empty"
                     },
                     "summary": {
                       "type": "string",
@@ -8333,6 +8335,7 @@
                   },
                   "required": [
                     "index",
+                    "ties",
                     "summary"
                   ]
                 }
@@ -8632,12 +8635,14 @@
                       "description": "index of the entry in the list"
                     },
                     "ties": {
-                      "type": "array",
+                      "type": [
+                        "array",
+                        "null"
+                      ],
                       "items": {
                         "type": "string"
                       },
-                      "description": "each project, organisation or person a note marked new ties the entry to, with the entry's role in it and its date; empty when no note is new",
-                      "default": []
+                      "description": "each project, organisation or person a note marked new ties the entry to, with the entry's role in it and its date; empty when no note is new; null when empty"
                     },
                     "summary": {
                       "type": "string",
@@ -8646,6 +8651,7 @@
                   },
                   "required": [
                     "index",
+                    "ties",
                     "summary"
                   ]
                 }

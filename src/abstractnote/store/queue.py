@@ -178,11 +178,12 @@ class Queue:
                               "lease_until": until})
         return {"items": items, "limit_applied": n}
 
-    def _fail(self, c: Any, note_id: str, failures: int, error: str, now: str) -> Dict[str, Any]:
+    def _fail(self, c: Any, note_id: str, failures: int, error: str, now: str, *,
+              final: bool = False) -> Dict[str, Any]:
         row = c.execute("SELECT attempts FROM queue WHERE note_id=?", (note_id,)).fetchone()
         c.execute("INSERT INTO queue_errors(note_id, attempt, at, error) VALUES (?,?,?,?)",
                   (note_id, int(row["attempts"]) if row else 0, now, error))
-        if failures >= MAX_FAILURES:
+        if final or failures >= MAX_FAILURES:
             c.execute("UPDATE queue SET state='failed', failures=?, last_error=?, failed_at=?, leased_by=NULL,"
                       " lease_until=NULL, next_attempt_at=NULL, inline_run_id=NULL, inline_until=NULL"
                       " WHERE note_id=?", (failures, error, now, note_id))
@@ -196,7 +197,10 @@ class Queue:
         return {"note_id": note_id, "status": "queued", "next_attempt_at": nxt}
 
     def ack(self, note_id: str, outcome: str, error: Optional[str] = None, revision_id: Optional[str] = None, *,
-            now: Optional[str] = None) -> Dict[str, Any]:
+            now: Optional[str] = None, final: bool = False) -> Dict[str, Any]:
+        """The outcome of processing ``note_id``. A failure is retried with backoff up to :data:`MAX_FAILURES`; a
+        ``final`` one (a cause no retry can change, such as a note with no text to read) marks it ``failed`` at
+        once, its reason in ``queue_errors`` and ``last_error`` like any other (B item 11, FIX1)."""
         if outcome not in ("ok", "error"):
             raise ValueError("The outcome must be ok or error.")
         now = now or ids.utc_now()
@@ -217,7 +221,8 @@ class Queue:
                 return {"note_id": note_id, "status": "processed"}
             if row["state"] == "done":
                 return {"note_id": note_id, "status": "processed"}
-            return self._fail(c, note_id, int(row["failures"]) + 1, str(error or "Processing failed."), now)
+            return self._fail(c, note_id, int(row["failures"]) + 1, str(error or "Processing failed."), now,
+                              final=final)
 
     def retry(self, note_id: str, *, now: Optional[str] = None) -> Dict[str, Any]:
         """Re-queue a failed note (user action from the queue panel)."""

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .. import ids
 from ..ingest.dates import date_basis, is_approximate
@@ -307,12 +307,14 @@ def note_parts(text: str, source: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [{"source": "note", "author": author, "text": text}]
 
 
-def note_context(nb: Any, note_id: str, max_chars: Optional[int] = None) -> Dict[str, Any]:
+def note_sections(nb: Any, note_id: str, max_chars: Optional[int] = None) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """The sections note-process reads (its text, its answer part, its attachments' extracted text, else its title)
+    and the texts they come from. No section = the note has no text to read: note-process stops at once and the
+    queue records that failure as final (``tools.queue.note_queue_ack``), since no retry can change it."""
     row = nb.store.note_row(note_id)
     if row is None:
         raise ValueError("That note is not in this notebook.")
     budget = int(max_chars) if max_chars else DEFAULT_SECTION_CHARS
-    atts = nb.store.attachments_of(note_id)
     source = json.loads(row["source_json"] or "{}")
     secs: List[Dict[str, Any]] = []
     for part in note_parts(row["text"] or "", source):
@@ -320,7 +322,7 @@ def note_context(nb: Any, note_id: str, max_chars: Optional[int] = None) -> Dict
             secs.append({"index": len(secs), "source": part["source"], "author": part["author"],
                          "chars": s["chars"], "text": s["text"]})
     full_text = [row["title"] or "", row["text"] or ""]
-    for a in atts:
+    for a in nb.store.attachments_of(note_id):
         path = nb.root / "extracted" / f"{a['sha256']}.txt"
         if not (a["extracted_chars"] and path.exists()):
             continue
@@ -331,6 +333,14 @@ def note_context(nb: Any, note_id: str, max_chars: Optional[int] = None) -> Dict
                          "chars": s["chars"], "text": s["text"]})
     if not secs and row["title"]:
         secs.append({"index": 0, "source": "title", "chars": len(row["title"]), "text": row["title"]})
+    return secs, full_text
+
+
+def note_context(nb: Any, note_id: str, max_chars: Optional[int] = None) -> Dict[str, Any]:
+    secs, full_text = note_sections(nb, note_id, max_chars)
+    row = nb.store.note_row(note_id)
+    atts = nb.store.attachments_of(note_id)
+    source = json.loads(row["source_json"] or "{}")
 
     about = json.loads(row["about_json"]) if row["about_json"] else None
     note = {

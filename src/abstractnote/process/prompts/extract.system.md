@@ -8,11 +8,11 @@ Return one JSON object with these fields:
 - `tasks`: things to do (`open`) and things reported done (`done`), with a `due` date when one is given, else null;
 - `time_refs`: explicit time references ("last Tuesday", "in 2024") with their `iso` date when the note's own date resolves them, else null;
 - `topics`: one to three topics this text is about; reuse an existing topic only when it names exactly that.
-- `document_date`: only when the last line says the note's date is approximate AND this text itself states when it was written: a dated letter, a report's date line, minutes or notes headed by the date of the meeting they record, "written on 3 March 2021"; a heading or first line that is a title with a date (`Minutes, 2 May 2020`, `Date: 2 July 2019`) is such a date: `{"iso": "2021-03-03", "basis": "stated in the text", "quote": "<the exact words that state it>"}` (`iso` is `YYYY-MM` or `YYYY` when the text gives only a month or a year). Otherwise leave it out. Never derive it from a date the text talks about (a deadline, an event), only from the date the text gives itself.
+- `document_date`: only when the last line says the note's date is approximate AND this text itself states when it was written: a dated letter, a report's date line, minutes or notes headed by the date of the meeting they record, "written on 3 March 2021"; a heading or first line that is a title with a date (`Minutes, 2 May 2020`, `Date: 2 July 2019`) is such a date: `{"iso": "2021-03-03", "basis": "stated in the text", "quote": "<the exact words that state it>"}` (`iso` is `YYYY-MM` or `YYYY` when the text gives only a month or a year). Otherwise null. Never derive it from a date the text talks about (a deadline, an event), only from the date the text gives itself.
 
 Kinds: person = a human, or an AI agent or seat that writes, decides or acts (a message's author is one); org = a company, team or group; project = a body of work with a goal; concept = an idea, method, rule or topic; place = a location; event = something that happens at a time; artifact = a document, dataset, file, repository or message; software = a program, package, library, service or tool; thing = anything else.
 
-Leave out a field that has its default: `object_is_literal` false, `certainty` stated, `stance` assert, `valid_from`, `valid_until`, `due`, `iso` and `document_date` null, `aliases` empty.
+Every field is written, null when not applicable: null stands for `object_is_literal` false, `certainty` stated, `stance` assert and `aliases` empty, and `valid_from`, `valid_until`, `due`, `iso` and `document_date` are null when the note gives none.
 
 Predicate vocabulary (use one of these CURIEs when it fits; otherwise write `ex:snake_case`):
 {{vocabulary}}
@@ -31,7 +31,7 @@ Rules:
 - A text that names things always has mentions; empty lists are only for a text that names nothing.
 - A text labelled "Answer by …" is what that author (usually an assistant) said in reply to the note's author: write its statements with `certainty: reported`, never as the note author's own.
 
-The answer has this shape (values are illustrations):
+The answer has this shape (values are illustrations; a field the illustration leaves out is written null):
 {"summary": "Dana asked for the LUT Pareto by Friday.", "mentions": [{"ref": "m1", "name": "Dana", "kind": "person", "role": "asks for the Pareto"}, {"ref": "m2", "name": "LUT", "kind": "project", "aliases": ["the LUT work"], "role": "the project the Pareto is for"}, {"ref": "m3", "name": "Pareto", "kind": "artifact", "role": "the chart Dana wants"}], "claims": [{"subject": "m1", "predicate": "ex:asked_for", "object": "m3", "evidence": "Dana wants the Pareto"}, {"subject": "m3", "predicate": "schema:about", "object": "m2", "evidence": "the LUT Pareto"}, {"subject": "m3", "predicate": "ex:deadline", "object": "2026-10-23", "object_is_literal": true, "certainty": "probable", "evidence": "by Friday, I think"}], "tasks": [{"text": "Send Dana the LUT Pareto", "status": "open", "due": "2026-10-23"}], "time_refs": [{"text": "Friday", "iso": "2026-10-23"}], "topics": ["lut"]}
 
 Output JSON only, matching the schema, written compactly on one line (no indentation).

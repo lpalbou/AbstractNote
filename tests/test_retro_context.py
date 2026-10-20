@@ -535,7 +535,7 @@ def test_the_prompts_cover_the_live_failures_reuse_index_slot_links_and_qualifyi
     from abstractnote.process.prompts import system_prompt
 
     link = system_prompt("link")
-    assert "Never leave out `candidate` for `reuse` or `unsure`" in link and "0 (the first candidate) is an index" in link
+    assert "`candidate` is never null for `reuse` or `unsure`" in link and "0 (the first candidate) is an index" in link
     assert "leave out `candidate`," not in link
     assert "is still reused by its index" in link
     assert "is never `new`: link it to that statement" in link and "one belief per fact at a time" in link

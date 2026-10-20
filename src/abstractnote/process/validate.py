@@ -27,7 +27,12 @@ The checks are structural, never about meaning (ADR 0004):
   ``{"index": 2, "existing": null}`` beside ``{"index": 2, "existing": 2}``); a task index once closing an open
   task and once closing none. The same relation to SEVERAL existing statements (or one task closing several open
   ones) is one statement linked to many, not a corruption (the watch's "new deadline" superseding three
-  deadlines): it stays valid, and the builder applies the first link.
+  deadlines): it stays valid; the builder applies the first link and names the others in a ``multi_link``
+  revision warning (ADR 0007).
+
+The schemas a model is handed are strict (every property required, an optional one nullable: ``schemas.strict``),
+so an answer carries null where it has nothing to say: null reads as absent here (an entry that differs from its
+twin only by null against an empty value is the same answer).
 
 The functions below the constants are copied into the note-process flow's code nodes (``flows/build.py``
 ``validate_code``), so the flow and the apply step run the very same source; they use no annotations and no
@@ -82,7 +87,11 @@ def _is_index(value, count):
 
 def _same_twice(items, key, what, problems, fields=None, target=None):
     """An index answered twice in contradiction: any difference (``fields`` None), else a difference in one of
-    ``fields`` or a ``target`` named by one entry and left empty by the other. Each index is reported once."""
+    ``fields`` or a ``target`` named by one entry and left empty by the other. Each index is reported once. Null,
+    an empty string and an empty list are the same absent value."""
+    def present(entry):
+        return {f: v for f, v in entry.items() if v is not None and v != "" and v != []}
+
     seen = {}
     reported = set()
     for it in items:
@@ -92,7 +101,7 @@ def _same_twice(items, key, what, problems, fields=None, target=None):
         if k in seen and k not in reported:
             first = seen[k]
             if fields is None:
-                bad = first != it
+                bad = present(first) != present(it)
             else:
                 bad = any(first.get(f) != it.get(f) for f in fields)
                 if target is not None and (first.get(target) is None) != (it.get(target) is None):
