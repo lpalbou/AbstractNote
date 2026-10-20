@@ -2,10 +2,9 @@
 
 Topics are stored under their canonical name since processing assigns them so (``NoteStore.assign_topic``);
 topics stored earlier keep their old spelling. :func:`plan` groups the stored topics that are one topic: the same
-:func:`abstractnote.ids.canonical_name` (``bug-fix``, ``Bug_Fix``, ``bug fix``), and a plural whose last word ends
-in ``s`` or ``es`` when the singular is itself a stored topic (``bug_fixes`` -> ``bug_fix``; the singular's last
-word must keep at least :data:`PLURAL_MIN_STEM` letters, so ``is`` never folds into ``i``). That is spelling,
-not meaning: anything else (``gateway`` versus ``abstractgateway``) is not merged here (ADR 0004).
+:func:`abstractnote.ids.canonical_name` (``bug-fix``, ``Bug_Fix``, ``bug fix``): case, ``-``, ``_`` and
+whitespace only. That is spelling, not meaning: no word rule decides that two topics are one (ADR 0004), so a
+plural (``bug_fixes`` and ``bug_fix``) and a prefix (``gateway`` and ``abstractgateway``) stay two topics.
 """
 
 from __future__ import annotations
@@ -15,27 +14,16 @@ from typing import Any, Dict, List, Optional
 from .. import ids
 
 ACTION = "topic.normalize"
-PLURAL_MIN_STEM = 3
-
-
-def _singular(key: str, keys: set) -> str:
-    last = key.rsplit("_", 1)[-1]
-    for cut in (1, 2):
-        stem = key[:-cut]
-        if last.endswith("s" if cut == 1 else "es") and len(last) - cut >= PLURAL_MIN_STEM and stem in keys:
-            return stem
-    return key
 
 
 def plan(store: Any) -> List[Dict[str, Any]]:
     """``[{into, from: [stored spellings], notes}]``: every stored topic that is not yet its group's one name."""
     topics = [r[0] for r in store.q("SELECT DISTINCT topic FROM note_topics ORDER BY topic")]
-    keys = {ids.canonical_name(t) for t in topics if ids.canonical_name(t)}
     groups: Dict[str, List[str]] = {}
     for t in topics:
         key = ids.canonical_name(t)
         if key:
-            groups.setdefault(_singular(key, keys), []).append(t)
+            groups.setdefault(key, []).append(t)
     out = []
     for into, members in sorted(groups.items()):
         variants = sorted(m for m in members if m != into)

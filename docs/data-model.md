@@ -208,9 +208,9 @@ A topic is stored under its canonical name (the entity rule: `Bug-Fix`, `bug fix
 `bug_fix`), and processing keeps the first 3 topics the model lists for a note (`TOPICS_PER_NOTE`; a
 user revision is not capped). The extraction packet lists the 50 most used topics. Topics stored before
 that keep their spelling until `abstractnote normalize-topics --notebook DIR [--dry-run]` gives each
-group one name in ONE revision (`topic.unassign` + `topic.assign`): the same canonical name, and a
-plural whose last word ends in `s` or `es` when the singular is itself a stored topic (`bug_fixes` ->
-`bug_fix`). That is spelling, not meaning: `gateway` and `abstractgateway` stay two topics. Search and
+group one name in ONE revision (`topic.unassign` + `topic.assign`): the same canonical name (case,
+`-`, `_` and whitespace). That is spelling, not meaning: no word rule decides that two topics are one
+(ADR 0004), so `bug_fixes` and `bug_fix`, or `gateway` and `abstractgateway`, stay two topics. Search and
 note lists filter by a topic's given and canonical spelling.
 
 ## Task

@@ -460,7 +460,7 @@ class Notebook:
 
     def normalize_topics(self, account: Optional[str] = None, *, client: str = "cli", dry_run: bool = False
                          ) -> Dict[str, Any]:
-        """Give every topic one spelling (its canonical name; plurals of a stored singular), in one revision
+        """Give every topic one spelling (its canonical name: case, -, _ and whitespace only), in one revision
         (``abstractnote normalize-topics``; :mod:`abstractnote.store.topics`)."""
         from .topics import normalize_topics
 

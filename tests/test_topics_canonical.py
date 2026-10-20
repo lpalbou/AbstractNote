@@ -1,6 +1,7 @@
 """Topics stop fragmenting (eval2 D13): a topic is stored under its canonical name, a note keeps at most
-TOPICS_PER_NOTE topics (the first the model lists), ``abstractnote normalize-topics`` merges the -/_/case and
-plural variants already stored (one revision), and the extraction packet lists the top-50 existing topics."""
+TOPICS_PER_NOTE topics (the first the model lists), ``abstractnote normalize-topics`` merges the -/_/case
+variants already stored (one revision; never a plural or any other word rule, ADR 0004), and the extraction
+packet lists the top-50 existing topics."""
 
 from __future__ import annotations
 
@@ -34,7 +35,7 @@ def _legacy(nb, note_id, topic):  # a topic stored before canonical names
         nb.store.refresh_topic(c, topic)
 
 
-def test_normalize_topics_merges_spelling_and_plural_variants_in_one_revision(nb):
+def test_normalize_topics_merges_spelling_variants_in_one_revision_and_never_plurals(nb):
     a, b, c, d = (nb.capture(f"note {i}", occurred_at=AT).note_id for i in range(4))
     _legacy(nb, a, "bug-fix")
     _legacy(nb, b, "bug_fix")
@@ -42,19 +43,21 @@ def test_normalize_topics_merges_spelling_and_plural_variants_in_one_revision(nb
     _legacy(nb, c, "Bug-Fix")
     _legacy(nb, d, "scifi-novel")
     _legacy(nb, d, "memory")
+    _legacy(nb, d, "memories")
     plan = nb.normalize_topics(dry_run=True)
     groups = {g["into"]: sorted(g["from"]) for g in plan["groups"]}
-    assert groups == {"bug_fix": ["Bug-Fix", "bug-fix", "bug_fixes"], "scifi_novel": ["scifi-novel"]}
+    # A plural is a word rule, not spelling: bug_fixes and memories stay their own topics (ADR 0004).
+    assert groups == {"bug_fix": ["Bug-Fix", "bug-fix"], "scifi_novel": ["scifi-novel"]}
     assert nb.store.note_topics(c) == ["Bug-Fix", "bug_fixes"]  # a dry run changes nothing
     out = nb.normalize_topics(account="me")
     assert out["revision_id"] and nb.revision(out["revision_id"])["source"]["account"] == "me"
-    assert [nb.store.note_topics(x) for x in (a, b, c, d)] == [["bug_fix"], ["bug_fix"], ["bug_fix"],
-                                                              ["memory", "scifi_novel"]]
-    assert {t["topic"]: t["note_count"] for t in nb.topics()["items"]} == {"bug_fix": 3, "memory": 1,
-                                                                           "scifi_novel": 1}
+    assert [nb.store.note_topics(x) for x in (a, b, c, d)] == [["bug_fix"], ["bug_fix"], ["bug_fix", "bug_fixes"],
+                                                              ["memories", "memory", "scifi_novel"]]
+    assert {t["topic"]: t["note_count"] for t in nb.topics()["items"]} == {
+        "bug_fix": 3, "bug_fixes": 1, "memories": 1, "memory": 1, "scifi_novel": 1}
     assert nb.normalize_topics()["groups"] == []
-    nb.rebuild()
-    assert nb.store.note_topics(c) == ["bug_fix"]
+    nb.rebuild()  # the revision replays (the legacy rows were written without one)
+    assert "bug_fix" in nb.store.note_topics(c)
 
 
 def test_the_extraction_packet_lists_the_top_50_topics():
