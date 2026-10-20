@@ -177,7 +177,12 @@ linking answer was malformed twice (the summary of “Zorn Labs” holds a piece
 (reason":)); nothing from it was applied."), which the drain acknowledges as a failed attempt (`queue_errors`,
 the usual backoff and three-failure rule). `note_apply_revision` checks the merged answers again and refuses an
 invalid one with the same sentence, so nothing of a corrupt answer is ever applied in part, whoever calls it.
-Measured on the 2026-10-20 ledgers (gw18080, read-only): retro-B 14 of 27 link answers invalid (3 fragments, 11
+The known source (2026-10-20, OVH `gpt-oss-120b` with AbstractCore's native `response_format: json_schema`): the
+server's constrained decoding writes an object's properties in alphabetical order and lets the model skip the
+optional ones, so a `reuse` written before its `candidate` loses the candidate, and a `reason` the model wants after
+`summary` (the last key) can only go inside the summary string. With every property listed as required (optional
+ones nullable) the same calls came back sound (6 of 6 notes, no retry). Measured on the 2026-10-20 ledgers
+(gw18080, read-only): retro-B 14 of 27 link answers invalid (3 fragments, 11
 candidate-less reuses, 2 contradicting duplicates), retro-A 17 of 23, the watch 0 of 10, the 1,000-note import 12
 of 1,446 (0.8 %); no extraction answer invalid (0 of 1,495); no fragment found in a quoted field.
 
