@@ -18,8 +18,9 @@ from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional
 
 BULK_PRIORITY = 0
 # ``source.origin.date_basis`` values whose ``occurred_at`` is an approximation of when the thing
-# happened (a session start, a last edit, a commit, a file date) rather than its own timestamp.
-APPROXIMATE_BASES = frozenset({"origin_session", "front_matter_modified", "git_added", "file_mtime",
+# happened (a session start, a last edit, a commit, a bulk import commit, a file date) rather than its own
+# timestamp.
+APPROXIMATE_BASES = frozenset({"origin_session", "front_matter_modified", "git_added", "bulk_commit", "file_mtime",
                                "store_updated", "last_record"})
 
 

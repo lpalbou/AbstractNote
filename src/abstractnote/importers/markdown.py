@@ -2,10 +2,14 @@
 
 The whole file is the note text (front matter and headings kept). ``occurred_at`` = a date in the
 front matter (``date``, ``created``, ``created_at``), else a ``Created:`` field line anywhere in
-the file, else a ``Date:`` field line in its first 40 lines (``- **Created:** 2026-09-12``, ``Date:
-2026-06-03``: a labelled metadata line, list marker and bold allowed, the value starting with an ISO
-date), else the commit that first added the file following moves (``git log --follow
---diff-filter=A``), else the file's modification time; ``source.origin.date_basis`` says which. A
+the file (or the commit that first added the file, when that is earlier: basis ``git_added``), else a
+``Date:`` field line in its first 40 lines (``- **Created:** 2026-09-12``, ``Date: 2026-06-03``: a
+labelled metadata line, list marker and bold allowed, the value starting with an ISO date), else the
+commit that first added the file following moves (``git log --follow --diff-filter=A``), else the
+file's modification time; ``source.origin.date_basis`` says which. A commit that added
+:data:`BULK_COMMIT_FILES` or more files in the same second is a bulk import, not a date: such a file
+without a field line takes the earlier of its modification time and that commit, basis ``bulk_commit``
+(approximate). A
 ``Completed:`` field line is kept as written in ``source.origin.completed``. ``source.origin`` =
 ``{repo, path, blob_sha, commit, added_as}`` when the tree is a git checkout. The source key
 includes the content hash: an edited file imported again is a new note that revisits the earlier
@@ -17,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import re
 import subprocess
+from collections import Counter
 from pathlib import Path
 from typing import Dict, Iterator, Optional, Tuple
 
@@ -27,6 +32,7 @@ IMPORTER = "markdown"
 DATE_KEYS = ("date", "created", "created_at", "Date", "Created")
 SKIPPED_DIRS = frozenset({".git", "node_modules", ".venv", "venv", "dist", "build", "__pycache__"})
 DATE_LINE_HEAD = 40  # a ``Date:`` line counts only near the top (later ones date completion reports)
+BULK_COMMIT_FILES = 10  # files first added in the same commit second: an import commit, not a creation date
 # A labelled metadata line (structure, not meaning): optional list marker and bold/italic markers
 # around the label, then a value that starts with an ISO date (optionally a time).
 _FIELD = re.compile(r"^\s*(?:[-*+]\s+)?[*_]{0,2}(created|date|completed)[*_]{0,2}\s*:\s*[*_]{0,2}\s*"
@@ -126,6 +132,7 @@ def drafts(*, report: ImportReport, path: str | Path, glob: str = "**/*.md", sin
     if not root.is_dir():
         raise ValueError(f"There is no folder at {path}.")
     toplevel, blobs, first = _git_index(root)
+    per_second = Counter(added[1] for added in first.values())
     repo = toplevel.name if toplevel else root.name
     for file in sorted(root.glob(glob)):
         if not file.is_file():
@@ -143,13 +150,19 @@ def drafts(*, report: ImportReport, path: str | Path, glob: str = "**/*.md", sin
         rel = file.relative_to(toplevel).as_posix() if toplevel else rel_root
         commit = first.get(rel)
         fields = _fields(text)
+        bulk = bool(commit) and per_second[commit[1]] >= BULK_COMMIT_FILES
+        committed = iso_utc(commit[1]) if commit else None
         occurred, basis = _date_from_front_matter(fm), "front_matter"
         if occurred is None and fields.get("created"):
             occurred, basis = _iso_day(fields["created"]), "created_line"
+            if occurred and committed and not bulk and committed < occurred:
+                occurred, basis = committed, "git_added"  # in the repository before its stated creation
         if occurred is None and fields.get("date"):
             occurred, basis = _iso_day(fields["date"]), "date_line"
-        if occurred is None and commit:
-            occurred, basis = iso_utc(commit[1]), "git_added"
+        if occurred is None and committed and not bulk:
+            occurred, basis = committed, "git_added"
+        if occurred is None and committed:
+            occurred, basis = min(iso_from_epoch(file.stat().st_mtime), committed), "bulk_commit"
         if occurred is None:
             occurred, basis = iso_from_epoch(file.stat().st_mtime), "file_mtime"
         if not in_window(occurred, since, until):
