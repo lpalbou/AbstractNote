@@ -127,7 +127,7 @@ def test_note_file_sets_kind_topics_and_priority(nb):
                        urgency="urgent", language="en", one_line="Send the Pareto by Friday.")
     assert out == {"note_id": r.note_id, "priority": 3, "status": "queued"}
     note = nb.note(r.note_id)
-    assert note["topics"] == ["lut", "release-work"] and note["kind"] == "task"
+    assert note["topics"] == ["lut", "release_work"] and note["kind"] == "task"  # canonical topic names (eval2 D13)
     assert nb.queue.item(r.note_id)["priority"] == 3
     explicit = nb.capture("bulk import", priority=0)
     assert nb.file_note(explicit.note_id, urgency="urgent")["priority"] == 0
