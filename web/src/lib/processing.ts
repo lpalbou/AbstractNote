@@ -221,7 +221,23 @@ export function stateLine(p: Processing): { tone: StateTone; text: string } {
     const every = everyWords(p.processor.schedule?.every);
     return { tone: "idle", text: [waitingWords(queued), every ? `the notebook looks ${every}` : ""].filter(Boolean).join(" · ") };
   }
+  const gaps = consolidationGapsWords(p.consolidation?.last);
+  if (gaps) return { tone: "idle", text: `Consolidated with gaps · ${gaps}` };
   return { tone: "idle", text: "Up to date · everything you sent is understood" };
+}
+
+/** What the last consolidation left for the next one, in words ("12 summaries to try again next time"); "" when nothing. */
+export function consolidationGapsWords(last: Consolidation["last"] | null | undefined): string {
+  if (!last || last.status !== "completed_with_gaps") return "";
+  const s = Math.max(0, Number(last.left_out?.summaries) || 0);
+  const g = Math.max(0, Number(last.left_out?.labels) || 0);
+  const parts = [s ? plural(s, "summary", "summaries") : "", g ? plural(g, "theme name", "theme names") : ""].filter(Boolean);
+  return parts.length ? `${parts.join(" and ")} to try again next time` : "some work to try again next time";
+}
+
+/** The last consolidation's end-user notice (only a run that left something out has one). */
+export function consolidationNotice(last: Consolidation["last"] | null | undefined): string {
+  return last && last.status === "completed_with_gaps" && last.notice ? last.notice : "";
 }
 
 // ------------------------------------------------------------------ consolidation
@@ -274,7 +290,7 @@ export function lastConsolidationLine(last: Consolidation["last"], nowMs: number
     last.insights ? plural(last.insights, "insight", "insights") : "",
   ].filter(Boolean);
   const head = dayWords(last.finished_at, nowMs) || "Last time";
-  if (last.status !== "completed") return `${head}: it stopped before the end${parts.length ? ` (${parts.join(", ")})` : ""}.`;
+  if (last.status !== "completed" && last.status !== "completed_with_gaps") return `${head}: it stopped before the end${parts.length ? ` (${parts.join(", ")})` : ""}.`;
   return `${head}: ${parts.length ? parts.join(", ") : "nothing needed changing"}.`;
 }
 

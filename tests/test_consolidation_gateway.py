@@ -107,4 +107,27 @@ def test_the_consolidation_view_on_the_page_and_its_own_route(gw):
     last = c.get("/api/gateway/note/consolidation", headers=h).json()["last"]
     assert last["status"] == "completed" and (last["labelled"], last["communities"], last["insights"]) == (1, 2, 1)
     assert {"finished_at", "status", "merges", "communities", "labelled", "summaries_refreshed",
-            "insights"} <= set(last)
+            "insights", "left_out", "budget_spent", "notice"} <= set(last)
+    assert last["notice"] is None and last["left_out"] == {"summaries": 0, "labels": 0, "reasons": []}
+
+
+def test_a_run_with_gaps_says_so_and_agrees_with_pending(gw):
+    from abstractnote.gateway.router import notebook_for
+    from abstractnote.recall import consolidation as cons
+
+    c, h = gw["client"], gw["alice"]
+    c.post(ENSURE, headers=h)
+    from test_store_support import create, rev, t
+
+    nb = notebook_for(_plane(gw, "alice"))
+    nb.apply_revision(rev("rv_gap", t(1), create("ex:person-dana", "Dana")))  # no summary: stale
+    assert cons.pending(nb)["stale_summaries"] == 1
+    cons.begin(nb)
+    cons.progress(nb, "summaries", 0, 1, skipped=["ex:person-dana"], reason="No answer.")
+    cons.end(nb, "completed")
+    view = c.get("/api/gateway/note/consolidation", headers=h).json()
+    last, pending = view["last"], view["pending"]
+    assert last["status"] == "completed_with_gaps" and last["left_out"]["summaries"] == pending["stale_summaries"] == 1
+    assert last["notice"] == "1 summary could not be refreshed this time; it will be tried again next time."
+    page = c.get("/api/gateway/note/processing", headers=h).json()
+    assert page["consolidation"]["last"]["notice"] == last["notice"]

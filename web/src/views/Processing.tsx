@@ -18,6 +18,7 @@ import {
   automationCommand,
   cancelWork,
   clockWords,
+  consolidationNotice,
   consolidationStageIndex,
   createPoller,
   drainNotes,
@@ -494,6 +495,7 @@ function ConsolidationCard({ c, now, api, settings, onSave, busy, act }: { c: Co
         </div>
       ) : null}
       <p className="nt-proc-cons__last">{lastConsolidationLine(c.last, now)}</p>
+      {consolidationNotice(c.last) ? <p className="nt-muted nt-proc-cons__pending nt-proc-cons__notice">{consolidationNotice(c.last)}</p> : null}
       {pending ? <p className="nt-muted nt-proc-cons__pending">Waiting: {pending}</p> : null}
       <ConsolidateSchedule settings={settings} onSave={onSave} fallback={c.automation.schedule?.every} />
     </Panel>

@@ -204,7 +204,9 @@ def _occurrence(svc: Any, automation_id: Optional[str]) -> Optional[Dict[str, An
 def consolidation_view(nb: Any, svc: Any, principal: Any) -> Dict[str, Any]:
     """``{automation: {id, state, paused, healthy, reason, schedule: {every}}, run: {run_id, started_at, stage,
     stage_done, stage_total, eta_s, elapsed_s} | null, last: {finished_at, status, merges, communities, labelled,
-    summaries_refreshed, insights, ...} | null, pending: {stale_labels, unlabelled, stale_summaries}}``.
+    summaries_refreshed, insights, left_out, budget_spent, notice, ...} | null, pending: {stale_labels, unlabelled,
+    stale_summaries}}``. ``last.status`` ``completed_with_gaps`` = the run left something for the next one
+    (``left_out``; ``notice`` is its end-user sentence), so ``last`` and ``pending`` agree (ADR 0007).
 
     An open consolidation whose automation run has already ended (it stopped before closing its row) is reported
     as the last one, status ``interrupted``, and no run."""
@@ -224,7 +226,8 @@ def consolidation_view(nb: Any, svc: Any, principal: Any) -> Dict[str, Any]:
                 (_ts(occ.get("updated_at")) or 0.0) >= float(row["started_ts"]) - 1.0:
             last = {"consolidation_id": row["consolidation_id"], "started_at": row["started_at"],
                     "finished_at": None, "status": "interrupted", "error": cons.INTERRUPTED, "merges": None,
-                    "communities": None, "labelled": None, "summaries_refreshed": None, "insights": None}
+                    "communities": None, "labelled": None, "summaries_refreshed": None, "insights": None,
+                    "left_out": None, "budget_spent": False, "notice": None}
             run = None
         else:
             run["run_id"] = None  # started outside the automation (a headless or manual run)

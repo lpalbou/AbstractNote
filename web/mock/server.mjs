@@ -94,7 +94,8 @@ export function createMockGateway(options = {}) {
     drain: null,
     reflectRun: null,
     consRun: null,
-    consLast: { finished_at: new Date(Date.now() - 86400_000 - 4 * 3600_000).toISOString().replace(/\.\d{3}Z$/, "Z"), status: "completed", merges: 17, communities: 35, labelled: 12, summaries_refreshed: 140, insights: 9 },
+    // The seed's last consolidation left 12 summaries for the next one (contract: completed_with_gaps, ADR 0007).
+    consLast: { finished_at: new Date(Date.now() - 86400_000 - 4 * 3600_000).toISOString().replace(/\.\d{3}Z$/, "Z"), status: "completed_with_gaps", merges: 17, communities: 35, labelled: 12, summaries_refreshed: 140, insights: 9, left_out: { summaries: 12, labels: 0, reasons: ["The model gave no summary for these entries, even when asked a second time."] }, budget_spent: false, notice: "12 summaries could not be refreshed this time; they will be tried again next time." },
     staleSummaries: 88,
     recent: [],
     done: [],
@@ -426,7 +427,9 @@ export function createMockGateway(options = {}) {
       r.stage_total = next.total();
       return;
     }
-    proc.consLast = { finished_at: nowIso(), status: "completed", merges: 2, communities: db.communities.size, labelled: 3, summaries_refreshed: 140, insights: 4 };
+    // What the summaries stage did not reach is left for the next run, and said (ADR 0007).
+    const left = proc.staleSummaries;
+    proc.consLast = { finished_at: nowIso(), status: left ? "completed_with_gaps" : "completed", merges: 2, communities: db.communities.size, labelled: 3, summaries_refreshed: 140, insights: 4, left_out: { summaries: left, labels: 0, reasons: left ? ["The time set aside for the consolidation ran out before it got to them."] : [] }, budget_spent: left > 0, notice: left ? `${left} ${left === 1 ? "summary" : "summaries"} could not be refreshed this time; ${left === 1 ? "it" : "they"} will be tried again next time.` : null };
     proc.consRun = null;
   }
 

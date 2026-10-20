@@ -3,12 +3,14 @@
  * order and "Move to front", the state sentence, consolidation lines, and the mock's GET /note/processing.
  * Each check goes red when the thing it checks is removed.
  */
+import { readFileSync } from "node:fs";
 import * as http from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApi } from "../src/lib/api";
 import {
   CONSOLIDATION_STAGES,
   clockWords,
+  consolidationNotice,
   consolidationStageIndex,
   createPoller,
   drainNotes,
@@ -296,6 +298,21 @@ describe("the state sentence", () => {
     expect(lastConsolidationLine({ ...last, status: "failed" }, now)).toMatch(/^Yesterday: it stopped before the end/);
     expect(lastConsolidationLine({ finished_at: null, status: "interrupted", merges: null, communities: null, labelled: null, summaries_refreshed: null, insights: null }, now)).toBe("Last time: it stopped before the end.");
     expect(pendingConsolidationLine({ unlabelled: 1, stale_labels: 2, stale_summaries: 88 })).toBe("1 theme to name · 2 themes changed since named · 88 summaries to refresh");
+  });
+  it("a consolidation that left something out says so, subtly (ADR 0007)", () => {
+    const now = Date.parse("2026-10-20T10:00:00");
+    const notice = "12 summaries could not be refreshed this time; they will be tried again next time.";
+    const last = { finished_at: new Date(Date.parse("2026-10-19T03:12:00")).toISOString(), status: "completed_with_gaps", merges: 0, communities: 3, labelled: 0, summaries_refreshed: 80, insights: 0, left_out: { summaries: 12, labels: 0, reasons: ["x"] }, budget_spent: false, notice };
+    expect(lastConsolidationLine(last, now)).toBe("Yesterday: 3 themes, 80 summaries refreshed.");
+    expect(consolidationNotice(last)).toBe(notice);
+    expect(consolidationNotice({ ...last, status: "completed" })).toBe("");
+    const c = { automation: { id: "c", state: "active", paused: false, healthy: true, reason: null }, run: null, last, pending: { stale_labels: 0, unlabelled: 0, stale_summaries: 12 } };
+    expect(stateLine(processing({ active: [], queue: { ...processing().queue, queued: 0 }, consolidation: c })).text).toBe("Consolidated with gaps · 12 summaries to try again next time");
+    expect(stateLine(processing({ active: [], queue: { ...processing().queue, queued: 0 }, consolidation: { ...c, last: { ...last, status: "completed" } } })).text).toBe("Up to date · everything you sent is understood");
+  });
+  it("the Processing page shows the notice under the last-run line", () => {
+    const src = readFileSync(new URL("../src/views/Processing.tsx", import.meta.url), "utf8");
+    expect(src).toMatch(/lastConsolidationLine\(c\.last, now\)\}<\/p>\n\s*\{consolidationNotice\(c\.last\) \? <p className="nt-muted[^"]*">\{consolidationNotice\(c\.last\)\}<\/p> : null\}/);
   });
 });
 
