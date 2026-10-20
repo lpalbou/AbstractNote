@@ -3189,7 +3189,9 @@
           "note_entities_normalize",
           "note_entities_stale_summaries",
           "note_entities_set_summaries",
-          "note_then_now_refresh"
+          "note_then_now_refresh",
+          "note_reinterpret_next",
+          "note_mark_reinterpret"
         ]
       }
     }

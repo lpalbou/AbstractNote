@@ -26,7 +26,7 @@ TOOL_NAMES: List[str] = [
     "note_resurface", "note_anniversaries", "note_insight_write", "note_communities_recompute",
     "note_communities_pending", "note_communities_label", "note_consolidation_begin", "note_consolidation_progress",
     "note_consolidation_end", "note_entities_normalize", "note_entities_stale_summaries", "note_entities_set_summaries",
-    "note_then_now_refresh",
+    "note_then_now_refresh", "note_reinterpret_next", "note_mark_reinterpret",
 ]
 
 
@@ -109,9 +109,11 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
         return proc.note_resolve_candidates(ctx, note_id, mentions)
 
     @tool(name="note_apply_revision", description="Apply the extraction and linking decisions of a note to the graph.")
-    def note_apply_revision(note_id: str, extraction: Dict[str, Any], linking: Dict[str, Any]) -> Dict[str, Any]:
-        """Apply the extraction and linking decisions of a note to the graph."""
-        return proc.note_apply_revision(ctx, note_id, extraction, linking)
+    def note_apply_revision(note_id: str, extraction: Dict[str, Any], linking: Dict[str, Any],
+                            reinterpret: bool = False) -> Dict[str, Any]:
+        """Apply the extraction and linking decisions of a note to the graph (reinterpret: the note was understood
+        before and is read again; a note whose re-understanding a consolidation took is read again anyway)."""
+        return proc.note_apply_revision(ctx, note_id, extraction, linking, reinterpret=bool(reinterpret))
 
     @tool(name="note_queue_lease", description="Take the next notes to process from the queue, by priority.")
     def note_queue_lease(worker_id: str, max_items: int = 1) -> Dict[str, Any]:
@@ -218,7 +220,7 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
     def note_consolidation_progress(stage: str, done: int, total: int, note: Optional[str] = None,
                                     skipped: Optional[List[Any]] = None, reason: Optional[str] = None
                                     ) -> Dict[str, Any]:
-        """stage: normalize, communities, labels, summaries, then_now or reflect; done of total items; skipped: the
+        """stage: normalize, reinterpret, communities, labels, summaries, then_now or reflect; done of total items; skipped: the
         ids (or {id, reason}) this stage leaves out for this run, reason: why."""
         return cons.note_consolidation_progress(ctx, stage, done, total, note, skipped, reason)
 
@@ -249,6 +251,18 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
         """Recompute the then-versus-now caches of the touched entries."""
         return cons.note_then_now_refresh(ctx)
 
+    @tool(name="note_reinterpret_next",
+          description="The next notes the consolidation understands again (earlier notes changed what they meant).")
+    def note_reinterpret_next(limit: int = 1, failed: Optional[List[Any]] = None) -> Dict[str, Any]:
+        """Take the next marked notes in history order (an unchanged one is settled without a model); failed: the
+        notes the last round could not understand again ({id, reason}); limit 0 only counts."""
+        return cons.note_reinterpret_next(ctx, limit, failed)
+
+    @tool(name="note_mark_reinterpret", description="Mark notes to be understood again by the next consolidation.")
+    def note_mark_reinterpret(note_ids: List[str], reason: Optional[str] = None) -> Dict[str, Any]:
+        """Mark understood notes to be understood again (reason: why, one sentence)."""
+        return cons.note_mark_reinterpret(ctx, note_ids, reason)
+
     tools = {
         "note_capture": note_capture, "note_file": note_file, "note_context": note_context,
         "note_resolve_candidates": note_resolve_candidates, "note_apply_revision": note_apply_revision,
@@ -264,6 +278,7 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
         "note_consolidation_end": note_consolidation_end, "note_entities_normalize": note_entities_normalize,
         "note_entities_stale_summaries": note_entities_stale_summaries,
         "note_entities_set_summaries": note_entities_set_summaries, "note_then_now_refresh": note_then_now_refresh,
+        "note_reinterpret_next": note_reinterpret_next, "note_mark_reinterpret": note_mark_reinterpret,
     }
     assert list(tools) == TOOL_NAMES
     return tools

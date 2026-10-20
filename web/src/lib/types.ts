@@ -263,14 +263,16 @@ export type Processing = {
   /** null: this server has no consolidation (contract "Consolidation"). */
   consolidation: Consolidation | null;
 };
-export type ConsolidationStage = "normalize" | "communities" | "labels" | "summaries" | "then_now" | "reflect" | "done";
+export type ConsolidationStage = "normalize" | "reinterpret" | "communities" | "labels" | "summaries" | "then_now" | "reflect" | "done";
 export type Consolidation = {
   automation: ProcessingAutomation & { schedule?: { every: string } | null };
   run: { run_id: string; started_at: string; stage: ConsolidationStage | string; stage_done: number; stage_total: number; eta_s: number | null; elapsed_s: number } | null;
   /**
    * An interrupted run has no finish time and null counts (W20). `status` completed_with_gaps: the run left
-   * `left_out` for the next one and `notice` is its one-sentence end-user line (ADR 0007).
+   * `left_out` for the next one and `notice` is its one-sentence end-user line (ADR 0007). `reinterpreted` /
+   * `unchanged`: the notes the reinterpret stage understood again, or found unchanged (ADR 0008).
    */
-  last: { finished_at: string | null; status: string; merges: number | null; communities: number | null; labelled: number | null; summaries_refreshed: number | null; insights: number | null; left_out?: { summaries: number; labels: number; reasons: string[] } | null; budget_spent?: boolean; notice?: string | null } | null;
-  pending: { stale_labels: number; unlabelled: number; stale_summaries: number };
+  last: { finished_at: string | null; status: string; merges: number | null; communities: number | null; labelled: number | null; summaries_refreshed: number | null; insights: number | null; left_out?: { summaries: number; labels: number; reinterpret?: number; reasons: string[] } | null; budget_spent?: boolean; notice?: string | null; reinterpreted?: number | null; unchanged?: number | null } | null;
+  /** `reinterpret`: notes an earlier note changed, waiting to be understood again (ADR 0008). */
+  pending: { stale_labels: number; unlabelled: number; stale_summaries: number; reinterpret?: number };
 };

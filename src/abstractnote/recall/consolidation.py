@@ -1,7 +1,9 @@
 """Memory consolidation (backlog 0032, docs/cognition.md "note-consolidate").
 
 A third automation per notebook runs the ``note-consolidate`` flow in stages (:data:`STAGES`): merge duplicate
-entities (normalize), recompute the communities, name the pending or stale ones (labels), refresh the entity
+entities (normalize), understand again the notes an earlier note made out of date (reinterpret, ADR 0008: in history
+order, each note once per pass, with progress and ETA; a note whose context did not change since it was understood is
+``unchanged`` without a model call), recompute the communities, name the pending or stale ones (labels), refresh the entity
 summaries that are placeholders or whose notes or statements changed since the summary (summaries), refresh the
 then-versus-now caches of what was touched (then_now) and run the reflect steps (reflect).
 
@@ -56,7 +58,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .. import ids
 
-STAGES = ("normalize", "communities", "labels", "summaries", "then_now", "reflect")
+STAGES = ("normalize", "reinterpret", "communities", "labels", "summaries", "then_now", "reflect")
 DONE = "done"
 STATUSES = ("completed", "completed_with_gaps", "failed")
 #: Closing statuses of a run that finished its stages (``end`` picks the one that tells the truth).
@@ -73,6 +75,13 @@ SUMMARY_MAX_CHARS = 600      # a longer answer is kept whole with an over_length
 LAST_RUNS = 20               # finished rows kept per notebook (older ones are deleted)
 INTERRUPTED = "It stopped before finishing."
 BUDGET_REASON = "The time set aside for the consolidation ran out before it got to them."
+#: ADR 0008 stage: notes taken per ``note_reinterpret_next`` call (one model-backed re-understanding at a time).
+REINTERPRET_BATCH = 1
+#: A note understood again this many times in one UTC day waits for the next day (review §6: a stated bound on
+#: oscillation; the hold is a skip with its reason, counted in ``left_out``, never silent).
+REINTERPRET_PER_DAY = 3
+HELD_REASON = "It was understood again three times today; it waits for tomorrow."
+FAILED_REASON = "It could not be understood again this time."
 
 _log = logging.getLogger("abstractnote.consolidation")
 
@@ -285,8 +294,10 @@ def _left_out(nb: Any, stages: Dict[str, Any], extra: Dict[str, Any]) -> Dict[st
     def still_stale(eid: str) -> bool:
         return eid in stale or (nb.store.entity_row(eid) is not None and nb.store.canonical(eid) in stale)
 
-    out: Dict[str, Any] = {"summaries": 0, "labels": 0, "reasons": []}
-    for kind, now_pending, still in (("summaries", stale, still_stale), ("labels", waiting, waiting.__contains__)):
+    marked = {m["note_id"] for m in nb.store.pending_marks()}  # ADR 0008: notes still waiting to be read again
+    out: Dict[str, Any] = {"summaries": 0, "labels": 0, "reinterpret": 0, "reasons": []}
+    for kind, now_pending, still in (("summaries", stale, still_stale), ("labels", waiting, waiting.__contains__),
+                                     ("reinterpret", marked, marked.__contains__)):
         skipped = [x for x in (stages.get(kind) or {}).get("skipped_ids") or [] if isinstance(x, dict)]
         left = [x for x in skipped if still(x["id"])]
         unreached = _count(reached.get(kind)) if budget else 0
@@ -303,21 +314,27 @@ def notice(left_out: Optional[Dict[str, Any]]) -> Optional[str]:
     """The end-user sentence of a run that left something out ("12 summaries could not be refreshed this time; they
     will be tried again next time."), None when nothing was."""
     lo = left_out if isinstance(left_out, dict) else {}
-    s, g = _count(lo.get("summaries")), _count(lo.get("labels"))
+    s, g, r = _count(lo.get("summaries")), _count(lo.get("labels")), _count(lo.get("reinterpret"))
     parts = ([f"{s} {'summary' if s == 1 else 'summaries'}"] if s else []) + \
         ([f"{g} theme {'name' if g == 1 else 'names'}"] if g else [])
-    if not parts:
-        return None
-    return (f"{' and '.join(parts)} could not be refreshed this time; {'it' if s + g == 1 else 'they'} will be tried"
-            " again next time.")
+    told = None
+    if parts:
+        told = (f"{' and '.join(parts)} could not be refreshed this time; {'it' if s + g == 1 else 'they'} will be"
+                " tried again next time.")
+    if r:  # ADR 0008: notes an earlier note changed, still waiting to be understood again
+        one = r == 1
+        again = (f"{r} {'note' if one else 'notes'} could not be understood again this time; {'it' if one else 'they'}"
+                 " will be read again next time.")
+        told = f"{told} {again[0].upper()}{again[1:]}" if told else again
+    return told
 
 
 def end(nb: Any, status: str, results: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Close the open consolidation: ``status`` completed (or completed_with_gaps) or failed; ``results`` adds to the
     counts read from the stages (``merges`` = normalize done, ``labelled`` = labels done, ``summaries_refreshed`` =
     summaries done). A failed run's ``results.error`` is its sentence. A finished run also reports ``left_out =
-    {summaries, labels, reasons}`` (:func:`_left_out`; ``results.budget_spent`` and ``results.not_reached:
-    {summaries, labels}`` say what the time budget stopped) and is closed as ``completed_with_gaps`` when anything
+    {summaries, labels, reinterpret, reasons}`` (:func:`_left_out`; ``results.budget_spent`` and ``results.not_reached:
+    {summaries, labels, reinterpret}`` say what the time budget stopped) and is closed as ``completed_with_gaps`` when anything
     was left out, ``completed`` otherwise, whatever the caller asked. Returns the finished row's ``last`` view."""
     if status not in STATUSES:
         raise ValueError("The status must be completed, completed_with_gaps or failed.")
@@ -330,6 +347,7 @@ def end(nb: Any, status: str, results: Optional[Dict[str, Any]] = None) -> Dict[
 
     out = {"merges": done("normalize"), "communities": None, "labelled": done("labels"),
            "summaries_refreshed": done("summaries"), "insights": 0}
+    out.update(pass_counts(nb, row["consolidation_id"]))  # ADR 0008: read from the marks (truth), never the caller
     for k in ("merges", "communities", "labelled", "summaries_refreshed", "insights"):
         if isinstance(extra.get(k), (int, float)) and not isinstance(extra.get(k), bool):
             out[k] = int(extra[k])
@@ -340,11 +358,12 @@ def end(nb: Any, status: str, results: Optional[Dict[str, Any]] = None) -> Dict[
         lo = _left_out(nb, stages, extra)
         out["left_out"] = lo
         out["budget_spent"] = bool(extra.get("budget_spent"))
-        status = "completed_with_gaps" if lo["summaries"] or lo["labels"] else "completed"
+        status = "completed_with_gaps" if lo["summaries"] or lo["labels"] or lo["reinterpret"] else "completed"
         if status == "completed_with_gaps":
-            _log.warning("consolidation %s completed with gaps: %d summaries and %d group names left for the next run"
-                         "%s. Reasons: %s", row["consolidation_id"], lo["summaries"], lo["labels"],
-                         " (the time budget was spent)" if out["budget_spent"] else "", " | ".join(lo["reasons"]))
+            _log.warning("consolidation %s completed with gaps: %d summaries, %d group names and %d notes to understand"
+                         " again left for the next run%s. Reasons: %s", row["consolidation_id"], lo["summaries"],
+                         lo["labels"], lo["reinterpret"], " (the time budget was spent)" if out["budget_spent"] else "",
+                         " | ".join(lo["reasons"]))
     ts = _now_ts()
     cols: Dict[str, Any] = {"finished_at": _iso(ts), "updated_ts": ts, "status": status,
                             "results_json": json.dumps(out), "error": error}
@@ -365,6 +384,8 @@ def _last_view(r: Dict[str, Any]) -> Dict[str, Any]:
             "communities": res.get("communities"), "labelled": res.get("labelled"),
             "summaries_refreshed": res.get("summaries_refreshed"), "insights": res.get("insights"),
             "left_out": lo, "budget_spent": bool(res.get("budget_spent")),
+            "reinterpreted": res.get("reinterpreted"), "unchanged": res.get("unchanged"),
+            "reinterpret_failed": res.get("reinterpret_failed"),
             "notice": notice(lo) if r["status"] == "completed_with_gaps" else None}
 
 
@@ -409,19 +430,141 @@ def pending(nb: Any) -> Dict[str, int]:
     seq = nb.store.q1("SELECT COALESCE(MAX(seq), 0) FROM revisions WHERE applied_index=1")[0]
     meta = nb.store.meta_get("communities") or {}
     labelled = nb.store.q1("SELECT COUNT(*), SUM(label IS NULL), SUM(stale_label) FROM communities")
-    stamp = (seq, meta.get("computed_at") if isinstance(meta, dict) else None, tuple(labelled))
+    marks = nb.store.q1("SELECT COALESCE(MAX(mark_id), 0), COUNT(consumed_at), COUNT(pass_id) FROM reinterpret_marks")
+    stamp = (seq, meta.get("computed_at") if isinstance(meta, dict) else None, tuple(labelled), tuple(marks))
     hit = _pending_cache.get(key)
     if hit is not None and hit[0] == stamp:
         return dict(hit[1])
     out = {"stale_labels": int(labelled[2] or 0), "unlabelled": int(labelled[1] or 0),
-           "stale_summaries": len(_stale(nb))}
+           "stale_summaries": len(_stale(nb)), "reinterpret": len(nb.store.pending_marks())}
     _pending_cache[key] = (stamp, out)
     return dict(out)
 
 
 def state(nb: Any) -> Dict[str, Any]:
-    """``{run, last, pending}`` of a notebook (headless part of ``GET /note/consolidation``)."""
-    return {"run": run_view(nb), "last": last(nb), "pending": pending(nb)}
+    """``{run, last, pending, reinterpret}`` of a notebook (headless part of ``GET /note/consolidation``):
+    ``reinterpret`` = what waits to be understood again and why, before the stage runs (ADR 0008, review 3.2)."""
+    return {"run": run_view(nb), "last": last(nb), "pending": pending(nb), "reinterpret": nb.store.reinterpret_state()}
+
+
+# --------------------------------------------------------------------------- the reinterpret stage (ADR 0008)
+
+
+def pass_counts(nb: Any, pass_id: str) -> Dict[str, int]:
+    """``{reinterpreted, unchanged, reinterpret_failed}``: the notes this pass understood again, found unchanged
+    (no revision written) and could not understand again (their marks wait for the next pass)."""
+    row = nb.store.q1("SELECT COUNT(DISTINCT CASE WHEN outcome='reinterpreted' THEN note_id END),"
+                      " COUNT(DISTINCT CASE WHEN outcome='unchanged' THEN note_id END),"
+                      " COUNT(DISTINCT CASE WHEN consumed_at IS NULL AND error IS NOT NULL THEN note_id END)"
+                      " FROM reinterpret_marks WHERE pass_id=?", (pass_id,))
+    return {"reinterpreted": int(row[0] or 0), "unchanged": int(row[1] or 0), "reinterpret_failed": int(row[2] or 0)}
+
+
+def _reinterpreted_today(nb: Any, note_id: str) -> int:
+    day = ids.utc_now()[:10]
+    return int(nb.store.q1("SELECT COUNT(DISTINCT consumed_revision_id) FROM reinterpret_marks WHERE note_id=? AND"
+                           " outcome='reinterpreted' AND consumed_at>=?", (note_id, day))[0] or 0)
+
+
+def digest_unchanged(nb: Any, note_id: str) -> bool:
+    """The no-call check (ADR 0008 §4, review 1.5): the note's context read again now (as of its date: the same
+    lookups, the mention queries its last reading asked) shows the same entities, statements, summaries and similar
+    notes as the
+    context its current interpretation recorded, leaving out what that interpretation itself wrote (its entities,
+    statements and summaries), and what was recorded after the note's date (a later statement or note is no
+    foundation). True: the foundation did not change for this note, nothing to understand again. A
+    revision without a record (written before schema 3, ``context_unknown``) is never unchanged."""
+    from ..process.context import load_packet, note_context
+    from ..process.resolve import resolve_candidates
+    from ..process.revise import reinterpret_view
+    from ..store.notebook import context_digest
+
+    s = nb.store
+    cur = s.current_interpretation(note_id)
+    if cur is None:
+        return False
+    stored = json.loads(s.revision_row(cur)["context_json"] or "null")
+    if not isinstance(stored, dict) or not stored.get("looked_up"):
+        return False
+    reinterpret_view(nb, note_id, note_context(nb, note_id))
+    if stored.get("mention_queries"):
+        resolve_candidates(nb, note_id, stored["mention_queries"])
+    now = context_digest(s, s.note_row(note_id), load_packet(nb, note_id))
+    chain = set(s.interpretation_chain(note_id))
+    cq = ",".join("?" for _ in chain)
+    own_entities = {r[0] for r in s.q(f"SELECT entity_id FROM entities WHERE created_revision_id IN ({cq})", list(chain))}
+    own_claims = {r[0] for r in s.q("SELECT claim_id FROM claims WHERE note_id=?", (note_id,))}
+
+    as_of = s.note_row(note_id)["occurred_at"]
+
+    def known_then(rows: Sequence[str], table: str, key: str, col: str) -> set:
+        # forward only (ADR 0008 §4): what was recorded after the note's date (the LATER block) is no foundation
+        out = set()
+        for x in rows:
+            r = s.q1(f"SELECT {col} FROM {table} WHERE {key}=?", (x,))
+            if r is not None and r[0] and r[0] <= as_of:
+                out.add(x)
+        return out
+
+    def norm(d: Dict[str, Any]) -> Tuple[set, set, set]:
+        # entities first seen after the note's date (later growth: a new vector neighbour) are no foundation either
+        return (known_then([e for e in d.get("entities") or [] if e not in own_entities], "entities", "entity_id",
+                           "COALESCE(first_seen, created_at)"),
+                known_then([c for c in d.get("claims") or [] if c not in own_claims], "claims", "claim_id", "observed_at"),
+                known_then(d.get("notes") or [], "notes", "note_id", "occurred_at"))
+
+    (e1, c1, n1), (e2, c2, n2) = norm(stored), norm(now)
+    if e1 != e2 or c1 != c2 or n1 != n2:
+        return False
+    s1, s2 = stored.get("summaries") or {}, now.get("summaries") or {}
+    return all(s1.get(e) == s2.get(e) for e in e2 if s2.get(e) not in chain)
+
+
+def reinterpret_next(nb: Any, limit: Any = REINTERPRET_BATCH, failed: Any = None) -> Dict[str, Any]:
+    """The next notes of the open consolidation's ``reinterpret`` stage (``note_reinterpret_next``): the pass takes
+    pending marks in history order (date, received time, id), never a note it took already; a note whose context did
+    not change is consumed ``unchanged`` here without a model call, a note understood again
+    :data:`REINTERPRET_PER_DAY` times today is held (skipped with its reason); the rest are returned for the model
+    (``note-process``, whose apply reads them again). ``failed`` (``[id]`` or ``[{id, reason}]``) records the notes
+    the last round could not understand again (their marks stay pending for the next pass). ``limit`` 0 only counts.
+    Returns ``{items: [{note_id, occurred_at, reasons}], unchanged: [note_id], held: [{id, reason}], done, total,
+    pending, pass_id}`` (``done`` = understood again, unchanged, failed or held in this pass)."""
+    row = _require_open(nb)
+    pid = row["consolidation_id"]
+    for f in _skips(failed, FAILED_REASON):
+        nb.store.fail_mark(f["id"], pid, f["reason"])
+    try:
+        n = int(REINTERPRET_BATCH if limit in (None, "") else limit)
+    except (TypeError, ValueError):
+        raise ValueError("The limit must be a whole number.") from None
+    if not 0 <= n <= 5:
+        _log.warning("reinterpret_next: the limit %d is outside 0..5; %d was applied", n, max(0, min(n, 5)))
+    n = max(0, min(n, 5))
+    items: List[Dict[str, Any]] = []
+    unchanged: List[str] = []
+    held: List[Dict[str, str]] = []
+    while len(items) < n:
+        pend = nb.store.pending_marks(pass_id=pid, limit=1)
+        if not pend:
+            break
+        m = pend[0]
+        nid = m["note_id"]
+        nb.store.take_mark(nid, pid)
+        if _reinterpreted_today(nb, nid) >= REINTERPRET_PER_DAY:
+            nb.store.fail_mark(nid, pid, HELD_REASON)
+            held.append({"id": nid, "reason": HELD_REASON})
+            _log.warning("consolidation %s, stage reinterpret: %s held: %s", pid, nid, HELD_REASON)
+            continue
+        if digest_unchanged(nb, nid):
+            nb.store.consume_marks(nid, pid, "unchanged", None, calls=0)
+            unchanged.append(nid)
+            continue
+        items.append({"note_id": nid, "occurred_at": m["occurred_at"], "reasons": m["reasons"]})
+    counts = pass_counts(nb, pid)
+    left = len(nb.store.pending_marks(pass_id=pid))
+    done = counts["reinterpreted"] + counts["unchanged"] + counts["reinterpret_failed"]
+    return {"items": items, "unchanged": unchanged, "held": held, "done": done,
+            "total": done + len(items) + left, "pending": left + len(items), "pass_id": pid, **counts}
 
 
 # --------------------------------------------------------------------------- stale summaries

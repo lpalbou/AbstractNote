@@ -97,6 +97,7 @@ export function createMockGateway(options = {}) {
     // The seed's last consolidation left 12 summaries for the next one (contract: completed_with_gaps, ADR 0007).
     consLast: { finished_at: new Date(Date.now() - 86400_000 - 4 * 3600_000).toISOString().replace(/\.\d{3}Z$/, "Z"), status: "completed_with_gaps", merges: 17, communities: 35, labelled: 12, summaries_refreshed: 140, insights: 9, left_out: { summaries: 12, labels: 0, reasons: ["The model gave no summary for these entries, even when asked a second time."] }, budget_spent: false, notice: "12 summaries could not be refreshed this time; they will be tried again next time." },
     staleSummaries: 88,
+    reinterpret: 12, // ADR 0008: notes an earlier note changed, waiting to be understood again
     recent: [],
     done: [],
     nextPassAt: 0,
@@ -383,6 +384,7 @@ export function createMockGateway(options = {}) {
   // `per`: items done per step of the simulation (a model call names 5 themes, refreshes 8 summaries).
   const CONS_STAGES = [
     { stage: "normalize", total: () => 24, per: 3 },
+    { stage: "reinterpret", total: () => proc.reinterpret, per: 1 },
     { stage: "communities", total: () => 1, per: 1 },
     { stage: "labels", total: () => 10, per: 5 },
     { stage: "summaries", total: () => 140, per: 8 },
@@ -409,7 +411,7 @@ export function createMockGateway(options = {}) {
       automation: { id: CONSOLIDATE_ID, state: healthOf(proc.consolidate), paused: proc.consolidate.paused, healthy: proc.consolidate.healthy, reason: automationHealth(CONSOLIDATE_ID, "note-consolidate").reason, schedule: { every: db.settings.consolidate_schedule?.every || "1d" } },
       run,
       last: proc.consLast,
-      pending: { stale_labels: comms.filter((c) => c.stale_label).length, unlabelled: comms.filter((c) => !c.label).length, stale_summaries: proc.staleSummaries },
+      pending: { stale_labels: comms.filter((c) => c.stale_label).length, unlabelled: comms.filter((c) => !c.label).length, stale_summaries: proc.staleSummaries, reinterpret: proc.reinterpret },
     };
   }
   function consolidationTick() {
@@ -419,6 +421,7 @@ export function createMockGateway(options = {}) {
     const step = CONS_STAGES[at].per;
     r.stage_done = Math.min(r.stage_total, r.stage_done + step);
     if (r.stage === "summaries") proc.staleSummaries = Math.max(0, proc.staleSummaries - step);
+    if (r.stage === "reinterpret") { proc.reinterpret = Math.max(0, proc.reinterpret - step); r.reinterpreted = (r.reinterpreted || 0) + step; }
     if (r.stage_done < r.stage_total) return;
     const next = CONS_STAGES[at + 1];
     if (next) {
@@ -429,7 +432,7 @@ export function createMockGateway(options = {}) {
     }
     // What the summaries stage did not reach is left for the next run, and said (ADR 0007).
     const left = proc.staleSummaries;
-    proc.consLast = { finished_at: nowIso(), status: left ? "completed_with_gaps" : "completed", merges: 2, communities: db.communities.size, labelled: 3, summaries_refreshed: 140, insights: 4, left_out: { summaries: left, labels: 0, reasons: left ? ["The time set aside for the consolidation ran out before it got to them."] : [] }, budget_spent: left > 0, notice: left ? `${left} ${left === 1 ? "summary" : "summaries"} could not be refreshed this time; ${left === 1 ? "it" : "they"} will be tried again next time.` : null };
+    proc.consLast = { finished_at: nowIso(), status: left ? "completed_with_gaps" : "completed", merges: 2, reinterpreted: r.reinterpreted || 0, unchanged: 0, communities: db.communities.size, labelled: 3, summaries_refreshed: 140, insights: 4, left_out: { summaries: left, labels: 0, reinterpret: 0, reasons: left ? ["The time set aside for the consolidation ran out before it got to them."] : [] }, budget_spent: left > 0, notice: left ? `${left} ${left === 1 ? "summary" : "summaries"} could not be refreshed this time; ${left === 1 ? "it" : "they"} will be tried again next time.` : null };
     proc.consRun = null;
   }
 
@@ -943,6 +946,10 @@ export function createMockGateway(options = {}) {
         claims: n.claim_ids.map((id) => claimView(db.claims.get(id))),
         revisits: (n.revisits || []).map((r) => db.notes.get(r.note_id)).filter(Boolean).map(noteRef),
         insight: null,
+        date_basis: n.source?.client ? "client" : "unrecorded", date_approximate: !n.source?.client,
+        // ADR 0008: the interpretation history (first understanding, then each re-understanding) and why it waits
+        interpretations: rev ? [{ revision_id: rev.revision_id, at: rev.at, recorded_at: rev.recorded_at, action: null, summary: rev.summary, context: null, context_unknown: true, superseded_by: null }] : [],
+        reinterpret_pending: [],
       });
     }
     m = np.match(/^\/notes\/([^/]+)\/attachments\/([^/]+)$/);

@@ -57,7 +57,7 @@ def test_an_empty_summary_answer_is_asked_again_and_never_ends_the_stage(tmp_pat
     assert summary_calls[0]["prompt"] == summary_calls[1]["prompt"]  # the retry is the same batch
     last = cons.last(nb_)
     assert last["summaries_refreshed"] == 11 and last["status"] == "completed" and last["notice"] is None
-    assert last["left_out"] == {"summaries": 0, "labels": 0, "reasons": []}
+    assert last["left_out"] == {"summaries": 0, "labels": 0, "reinterpret": 0, "reasons": []}
     assert cons.pending(nb_)["stale_summaries"] == 0
     assert out["response"].startswith("Consolidated: ")
 
@@ -74,7 +74,7 @@ def test_entries_unanswered_twice_are_skipped_for_this_run_logged_and_the_stage_
     assert len(skipped_names) == 8 and not skipped_names & _names(summary_calls[2]["prompt"])  # the stage moved on
     last = cons.last(nb_)
     assert last["summaries_refreshed"] == 3 and last["status"] == "completed_with_gaps"
-    assert last["left_out"] == {"summaries": 8, "labels": 0, "reasons": [NO_SUMMARY_REASON]}
+    assert last["left_out"] == {"summaries": 8, "labels": 0, "reinterpret": 0, "reasons": [NO_SUMMARY_REASON]}
     assert last["notice"] == "8 summaries could not be refreshed this time; they will be tried again next time."
     assert cons.pending(nb_)["stale_summaries"] == 8  # last and pending agree
     stage = _stage(nb_, "summaries")
@@ -133,7 +133,7 @@ def test_groups_unnamed_twice_are_skipped_excluded_from_the_next_offer_and_repor
     assert [c["schema"] for c in llm.calls].count("CommunityLabels") == 5
     last = cons.last(nb_)
     assert last["status"] == "completed_with_gaps" and last["summaries_refreshed"] == 11
-    assert last["left_out"] == {"summaries": 0, "labels": 2, "reasons": [NO_LABEL_REASON]}
+    assert last["left_out"] == {"summaries": 0, "labels": 2, "reinterpret": 0, "reasons": [NO_LABEL_REASON]}
     assert last["notice"] == "2 theme names could not be refreshed this time; they will be tried again next time."
     assert cons.pending(nb_)["unlabelled"] == 2
     assert _stage(nb_, "labels")["skipped"] == 2

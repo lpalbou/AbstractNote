@@ -691,3 +691,484 @@ def apply_note_revision(nb: Any, note_id: str, extraction: Any, linking: Any, *,
         attempt += 1
     rev = build_revision(nb, note_id, extraction, linking, attempt=attempt, run_id=run_id)
     return nb.apply_revision(rev)
+
+
+# ============================================================================ ADR 0008: a note understood again
+#
+# ``note.reinterpret`` (lane R2): the note is read again against its foundation (the context as of its date) and the
+# new reading supersedes the previous one's effects. The inverse of every op is in docs/data-model.md
+# ("note.reinterpret"); in short: its statements the new reading does not make close with the kind
+# ``reinterpreted``, a statement it makes again with another certainty or window is revised in place, statements and
+# tasks of other notes it had closed re-open unless the new reading closes them again (or writes on the same slot),
+# its reinforcements, mentions, topics and tasks are replaced, entities only it created and nothing references any
+# more are retired. Nothing changes when the new reading equals the old one (structural key, no revision written).
+
+from ..store.notes import REINTERPRET_ACTION, REINTERPRETED, TOPICS_PER_NOTE  # noqa: E402
+
+
+class _ReinterpretBuilder(_Builder):
+    """The revision builder of a re-understanding: the note's own previous reading is not context (its statements are
+    not "existing" ones to restate, its tasks not open tasks to close, its entities' names are reused, never minted
+    again); the statements and tasks the previous reading closed are context (the view adds them)."""
+
+    def __init__(self, nb: Any, note: Any, packet: Dict[str, Any], chain: Sequence[str]) -> None:
+        super().__init__(nb, note, packet)
+        self.chain = set(chain)
+        nid = note["note_id"]
+        self.own_claims = {r[0] for r in nb.store.q("SELECT claim_id FROM claims WHERE note_id=?", (nid,))}
+        self.own_tasks = {r[0] for r in nb.store.q("SELECT task_id FROM tasks WHERE note_id=?", (nid,))}
+
+    def existing_claim(self, index: Optional[int]) -> Optional[str]:
+        cid = super().existing_claim(index)
+        return None if cid in self.own_claims else cid
+
+    def open_task(self, index: Optional[int]) -> Optional[str]:
+        lst = self.packet.get("open_tasks") or []
+        if not isinstance(index, int) or isinstance(index, bool) or not (0 <= index < len(lst)):
+            return None
+        tid = lst[index]
+        if tid in self.own_tasks:
+            return None
+        row = self.nb.store.q1("SELECT status, closed_revision_id FROM tasks WHERE task_id=?", (tid,))
+        if row is None or not (row[0] == "open" or row[1] in self.chain):
+            return None
+        return tid
+
+    def identical_active(self, subject: str, predicate: str, obj_id: Optional[str], literal: Optional[str]
+                         ) -> Optional[str]:
+        same = super().identical_active(subject, predicate, obj_id, literal)
+        if same is None or same not in self.own_claims:
+            return same
+        s = self.nb.store.merged_members(self.nb.store.canonical(subject))
+        sql = (f"SELECT claim_id FROM claims WHERE status='active' AND valid_until IS NULL AND predicate=? AND"
+               f" subject_id IN ({','.join('?' for _ in s)}) AND (note_id IS NULL OR note_id!=?)")
+        params: List[Any] = [predicate, *s, self.note_id]
+        if obj_id:
+            o = self.nb.store.merged_members(self.nb.store.canonical(obj_id))
+            sql += f" AND object_id IN ({','.join('?' for _ in o)})"
+            params += o
+        else:
+            sql += " AND object_id IS NULL AND object_literal=?"
+            params.append(literal)
+        row = self.nb.store.q1(sql + " ORDER BY observed_at LIMIT 1", params)
+        return row[0] if row else None
+
+    def lineage(self, anchor: Any) -> List[Any]:
+        return [r for r in super().lineage(anchor) if r["claim_id"] not in self.own_claims
+                or r["claim_id"] == anchor["claim_id"]]
+
+    def create(self, kind: str, name: str, aliases: Sequence[str], summary: Optional[str]) -> str:
+        """A name a live entity already holds is that entity (the canonical-name rule, applied here rather than by
+        ``reuse_taken_names`` after the fact, so this reading's statements are compared with its previous ones on
+        the same subject instead of becoming reinforcements of them)."""
+        holder = self.nb.store.name_key_holder(ids.name_key(name))
+        if holder is None:
+            return super().create(kind, name, aliases, summary)
+        known = self.known_names(holder)
+        for alias in [name, *aliases]:
+            alias = str(alias or "").strip()
+            if alias and ids.fold(alias) not in known:
+                known.add(ids.fold(alias))
+                self.ops.append(_op("entity.alias", entity_id=holder, alias=alias))
+        return holder
+
+
+def _claim_key(nb: Any, subject: str, predicate: str, obj_id: Optional[str], literal: Optional[str]) -> tuple:
+    c = nb.store.canonical
+    return (c(subject), predicate, c(obj_id) if obj_id else None, None if obj_id else literal)
+
+
+def _copy_id(rid: str, claim_id: str) -> str:
+    """The AbstractMemory id of a claim's later copy (revised or re-opened by revision ``rid``)."""
+    return ids.claim_id(rid, claim_id, "copy", "")
+
+
+def replay_claim_state(nb: Any, claim_id: str, exclude: Sequence[str]) -> Dict[str, Any]:
+    """``{status, valid_until, superseded_by, closed_reason, closed_revision_id}`` of a claim from its own add and
+    every applied revision that touched it, leaving out the revisions in ``exclude`` (a superseded reading): the
+    state a re-opened statement returns to."""
+    row = nb.store.claim_row(claim_id)
+    skip = set(exclude)
+    until = None
+    added = nb.store.revision_row(row["revision_id"])
+    for op in json.loads(added["ops_json"]) if added else []:
+        p = op.get("payload") or {}
+        if op.get("op") == "claim.add" and p.get("claim_id") == claim_id:
+            until = p.get("valid_until")
+    st: Dict[str, Any] = {"status": "active", "valid_until": until, "superseded_by": None, "closed_reason": None,
+                          "closed_revision_id": None}
+    for r in nb.store.q("SELECT revision_id, at, ops_json FROM revisions WHERE applied_index=1 AND abandoned=0 AND"
+                        " ops_json LIKE ? ORDER BY seq", (f'%"{claim_id}"%',)):
+        if r["revision_id"] in skip or r["revision_id"] == row["revision_id"]:
+            continue
+        for op in json.loads(r["ops_json"]):
+            name, p = op.get("op"), op.get("payload") or {}
+            close = {"closed_reason": p.get("reason"), "closed_revision_id": r["revision_id"]}
+            if name == "claim.insert_before" and p.get("after_claim_id") == claim_id and st["status"] != "retracted":
+                if p.get("after_valid_until") and (st["valid_until"] is None or st["valid_until"] > p["after_valid_until"]):
+                    st = {**st, "status": "superseded", "valid_until": p["after_valid_until"],
+                          "superseded_by": p.get("claim_id"), **close}
+            elif p.get("claim_id") != claim_id:
+                continue
+            elif name == "claim.supersede" and st["status"] == "active":
+                st = {**st, "status": "superseded", "valid_until": st["valid_until"] or p.get("valid_until"),
+                      "superseded_by": p.get("by_claim_id"), **close}
+            elif name == "claim.insert_before" and st["status"] == "active":
+                st = {**st, "status": "superseded", "valid_until": p.get("valid_until"),
+                      "superseded_by": p.get("before_claim_id"), **close}
+            elif name == "claim.retract" and st["status"] != "retracted":
+                st = {**st, "status": "retracted", "valid_until": st["valid_until"] or p.get("valid_until") or r["at"],
+                      **close}
+            elif name == "claim.reinterpret":
+                st = {**st, "status": REINTERPRETED, "valid_until": p.get("valid_until"), **close}
+            elif name == "claim.reopen":
+                st = {k: p.get(k) for k in ("status", "valid_until", "superseded_by", "closed_reason",
+                                            "closed_revision_id")}
+            elif name == "claim.repoint":
+                st = {**st, "superseded_by": p.get("superseded_by")}
+    return st
+
+
+def _claim_fields(row: Any) -> Dict[str, Any]:
+    return {k: row[k] for k in ("subject_id", "predicate", "object_id", "object_literal", "certainty", "stance",
+                                "observed_at", "valid_from", "valid_until", "evidence", "note_id")}
+
+
+def plan_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any, *, run_id: Optional[str] = None,
+                          reason: Optional[str] = None) -> Dict[str, Any]:
+    """The re-understanding of a note (pure: nothing is written). ``{unchanged, summary_only, previous_revision_id,
+    revision (when changed), diff: {claims_closed, claims_revised, claims_reopened, claims_repointed,
+    reinforcements_dropped, tasks_reopened, tasks_retired, entities_retired}, warnings}``."""
+    from ..store.names import reuse_taken_names
+
+    s = nb.store
+    note = s.note_row(note_id)
+    if note is None:
+        raise ValueError("That note is not in this notebook.")
+    current = s.current_interpretation(note_id)
+    if current is None:
+        raise ValueError("This note has not been understood yet, so it cannot be understood again; it is understood"
+                         " when its turn in the queue comes.")
+    chain = s.interpretation_chain(note_id)
+    packet = load_packet(nb, note_id)
+    if packet is None:
+        raise ValueError("Look up the note's context first (note_context): a note is understood again against what"
+                         " was known at its date.")
+    ext, link = _validated(extraction, linking)
+    b = _ReinterpretBuilder(nb, note, packet, chain)
+    flags = extraction.get("warnings") if isinstance(extraction, dict) else None
+    b.warnings.extend(str(w) for w in (flags or []) if isinstance(w, str) and w.strip())
+    b.redate(ext)
+    b.mentions(ext, link)
+    b.claims(ext, link)
+    _note_missing_summaries(b, ext, link)
+    b.tasks(ext, link)
+    b.topics(ext)
+    b.ops.append(_op("note.summary", note_id=note_id, summary=ext.summary or None, kind=None, language=None))
+    rid = ids.revision_id_for_action(REINTERPRET_ACTION, note_id, current)
+    built = reuse_taken_names(s, {"revision_id": rid, "note_id": note_id, "ops": b.ops, "warnings": b.warnings})
+    chain_set = set(chain)
+    cq = ",".join("?" for _ in chain)
+
+    own_rows = list(s.q("SELECT * FROM claims WHERE note_id=? AND status!=?", (note_id, REINTERPRETED)))
+    own_by_key = {_claim_key(nb, r["subject_id"], r["predicate"], r["object_id"], r["object_literal"]): r
+                  for r in own_rows}
+    own_ids = {r["claim_id"] for r in own_rows}
+    cross_claims = {r["claim_id"]: r for r in s.q(
+        f"SELECT * FROM claims WHERE closed_revision_id IN ({cq}) AND (note_id IS NULL OR note_id!=?)",
+        [*chain, note_id])} if chain else {}
+    my_reinforced = {r[0] for r in s.q(f"SELECT claim_id FROM claim_reinforcements WHERE revision_id IN ({cq})",
+                                       chain)} if chain else set()
+    own_tasks = {r["task_id"]: r for r in s.q("SELECT * FROM tasks WHERE note_id=? AND status!='retired'", (note_id,))}
+    cross_tasks = {r["task_id"]: r for r in s.q(
+        f"SELECT * FROM tasks WHERE closed_revision_id IN ({cq}) AND (note_id IS NULL OR note_id!=?)",
+        [*chain, note_id])} if chain else {}
+
+    claim_map: Dict[str, str] = {}
+    kept, revised, slots = set(), [], {}
+    kept_reinf, kept_cross, kept_tasks, kept_cross_tasks = set(), set(), set(), set()
+    new_ids: set = set()
+    changes = 0  # effects the new reading has that the old one did not
+    out: List[Dict[str, Any]] = []
+    mentions: set = set()
+    topics: set = set()
+    summary_ops = 0
+    for op in built["ops"]:
+        name, p = op["op"], dict(op.get("payload") or {})
+        for f in ("claim_id", "by_claim_id", "before_claim_id", "after_claim_id", "disputes"):
+            if p.get(f) in claim_map:
+                p[f] = claim_map[p[f]]
+        if name == "claim.add":
+            if p.get("object_id") and p["object_id"] == p["subject_id"]:
+                continue
+            key = _claim_key(nb, p["subject_id"], p["predicate"], p.get("object_id"), p.get("object_literal"))
+            own = own_by_key.get(key)
+            if own is not None:
+                claim_map[p["claim_id"]] = own["claim_id"]
+                kept.add(own["claim_id"])
+                slots.setdefault((key[0], key[1]), own["claim_id"])
+                closed = own["closed_revision_id"] is not None
+                now = (p["certainty"], p.get("stance") or "assert", p.get("valid_from"), p.get("evidence"),
+                       None if closed else p.get("valid_until"))
+                was = (own["certainty"], own["stance"] or "assert", own["valid_from"], own["evidence"],
+                       None if closed else own["valid_until"])
+                if now != was:
+                    copy = _copy_id(rid, own["claim_id"])
+                    assertion = {**_claim_fields(own), "claim_id": copy, "of_claim_id": own["claim_id"],
+                                 "certainty": p["certainty"], "stance": p.get("stance") or "assert",
+                                 "valid_from": p.get("valid_from"), "evidence": p.get("evidence"),
+                                 "valid_until": own["valid_until"] if closed else p.get("valid_until")}
+                    out.append(_op("claim.revise", claim_id=own["claim_id"], certainty=p["certainty"],
+                                   stance=p.get("stance") or "assert", valid_from=p.get("valid_from"),
+                                   valid_until=p.get("valid_until"), evidence=p.get("evidence"), assertion_id=copy,
+                                   previous_assertion_id=own["assertion_id"] or own["claim_id"],
+                                   empty_at=own["valid_from"] or own["observed_at"], assertion=assertion,
+                                   previous={"certainty": own["certainty"], "stance": own["stance"],
+                                             "valid_from": own["valid_from"], "valid_until": own["valid_until"],
+                                             "evidence": own["evidence"]},
+                                   reason=reason or "read again"))
+                    revised.append(own["claim_id"])
+                continue
+            cid = p["claim_id"]
+            if s.claim_row(cid) is not None or cid in new_ids:  # an id an earlier reading of this note used (review 1.2)
+                new = ids.claim_id(f"{note_id}@{rid}", p["subject_id"], p["predicate"], p.get("object_id") or
+                                   p.get("object_literal"))
+                claim_map[cid] = new
+                p["claim_id"] = cid = new
+            new_ids.add(cid)
+            slots.setdefault((key[0], key[1]), cid)
+            changes += 1
+            out.append({"op": name, "payload": p})
+            continue
+        if name == "claim.reinforce":
+            target = p["claim_id"]
+            if target in own_ids:
+                kept.add(target)
+                continue
+            if target in my_reinforced:
+                kept_reinf.add(target)
+                continue
+            changes += 1
+        elif name in ("claim.supersede", "claim.retract"):
+            target = p["claim_id"]
+            if target in cross_claims:
+                kept_cross.add(target)
+                continue
+            if target in own_ids:
+                continue
+            changes += 1
+        elif name == "claim.insert_before":
+            if p["claim_id"] in own_ids:
+                continue  # its statement was kept: it is already placed
+            if p.get("after_claim_id") in cross_claims:
+                kept_cross.add(p["after_claim_id"])
+            changes += 1
+        elif name == "entity.mention":
+            mentions.add(p["entity_id"])
+        elif name == "task.open":
+            if p["task_id"] in own_tasks:
+                kept_tasks.add(p["task_id"])
+                continue
+            changes += 1
+        elif name == "task.close":
+            tid = p["task_id"]
+            if tid in cross_tasks:
+                kept_cross_tasks.add(tid)
+                continue
+            if tid in own_tasks:
+                kept_tasks.add(tid)
+                if own_tasks[tid]["status"] != "open":
+                    continue
+            changes += 1
+        elif name == "topic.assign":
+            t = ids.canonical_name(p["topic"])
+            if t not in topics and len(topics) >= TOPICS_PER_NOTE:  # the processing cap (op_topic_assign's)
+                built["warnings"].append(f"topics_not_assigned: a note keeps the first {TOPICS_PER_NOTE} topics from"
+                                         f" processing; not assigned: {p['topic']}.")
+                continue
+            topics.add(t)
+        elif name in ("entity.create", "entity.merge", "claim.revise"):
+            changes += 1
+        elif name in ("entity.summary", "note.summary", "entity.alias", "entity.rename"):
+            summary_ops += 1
+        out.append({"op": name, "payload": p})
+
+    pre: List[Dict[str, Any]] = [_op("note.reinterpret", note_id=note_id, supersedes=current,
+                                     reason=reason or "understood again", by_note_ids=[])]
+    diff: Dict[str, List[str]] = {k: [] for k in ("claims_closed", "claims_revised", "claims_reopened",
+                                                  "claims_repointed", "reinforcements_dropped", "tasks_reopened",
+                                                  "tasks_retired", "entities_retired")}
+    diff["claims_revised"] = list(revised)
+    for r in own_rows:
+        if r["claim_id"] not in kept:
+            pre.append(_op("claim.reinterpret", claim_id=r["claim_id"], valid_until=r["valid_from"] or r["observed_at"],
+                           assertion_id=r["assertion_id"] or r["claim_id"], reason=reason or "understood again"))
+            diff["claims_closed"].append(r["claim_id"])
+    post: List[Dict[str, Any]] = []
+    for cid, x in cross_claims.items():
+        slot = (nb.store.canonical(x["subject_id"]), x["predicate"])
+        if cid in kept_cross or slot in slots:
+            by = slots.get(slot)
+            if by and x["superseded_by"] != by and x["superseded_by"] not in kept and x["superseded_by"] not in new_ids:
+                post.append(_op("claim.repoint", claim_id=cid, superseded_by=by, previous=x["superseded_by"]))
+                diff["claims_repointed"].append(cid)
+            continue
+        st = replay_claim_state(nb, cid, chain)
+        copy = _copy_id(rid, cid)
+        pre.append(_op("claim.reopen", claim_id=cid, closed_by_revision=x["closed_revision_id"], assertion_id=copy,
+                       previous_assertion_id=x["assertion_id"] or cid, empty_at=x["valid_from"] or x["observed_at"],
+                       assertion={**_claim_fields(x), "claim_id": copy, "of_claim_id": cid,
+                                  "valid_until": st["valid_until"]},
+                       reason="the reading that closed it was withdrawn", **st))
+        diff["claims_reopened"].append(cid)
+    for cid in sorted(my_reinforced - kept_reinf):
+        for (rv,) in s.q(f"SELECT revision_id FROM claim_reinforcements WHERE claim_id=? AND revision_id IN ({cq})",
+                         [cid, *chain]):
+            pre.append(_op("reinforcement.drop", claim_id=cid, revision_id=rv))
+        diff["reinforcements_dropped"].append(cid)
+    for tid, t in cross_tasks.items():
+        if tid not in kept_cross_tasks:
+            pre.append(_op("task.reopen", task_id=tid, closed_revision_id=t["closed_revision_id"]))
+            diff["tasks_reopened"].append(tid)
+    for tid, t in own_tasks.items():
+        if tid not in kept_tasks:
+            post.append(_op("task.retire", task_id=tid, reason=reason or "understood again"))
+            diff["tasks_retired"].append(tid)
+        elif t["status"] != "open" and t["closed_revision_id"] in chain_set and not any(
+                o["op"] == "task.close" and o["payload"].get("task_id") == tid for o in built["ops"]):
+            pre.append(_op("task.reopen", task_id=tid, closed_revision_id=t["closed_revision_id"]))
+            diff["tasks_reopened"].append(tid)
+    referenced: set = set(mentions)
+    for o in out:
+        p = o["payload"]
+        referenced.update(x for x in (p.get("subject_id"), p.get("object_id"), p.get("entity_id"), p.get("into_id"))
+                          if x)
+    for r in own_rows:
+        if r["claim_id"] in kept:
+            referenced.update(x for x in (r["subject_id"], r["object_id"]) if x)
+    created = [r[0] for r in s.q(f"SELECT entity_id FROM entities WHERE created_revision_id IN ({cq}) AND merged_into IS"
+                                 " NULL AND retired_revision_id IS NULL ORDER BY entity_id", chain)] if chain else []
+    for eid in created:
+        if eid in referenced or nb.store.canonical(eid) in referenced:
+            continue
+        members = s.merged_members(eid)
+        mq = ",".join("?" for _ in members)
+        elsewhere = s.q1(f"SELECT 1 FROM entity_notes WHERE entity_id IN ({mq}) AND note_id!=? LIMIT 1",
+                         [*members, note_id]) or s.q1(
+            f"SELECT 1 FROM claims WHERE (subject_id IN ({mq}) OR object_id IN ({mq})) AND (note_id IS NULL OR"
+            f" note_id!=?) AND status!=? LIMIT 1", [*members, *members, note_id, REINTERPRETED])
+        if elsewhere:
+            continue
+        post.append(_op("entity.retire", entity_id=eid, reason=reason or "only an earlier reading of this note made it"))
+        diff["entities_retired"].append(eid)
+
+    old_mentions = {r[0] for r in s.q("SELECT entity_id FROM entity_notes WHERE note_id=?", (note_id,))}
+    old_topics = {r[0] for r in s.q("SELECT topic FROM note_topics WHERE note_id=? AND assigned_by='revision'",
+                                    (note_id,))}
+    unchanged = (changes == 0 and not any(diff.values()) and mentions == old_mentions and topics == old_topics)
+    result: Dict[str, Any] = {"unchanged": unchanged, "summary_only": unchanged and summary_ops > 0,
+                              "previous_revision_id": current, "diff": diff, "warnings": list(built["warnings"])}
+    if unchanged:
+        return result
+    summary = (link.revision_summary or "").strip() or (ext.summary or "").strip() or "Read the note again."
+    result["revision"] = {"revision_id": rid, "note_id": note_id, "action": REINTERPRET_ACTION, "target": note_id,
+                          "at": b.at, "run_id": run_id, "ops": [*pre, *out, *post], "summary": summary,
+                          "warnings": list(built["warnings"]),
+                          "source": {"client": "consolidation", "reason": reason or "understood again"}}
+    return result
+
+
+def apply_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any, *, run_id: Optional[str] = None,
+                           reason: Optional[str] = None, pass_id: Optional[str] = None) -> Dict[str, Any]:
+    """Understand an already understood note again (``note_apply_revision`` with ``reinterpret``, ADR 0008): build
+    the ``note.reinterpret`` revision and apply it, or record ``unchanged`` and write nothing; either way the note's
+    marks this pass took (or, without a pass, every mark it had when its context was read) are consumed. Fails
+    loudly when the installed AbstractMemory lacks the closure kind ``reinterpreted``."""
+    from ..store.kg import require_reinterpreted
+
+    require_reinterpreted()
+    nb.recover()
+    plan = plan_reinterpretation(nb, note_id, extraction, linking, run_id=run_id, reason=reason)
+    packet_row = nb.store.q1("SELECT created_at FROM context_packets WHERE note_id=?", (note_id,))
+    before = packet_row[0] if packet_row else None
+    if plan["unchanged"]:
+        _consume(nb, note_id, pass_id, "unchanged", None, before)
+        return {"revision_id": None, "unchanged": True, "summary_only": plan["summary_only"],
+                "previous_revision_id": plan["previous_revision_id"], "summary": "Understood again: nothing changed.",
+                "entities_created": [], "entities_merged": [], "claims_added": [], "claims_reinforced": [],
+                "claims_superseded": [], "claims_retracted": [], "tasks_opened": [], "tasks_closed": [],
+                "claims_inserted_before": [], "retrospective": [], "warnings": plan["warnings"], "marked": 0,
+                "reinterpret_marked": {"count": 0, "notes": [], "by_entity": []}}
+    out = nb.apply_revision(plan["revision"])
+    _consume(nb, note_id, pass_id, "reinterpreted", out["revision_id"], before)
+    out.update({"reinterpreted": True, "unchanged": False, "previous_revision_id": plan["previous_revision_id"],
+                "diff": plan["diff"]})
+    return out
+
+
+def _consume(nb: Any, note_id: str, pass_id: Optional[str], outcome: str, revision_id: Optional[str],
+             before: Optional[str]) -> None:
+    s = nb.store
+    with s.tx() as c:
+        if pass_id:
+            s.consume_marks(note_id, pass_id, outcome, revision_id, c=c)
+            return
+        now = ids.utc_now()
+        c.execute("UPDATE reinterpret_marks SET consumed_at=?, outcome=?, consumed_revision_id=?,"
+                  " pass_id=COALESCE(pass_id, 'direct'), taken_at=COALESCE(taken_at, ?) WHERE note_id=? AND"
+                  " consumed_at IS NULL AND (pass_id IS NOT NULL OR marked_at<=?)",
+                  (now, outcome, revision_id, now, note_id, before or now))
+
+
+def reinterpret_view(nb: Any, note_id: str, out: Dict[str, Any]) -> Dict[str, Any]:
+    """The context of a note understood again (ADR 0008): its own previous reading is not shown (its statements and
+    tasks), and the statements and tasks of other notes that the previous reading closed are shown again as they
+    would stand without it (they re-open unless the new reading closes them). Edits the stored packet so every index
+    stays valid. Fails loudly when the context has not the expected keys (seam with lane R1)."""
+    from .context import claim_view, save_packet
+
+    for k in ("existing_claims", "candidate_entities", "open_tasks"):
+        if k not in out:
+            raise RuntimeError(f"note_context returned no {k!r}; the re-understanding view cannot be built (seam R1).")
+    s = nb.store
+    chain = s.interpretation_chain(note_id)
+    if not chain:
+        return out
+    packet = load_packet(nb, note_id)
+    if packet is None:
+        raise RuntimeError("note_context stored no packet for this note.")
+    own = {r[0] for r in s.q("SELECT claim_id FROM claims WHERE note_id=?", (note_id,))}
+    own_tasks = {r[0] for r in s.q("SELECT task_id FROM tasks WHERE note_id=?", (note_id,))}
+    out = dict(out)
+    out["existing_claims"] = [v for v in out["existing_claims"] if v.get("claim_id") not in own]
+    cands = []
+    for c in out["candidate_entities"]:
+        c = dict(c)
+        c["active_claims"] = [v for v in c.get("active_claims") or [] if v.get("claim_id") not in own]
+        cands.append(c)
+    out["candidate_entities"] = cands
+    out["open_tasks"] = [t for t in out["open_tasks"] if t.get("task_id") not in own_tasks]
+    cq = ",".join("?" for _ in chain)
+    by_entity = {c["entity_id"]: c for c in cands}
+    for r in s.q(f"SELECT * FROM claims WHERE closed_revision_id IN ({cq}) AND (note_id IS NULL OR note_id!=?) AND"
+                 f" status!=? ORDER BY observed_at", [*chain, note_id, REINTERPRETED]):
+        if r["claim_id"] in packet["existing_claims"]:
+            continue
+        idx = len(packet["existing_claims"])
+        packet["existing_claims"].append(r["claim_id"])
+        view = claim_view(nb, r, idx)
+        out["existing_claims"].append(view)
+        for e in (r["subject_id"], r["object_id"]):
+            card = by_entity.get(s.canonical(e)) if e else None
+            if card is not None:
+                card["active_claims"].append(view)
+    for t in s.q(f"SELECT * FROM tasks WHERE closed_revision_id IN ({cq}) AND (note_id IS NULL OR note_id!=?)",
+                 [*chain, note_id]):
+        if t["task_id"] in packet["open_tasks"]:
+            continue
+        idx = len(packet["open_tasks"])
+        packet["open_tasks"].append(t["task_id"])
+        out["open_tasks"].append({"index": idx, "task_id": t["task_id"], "text": t["text"], "opened_at": t["opened_at"],
+                                  "due": t["due"], "note_id": t["note_id"]})
+    save_packet(nb, note_id, packet)
+    return out

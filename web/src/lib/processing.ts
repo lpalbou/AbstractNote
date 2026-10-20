@@ -213,7 +213,8 @@ export function stateLine(p: Processing): { tone: StateTone; text: string } {
   if (run && run.stage !== "done") {
     const i = consolidationStageIndex(run.stage);
     const stage = i >= 0 && i < CONSOLIDATION_STAGES.length ? CONSOLIDATION_STAGES[i].label : "";
-    return { tone: "live", text: ["Consolidating your notebook", stage && run.stage_total ? `${stage} ${run.stage_done} of ${run.stage_total}` : stage, etaWords(run.eta_s)].filter(Boolean).join(" · ") };
+    const progress = run.stage === "reinterpret" ? reinterpretWords(run.stage_done, run.stage_total) : stage && run.stage_total ? `${stage} ${run.stage_done} of ${run.stage_total}` : stage;
+    return { tone: "live", text: ["Consolidating your notebook", progress, etaWords(run.eta_s)].filter(Boolean).join(" · ") };
   }
   const other = groupActive(p.active)[0];
   if (other) return { tone: "live", text: [flowWords(other.item.flow), queued ? waitingWords(queued) : ""].filter(Boolean).join(" · ") };
@@ -226,13 +227,23 @@ export function stateLine(p: Processing): { tone: StateTone; text: string } {
   return { tone: "idle", text: "Up to date · everything you sent is understood" };
 }
 
+/** The reinterpret stage in words (ADR 0008): "Re-understanding 12 notes", then "Re-understanding 3 of 12 notes". */
+export function reinterpretWords(done: number, total: number): string {
+  const t = Math.max(0, Number(total) || 0);
+  const d = Math.max(0, Math.min(t, Number(done) || 0));
+  if (!t) return "Re-understanding";
+  return d ? `Re-understanding ${d} of ${plural(t, "note", "notes")}` : `Re-understanding ${plural(t, "note", "notes")}`;
+}
+
 /** What the last consolidation left for the next one, in words ("12 summaries to try again next time"); "" when nothing. */
 export function consolidationGapsWords(last: Consolidation["last"] | null | undefined): string {
   if (!last || last.status !== "completed_with_gaps") return "";
   const s = Math.max(0, Number(last.left_out?.summaries) || 0);
   const g = Math.max(0, Number(last.left_out?.labels) || 0);
+  const r = Math.max(0, Number(last.left_out?.reinterpret) || 0);
   const parts = [s ? plural(s, "summary", "summaries") : "", g ? plural(g, "theme name", "theme names") : ""].filter(Boolean);
-  return parts.length ? `${parts.join(" and ")} to try again next time` : "some work to try again next time";
+  const words = [parts.length ? `${parts.join(" and ")} to try again next time` : "", r ? `${plural(r, "note", "notes")} to understand again next time` : ""].filter(Boolean);
+  return words.length ? words.join(" and ") : "some work to try again next time";
 }
 
 /** The last consolidation's end-user notice (only a run that left something out has one). */
@@ -245,6 +256,7 @@ export function consolidationNotice(last: Consolidation["last"] | null | undefin
 /** The stages of a consolidation, in order, as the stepper names them. */
 export const CONSOLIDATION_STAGES: Array<{ stage: string; label: string }> = [
   { stage: "normalize", label: "Normalize" },
+  { stage: "reinterpret", label: "Re-understanding" },
   { stage: "communities", label: "Themes" },
   { stage: "labels", label: "Labels" },
   { stage: "summaries", label: "Summaries" },
@@ -284,6 +296,7 @@ export function lastConsolidationLine(last: Consolidation["last"], nowMs: number
   if (!last) return "Not consolidated yet.";
   const parts = [
     last.merges ? `${plural(last.merges, "entity", "entities")} joined` : "",
+    last.reinterpreted ? `${plural(last.reinterpreted, "note", "notes")} understood again` : "",
     last.communities ? plural(last.communities, "theme", "themes") : "",
     last.labelled ? `${last.labelled} named` : "",
     last.summaries_refreshed ? `${plural(last.summaries_refreshed, "summary", "summaries")} refreshed` : "",
@@ -301,6 +314,7 @@ export function pendingConsolidationLine(p: Consolidation["pending"] | null | un
     p.unlabelled ? `${plural(p.unlabelled, "theme", "themes")} to name` : "",
     p.stale_labels ? `${plural(p.stale_labels, "theme", "themes")} changed since named` : "",
     p.stale_summaries ? `${plural(p.stale_summaries, "summary", "summaries")} to refresh` : "",
+    p.reinterpret ? `${plural(p.reinterpret, "note", "notes")} to understand again` : "",
   ].filter(Boolean).join(" · ");
 }
 

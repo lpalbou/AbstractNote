@@ -117,9 +117,10 @@ def _archive_card(nb: Any, arch: Any, entity_id: str, at_n: Optional[str]) -> Di
     ref = at_n or "9999-12-31T23:59:59Z"
     q = ",".join("?" for _ in members)
     in_rev, p_rev = arch.revisions_in("revision_id")
-    in_note, p_note = arch.notes_in("en.note_id")
-    stats = s.q1(f"SELECT MIN(en.at), MAX(en.at), COUNT(DISTINCT en.note_id) FROM entity_notes en WHERE en.entity_id"
-                 f" IN ({q}) AND en.at<=? AND {in_note}", [*members, ref, *p_note])
+    # the mentions as the archive held them (ADR 0008: with those a later re-understanding soft-removed)
+    held_sql, p_held = arch.mentions_sql()
+    stats = s.q1(f"SELECT MIN(en.at), MAX(en.at), COUNT(DISTINCT en.note_id) FROM ({held_sql}) en WHERE en.entity_id"
+                 f" IN ({q}) AND en.at<=?", [*p_held, *members, ref])
     created = s.q1(f"SELECT MIN(created_at) FROM entities WHERE entity_id IN ({q}) AND"
                    f" {arch.revisions_in('created_revision_id')[0]}", [*members, arch.at])[0]
     first = min([x for x in (stats[0], created) if x], default=None)
@@ -139,20 +140,20 @@ def _archive_card(nb: Any, arch: Any, entity_id: str, at_n: Optional[str]) -> Di
                 "recorded_at": r["recorded_at"]}
                for r in s.summary_rows(members, at=ref, where=in_srev, params=p_srev,
                                        superseded_within=arch.revisions_in("r2.revision_id"))]
-    notes = s.q(f"SELECT DISTINCT n.* FROM entity_notes en JOIN notes n ON n.note_id=en.note_id WHERE en.entity_id IN"
-                f" ({q}) AND en.at<=? AND n.archived_at IS NULL AND {in_note} ORDER BY n.occurred_at DESC LIMIT ?",
-                [*members, ref, *p_note, CARD_NOTES])
+    notes = s.q(f"SELECT DISTINCT n.* FROM ({held_sql}) en JOIN notes n ON n.note_id=en.note_id WHERE en.entity_id IN"
+                f" ({q}) AND en.at<=? AND n.archived_at IS NULL ORDER BY n.occurred_at DESC LIMIT ?",
+                [*p_held, *members, ref, CARD_NOTES])
     opened, p_open = arch.revisions_in("t.opened_revision_id")
     tasks = []
-    for r in s.q(f"SELECT t.* FROM tasks t WHERE t.note_id IN (SELECT en.note_id FROM entity_notes en WHERE"
+    for r in s.q(f"SELECT t.* FROM tasks t WHERE t.note_id IN (SELECT en.note_id FROM ({held_sql}) en WHERE"
                  f" en.entity_id IN ({q})) AND t.opened_at<=? AND {opened} ORDER BY t.opened_at",
-                 [*members, ref, *p_open]):
+                 [*p_held, *members, ref, *p_open]):
         closed = r["closed_at"] is not None and arch.has(r["closed_revision_id"]) and r["closed_at"] <= ref
         if not closed:
             tasks.append(shapes.task(r) | {"status": "open", "closed_at": None})
     months: Dict[str, int] = {}
-    for r in s.q(f"SELECT substr(en.at,1,7), COUNT(DISTINCT en.note_id) FROM entity_notes en WHERE en.entity_id IN"
-                 f" ({q}) AND en.at<=? AND {in_note} GROUP BY substr(en.at,1,7) ORDER BY 1", [*members, ref, *p_note]):
+    for r in s.q(f"SELECT substr(en.at,1,7), COUNT(DISTINCT en.note_id) FROM ({held_sql}) en WHERE en.entity_id IN"
+                 f" ({q}) AND en.at<=? GROUP BY substr(en.at,1,7) ORDER BY 1", [*p_held, *members, ref]):
         months[r[0]] = r[1]
     return {
         "entity_id": eid, "resolved_from": entity_id if entity_id != eid else None, "as_of": at_n,

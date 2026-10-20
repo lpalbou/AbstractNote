@@ -150,14 +150,14 @@ def test_one_consolidation_fills_summaries_names_groups_and_reports_every_stage(
     world(nb_)
     nb_.recompute_communities()
     before = cons.pending(nb_)
-    assert before == {"stale_labels": 0, "unlabelled": 2, "stale_summaries": 11}
+    assert before == {"stale_labels": 0, "unlabelled": 2, "stale_summaries": 11, "reinterpret": 0}
     log = []
     _recording(tools, "note_consolidation_progress", log)
     llm = _llm()
     out = NoteRunner.with_llm(llm, tools).run("note-consolidate", {})
     assert out["response"] == "Consolidated: 0 merges, 2 groups named, 11 summaries refreshed, 0 insights."
     assert sorted(c["label"] for c in nb_.communities()["items"]) == ["Group 0", "Group 1"]
-    assert cons.pending(nb_) == {"stale_labels": 0, "unlabelled": 0, "stale_summaries": 0}
+    assert cons.pending(nb_) == {"stale_labels": 0, "unlabelled": 0, "stale_summaries": 0, "reinterpret": 0}
     assert [c["schema"] for c in llm.calls] == ["CommunityLabels", "EntitySummaries", "EntitySummaries",
                                                 "Reflections"]  # 8 + 3 entries; labels already done for reflect
     # progress rows advance through every stage, in order
@@ -208,7 +208,7 @@ def test_the_budget_bounds_the_summary_loop_and_says_what_it_did_not_reach(tmp_p
     last = cons.last(nb_)
     assert cons.pending(nb_)["stale_summaries"] == 3
     assert last["status"] == "completed_with_gaps" and last["budget_spent"] is True
-    assert last["left_out"] == {"summaries": 3, "labels": 0, "reasons": [cons.BUDGET_REASON]}
+    assert last["left_out"] == {"summaries": 3, "labels": 0, "reinterpret": 0, "reasons": [cons.BUDGET_REASON]}
 
 
 def test_a_tool_failure_inside_the_summary_loop_ends_the_run_and_closes_it_as_failed(tmp_path):

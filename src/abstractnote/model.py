@@ -42,6 +42,9 @@ OP_NAMES = (
     "entity.mention", "claim.add", "claim.supersede", "claim.retract", "claim.reinforce", "topic.assign",
     "task.open", "task.close", "task.drop", "note.summary", "claim.insert_before", "note.redate",
     "note.archive", "topic.unassign",
+    # ADR 0008: a re-understanding (``note.reinterpret``) and the inverse of every op (data-model.md "Re-understanding")
+    "note.reinterpret", "claim.reinterpret", "claim.revise", "claim.reopen", "claim.repoint", "reinforcement.drop",
+    "task.reopen", "task.retire", "entity.retire",
 )
 
 

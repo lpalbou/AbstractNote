@@ -25,6 +25,8 @@ import {
   pendingConsolidationLine,
   queueSegments,
   revisionChips,
+  consolidationGapsWords,
+  reinterpretWords,
   stateLine,
   stepIndex,
   stepperFor,
@@ -224,9 +226,10 @@ describe("steppers", () => {
     expect(early.map((x) => x.item.run_id)).toEqual(["d", "e"]);
   });
   it("consolidation stages", () => {
-    expect(CONSOLIDATION_STAGES.map((s) => s.label)).toEqual(["Normalize", "Themes", "Labels", "Summaries", "Then and now", "Reflect"]);
-    expect(consolidationStageIndex("summaries")).toBe(3);
-    expect(consolidationStageIndex("done")).toBe(6);
+    expect(CONSOLIDATION_STAGES.map((s) => s.label)).toEqual(["Normalize", "Re-understanding", "Themes", "Labels", "Summaries", "Then and now", "Reflect"]);
+    expect(consolidationStageIndex("summaries")).toBe(4);
+    expect(consolidationStageIndex("reinterpret")).toBe(1);
+    expect(consolidationStageIndex("done")).toBe(7);
     expect(consolidationStageIndex("other")).toBe(-1);
   });
 });
@@ -289,6 +292,19 @@ describe("the state sentence", () => {
   it("consolidation in progress when nothing else runs", () => {
     const c = { automation: { id: "c", state: "active", paused: false, healthy: true, reason: null }, run: { run_id: "x", started_at: "2026-10-20T09:56:00Z", stage: "summaries", stage_done: 48, stage_total: 140, eta_s: 400, elapsed_s: 240 }, last: null, pending: { stale_labels: 0, unlabelled: 0, stale_summaries: 0 } };
     expect(stateLine(processing({ active: [], consolidation: c })).text).toBe("Consolidating your notebook · Summaries 48 of 140 · about 7 min left");
+  });
+  it("the re-understanding stage in words (ADR 0008)", () => {
+    const run = { run_id: "x", started_at: "2026-10-20T09:56:00Z", stage: "reinterpret", stage_done: 0, stage_total: 12, eta_s: 400, elapsed_s: 10 };
+    const c = { automation: { id: "c", state: "active", paused: false, healthy: true, reason: null }, run, last: null, pending: { stale_labels: 0, unlabelled: 0, stale_summaries: 0, reinterpret: 12 } };
+    expect(stateLine(processing({ active: [], consolidation: c })).text).toBe("Consolidating your notebook · Re-understanding 12 notes · about 7 min left");
+    expect(stateLine(processing({ active: [], consolidation: { ...c, run: { ...run, stage_done: 3 } } })).text).toBe("Consolidating your notebook · Re-understanding 3 of 12 notes · about 7 min left");
+    expect(reinterpretWords(0, 1)).toBe("Re-understanding 1 note");
+    expect(pendingConsolidationLine({ unlabelled: 0, stale_labels: 0, stale_summaries: 0, reinterpret: 4 })).toBe("4 notes to understand again");
+    const now = Date.parse("2026-10-20T10:00:00");
+    const last = { finished_at: new Date(Date.parse("2026-10-19T03:12:00")).toISOString(), status: "completed_with_gaps", merges: 0, communities: 3, labelled: 0, summaries_refreshed: 0, insights: 0, reinterpreted: 5, unchanged: 2, left_out: { summaries: 0, labels: 0, reinterpret: 3, reasons: ["x"] }, budget_spent: true, notice: "n" };
+    expect(lastConsolidationLine(last, now)).toBe("Yesterday: 5 notes understood again, 3 themes.");
+    expect(consolidationGapsWords(last)).toBe("3 notes to understand again next time");
+    expect(consolidationGapsWords({ ...last, left_out: { summaries: 2, labels: 0, reinterpret: 3, reasons: [] } })).toBe("2 summaries to try again next time and 3 notes to understand again next time");
   });
   it("the last consolidation in one line, and what is waiting", () => {
     const now = Date.parse("2026-10-20T10:00:00");

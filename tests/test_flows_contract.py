@@ -27,7 +27,7 @@ def _params_from_sites(flows):
 def test_every_tool_call_is_fed_by_an_arguments_node():
     flows = load_flows()
     sites = [s for f in flows.values() for s in tool_call_sites(f)]
-    assert len(sites) == 45  # 21 + note-consolidate (23, backlog 0032) + the drain's themes check (ADR 0008 §5)
+    assert len(sites) == 51  # 21 + note-consolidate (23, backlog 0032; + 6 for the reinterpret stage, ADR 0008) + the drain's themes check (ADR 0008 §5)
     for s in sites:
         assert s["arguments"] is not None and len(s["tools"]) == 1, s
         assert s["tools"][0] in NOTE_TOOLS

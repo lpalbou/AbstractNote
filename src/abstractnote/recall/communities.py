@@ -43,7 +43,7 @@ import math
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .. import ids
-from ..store.notes import clamp_limit
+from ..store.notes import REINTERPRET_ACTION, clamp_limit  # a re-understanding since the last computation makes it due
 from . import shapes
 
 DEFAULT_RESOLUTION = 1.0
@@ -60,8 +60,6 @@ LABEL_MAX_WORDS = 4
 DUE_RETRO_NOTES = 1             # retrospective notes since the last computation that make it due (ADR 0008 §5)
 DUE_REVISIONS = 20              # ... or revisions applied since then
 DUE_REVISIONS_SHARE = 0.10      # ... or this share of the revisions applied at the last computation, when more
-#: The revision that re-understands a note (ADR 0008 §1); any since the last computation makes it due.
-REINTERPRET_ACTION = "note.reinterpret"
 COMMUNITY_KINDS = ["project", "theme", "people", "tooling", "process", "other"]
 
 #: Structured output of the labelling step (top-level field ``communities``, so no other schema has the same

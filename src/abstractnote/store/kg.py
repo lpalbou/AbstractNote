@@ -30,6 +30,32 @@ from .embeddings import VectorCache, vector_key
 OWNER_ID = "abstractnote"
 SCOPE = "global"
 KIND_ATTR = "abstractnote_kind"  # claim | name | alias | same_as
+#: ADR 0008: the AbstractMemory closure kind of a statement a re-understanding withdrew (never written as a retraction).
+REINTERPRETED_KIND = "reinterpreted"
+#: The attribute naming the note-index claim of an assertion that is a later COPY of it (a statement read again with
+#: another certainty, or re-opened: AbstractMemory content is append-only and a window cannot widen).
+CLAIM_ATTR = "claim_id"
+
+
+def supports_reinterpreted() -> bool:
+    """Whether the installed AbstractMemory accepts the closure kind ``reinterpreted`` (an additive kind of
+    abstractmemory 0.3.2; ADR 0008)."""
+    try:
+        ClosureRecord(assertion_id="probe", kind=REINTERPRETED_KIND, reason="probe")
+    except ValueError:
+        return False
+    return True
+
+
+def require_reinterpreted() -> None:
+    """Fail loudly when the installed AbstractMemory lacks the closure kind (no silent mapping to a retraction)."""
+    if not supports_reinterpreted():
+        import abstractmemory
+
+        raise RuntimeError(
+            f"The installed AbstractMemory ({getattr(abstractmemory, '__version__', 'unknown version')}) has no closure"
+            " kind 'reinterpreted', which understanding a note again needs (ADR 0008); install an abstractmemory that"
+            " has it.")
 
 
 class _LookupEmbedder:
@@ -64,6 +90,8 @@ def claim_assertion(payload: Dict[str, Any], rev: Dict[str, Any], subject_kind: 
         attrs["literal"] = True
     if payload.get("evidence"):
         attrs["evidence_quote"] = payload["evidence"]
+    if payload.get("of_claim_id"):  # a copy of a note-index claim (claim.revise / claim.reopen, ADR 0008)
+        attrs[CLAIM_ATTR] = payload["of_claim_id"]
     prov = {
         "source": "abstractnote", "note_id": payload.get("note_id") or rev.get("note_id"),
         "revision_id": rev["revision_id"], "run_id": run_id or rev.get("run_id"),
@@ -162,6 +190,20 @@ class ClaimStore:
             elif name == "claim.retract":
                 closes.append({"assertion_id": p["claim_id"], "valid_until": p.get("valid_until") or rev["at"],
                                "kind": "retract", "reason": p.get("reason") or "retracted", "replacement_ids": ()})
+            elif name == "claim.reinterpret":
+                # ADR 0008: the withdrawn reading's copy closes empty (at its own start), whatever closed it before
+                closes.append({"assertion_id": p.get("assertion_id") or p["claim_id"], "valid_until": p["valid_until"],
+                               "kind": REINTERPRETED_KIND, "narrow": True, "replacement_ids": (),
+                               "reason": p.get("reason") or "the note was understood again"})
+            elif name in ("claim.revise", "claim.reopen"):
+                # the statement as it now reads is a new copy (content is append-only, a window cannot widen); the
+                # copy it replaces closes empty with the kind reinterpreted, naming the new one
+                a = dict(p["assertion"])
+                adds.append(claim_assertion(a, rev, kinds.get(a["subject_id"]), kinds.get(a.get("object_id") or "")))
+                closes.append({"assertion_id": p["previous_assertion_id"], "valid_until": p["empty_at"],
+                               "kind": REINTERPRETED_KIND, "narrow": True, "replacement_ids": (a["claim_id"],),
+                               "reason": p.get("reason") or ("read again" if name == "claim.revise" else
+                                                             "re-opened: the reading that closed it was withdrawn")})
         return adds, closes
 
     def texts_for(self, adds: Sequence[TripleAssertion]) -> List[str]:
@@ -179,6 +221,8 @@ class ClaimStore:
                 warnings.filterwarnings("error", message=r"#FALLBACK: embedder failed", category=RuntimeWarning)
                 self.store.add(adds)
         closed = 0
+        if any(c["kind"] == REINTERPRETED_KIND for c in closes):
+            require_reinterpreted()
         for c in closes:
             if c["kind"] == "supersede" and not c["replacement_ids"]:
                 c = dict(c, kind="retract")
@@ -226,9 +270,11 @@ class ClaimStore:
         return self.store.query(TripleQuery(**kwargs))
 
     def active_claim_ids(self, at: str) -> List[str]:
-        """Claim assertion ids AbstractMemory considers active at ``at``."""
+        """Note-index claim ids AbstractMemory considers active at ``at`` (a copy written by a re-understanding names
+        its claim in ``attributes.claim_id``)."""
         rows = self.query(active_at=ids.normalize_time(at, field="at"))
-        return sorted(a.assertion_id for a in rows if (a.attributes or {}).get(KIND_ATTR) == "claim")
+        return sorted({(a.attributes or {}).get(CLAIM_ATTR) or a.assertion_id for a in rows
+                       if (a.attributes or {}).get(KIND_ATTR) == "claim"})
 
     def count(self) -> int:
         return len(self.query())
@@ -241,8 +287,9 @@ def kinds_from_index(conn: sqlite3.Connection, rev: Dict[str, Any]) -> Dict[str,
     """Entity kinds needed to type a revision's claim assertions."""
     wanted = set()
     for op in rev.get("ops") or []:
-        if op["op"] == "claim.add":
+        if op["op"] in ("claim.add", "claim.revise", "claim.reopen"):
             p = op.get("payload") or {}
+            p = p.get("assertion") or p if op["op"] != "claim.add" else p
             wanted.add(p["subject_id"])
             if p.get("object_id"):
                 wanted.add(p["object_id"])

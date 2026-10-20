@@ -82,6 +82,7 @@ generic thing.
 | `first_seen`, `last_seen` | `occurred_at` of the first and latest note mentioning it |
 | `note_count` | number of notes that mention it |
 | `merged_into` | set when the model decided this entity is the same as another; the record stays so old links still resolve |
+| `retired_revision_id`, `retired_at` | set when only a superseded interpretation created the entity and nothing references it any more (`entity.retire`, ADR 0008): it leaves lists, the graph, search and candidates; the archive as received before shows it; a later mention brings it back |
 | `embedding` | vector of `name + aliases + summary`, refreshed when the summary changes |
 
 Entities are created only by revisions. The id is minted from the canonical name of the name chosen
@@ -130,11 +131,11 @@ graph.
 | `stance` | `assert`, `revise`, `retract`: what the note does to earlier knowledge |
 | `observed_at` | the note's `occurred_at` |
 | `valid_from`, `valid_until` | the validity window; `valid_from` defaults to `observed_at` for state claims and is null for timeless facts or for a statement that stopped before its note was written (`valid_until` earlier than the note); `valid_until` is set when a later note supersedes or retracts the claim, when the claim is an earlier belief placed before a later one (`claim.insert_before`: the later one's start), and equals `valid_from` when you retract it ("never true"); it is never earlier than `valid_from` |
-| `status` | `active`, `superseded`, `retracted` |
+| `status` | `active`, `superseded`, `retracted`, `reinterpreted` (the note was understood again and its new reading does not make this statement: an empty window, never a belief; see "Re-understanding") |
 | `superseded_by` | the claim that replaced it |
 | `evidence` | the verbatim excerpt of the note that supports the claim |
 | `note_id`, `revision_id` | provenance |
-| `assertion_id` | the id of the same claim in the AbstractMemory store (equals `claim_id`) |
+| `assertion_id` | the id of the same claim in the AbstractMemory store (equals `claim_id`; a statement a re-understanding revised in place or re-opened has a new copy there, named here, whose `attributes.claim_id` is the claim) |
 
 ### Relation
 
@@ -158,6 +159,8 @@ and tasks.
 | `at` | the note's `occurred_at` (history time) |
 | `recorded_at` | when the processor applied it (system time) |
 | `run_id` | the processing run (ledger) |
+| `action` | null for a note's first understanding; `note.reinterpret` for a re-understanding (ADR 0008, id from `(note.reinterpret, note_id, the revision it supersedes)`); the user action otherwise |
+| `context_json` | the dependency record (ADR 0008): what the reading saw, `{as_of, entities, claims, summaries: {entity_id: revision_id}, notes, mention_queries, looked_up}` (see "Re-understanding"); null on revisions written before schema 3 (`context_unknown`) and on user actions |
 | `ops` | ordered list of operations |
 | `summary` | one sentence written by the processor ("Linked the LUT budget decision to Castor; superseded the earlier plan.") |
 
@@ -182,6 +185,15 @@ Operations:
 | `entity.mention` | `{entity_id, note_id}` (the note talks about the entity; drives `note_count`, `first_seen`, `last_seen`) |
 | `note.summary` | `{note_id, summary, kind, language}` |
 | `note.archive` | `{note_id, duplicate_of?, reason?}`: the note is archived (it leaves lists, search and the queue, keeps its links) and names the copy it duplicates (`abstractnote dedupe-sources`) |
+| `note.reinterpret` | `{note_id, supersedes, reason, by_note_ids}`: the first op of a re-understanding (see "Re-understanding"): the interpretation `supersedes` is superseded, its mentions and topics are soft-removed (`entity_notes_removed`, `note_topics_removed`) for the new reading's ops to add them again |
+| `claim.reinterpret` | `{claim_id, valid_until, assertion_id, reason}`: a statement of the superseded reading the new one does not make: status `reinterpreted`, window emptied at its own start; AbstractMemory closes its copy with the closure kind `reinterpreted` |
+| `claim.revise` | `{claim_id, certainty, stance, valid_from, valid_until, evidence, assertion_id, previous, previous_assertion_id, empty_at, assertion}`: the same statement (subject, predicate, object) read again with another certainty, stance, window or evidence: updated in place (`previous` keeps the earlier values; a window another revision closed stays closed); AbstractMemory gets the new copy `assertion` and closes the previous one empty (kind `reinterpreted`) |
+| `claim.reopen` | `{claim_id, status, valid_until, superseded_by, closed_reason, closed_revision_id, closed_by_revision, assertion_id, previous_assertion_id, empty_at, assertion}`: a statement of another note that the superseded reading had closed (superseded, retracted, narrowed) and the new reading leaves alone: restored to the state the other revisions give it; AbstractMemory gets a re-opened copy (a window cannot widen there) |
+| `claim.repoint` | `{claim_id, superseded_by, previous}`: a statement the superseded reading closed and the new reading closes on the same slot: it stays closed, superseded by the new reading's statement |
+| `reinforcement.drop` | `{claim_id, revision_id}`: a reinforcement the superseded reading made that the new one does not repeat |
+| `task.reopen` | `{task_id, closed_revision_id}`: a task the superseded reading closed that the new one does not close |
+| `task.retire` | `{task_id, reason}`: a task of the superseded reading the new one does not have: status `retired` |
+| `entity.retire` | `{entity_id, reason}`: an entity only the superseded reading created and that nothing references any more (see Entity) |
 | `note.redate` | `{note_id, from, to, basis, quote?, reason?}`: the note moves in history time (`basis` `content` when its text states its date, `user` when a person sets it); its mentions, its topics' ranges, its queue place, and the statements and tasks it wrote with the old date move with it; `source.redated` keeps `{basis, from, to, revision_id}` |
 
 User actions (`close a task`, `retract a claim`, `undo a merge`, `confirm a match`) produce revisions with
@@ -217,7 +229,7 @@ note lists filter by a topic's given and canonical spelling.
 
 ## Task
 
-Open loops extracted from notes: `{task_id, note_id, text, status open|done|dropped, due?,
+Open loops extracted from notes: `{task_id, note_id, text, status open|done|dropped|retired, due?,
 closed_by_note_id?}`; `task_id` is `tk_<...>` deterministic from `(note_id, normalised text)`. A later note that reports the task done closes it with a `task.close` op,
 decided by the model during processing, applied only when the linking quotes the note's own words that say it is
 done (`evidence`, a whole-word sequence of the note) and the note is not older than the task; otherwise the open task
@@ -357,6 +369,76 @@ built from later ones, while live notes arrive too. History adapts; nothing is r
 - **History order everywhere history is shown**: timelines, then-versus-now and relation timelines order by
   `occurred_at`/`observed_at` and end a superseded belief at its `valid_until` (not when the closing revision was
   applied); new entities are counted where they were first seen. `GET /note/changes` stays in system time.
+
+### Re-understanding (ADR 0008)
+
+A note is understood against what the notebook knew; when an earlier note (its foundation) arrives later, the
+note is understood again. Interpretation is a derived view: each reading is a revision, the revision log keeps
+them all, and the as-received axis shows what the notebook believed before.
+
+- **Dependency record** (`revisions.context_json`, every processing and re-understanding revision): what the
+  reading SAW, from the stored context packet as the apply finds it: `as_of` (the note's date), `entities` (the
+  candidates `note_context` showed and those `note_resolve_candidates` offered per mention), `claims` (every
+  statement the packet indexed), `summaries` (`{entity_id: revision_id}` of the summary known at the note's date),
+  `notes` (the similar notes shown), `mention_queries` (the mention names resolve was asked, for the no-call check)
+  and `looked_up` (false when the note was applied without a context: nothing was seen). R1's digest
+  (`packet.context`) is merged in when present. A stored packet that has lost its keys fails the apply loudly.
+- **What a reading USED** (`note_dependencies`, a projection of the current interpretation): the subjects and
+  objects of its statements, the statements it related to (reinforced, closed), its tasks and the tasks it closed;
+  its mentions are `entity_notes`. This, not what the packet merely showed, is the invalidation key (a hub entity
+  shown in every packet marks only the notes that used it).
+- **Marks** (`reinterpret_marks`, truth: kept by a rebuild, never written by a replay): when a revision is
+  applied, the notes whose current interpretation used an entity it touched (created, mentioned, the subject or
+  object of a statement it added or closed, an alias or summary it wrote, an entity it retired), or an entity whose
+  canonical name or alias has the same key as one of those (exact keys, ADR 0004), or an entity whose name or alias
+  the note's own words write (whole words), or that closed a task whose words contain or are contained in a task
+  this note opened, are marked `{note_id, reason, by_note_id, by_revision_id, entities, from_at, marked_at}`. The
+  reason is a sentence ("An earlier note (2026-03-05) says more about LUT."). Forward only: a note understood for
+  the first time marks only notes on or after its date (the same date included); a re-understanding marks only
+  notes after it in history order (date, then received time, then id), so marks never go back in history and a
+  pass terminates. A person's re-date marks forward from the earlier of the two dates over the moved note's used
+  entities, and the moved note itself; an archive (not of a duplicate) from the note's date; a retraction from the
+  statement's date; a join or separation a person confirmed from the earlier first mention. The canonical-name
+  repair and duplicate archiving mark nothing (they join copies, not meanings). A note has at most one untaken mark
+  (idempotent); once a pass took it the note is in flight, and a new mark is a new row for the next pass. The apply
+  result says how many notes it marked and why (`marked`, `reinterpret_marked`).
+- **`note.reinterpret`**: the consolidation's reinterpret stage (cognition.md) or `note_apply_revision(...,
+  reinterpret=true)` reads a marked note again with `note-process` (its context leaves out its own previous
+  reading and shows again what that reading had closed). The new reading supersedes the previous one's effects;
+  the inverse of every op of the superseded interpretation:
+
+| op of the superseded reading | in the re-understanding |
+|---|---|
+| `claim.add` (its own statements) | same subject, predicate and object in the new reading: kept as is, or `claim.revise` in place when certainty, stance, window or evidence differ; otherwise `claim.reinterpret` |
+| `claim.supersede`, `claim.retract`, `claim.insert_before` (`after_claim_id`) on another note's statement | the new reading writes on the same slot (subject and predicate): stays closed (`claim.repoint` to the new statement); otherwise `claim.reopen` to the state the other revisions give it |
+| `claim.reinforce` | repeated: kept; otherwise `reinforcement.drop` |
+| `entity.mention` | soft-removed (`entity_notes_removed`); the new reading's mentions are added |
+| `topic.assign` | soft-removed (`note_topics_removed`); the new reading's topics are added (the first 3) |
+| `task.open` (its own tasks) | the same task (same words) in the new reading: kept (re-opened when the new reading no longer says it is done); otherwise `task.retire` |
+| `task.close` of another note's task | closed again by the new reading: kept; otherwise `task.reopen` |
+| `entity.create` | referenced by the new reading or by anything else: kept; otherwise `entity.retire` |
+| `entity.alias`, `entity.rename`, `entity.summary`, `entity.merge`, `note.redate`, `note.summary` | kept (names seen in the note's words, dated summaries in the history, merges a person can undo; the note summary is rewritten) |
+
+  When the new reading's statements (subject, predicate, object, certainty, stance, window), mentions, tasks and
+  topics equal the old ones, nothing is written: the mark is consumed `unchanged` (a summary rewrite alone is
+  `summary_only`, still unchanged). Before any model call, the stage's no-call check compares the note's context
+  looked up again with the dependency record (what was known at the note's date only, without the reading's own
+  entities, statements and summaries): equal means the foundation did not change, `unchanged` with zero calls.
+  The revision's id is deterministic from the revision it supersedes, so a replay is a no-op.
+- **AbstractMemory**: a closed reading is the additive closure kind `reinterpreted` (never a retraction; an
+  AbstractMemory without it makes the re-understanding fail before anything is written). A revised or re-opened
+  statement is a new assertion copy (content is append-only, a window cannot widen), its `attributes.claim_id`
+  naming the claim; the copy it replaces is closed empty with the kind `reinterpreted`. `ClaimStore.active_claim_ids`
+  answers claim ids, so the two stores agree.
+- **As received**: a re-understanding belongs to the archive at R when it was RECORDED by R (it is what the
+  processor did then): before it, the archive shows the previous reading's statements (their status, window and
+  revised values), mentions, topics and the entities it alone created.
+- **Supersede of a statement no longer believed** (a context read before a re-understanding or a person closed
+  it): nothing is closed, the note's statement is kept as new, the revision warns `stale_context` and the result
+  lists the statements.
+- **Upgrade** (schema 3): `meta.dependency_record = {schema: 3, since_seq, upgraded_at}`; revisions up to `since_seq`
+  have no record (`context_unknown`): they are reached through their mentions and the name match, and a mark on such
+  a note is always read again with the model.
 
 ### Document dates
 

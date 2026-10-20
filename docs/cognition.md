@@ -19,7 +19,7 @@ AbstractFlow's `wf_common`) into `src/abstractnote/flows/json/*.json`; the bundl
 | `note-recall` | `abstractnote.recall.v1` and `abstractcode.agent.v1` | clients, agents, per question | answer a question at the requested effort |
 | `note-mine` | internal subflow | `note-recall` (deep) | multi-step mining across time; writes a dossier insight |
 | `note-reflect` | `abstractnote.reflect.v1` | a scheduled automation | surface open loops, contradictions, resurfaced material, connections |
-| `note-consolidate` | `abstractnote.consolidate.v1` | the consolidation automation, "Consolidate now" | merge duplicates, refresh the groups and their names, stale summaries and then-and-now, then reflect |
+| `note-consolidate` | `abstractnote.consolidate.v1` | the consolidation automation, "Consolidate now" | merge duplicates, understand again the notes an earlier note changed, refresh the groups and their names, stale summaries and then-and-now, then reflect |
 
 Every flow exposes `provider` and `model` start pins. Blank means the gateway's default text
 model. The processor automation carries the user's "filing model" (a small fast model is
@@ -307,6 +307,7 @@ keeps the notebook's derived memory fresh, in stages, each reporting its progres
 | Stage | What runs | Model |
 |---|---|---|
 | `normalize` | `note_entities_normalize`: the entries that share a canonical name are merged (`Notebook.normalize_entities`, one reversible revision per merge) | none |
+| `reinterpret` | loop (ADR 0008): `note_reinterpret_next` (1) -> the `note-process` flow as a subflow for that note -> the next, until no marked note is left for this pass or the budget is spent (below) | as note-process, per note read again (0 for a note settled unchanged) |
 | `communities` | `note_communities_recompute` (as in note-reflect) | none |
 | `labels` | loop: `note_communities_pending` (5, `exclude` = the groups skipped this run) -> the reflect naming step (`CommunityLabels`, by index; asked once more when a group is left out) -> `note_communities_label`, until none waits that was not skipped, or the budget is spent | 1 call per 5 groups (2 when the first answer leaves one out) |
 | `summaries` | loop: `note_entities_stale_summaries` (8) -> `llm_call summaries` (`EntitySummaries`: `[{index, summary}]`; `summaries_again` when an entry is left out or empty) -> `note_entities_set_summaries`, until none is stale that was not offered this run, or the budget is spent | 1 call per 8 entries (2 when the first answer leaves one out) |
@@ -357,6 +358,34 @@ dated `as_of` = the entry's latest dated knowledge (its last mention, or its cur
 later): the new summary is current until a note dated later writes one, and a note dated between that
 knowledge and the consolidation is never hidden behind it. The summary history keeps every version and a
 rebuild replays it.
+
+**Re-understanding** (stage `reinterpret`, ADR 0008; the records and marks are in data-model.md
+"Re-understanding"). A note understood without its foundation is understood again when the foundation
+arrives: when a note is applied, the later notes whose current interpretation USED what it touched are marked
+(with the reason and the note that caused it), and this stage reads them again. `note_reinterpret_next` takes
+the pending marks of the open consolidation in history order (date, then received time, then id), each note at
+most once per pass (a mark that arrives for a note the pass already read waits for the next pass). Before any
+model call it runs the no-call check: the note's context is looked up again (the same `note_context` and
+`note_resolve_candidates` lookups, with the mention names its last reading asked) and compared with the
+dependency record of its current interpretation, on what was known at the note's date (the entities, the
+statements and similar notes recorded on or before it, the summaries written for a date on or before it), leaving
+out what that reading itself wrote; equal: the note is `unchanged`, its mark is consumed and no model is called.
+Otherwise the note goes through `note-process` (filing is not repeated): its context leaves out its own previous
+reading (its statements and tasks) and shows again what that reading had closed; the apply sees that the pass took
+the note's mark and builds a `note.reinterpret` revision (or records `unchanged` when the new reading's statements,
+mentions, tasks and topics equal the old ones; summaries alone do not count). A re-understanding marks only
+notes after it in history order, so a pass is one forward sweep and ends; a second pass with no new earlier note
+has no mark to read and calls no model. A note read again three times in one UTC day waits for the next day
+(`REINTERPRET_PER_DAY`, skipped with that reason). A note that cannot be read again (the model fails) is skipped
+for this run with its reason (the W26 shape: `stages_json.reinterpret.skipped_ids`, a warning on the
+`abstractnote.consolidation` logger), its mark waits (with the error) and its previous interpretation stays
+current; the stage goes on with the next note. The time budget stops the stage before it takes the next note:
+what is left is `results.not_reached.reinterpret`. The close reports `reinterpreted`, `unchanged` and
+`reinterpret_failed` (read from the marks), and `left_out.reinterpret` = the skipped notes still marked plus what the
+budget did not reach; a run that left notes is `completed_with_gaps` and its notice says "3 notes could not be
+understood again this time; they will be read again next time." The progress line reads "Re-understanding 12
+notes" (web: "Re-understanding 3 of 12 notes"); `GET /note/consolidation` `pending.reinterpret` gives the count
+before the run, and `consolidation.state(nb)["reinterpret"]` the count by entity and the reasons.
 
 The start pins are `budget_s` (default 3600: the loops stop starting rounds after it), `limit` (the reflect
 stage's insight limit, default 10), `thinking` (`on` or `off`, default `off`, wired to both model steps) and

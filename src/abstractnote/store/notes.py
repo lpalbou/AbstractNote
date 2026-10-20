@@ -128,11 +128,18 @@ RETRO_MIN_GAP = timedelta(days=1)
 SUMMARY_ORDER = "s.at, COALESCE(v.seq, 0)"
 SUMMARY_ORDER_DESC = "s.at DESC, COALESCE(v.seq, 0) DESC"
 _SUMMARY_FROM = "entity_summaries s LEFT JOIN revisions v ON v.revision_id=s.revision_id"
-#: The revision that re-understands a note (ADR 0008 §1), as its ``action`` or as one of its ops.
+#: The revision that re-understands a note (ADR 0008 §1), as its ``action`` or as one of its ops: the action of a
+#: revision that supersedes a note's previous interpretation (``REINTERPRET_ACTION`` is the same value).
 REINTERPRET = "note.reinterpret"
-#: The closure kind of a statement a re-understanding withdrew, stored as the claim's ``status`` (R2's
-#: ``op_claim_reinterpret``, same name and value as R2's constant in this module: one definition at the merge).
+REINTERPRET_ACTION = REINTERPRET
+#: The closure kind of a statement a re-understanding withdrew, stored as the claim's ``status`` and written as the
+#: AbstractMemory ClosureRecord kind (``op_claim_reinterpret``). The one definition: other modules import it.
 REINTERPRETED = "reinterpreted"
+#: A task a re-understanding withdrew (it was the superseded reading's task, the new reading has no such task).
+TASK_RETIRED = "retired"
+#: User actions whose effects mark the notes after them for re-understanding (ADR 0008 §4, review 3.4). The
+#: canonical-name repair (``entity.merge`` from ``normalize``) and duplicate archiving join copies, not meanings.
+MARKING_ACTIONS = ("note.redate", "note.archive", "claim.retract", "entity.unmerge", "match.confirm")
 _IS_REINTERPRET = f"(r2.action='{REINTERPRET}' OR r2.ops_json LIKE '%\"{REINTERPRET}\"%')"
 
 
@@ -158,6 +165,9 @@ class NoteStore:
         self.path = str(path)
         self.lock = threading.RLock()
         self.conn = connect(self.path)
+        #: ADR 0008 invalidation marks are written while revisions are applied, never while a rebuild replays them
+        #: (the marks table is truth and keeps what was already marked and consumed).
+        self.marking = True
         with self.lock:
             ensure_schema(self.conn)
 
@@ -280,6 +290,7 @@ class NoteStore:
             "run_id": r["run_id"], "ops": _uj(r["ops_json"], []), "summary": r["summary"],
             "source": _uj(r["source_json"]), "warnings": _uj(r["warnings_json"], []),
             "applied_index": bool(r["applied_index"]), "applied_kg": bool(r["applied_kg"]),
+            "context": _uj(r["context_json"]) if "context_json" in r.keys() else None,
         }
 
     def insert_revision(self, rev: Dict[str, Any]) -> bool:
@@ -287,12 +298,13 @@ class NoteStore:
         with self.lock:
             cur = self.conn.execute(
                 "INSERT OR IGNORE INTO revisions(revision_id, note_id, attempt, action, target, at, recorded_at,"
-                " run_id, ops_json, summary, source_json, warnings_json, result_json, applied_index, applied_kg)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0)",
+                " run_id, ops_json, summary, source_json, warnings_json, result_json, applied_index, applied_kg,"
+                " context_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?)",
                 (rev["revision_id"], rev.get("note_id"), rev.get("attempt"), rev.get("action"), rev.get("target"),
                  rev["at"], rev["recorded_at"], rev.get("run_id"), _j(rev.get("ops") or []), rev.get("summary") or "",
                  _j(rev.get("source")) if rev.get("source") is not None else None, _j(rev.get("warnings") or []),
-                 _j(rev.get("result")) if rev.get("result") is not None else None),
+                 _j(rev.get("result")) if rev.get("result") is not None else None,
+                 _j(rev["context"]) if rev.get("context") is not None else None),
             )
             return cur.rowcount > 0
 
@@ -398,6 +410,7 @@ class NoteStore:
             "display_name": r["display_name"] or r["name"],
             "aliases": self.aliases(r["entity_id"]), "summary": r["summary"], "first_seen": r["first_seen"],
             "last_seen": r["last_seen"], "note_count": r["note_count"], "merged_into": r["merged_into"],
+            "retired": bool(r["retired_revision_id"]),
         }
 
     def name_key_groups(self) -> List[List[str]]:
@@ -569,8 +582,8 @@ class NoteStore:
         sql = "SELECT * FROM claims WHERE (valid_from IS NULL OR valid_from<=?)"
         params: List[Any] = [at]
         if arch is None:
-            sql += " AND (valid_until IS NULL OR valid_until>?)"
-            params.append(at)
+            sql += " AND (valid_until IS NULL OR valid_until>?) AND status!=?"  # ADR 0008: a withdrawn reading
+            params += [at, REINTERPRETED]
         else:
             frag, fp = arch.revisions_in("revision_id")
             sql += f" AND {frag}"
@@ -630,6 +643,9 @@ class NoteStore:
             frag, fp = arch.revisions_in("revision_id")
             sql += f" AND {frag}"
             params += fp
+        else:  # ADR 0008: a statement a re-understanding withdrew is not an edge (the archive view shows it before)
+            sql += " AND status!=?"
+            params.append(REINTERPRETED)
         claims = self.q(sql, params)
         edges: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
         for r in claims:
@@ -655,7 +671,7 @@ class NoteStore:
         if arch:
             nodes = self._archive_nodes(arch, at_n)
         else:
-            node_sql = "SELECT * FROM entities WHERE 1=1"
+            node_sql = "SELECT * FROM entities WHERE retired_revision_id IS NULL"  # ADR 0008: a retired entity
             nparams: List[Any] = []
             if at_n:
                 node_sql += " AND COALESCE(first_seen, created_at)<=? AND (merged_into IS NULL OR merged_at>?)"
@@ -791,7 +807,7 @@ class NoteStore:
         sql = "SELECT e.* FROM entities e WHERE 1=1"
         params: List[Any] = []
         if not include_merged:
-            sql += " AND e.merged_into IS NULL"
+            sql += " AND e.merged_into IS NULL AND e.retired_revision_id IS NULL"
         if kind:
             sql += " AND e.kind=?"
             params.append(kind)
@@ -927,9 +943,14 @@ class NoteStore:
         revs = [self.revision_dict(r) for r in self.q(
             "SELECT * FROM revisions WHERE applied_index=1 AND at>=? AND at<?" + f_rev + " ORDER BY at, seq",
             (s, e, *p_rev))]
-        touched = [self.entity_brief(r[0]) for r in self.q(
-            "SELECT DISTINCT entity_id FROM entity_notes WHERE at>=? AND at<?" + f_note + " ORDER BY entity_id",
-            (s, e, *p_note))]
+        if arch is None:
+            touched_rows = self.q("SELECT DISTINCT entity_id FROM entity_notes WHERE at>=? AND at<? ORDER BY entity_id",
+                                  (s, e))
+        else:  # the mentions as the archive held them (ADR 0008: a superseded reading's mentions, before it was)
+            msql, mp = arch.mentions_sql()
+            touched_rows = self.q(f"SELECT DISTINCT entity_id FROM ({msql}) WHERE at>=? AND at<? ORDER BY entity_id",
+                                  (*mp, s, e))
+        touched = [self.entity_brief(r[0]) for r in touched_rows]
         created = [r[0] for r in self.q("SELECT entity_id FROM entities WHERE created_at>=? AND created_at<?" +
                                         f_created, (s, e, *p_created))]
         superseded = [self.claim_dict(r) for r in self.q(
@@ -1114,6 +1135,248 @@ class NoteStore:
                 "stale_summaries": stale, "retro_notes_since_communities": notes,
                 "communities_due": notes >= int(threshold), "threshold": int(threshold)}
 
+    # ------------------------------------------------------------------ ADR 0008: interpretations and marks
+
+    def interpretation_chain(self, note_id: str, c: Optional[sqlite3.Connection] = None) -> List[str]:
+        """The applied interpretation revisions of a note in order: its processing revision and the
+        ``note.reinterpret`` revisions that superseded it (the last one not superseded is the current one)."""
+        conn = c or self.conn
+        with self.lock:
+            rows = conn.execute("SELECT revision_id FROM revisions WHERE note_id=? AND applied_index=1 AND abandoned=0 AND"
+                                " (action IS NULL OR action=?) ORDER BY seq", (note_id, REINTERPRET_ACTION)).fetchall()
+        return [r[0] for r in rows]
+
+    def current_interpretation(self, note_id: str, c: Optional[sqlite3.Connection] = None) -> Optional[str]:
+        """The note's current interpretation revision (the latest applied one no ``note.reinterpret`` superseded),
+        or None when the note was never understood."""
+        conn = c or self.conn
+        with self.lock:
+            row = conn.execute(
+                "SELECT revision_id FROM revisions WHERE note_id=? AND applied_index=1 AND abandoned=0 AND (action IS NULL"
+                " OR action=?) AND revision_id NOT IN (SELECT revision_id FROM revision_supersessions) ORDER BY seq DESC"
+                " LIMIT 1", (note_id, REINTERPRET_ACTION)).fetchone()
+        return row[0] if row else None
+
+    @staticmethod
+    def note_order_key(row: Any) -> Tuple[str, str, str]:
+        """History order of notes (ADR 0008 §4): the date, then (same date) the time it was received, then its id."""
+        return (row["occurred_at"], row["received_at"], row["note_id"])
+
+    def used_by(self, c: sqlite3.Connection, note_id: str) -> Dict[str, List[str]]:
+        """What the note's current interpretation USED (the invalidation key, never what its packet merely showed):
+        ``{entity, claim, task_opened, task_closed}`` from ``note_dependencies`` plus its live mentions."""
+        out: Dict[str, List[str]] = {"entity": [], "claim": [], "task_opened": [], "task_closed": []}
+        for kind, key in c.execute("SELECT kind, key FROM note_dependencies WHERE note_id=? ORDER BY kind, key",
+                                   (note_id,)).fetchall():
+            out.setdefault(kind, []).append(key)
+        for (eid,) in c.execute("SELECT entity_id FROM entity_notes WHERE note_id=?", (note_id,)).fetchall():
+            if eid not in out["entity"]:
+                out["entity"].append(eid)
+        return out
+
+    def mark_reinterpret(self, c: sqlite3.Connection, marks: Sequence[Dict[str, Any]], marked_at: str) -> List[str]:
+        """Insert re-understanding marks ``[{note_id, reason, by_note_id?, by_revision_id?, entities?, from_at?}]`` in
+        the caller's transaction. Idempotent: a note that already has an untaken mark is not marked twice (the unique
+        index); a note whose mark a pass has taken gets a new row, for the next pass (review 3.5). Returns the notes
+        newly marked."""
+        out: List[str] = []
+        for m in marks:
+            cur = c.execute(
+                "INSERT OR IGNORE INTO reinterpret_marks(note_id, reason, by_note_id, by_revision_id, entities_json,"
+                " from_at, marked_at) VALUES (?,?,?,?,?,?,?)",
+                (m["note_id"], m["reason"], m.get("by_note_id"), m.get("by_revision_id"),
+                 _j(sorted(set(m.get("entities") or []))), m.get("from_at"), marked_at))
+            if cur.rowcount:
+                out.append(m["note_id"])
+        return out
+
+    def take_mark(self, note_id: str, pass_id: str) -> int:
+        """A pass takes the note's pending marks (``pass_id``, ``taken_at``): the untaken ones and those an earlier
+        pass took but did not consume (it failed or held them); returns how many."""
+        with self.tx() as c:
+            cur = c.execute("UPDATE reinterpret_marks SET pass_id=?, taken_at=?, error=NULL WHERE note_id=? AND"
+                            " consumed_at IS NULL AND (pass_id IS NULL OR pass_id!=?)",
+                            (pass_id, ids.utc_now(), note_id, pass_id))
+            return int(cur.rowcount or 0)
+
+    def consume_marks(self, note_id: str, pass_id: Optional[str], outcome: str, revision_id: Optional[str] = None,
+                      calls: Optional[int] = None, c: Optional[sqlite3.Connection] = None) -> int:
+        """Stamp the marks a pass took for the note as consumed with ``outcome`` (reinterpreted | unchanged); without a
+        ``pass_id`` (a direct call), every taken or untaken mark of the note marked before now."""
+        now = ids.utc_now()
+
+        def run(conn: sqlite3.Connection) -> int:
+            if pass_id:
+                cur = conn.execute("UPDATE reinterpret_marks SET consumed_at=?, outcome=?, consumed_revision_id=?, calls=?,"
+                                   " error=NULL WHERE note_id=? AND pass_id=? AND consumed_at IS NULL",
+                                   (now, outcome, revision_id, calls, note_id, pass_id))
+            else:
+                cur = conn.execute("UPDATE reinterpret_marks SET consumed_at=?, outcome=?, consumed_revision_id=?, calls=?,"
+                                   " pass_id=COALESCE(pass_id, 'direct'), taken_at=COALESCE(taken_at, ?), error=NULL"
+                                   " WHERE note_id=? AND consumed_at IS NULL AND marked_at<=?",
+                                   (now, outcome, revision_id, calls, now, note_id, now))
+            return int(cur.rowcount or 0)
+
+        if c is not None:
+            return run(c)
+        with self.tx() as conn:
+            return run(conn)
+
+    def fail_mark(self, note_id: str, pass_id: str, error: str) -> None:
+        """A failed re-understanding (review 4.2): the mark stays pending (taken by this pass, so the next pass takes it
+        again), with the error; the note's previous interpretation stays current."""
+        with self.tx() as c:
+            c.execute("UPDATE reinterpret_marks SET error=? WHERE note_id=? AND pass_id=? AND consumed_at IS NULL",
+                      (" ".join(str(error or "").split()) or "It could not be understood again.", note_id, pass_id))
+
+    def pending_marks(self, *, pass_id: Optional[str] = None, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Notes waiting to be re-understood, in history order (ADR 0008: ascending date, then received time, then
+        id), one row per note: ``{note_id, occurred_at, received_at, reasons, by_note_ids, entities, marked_at,
+        taken_by}``. With ``pass_id``, the notes that pass has not taken yet (a note it took is left for the next
+        pass, review §6)."""
+        sql = ("SELECT m.*, n.occurred_at, n.received_at, n.archived_at FROM reinterpret_marks m JOIN notes n ON"
+               " n.note_id=m.note_id WHERE m.consumed_at IS NULL AND n.archived_at IS NULL")
+        params: List[Any] = []
+        if pass_id:
+            sql += " AND m.note_id NOT IN (SELECT note_id FROM reinterpret_marks WHERE pass_id=?)"
+            params.append(pass_id)
+        sql += " ORDER BY n.occurred_at, n.received_at, n.note_id, m.mark_id"
+        by_note: Dict[str, Dict[str, Any]] = {}
+        for r in self.q(sql, params):
+            d = by_note.get(r["note_id"])
+            if d is None:
+                d = by_note[r["note_id"]] = {"note_id": r["note_id"], "occurred_at": r["occurred_at"],
+                                             "received_at": r["received_at"], "reasons": [], "by_note_ids": [],
+                                             "entities": [], "marked_at": r["marked_at"], "taken_by": r["pass_id"],
+                                             "error": r["error"]}
+            if r["reason"] not in d["reasons"]:
+                d["reasons"].append(r["reason"])
+            if r["by_note_id"] and r["by_note_id"] not in d["by_note_ids"]:
+                d["by_note_ids"].append(r["by_note_id"])
+            for e in _uj(r["entities_json"], []) or []:
+                if e not in d["entities"]:
+                    d["entities"].append(e)
+        out = list(by_note.values())
+        return out if limit is None else out[: max(0, int(limit))]
+
+    def reinterpret_marks(self) -> List[Dict[str, Any]]:
+        """The untaken pending marks, one row per mark, in history order: ``[{mark_id, note_id, reason, by_note_id,
+        marked_at, from_at, entities}]`` (a mark a pass has taken is in flight, :meth:`consume_reinterpret_mark`)."""
+        rows = self.q("SELECT m.*, n.occurred_at, n.received_at FROM reinterpret_marks m JOIN notes n ON"
+                      " n.note_id=m.note_id WHERE m.consumed_at IS NULL AND m.pass_id IS NULL AND n.archived_at IS NULL"
+                      " ORDER BY n.occurred_at, n.received_at, n.note_id, m.mark_id")
+        return [{"mark_id": r["mark_id"], "note_id": r["note_id"], "reason": r["reason"], "by_note_id": r["by_note_id"],
+                 "marked_at": r["marked_at"], "from_at": r["from_at"], "entities": _uj(r["entities_json"], [])}
+                for r in rows]
+
+    def consume_reinterpret_mark(self, note_id: str, pass_id: str = "direct") -> Optional[Dict[str, Any]]:
+        """Take the note's untaken mark for re-understanding (``pass_id``, ``taken_at``): the note is in flight; a
+        mark arriving from now on is a new row for the next pass (review 3.5). Returns the taken mark (the first, with
+        ``taken`` = how many were taken) or None. The apply of the re-understanding stamps it consumed."""
+        first = self.q1("SELECT * FROM reinterpret_marks WHERE note_id=? AND consumed_at IS NULL AND pass_id IS NULL"
+                        " ORDER BY mark_id LIMIT 1", (note_id,))
+        if first is None:
+            return None
+        n = self.take_mark(note_id, pass_id)
+        return {"mark_id": first["mark_id"], "note_id": note_id, "reason": first["reason"],
+                "by_note_id": first["by_note_id"], "marked_at": first["marked_at"], "pass_id": pass_id, "taken": n}
+
+    def reinterpret_state(self) -> Dict[str, Any]:
+        """``{pending, by_entity: [{entity_id, name, notes}], reasons: [sentence], context_unknown, consumed_today,
+        last_marked_at}``: what is waiting to be re-understood and why, readable before the stage runs (review 3.2)."""
+        pend = self.pending_marks()
+        counts: Dict[str, int] = {}
+        reasons: List[str] = []
+        for p in pend:
+            for e in p["entities"]:
+                counts[e] = counts.get(e, 0) + 1
+            for why in p["reasons"]:
+                if why not in reasons:
+                    reasons.append(why)
+        top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
+        unknown = 0
+        if pend:
+            q = ",".join("?" for _ in pend)
+            unknown = int(self.q1(
+                f"SELECT COUNT(DISTINCT r.note_id) FROM revisions r WHERE r.note_id IN ({q}) AND r.applied_index=1 AND"
+                f" r.action IS NULL AND r.context_json IS NULL AND r.revision_id NOT IN (SELECT revision_id FROM"
+                f" revision_supersessions)", [p["note_id"] for p in pend])[0] or 0)
+        day = ids.utc_now()[:10]
+        consumed = int(self.q1("SELECT COUNT(*) FROM reinterpret_marks WHERE consumed_at>=?", (day,))[0] or 0)
+        last = self.q1("SELECT MAX(marked_at) FROM reinterpret_marks")[0]
+        return {"pending": len(pend), "by_entity": [{"entity_id": e, "name": self._name(e), "notes": n} for e, n in top],
+                "reasons": reasons[:10], "context_unknown": unknown, "consumed_today": consumed, "last_marked_at": last}
+
+    def later_dependents(self, c: sqlite3.Connection, entity_ids: Iterable[str], *, after: Optional[Tuple[str, str, str]]
+                         = None, from_at: Optional[str] = None, exclude: Sequence[str] = (),
+                         opened_task_texts: Sequence[str] = ()) -> Dict[str, Dict[str, Any]]:
+        """The notes after a point in history whose CURRENT interpretation used one of ``entity_ids`` (or an entity
+        whose name or alias has the same canonical name as one of theirs: the F2 match, exact keys only, ADR 0004),
+        or closed a task like one of ``opened_task_texts`` (whole-word containment either way; review 3.7). ``after``
+        = the order key of the note that caused it (only notes strictly after it in history order: forward only, same
+        date ordered by received time); ``from_at`` = a date (notes on or after it; user actions). Only notes that
+        were understood and are not archived. Returns ``{note_id: {entities: [...], tasks: bool}}``."""
+        canon = {self.canonical(e, c) for e in entity_ids if e}
+        members: set = set()
+        for e in canon:
+            members.update(self.merged_members(e, c))
+        keys: set = set()
+        for e in sorted(members):
+            r = c.execute("SELECT name_key, display_name, name FROM entities WHERE entity_id=?", (e,)).fetchone()
+            if r is not None:
+                keys.update(k for k in (r["name_key"], ids.name_key(r["display_name"] or r["name"])) if k)
+            keys.update(a[0] for a in c.execute("SELECT alias_key FROM entity_aliases WHERE entity_id=? AND alias_key IS"
+                                                " NOT NULL", (e,)).fetchall())
+        named: Dict[str, str] = {}
+        if keys:
+            kq = ",".join("?" for _ in keys)
+            for (eid,) in c.execute(f"SELECT entity_id FROM entities WHERE name_key IN ({kq}) UNION SELECT entity_id FROM"
+                                    f" entity_aliases WHERE alias_key IN ({kq})", [*keys, *keys]).fetchall():
+                if eid not in members:
+                    named[eid] = self.canonical(eid, c)
+        targets = {e: self.canonical(e, c) for e in members}
+        targets.update(named)
+        where, params = self._after_sql(after, from_at)
+        out: Dict[str, Dict[str, Any]] = {}
+        skip = set(exclude)
+        if targets:
+            tq = ",".join("?" for _ in targets)
+            rows = c.execute(
+                f"SELECT x.note_id, x.entity_id FROM (SELECT note_id, entity_id FROM entity_notes WHERE entity_id IN ({tq})"
+                f" UNION SELECT note_id, key AS entity_id FROM note_dependencies WHERE kind='entity' AND key IN ({tq}))"
+                f" x JOIN notes n ON n.note_id=x.note_id WHERE n.archived_at IS NULL AND n.processed_at IS NOT NULL"
+                f" AND {where}", [*targets, *targets, *params]).fetchall()
+            for nid, eid in rows:
+                if nid in skip:
+                    continue
+                d = out.setdefault(nid, {"entities": [], "tasks": False})
+                e = targets.get(eid, eid)
+                if e not in d["entities"]:
+                    d["entities"].append(e)
+        texts = [" " + " ".join(_words(t)) + " " for t in opened_task_texts if _words(t)]
+        if texts:
+            rows = c.execute(
+                f"SELECT d.note_id, t.text FROM note_dependencies d JOIN tasks t ON t.task_id=d.key JOIN notes n ON"
+                f" n.note_id=d.note_id WHERE d.kind='task_closed' AND n.archived_at IS NULL AND n.processed_at IS NOT"
+                f" NULL AND {where}", params).fetchall()
+            for nid, text in rows:
+                if nid in skip:
+                    continue
+                w = " " + " ".join(_words(text)) + " "
+                if w.strip() and any(w in t or t in w for t in texts):
+                    out.setdefault(nid, {"entities": [], "tasks": False})["tasks"] = True
+        return out
+
+    @staticmethod
+    def _after_sql(after: Optional[Tuple[str, str, str]], from_at: Optional[str]) -> Tuple[str, List[Any]]:
+        if after is not None:
+            t, rcv, nid = after
+            return ("(n.occurred_at>? OR (n.occurred_at=? AND (n.received_at>? OR (n.received_at=? AND"
+                    " n.note_id>?))))", [t, t, rcv, rcv, nid])
+        if from_at is not None:
+            return "n.occurred_at>=?", [from_at]
+        raise ValueError("later_dependents needs a point in history (after) or a date (from_at).")
+
     def counts(self) -> Dict[str, int]:
         def n(sql: str) -> int:
             return int(self.q1(sql)[0])
@@ -1122,7 +1385,7 @@ class NoteStore:
             "notes": n("SELECT COUNT(*) FROM notes WHERE insight_kind IS NULL"),
             "insights": n("SELECT COUNT(*) FROM notes WHERE insight_kind IS NOT NULL"),
             "attachments": n("SELECT COUNT(*) FROM attachments"),
-            "entities": n("SELECT COUNT(*) FROM entities WHERE merged_into IS NULL"),
+            "entities": n("SELECT COUNT(*) FROM entities WHERE merged_into IS NULL AND retired_revision_id IS NULL"),
             "entities_merged": n("SELECT COUNT(*) FROM entities WHERE merged_into IS NOT NULL"),
             "claims": n("SELECT COUNT(*) FROM claims"),
             "claims_active": n("SELECT COUNT(*) FROM claims WHERE status='active'"),
@@ -1157,6 +1420,11 @@ def distinct_names(names: Iterable[str], exclude: Iterable[str] = ()) -> List[st
     return out
 
 
+def _words(text: Any) -> List[str]:
+    """Case-folded words (letters and digits), for the structural whole-word checks of ADR 0008 marks."""
+    return "".join(ch if ch.isalnum() else " " for ch in ids.fold(str(text or ""))).split()
+
+
 def fts_terms(text: str) -> str:
     """FTS5 MATCH string: every word of the query as a quoted term, OR-joined (BM25 ranks)."""
     words = [w for w in "".join(ch if ch.isalnum() else " " for ch in str(text or "")).split() if w]
@@ -1181,6 +1449,9 @@ class _OpContext:
         self.dirty_relations: set = set()
         self.dirty_relation_entities: set = set()
         self.retro: set = set()
+        # ADR 0008: what this revision did that marks later notes for re-understanding, and the entities it retired
+        self.adr8: Dict[str, Any] = {"redated": [], "archived": [], "retracted": [], "paired": [], "retired": set(),
+                                     "stale": []}
 
     def apply(self, op: str, p: Dict[str, Any]) -> None:
         fn = getattr(self, "op_" + op.replace(".", "_"), None)
@@ -1282,6 +1553,7 @@ class _OpContext:
         if into["key_clash_with"] and self._key_holder(into["name_key"], into_id) is None:
             self.c.execute("UPDATE entities SET key_clash_with=NULL WHERE entity_id=?", (into_id,))
         self.stats["entities_merged"].append({"from_id": from_id, "into_id": into_id})
+        self.adr8["paired"].append((from_id, into_id, "joined"))
         self.dirty_relation_entities.update({from_id, into_id})
         self.dirty_entities.update({from_id, into_id})
 
@@ -1294,6 +1566,7 @@ class _OpContext:
         self.c.execute("UPDATE merges SET undone_at=?, undone_revision_id=? WHERE from_id=? AND into_id=? AND"
                        " undone_at IS NULL", (self.at, self.rid, from_id, into_id))
         self._separate_name(from_id, row)
+        self.adr8["paired"].append((from_id, into_id, "separated"))
         self.dirty_relation_entities.update({from_id, into_id})
         self.dirty_entities.update({from_id, into_id})
 
@@ -1316,6 +1589,9 @@ class _OpContext:
     def op_entity_mention(self, p: Dict[str, Any]) -> None:
         eid = p["entity_id"]
         row = self._require_entity(eid)
+        if row["retired_revision_id"]:  # ADR 0008: a retired entity a note mentions again comes back
+            self.c.execute("UPDATE entities SET retired_revision_id=NULL, retired_at=NULL WHERE entity_id=?", (eid,))
+            self.adr8["retired"].discard(eid)
         note_id = p.get("note_id") or self.note_id
         at = self.at
         if note_id:
@@ -1402,6 +1678,8 @@ class _OpContext:
             (p.get("by_claim_id"), self.window_end(row, p["valid_until"]), p.get("reason"), self.rid, p["claim_id"]))
         if cur.rowcount:
             self.stats["claims_superseded"].append(p["claim_id"])
+        elif row["status"] != "active" and row["closed_revision_id"] != self.rid:
+            self.adr8["stale"].append(p["claim_id"])  # closed since the note was read (ADR 0008 §5, review 4.1)
         self._dirty_claim_relation(row)
 
     def op_claim_insert_before(self, p: Dict[str, Any]) -> None:
@@ -1425,7 +1703,8 @@ class _OpContext:
             cur = self.c.execute(
                 "UPDATE claims SET status=CASE WHEN status='active' THEN 'superseded' ELSE status END,"
                 " superseded_by=?, valid_until=?, closed_reason=COALESCE(?, closed_reason), closed_revision_id=?"
-                " WHERE claim_id=? AND status!='retracted' AND (valid_until IS NULL OR valid_until>?)",
+                " WHERE claim_id=? AND status NOT IN ('retracted', 'reinterpreted') AND (valid_until IS NULL OR"
+                " valid_until>?)",
                 (p["claim_id"], end, p.get("reason"), self.rid, p["after_claim_id"], end))
             if cur.rowcount:
                 self.stats["claims_superseded"].append(p["after_claim_id"])
@@ -1435,10 +1714,13 @@ class _OpContext:
         row = self._claim(p["claim_id"])
         cur = self.c.execute(
             "UPDATE claims SET status='retracted', valid_until=COALESCE(valid_until, ?), closed_reason=?,"
-            " closed_revision_id=? WHERE claim_id=? AND status!='retracted'",
+            " closed_revision_id=? WHERE claim_id=? AND status NOT IN ('retracted', 'reinterpreted')",
             (self.window_end(row, p.get("valid_until") or self.at), p.get("reason"), self.rid, p["claim_id"]))
         if cur.rowcount:
             self.stats["claims_retracted"].append(p["claim_id"])
+            self.adr8["retracted"].append(row)
+        elif row["status"] == REINTERPRETED:
+            self.adr8["stale"].append(p["claim_id"])
         self._dirty_claim_relation(row)
 
     def op_claim_reinforce(self, p: Dict[str, Any]) -> None:
@@ -1518,6 +1800,8 @@ class _OpContext:
         self.c.execute("UPDATE notes SET archived_at=COALESCE(archived_at, ?), status='archived',"
                        " duplicate_of=COALESCE(?, duplicate_of) WHERE note_id=?",
                        (self.recorded_at, p.get("duplicate_of"), note_id))
+        if not p.get("duplicate_of"):  # a foundation removed (a duplicate's copy stays): ADR 0008 §4
+            self.adr8["archived"].append(note_id)
         self.c.execute("UPDATE queue SET state='done', leased_by=NULL, lease_until=NULL, next_attempt_at=NULL"
                        " WHERE note_id=? AND state IN ('queued','failed')", (note_id,))
 
@@ -1530,6 +1814,7 @@ class _OpContext:
         if row is None:
             raise ValueError(f"The note {note_id} is not in this notebook.")
         old, new = p["from"], p["to"]
+        self.adr8["redated"].append((note_id, old, new))
         src = _uj(row["source_json"], {}) or {}
         src["redated"] = {"basis": p["basis"], "from": old, "to": new, "revision_id": self.rid}
         self.c.execute("UPDATE notes SET occurred_at=?, source_json=? WHERE note_id=?", (new, _j(src), note_id))
@@ -1604,3 +1889,303 @@ class _OpContext:
                            " processed_at=? WHERE note_id=?", (self.recorded_at, self.note_id))
             self.c.execute("UPDATE queue SET state='done', done_at=?, leased_by=NULL, lease_until=NULL,"
                            " last_error=NULL WHERE note_id=?", (self.recorded_at, self.note_id))
+        self.adr8_finish()
+
+    # --- ADR 0008: a note understood again (``note.reinterpret``; the inverse table is in docs/data-model.md)
+    def op_note_reinterpret(self, p: Dict[str, Any]) -> None:
+        """The first op of a re-understanding: the previous interpretation ``supersedes`` is superseded. Its
+        mentions and the topics it assigned are soft-removed (moved to ``entity_notes_removed`` /
+        ``note_topics_removed`` with this revision, so the archive as received before still shows them; the new
+        reading's ops add the mentions and topics again), its dependency record is dropped (recomputed at the end)."""
+        note_id = p["note_id"]
+        if self.c.execute("SELECT 1 FROM notes WHERE note_id=?", (note_id,)).fetchone() is None:
+            raise ValueError(f"The note {note_id} is not in this notebook.")
+        prev = p["supersedes"]
+        if self.c.execute("SELECT 1 FROM revisions WHERE revision_id=? AND note_id=? AND applied_index=1",
+                          (prev, note_id)).fetchone() is None:
+            raise ValueError(f"The revision {prev} is not an applied interpretation of {note_id}.")
+        for r in self.c.execute("SELECT entity_id, note_id, at, revision_id FROM entity_notes WHERE note_id=?",
+                                (note_id,)).fetchall():
+            self.c.execute("INSERT OR IGNORE INTO entity_notes_removed(entity_id, note_id, at, revision_id,"
+                           " removed_revision_id) VALUES (?,?,?,?,?)", (*tuple(r), self.rid))
+            self.dirty_entities.add(r[0])
+        self.c.execute("DELETE FROM entity_notes WHERE note_id=?", (note_id,))
+        topics = [r[0] for r in self.c.execute("SELECT topic FROM note_topics WHERE note_id=? AND assigned_by='revision'",
+                                               (note_id,)).fetchall()]
+        self.c.execute("INSERT OR IGNORE INTO note_topics_removed(note_id, topic, assigned_by, revision_id, at,"
+                       " removed_revision_id) SELECT note_id, topic, assigned_by, revision_id, at, ? FROM note_topics"
+                       " WHERE note_id=? AND assigned_by='revision'", (self.rid, note_id))
+        self.c.execute("DELETE FROM note_topics WHERE note_id=? AND assigned_by='revision'", (note_id,))
+        for t in topics:
+            self.s.refresh_topic(self.c, t)
+        self.c.execute("DELETE FROM note_dependencies WHERE note_id=?", (note_id,))
+        self.c.execute("INSERT OR REPLACE INTO revision_supersessions(revision_id, superseded_by, note_id, recorded_at)"
+                       " VALUES (?,?,?,?)", (prev, self.rid, note_id, self.recorded_at))
+        self.stats["reinterpreted"] = {"note_id": note_id, "supersedes": prev}
+
+    def op_claim_reinterpret(self, p: Dict[str, Any]) -> None:
+        """A statement of the superseded reading the new one does not make: closed with the kind ``reinterpreted``
+        (an empty window: never a belief in the current reading; the archive as received before shows it)."""
+        row = self._claim(p["claim_id"])
+        end = row["valid_from"] or row["observed_at"]
+        cur = self.c.execute(
+            "UPDATE claims SET status=?, valid_until=CASE WHEN valid_until IS NULL OR valid_until>? THEN ? ELSE"
+            " valid_until END, closed_reason=?, closed_revision_id=? WHERE claim_id=? AND status!=?",
+            (REINTERPRETED, end, end, p.get("reason") or "read again", self.rid, p["claim_id"], REINTERPRETED))
+        if cur.rowcount:
+            self.stats.setdefault("claims_reinterpreted", []).append(p["claim_id"])
+        self._dirty_claim_relation(row)
+
+    def op_claim_revise(self, p: Dict[str, Any]) -> None:
+        """The same statement (subject, predicate, object) read again with another certainty, stance, window or
+        evidence: updated in place (``previous`` keeps the earlier values; review 1.2: never dropped, never a second
+        copy). A window another revision closed stays closed. ``assertion_id`` names its new AbstractMemory copy."""
+        row = self._claim(p["claim_id"])
+        self.c.execute(
+            "UPDATE claims SET certainty=?, stance=?, valid_from=?, evidence=?, assertion_id=?, valid_until=CASE WHEN"
+            " closed_revision_id IS NULL THEN ? ELSE valid_until END WHERE claim_id=?",
+            (p["certainty"], p.get("stance") or "assert", p.get("valid_from"), p.get("evidence"), p["assertion_id"],
+             p.get("valid_until"), p["claim_id"]))
+        obj_text = row["object_literal"] or ""
+        if row["object_id"]:
+            obj_text = self.c.execute("SELECT name FROM entities WHERE entity_id=?", (row["object_id"],)).fetchone()[0]
+        subject_name = self.c.execute("SELECT name FROM entities WHERE entity_id=?", (row["subject_id"],)).fetchone()[0]
+        self.c.execute("DELETE FROM claims_fts WHERE claim_id=?", (p["claim_id"],))
+        self.c.execute("INSERT INTO claims_fts(claim_id, text) VALUES (?,?)", (p["claim_id"], NoteStore.claim_text(
+            subject_name, row["predicate"], obj_text, p.get("evidence"))))
+        self.stats.setdefault("claims_revised", []).append(p["claim_id"])
+        self._dirty_claim_relation(row)
+
+    def op_claim_reopen(self, p: Dict[str, Any]) -> None:
+        """A statement of another note that the superseded reading had closed (superseded, retracted or narrowed)
+        and the new reading leaves alone: restored to the state the other revisions give it (``status``,
+        ``valid_until``, ``superseded_by``, ``closed_reason``, ``closed_revision_id``). ``assertion_id`` names its
+        re-opened AbstractMemory copy (a window cannot widen there)."""
+        row = self._claim(p["claim_id"])
+        self.c.execute("UPDATE claims SET status=?, valid_until=?, superseded_by=?, closed_reason=?,"
+                       " closed_revision_id=?, assertion_id=? WHERE claim_id=?",
+                       (p["status"], p.get("valid_until"), p.get("superseded_by"), p.get("closed_reason"),
+                        p.get("closed_revision_id"), p["assertion_id"], p["claim_id"]))
+        self.stats.setdefault("claims_reopened", []).append(p["claim_id"])
+        self._dirty_claim_relation(row)
+
+    def op_claim_repoint(self, p: Dict[str, Any]) -> None:
+        """A statement the superseded reading closed and the new reading closes on the same slot: it stays closed,
+        now superseded by the new reading's statement."""
+        row = self._claim(p["claim_id"])
+        self.c.execute("UPDATE claims SET superseded_by=? WHERE claim_id=?", (p["superseded_by"], p["claim_id"]))
+        self._dirty_claim_relation(row)
+
+    def op_reinforcement_drop(self, p: Dict[str, Any]) -> None:
+        """A reinforcement the superseded reading made (``revision_id``) that the new reading does not repeat."""
+        row = self._claim(p["claim_id"])
+        cur = self.c.execute("DELETE FROM claim_reinforcements WHERE claim_id=? AND revision_id=?",
+                             (p["claim_id"], p["revision_id"]))
+        if cur.rowcount:
+            self.c.execute("UPDATE claims SET reinforced_count=MAX(reinforced_count-1, 0) WHERE claim_id=?",
+                           (p["claim_id"],))
+            self.stats.setdefault("reinforcements_dropped", []).append(p["claim_id"])
+        self._dirty_claim_relation(row)
+
+    def op_task_reopen(self, p: Dict[str, Any]) -> None:
+        """A task the superseded reading closed (``closed_revision_id``) that the new reading does not close."""
+        cur = self.c.execute("UPDATE tasks SET status='open', closed_at=NULL, closed_by_note_id=NULL,"
+                             " closed_revision_id=NULL, recorded_closed_at=NULL WHERE task_id=? AND closed_revision_id=?",
+                             (p["task_id"], p["closed_revision_id"]))
+        if cur.rowcount:
+            self.stats.setdefault("tasks_reopened", []).append(p["task_id"])
+
+    def op_task_retire(self, p: Dict[str, Any]) -> None:
+        """A task of the superseded reading that the new reading does not have: status ``retired`` (kept, with the
+        revision that withdrew it)."""
+        cur = self.c.execute("UPDATE tasks SET status=?, removed_revision_id=? WHERE task_id=? AND status!=?",
+                             (TASK_RETIRED, self.rid, p["task_id"], TASK_RETIRED))
+        if cur.rowcount:
+            self.stats.setdefault("tasks_retired", []).append(p["task_id"])
+
+    def op_entity_retire(self, p: Dict[str, Any]) -> None:
+        """An entity only the superseded reading created and that nothing references any more: retired (kept for the
+        archive as received before; left out of lists, the graph, search and candidates; a later mention brings it
+        back)."""
+        eid = p["entity_id"]
+        self._require_entity(eid)
+        cur = self.c.execute("UPDATE entities SET retired_revision_id=?, retired_at=? WHERE entity_id=? AND"
+                             " retired_revision_id IS NULL", (self.rid, self.at, eid))
+        if cur.rowcount:
+            self.adr8["retired"].add(eid)
+            self.stats.setdefault("entities_retired", []).append(eid)
+        self.dirty_entities.add(eid)
+
+    def adr8_finish(self) -> None:
+        """End of a revision (ADR 0008): the dependency record of a note's current interpretation, the cleanup of
+        retired entities, warnings for statements closed since the note was read, then the forward marks."""
+        action = self.rev.get("action")
+        interp = bool(self.note_id) and (not action or action == REINTERPRET_ACTION)
+        if interp:
+            self._record_used(self.note_id)
+        if action == REINTERPRET_ACTION:
+            self.c.execute("UPDATE notes SET processed_at=? WHERE note_id=?", (self.recorded_at, self.note_id))
+        for eid in sorted(self.adr8["retired"]):
+            self.c.execute("UPDATE entities SET vector_key=NULL WHERE entity_id=? AND retired_revision_id IS NOT NULL",
+                           (eid,))
+            self.c.execute("DELETE FROM entities_fts WHERE entity_id=?", (eid,))
+        if self.adr8["stale"]:
+            stale = list(dict.fromkeys(self.adr8["stale"]))
+            self.stats["stale_context"] = stale
+            row = self.c.execute("SELECT warnings_json FROM revisions WHERE revision_id=?", (self.rid,)).fetchone()
+            warnings = list(_uj(row[0], []) or []) if row else []
+            w = (f"stale_context: {len(stale)} statement(s) this note named are no longer believed (they changed since"
+                 " the note was read); its own statements were kept as new.")
+            if w not in warnings:
+                warnings.append(w)
+                self.c.execute("UPDATE revisions SET warnings_json=? WHERE revision_id=?", (_j(warnings), self.rid))
+        if self.s.marking:
+            self._mark_dependents(interp)
+
+    def _record_used(self, note_id: str) -> None:
+        """``note_dependencies`` of the note = what its current interpretation USED (review 3.1): the subjects and
+        objects of its statements, the statements it related to (reinforced, closed), its tasks and the tasks it
+        closed. Its mentions are ``entity_notes``."""
+        c = self.c
+        chain = set(self.s.interpretation_chain(note_id, c)) | {self.rid}
+        superseded = {r[0] for r in c.execute("SELECT revision_id FROM revision_supersessions WHERE note_id=?",
+                                              (note_id,)).fetchall()}
+        current = chain - superseded
+        rows: set = set()
+        for r in c.execute("SELECT subject_id, object_id FROM claims WHERE note_id=? AND status!=?",
+                           (note_id, REINTERPRETED)).fetchall():
+            rows.update(("entity", x) for x in r if x)
+        related = [r[0] for r in c.execute("SELECT claim_id FROM claim_reinforcements WHERE note_id=?", (note_id,))]
+        if current:
+            q = ",".join("?" for _ in current)
+            related += [r[0] for r in c.execute(f"SELECT claim_id FROM claims WHERE closed_revision_id IN ({q}) AND"
+                                                f" (note_id IS NULL OR note_id!=?)", [*current, note_id])]
+            rows.update(("task_closed", r[0]) for r in c.execute(
+                f"SELECT task_id FROM tasks WHERE closed_revision_id IN ({q}) AND status!=?", [*current, TASK_RETIRED]))
+        for cid in related:
+            rows.add(("claim", cid))
+            r = c.execute("SELECT subject_id, object_id FROM claims WHERE claim_id=?", (cid,)).fetchone()
+            if r is not None:
+                rows.update(("entity", x) for x in r if x)
+        rows.update(("task_opened", r[0]) for r in c.execute("SELECT task_id FROM tasks WHERE note_id=? AND status!=?",
+                                                             (note_id, TASK_RETIRED)))
+        c.execute("DELETE FROM note_dependencies WHERE note_id=?", (note_id,))
+        c.executemany("INSERT OR IGNORE INTO note_dependencies(note_id, kind, key, revision_id) VALUES (?,?,?,?)",
+                      [(note_id, k, v, self.rid) for k, v in sorted(rows)])
+
+    def _names_in_note(self, note: Any) -> List[str]:
+        """Live entities whose canonical name or an alias occurs in the note's own words (case-folded whole words:
+        the exact-name rule of candidate generation, ADR 0004). An earlier note that NAMES an entity a later note
+        used changes what that later note could mean, even when it decided its mention was another entity (F2)."""
+        from pathlib import Path
+
+        parts = [note["title"] or "", note["text"] or ""]
+        root = Path(self.s.path).parent
+        for a in self.c.execute("SELECT sha256, extracted_chars FROM attachments WHERE note_id=?", (note["note_id"],)):
+            path = root / "extracted" / f"{a[0]}.txt"
+            if a[1] and path.exists():
+                parts.append(path.read_text(encoding="utf-8"))
+        tokens = _words("\n".join(parts))
+        if not tokens:
+            return []
+        token_set = set(tokens)
+        joined = " " + " ".join(tokens) + " "
+        found: List[str] = []
+        forms = [(r[0], r[1]) for r in self.c.execute(
+            "SELECT entity_id, name FROM entities WHERE retired_revision_id IS NULL UNION ALL SELECT entity_id,"
+            " display_name FROM entities WHERE display_name IS NOT NULL AND retired_revision_id IS NULL UNION ALL"
+            " SELECT entity_id, alias FROM entity_aliases").fetchall()]
+        for eid, form in forms:
+            ws = _words(str(form or "").replace("_", " "))
+            if not ws or any(w not in token_set for w in ws):
+                continue
+            if len(ws) > 1 and (" " + " ".join(ws) + " ") not in joined:
+                continue
+            e = self.s.canonical(eid, self.c)
+            if e not in found:
+                found.append(e)
+        return found
+
+    def _mark_dependents(self, interp: bool) -> None:
+        """ADR 0008 §4: mark the later notes whose current interpretation used what this revision touched. Forward
+        only: a note's own revision marks only notes after it in history order (date, then received time, then id);
+        a person's re-date marks from the earlier of the two dates, an archive from the note's date, a retraction
+        from the statement's date, a join or separation from the earlier first mention."""
+        c = self.c
+        marks: List[Dict[str, Any]] = []
+        names = lambda eids: _names_sentence(self.s, c, eids)  # noqa: E731
+        if interp:
+            note = c.execute("SELECT * FROM notes WHERE note_id=?", (self.note_id,)).fetchone()
+            # A note understood for the first time is new information: it marks every note on or after its date
+            # (same date included, review 3.3). A re-understanding marks only the notes after it in history order
+            # (date, then received time, then id), so a pass is one forward sweep and terminates (ADR 0008 §4).
+            first = self.rev.get("action") != REINTERPRET_ACTION
+            key = None if first else NoteStore.note_order_key(note)
+            frm = note["occurred_at"] if first else None
+            where, params = NoteStore._after_sql(key, frm)
+            later = c.execute(f"SELECT 1 FROM notes n WHERE n.processed_at IS NOT NULL AND n.archived_at IS NULL AND"
+                              f" n.note_id!=? AND {where} LIMIT 1", [self.note_id, *params]).fetchone()
+            if later is not None:
+                touched = {self.s.canonical(e, c) for e in self.dirty_entities if e}
+                touched |= set(self._names_in_note(note)) | self.adr8["retired"]
+                opened = [op["payload"].get("text") for op in self.rev.get("ops") or [] if op["op"] == "task.open"]
+                day = note["occurred_at"][:10]
+                for nid, d in self.s.later_dependents(c, touched, after=key, from_at=frm, exclude=[self.note_id],
+                                                      opened_task_texts=[t for t in opened if t]).items():
+                    why = (f"An earlier note ({day}) says more about {names(d['entities'])}." if d["entities"] else
+                           f"An earlier note ({day}) opened a task like one this note closed.")
+                    marks.append({"note_id": nid, "reason": why, "by_note_id": self.note_id, "by_revision_id": self.rid,
+                                  "entities": d["entities"], "from_at": note["occurred_at"]})
+        action = self.rev.get("action")
+        if action in MARKING_ACTIONS:
+            def forward(from_at: str, eids: Iterable[str], why: str, exclude: Sequence[str] = ()) -> None:
+                for nid, d in self.s.later_dependents(c, eids, from_at=from_at, exclude=exclude).items():
+                    marks.append({"note_id": nid, "reason": why, "by_note_id": None, "by_revision_id": self.rid,
+                                  "entities": d["entities"], "from_at": from_at})
+
+            for note_id, old, new in self.adr8["redated"]:
+                used = self.s.used_by(c, note_id)["entity"]
+                forward(min(old, new), used, f"A note it builds on was moved to {new[:10]}.", exclude=[note_id])
+                if c.execute("SELECT processed_at FROM notes WHERE note_id=? AND archived_at IS NULL",
+                             (note_id,)).fetchone() not in (None, (None,)):
+                    marks.append({"note_id": note_id, "reason": f"Its date was set to {new[:10]}.", "by_note_id": None,
+                                  "by_revision_id": self.rid, "entities": used, "from_at": min(old, new)})
+            for note_id in self.adr8["archived"]:
+                n = c.execute("SELECT occurred_at FROM notes WHERE note_id=?", (note_id,)).fetchone()
+                forward(n[0], self.s.used_by(c, note_id)["entity"],
+                        f"A note it builds on ({n[0][:10]}) was archived.", exclude=[note_id])
+            for row in self.adr8["retracted"] if action == "claim.retract" else []:
+                forward(row["observed_at"], [x for x in (row["subject_id"], row["object_id"]) if x],
+                        "A statement it builds on was withdrawn.")
+            for a, b, how in self.adr8["paired"]:
+                first = [r[0] for r in c.execute("SELECT first_seen FROM entities WHERE entity_id IN (?, ?) AND first_seen"
+                                                 " IS NOT NULL", (a, b))]
+                if first:
+                    forward(min(first), [a, b], f"Two entries it uses were {how}.")
+        if not marks:
+            return
+        new = self.s.mark_reinterpret(c, marks, self.recorded_at)
+        by_entity: Dict[str, int] = {}
+        for m in marks:
+            if m["note_id"] in new:
+                for e in m.get("entities") or []:
+                    by_entity[e] = by_entity.get(e, 0) + 1
+        self.stats["reinterpret_marked"] = {
+            "count": len(set(new)), "notes": sorted(set(new)),
+            "by_entity": [{"entity_id": e, "name": self.s._name(e), "notes": n}
+                          for e, n in sorted(by_entity.items(), key=lambda kv: (-kv[1], kv[0]))[:10]]}
+
+
+def _names_sentence(store: NoteStore, c: sqlite3.Connection, eids: Sequence[str]) -> str:
+    """"Priya, the calibration plan and 2 more": the display names of the entities that caused a mark."""
+    shown = []
+    for e in list(eids)[:3]:
+        r = c.execute("SELECT display_name, name FROM entities WHERE entity_id=?", (e,)).fetchone()
+        if r is not None:
+            shown.append(r[0] or r[1])
+    if not shown:
+        return "what it is about"
+    more = max(0, len(eids) - len(shown))
+    if more:
+        return ", ".join(shown) + f" and {more} more"
+    return shown[0] if len(shown) == 1 else ", ".join(shown[:-1]) + " and " + shown[-1]

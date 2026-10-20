@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 2  # 2: entities.name_key/display_name/key_clash_with, entity_aliases.alias_key
+SCHEMA_VERSION = 3  # 2: entities.name_key/display_name/key_clash_with, entity_aliases.alias_key;
+#                    3: ADR 0008 (revisions.context_json, reinterpret_marks, note_dependencies, soft-removed mentions,
+#                    topics and tasks of a superseded interpretation, retired entities)
 
-TRUTH_TABLES = ("meta", "notes", "attachments", "note_links", "queue", "revisions", "vectors", "context_packets")
+TRUTH_TABLES = ("meta", "notes", "attachments", "note_links", "queue", "revisions", "vectors", "context_packets",
+                "reinterpret_marks")
 #: Derived tables a rebuild copies (entity ids are stable, and the community labels are the model's work), and the
 #: consolidation bookkeeping (its progress rows and the measured seconds per item the next ETA starts from).
 KEPT_TABLES = ("communities", "entity_communities", "consolidation_runs")
@@ -143,6 +146,30 @@ CREATE INDEX IF NOT EXISTS idx_revisions_note ON revisions(note_id);
 CREATE INDEX IF NOT EXISTS idx_revisions_at ON revisions(at);
 CREATE INDEX IF NOT EXISTS idx_revisions_recorded ON revisions(recorded_at);
 
+-- ADR 0008: notes marked for re-understanding (truth: an "unchanged" outcome writes no revision, so only this table
+-- says it was consumed). One untaken pending mark per note; a mark arriving while one is taken by a pass is a new row
+-- for the next pass. ``pass_id`` = the consolidation that took it, ``outcome`` reinterpreted | unchanged.
+CREATE TABLE IF NOT EXISTS reinterpret_marks (
+  mark_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  note_id TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  by_note_id TEXT,
+  by_revision_id TEXT,
+  entities_json TEXT NOT NULL DEFAULT '[]',
+  from_at TEXT,
+  marked_at TEXT NOT NULL,
+  pass_id TEXT,
+  taken_at TEXT,
+  consumed_at TEXT,
+  outcome TEXT,
+  consumed_revision_id TEXT,
+  calls INTEGER,
+  error TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reinterpret_marks_untaken ON reinterpret_marks(note_id)
+  WHERE consumed_at IS NULL AND pass_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_reinterpret_marks_note ON reinterpret_marks(note_id, consumed_at);
+
 CREATE TABLE IF NOT EXISTS vectors (
   vector_key TEXT PRIMARY KEY,
   model_id TEXT NOT NULL,
@@ -217,6 +244,18 @@ CREATE TABLE IF NOT EXISTS entity_notes (
   PRIMARY KEY (entity_id, note_id)
 );
 CREATE INDEX IF NOT EXISTS idx_entity_notes_note ON entity_notes(note_id);
+
+-- the mentions of a superseded interpretation (ADR 0008 soft removal: the live reads never see them, the archive as
+-- received before the re-understanding does)
+CREATE TABLE IF NOT EXISTS entity_notes_removed (
+  entity_id TEXT NOT NULL,
+  note_id TEXT NOT NULL,
+  at TEXT NOT NULL,
+  revision_id TEXT NOT NULL,
+  removed_revision_id TEXT NOT NULL,
+  PRIMARY KEY (entity_id, note_id, revision_id)
+);
+CREATE INDEX IF NOT EXISTS idx_entity_notes_removed_note ON entity_notes_removed(note_id);
 
 CREATE TABLE IF NOT EXISTS merges (
   from_id TEXT NOT NULL,
@@ -297,6 +336,37 @@ CREATE TABLE IF NOT EXISTS note_topics (
 );
 CREATE INDEX IF NOT EXISTS idx_note_topics_topic ON note_topics(topic);
 
+-- the topics a superseded interpretation assigned (ADR 0008 soft removal)
+CREATE TABLE IF NOT EXISTS note_topics_removed (
+  note_id TEXT NOT NULL,
+  topic TEXT NOT NULL,
+  assigned_by TEXT NOT NULL,
+  revision_id TEXT,
+  at TEXT NOT NULL,
+  removed_revision_id TEXT NOT NULL,
+  PRIMARY KEY (note_id, topic, removed_revision_id)
+);
+
+-- what each note's CURRENT interpretation used (ADR 0008 §4, the invalidation key: entities it reused, created or
+-- made the subject or object of a statement, statements it related to, tasks it opened or closed); kind entity |
+-- claim | task_opened | task_closed. Derived from the revision's ops (a rebuild recomputes it).
+CREATE TABLE IF NOT EXISTS note_dependencies (
+  note_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  key TEXT NOT NULL,
+  revision_id TEXT NOT NULL,
+  PRIMARY KEY (note_id, kind, key)
+);
+CREATE INDEX IF NOT EXISTS idx_note_dependencies_key ON note_dependencies(kind, key);
+
+-- interpretation revisions a later note.reinterpret superseded (ADR 0008 §1)
+CREATE TABLE IF NOT EXISTS revision_supersessions (
+  revision_id TEXT PRIMARY KEY,
+  superseded_by TEXT NOT NULL,
+  note_id TEXT,
+  recorded_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
   task_id TEXT PRIMARY KEY,
   note_id TEXT,
@@ -371,7 +441,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS claims_fts USING fts5(claim_id UNINDEXED, tex
 PROJECTION_TABLES = (
     "entities", "entity_aliases", "entity_names", "entity_summaries", "entity_notes", "merges", "claims",
     "claim_reinforcements", "relations", "topics", "note_topics", "tasks", "then_now_cache",
-    "entities_fts", "claims_fts",
+    "entities_fts", "claims_fts", "entity_notes_removed", "note_topics_removed", "note_dependencies",
+    "revision_supersessions",
 )
 
 
@@ -388,8 +459,13 @@ def connect(path: str) -> sqlite3.Connection:
 # Columns added after the first notebooks were created (in-place upgrade on open).
 _ADDED_COLUMNS = {
     "notes": [("about_json", "TEXT")],
-    "entities": [("name_key", "TEXT"), ("display_name", "TEXT"), ("key_clash_with", "TEXT")],
+    # schema 3 (ADR 0008): a retired entity (``entity.retire``), a task a re-understanding withdrew, the
+    # dependency record of a revision (``context_json``)
+    "entities": [("name_key", "TEXT"), ("display_name", "TEXT"), ("key_clash_with", "TEXT"),
+                 ("retired_revision_id", "TEXT"), ("retired_at", "TEXT")],
+    "tasks": [("removed_revision_id", "TEXT")],
     "entity_aliases": [("alias_key", "TEXT")],
+    "revisions": [("context_json", "TEXT")],
 }
 
 #: Created after the added columns exist. One live entity per canonical name: ``name_key`` is unique among
@@ -405,6 +481,12 @@ CREATE INDEX IF NOT EXISTS idx_alias_key ON entity_aliases(alias_key);
 #: Meta key set when a migration found entities written before canonical names: the next write
 #: (``Notebook.recover_pending``) merges the groups that share a canonical name (``normalize_entities``).
 NAME_KEY_REPAIR_META = "name_key_repair"
+
+#: Meta entry (ADR 0008 migration flag): ``{schema, since_seq, upgraded_at}``. Revisions with ``seq <= since_seq``
+#: were written before the dependency record existed (``context_json`` null: ``context_unknown``); a mark on such a
+#: note is always re-understood with the model (no stored digest to compare), and invalidation reaches it through
+#: its mentions (``entity_notes``) and the name and alias match only.
+DEPENDENCY_RECORD_META = "dependency_record"
 
 
 def _backfill_name_keys(conn: sqlite3.Connection) -> None:
@@ -441,6 +523,20 @@ def _backfill_name_keys(conn: sqlite3.Connection) -> None:
         conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (NAME_KEY_REPAIR_META, '"pending"'))
 
 
+def _flag_dependency_record(conn: sqlite3.Connection, *, fresh: bool) -> None:
+    """Schema 2 -> 3 (ADR 0008): record from which revision on every processing revision carries its dependency
+    record (:data:`DEPENDENCY_RECORD_META`); the revisions before it are ``context_unknown``. Written once."""
+    import json
+    import time
+
+    if conn.execute("SELECT 1 FROM meta WHERE key=?", (DEPENDENCY_RECORD_META,)).fetchone() is not None:
+        return
+    since = 0 if fresh else int(conn.execute("SELECT COALESCE(MAX(seq), 0) FROM revisions").fetchone()[0])
+    value = {"schema": 3, "since_seq": since, "upgraded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                 (DEPENDENCY_RECORD_META, json.dumps(value, sort_keys=True, separators=(",", ":"))))
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(DDL)
     for table, cols in _ADDED_COLUMNS.items():
@@ -461,6 +557,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError as exc:  # pragma: no cover - every supported Python ships FTS5
         raise RuntimeError("AbstractNote needs SQLite with FTS5; this Python's sqlite3 lacks it.") from exc
     row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+    if row is None or int(row[0]) < 3:
+        _flag_dependency_record(conn, fresh=row is None)
     if row is None:
         conn.execute("INSERT INTO meta(key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
     elif int(row[0]) > SCHEMA_VERSION:

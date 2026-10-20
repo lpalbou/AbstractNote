@@ -37,8 +37,8 @@ from .embeddings import (
 )
 from .kg import ClaimStore, claim_assertion, kinds_from_index
 from .names import merge_ops, merge_plan, reuse_taken_names
-from .notes import NoteStore, _j, _uj, entity_text, note_vector_text
-from .schema import KEPT_TABLES, NAME_KEY_REPAIR_META
+from .notes import REINTERPRET_ACTION, NoteStore, _j, _uj, entity_text, note_vector_text
+from .schema import DEPENDENCY_RECORD_META, KEPT_TABLES, NAME_KEY_REPAIR_META
 
 NOTE_DB = "note.sqlite3"
 KG_DB = "kg.sqlite3"
@@ -58,6 +58,46 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
 PROCESSOR_MAX_ITEMS = 200
 #: Retrospective notes since the last community computation that make a recomputation due (retro_state).
 RETRO_COMMUNITY_NOTES = 20
+#: The stored context packet keys today's ``note_context`` and ``note_resolve_candidates`` write.
+PACKET_KEYS = ("candidate_entities", "existing_claims", "mentions")
+
+
+def context_digest(store: NoteStore, note_row: Any, packet: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """The dependency record of a revision (ADR 0008 §3, ``revisions.context_json``): what it SAW, ``{as_of,
+    entities, claims, summaries: {entity_id: revision_id}, notes (the similar notes shown), mention_queries,
+    looked_up}``, from the stored context
+    packet as the apply finds it (``note_context`` and ``note_resolve_candidates`` both add to it; R1's digest
+    ``packet.context``, when present, is merged in). A packet without its keys is an error (never a silent empty
+    record); a note applied without any packet records ``looked_up: false``. What the revision USED is
+    ``note_dependencies``, the invalidation key."""
+    as_of = note_row["occurred_at"]
+    if packet is None:
+        return {"as_of": as_of, "entities": [], "claims": [], "summaries": {}, "notes": [], "mention_queries": [],
+                "looked_up": False}
+    missing = [k for k in PACKET_KEYS if k not in packet]
+    if missing:
+        raise RuntimeError("The note's stored context has no " + ", ".join(missing)
+                           + "; it cannot record what the revision depended on (ADR 0008).")
+    r1 = packet.get("context") if isinstance(packet.get("context"), dict) else {}
+    entities: List[str] = []
+    for eid in [*(r1.get("entities") or []), *packet["candidate_entities"],
+                *(e for ids_ in packet["mentions"].values() for e in ids_)]:
+        if eid and eid not in entities:
+            entities.append(eid)
+    claims: List[str] = []
+    for cid in [*(r1.get("claims") or []), *packet["existing_claims"]]:
+        if cid and cid not in claims:
+            claims.append(cid)
+    summaries: Dict[str, Any] = dict(r1.get("summaries") or {})
+    for eid in entities:  # the summary known at the note's date (the latest written for a date on or before it)
+        if eid not in summaries:
+            r = store.q1("SELECT revision_id FROM entity_summaries WHERE entity_id=? AND at<=? ORDER BY at DESC,"
+                         " rowid DESC LIMIT 1", (eid, r1.get("as_of") or as_of))
+            summaries[eid] = r[0] if r else None
+    notes = [n for n in [*(r1.get("notes") or []), *(packet.get("similar_notes") or [])] if n]
+    return {"as_of": r1.get("as_of") or as_of, "entities": entities, "claims": claims, "summaries": summaries,
+            "notes": list(dict.fromkeys(notes)), "mention_queries": list(packet.get("mention_queries") or []),
+            "looked_up": True}
 
 
 def _check_consolidate_schedule(value: Any) -> Dict[str, Any]:
@@ -237,6 +277,13 @@ class Notebook:
             # One canonical name per entity: a create of a taken canonical name becomes a reuse, whatever
             # the model decided (store.names); the stored revision is the rewritten one, so a replay agrees.
             rev = reuse_taken_names(self.store, rev)
+            if rev.get("note_id") and rev.get("action") in (None, REINTERPRET_ACTION) and rev.get("context") is None:
+                from ..process.context import load_packet
+
+                note_row = self.store.note_row(rev["note_id"])
+                if note_row is None:
+                    raise ValueError("That note is not in this notebook.")
+                rev = {**rev, "context": context_digest(self.store, note_row, load_packet(self, rev["note_id"]))}
             self.store.insert_revision(rev)
             return self._finish(rev, _fail_after_index=_fail_after_index)
 
@@ -250,8 +297,7 @@ class Notebook:
         data["at"] = ids.normalize_time(data["at"], field="revision time")
         ops = []
         for op in data.get("ops") or []:
-            o = op.model_dump() if isinstance(op, RevisionOp) else RevisionOp(**op).model_dump()
-            ops.append(o)
+            ops.append(op.model_dump() if isinstance(op, RevisionOp) else RevisionOp(**op).model_dump())
         data["ops"] = ops
         if not data.get("revision_id"):
             raise ValueError("A revision needs a revision_id.")
@@ -299,7 +345,14 @@ class Notebook:
             "claims_inserted_before": result.get("claims_inserted_before", []),
             "retrospective": result.get("retro_entities", []),
             "warnings": list(_uj(row["warnings_json"], []) or []),
+            # ADR 0008: how many later notes this revision marked for re-understanding, and why (review 3.2)
+            "marked": int((result.get("reinterpret_marked") or {}).get("count") or 0),
+            "reinterpret_marked": result.get("reinterpret_marked") or {"count": 0, "notes": [], "by_entity": []},
         }
+        for k in ("claims_reinterpreted", "claims_revised", "claims_reopened", "reinforcements_dropped",
+                  "tasks_reopened", "tasks_retired", "entities_retired", "stale_context", "reinterpreted"):
+            if result.get(k):
+                out[k] = result[k]
         if already_applied:
             out["already_applied"] = True
         return out
@@ -396,6 +449,66 @@ class Notebook:
         ``communities_due`` once ``threshold`` (default :data:`RETRO_COMMUNITY_NOTES`) retrospective notes arrived
         since the communities were last computed."""
         return self.store.retro_state(threshold=RETRO_COMMUNITY_NOTES if threshold is None else int(threshold))
+
+    # ------------------------------------------------------------------ ADR 0008: re-understanding marks
+
+    def reinterpret_state(self) -> Dict[str, Any]:
+        """What waits to be understood again and why (``NoteStore.reinterpret_state``), readable before the
+        consolidation's ``reinterpret`` stage runs."""
+        return self.store.reinterpret_state()
+
+    def mark_reinterpret(self, note_ids: Sequence[str], reason: str = "") -> Dict[str, Any]:
+        """Mark notes for re-understanding by hand (``note_mark_reinterpret``): each must have been understood
+        already. Returns ``{marked: [note_id], already: [note_id]}`` (an untaken mark is never doubled)."""
+        why = " ".join(str(reason or "").split()) or "Asked to be understood again."
+        rows = []
+        for nid in note_ids:
+            row = self.store.note_row(str(nid))
+            if row is None:
+                raise ValueError(f"The note {nid} is not in this notebook.")
+            if self.store.current_interpretation(row["note_id"]) is None:
+                raise ValueError(f"The note {nid} has not been understood yet; it is understood when its turn comes.")
+            rows.append({"note_id": row["note_id"], "reason": why, "from_at": row["occurred_at"]})
+        with self.store.tx() as c:
+            new = self.store.mark_reinterpret(c, rows, ids.utc_now())
+        return {"marked": new, "already": [r["note_id"] for r in rows if r["note_id"] not in new]}
+
+    def mark_forward(self, note_id: str, from_at: Optional[str] = None, reason: str = "", *,
+                     include_self: bool = False) -> Dict[str, Any]:
+        """Mark the notes on or after ``from_at`` (default: the note's date) whose current interpretation used what
+        this note's interpretation used (ADR 0008 §4; the API a date change or an archive elsewhere calls, review
+        3.4). ``include_self`` marks the note too. Returns ``{marked: [note_id]}``."""
+        row = self.store.note_row(note_id)
+        if row is None:
+            raise ValueError("That note is not in this notebook.")
+        frm = ids.normalize_time(from_at, field="from_at") if from_at else row["occurred_at"]
+        why = " ".join(str(reason or "").split()) or f"A note it builds on ({row['occurred_at'][:10]}) changed."
+        with self.store.tx() as c:
+            used = self.store.used_by(c, note_id)
+            deps = self.store.later_dependents(c, used["entity"], from_at=frm, exclude=[note_id])
+            rows = [{"note_id": n, "reason": why, "by_note_id": note_id, "entities": d["entities"], "from_at": frm}
+                    for n, d in deps.items()]
+            if include_self and self.store.current_interpretation(note_id, c) is not None:
+                rows.append({"note_id": note_id, "reason": why, "entities": used["entity"], "from_at": frm})
+            new = self.store.mark_reinterpret(c, rows, ids.utc_now())
+        return {"marked": new}
+
+    def interpretations(self, note_id: str) -> List[Dict[str, Any]]:
+        """The note's interpretation history (ADR 0008, review 4.4): ``[{revision_id, at, recorded_at, action,
+        summary, context: {as_of, entities, claims, summaries} | null, context_unknown, superseded_by}]``, oldest
+        first (``action`` null for the first understanding, ``note.reinterpret`` for each re-understanding)."""
+        sup = {r[0]: r[1] for r in self.store.q("SELECT revision_id, superseded_by FROM revision_supersessions WHERE"
+                                                " note_id=?", (note_id,))}
+        out = []
+        for r in self.store.q("SELECT * FROM revisions WHERE note_id=? AND applied_index=1 AND abandoned=0 AND (action"
+                              " IS NULL OR action=?) ORDER BY seq", (note_id, REINTERPRET_ACTION)):
+            ctx = _uj(r["context_json"])
+            out.append({"revision_id": r["revision_id"], "at": r["at"], "recorded_at": r["recorded_at"],
+                        "action": r["action"], "summary": r["summary"],
+                        "context": ({k: ctx.get(k) for k in ("as_of", "entities", "claims", "summaries")}
+                                    if isinstance(ctx, dict) else None),
+                        "context_unknown": ctx is None, "superseded_by": sup.get(r["revision_id"])})
+        return out
 
     def retract_claim(self, claim_id: str, account: Optional[str], reason: str, *, client: str = "web",
                       occurred_at: Optional[str] = None) -> Dict[str, Any]:
@@ -536,6 +649,9 @@ class Notebook:
                 "SELECT * FROM claims WHERE note_id=? ORDER BY seq", (note_id,))],
             "revisits": [shapes.note_ref(r) for r in revisits],
             "insight": shapes.insight_facts(row),
+            "interpretations": self.interpretations(note_id),
+            # ADR 0008: why the note waits to be understood again (the reasons of its pending marks), [] when it does not
+            "reinterpret_pending": next((m["reasons"] for m in self.store.pending_marks() if m["note_id"] == note_id), []),
         }
 
     def note_links(self, note_id: str) -> Dict[str, Any]:
@@ -955,9 +1071,11 @@ class Notebook:
                 self._reindex_notes(reembed=reembed)
                 self.kg = ClaimStore(kg_path, cache)
                 replayed = 0
+                self.store.marking = False  # ADR 0008: the marks table is truth; a replay marks nothing again
                 for row in self.store.q("SELECT * FROM revisions WHERE abandoned=0 ORDER BY seq"):
                     self._finish(self.store.revision_dict(row))
                     replayed += 1
+                self.store.marking = True
                 self._sync_pin()
             except BaseException:
                 try:
@@ -994,7 +1112,7 @@ class Notebook:
                 c.execute("DELETE FROM meta")
                 c.execute("INSERT INTO meta SELECT * FROM old.meta" + (" WHERE key!='embedding_pin'" if reembed else ""))
                 tables = ["notes", "attachments", "note_links", "queue", "queue_errors", "context_packets", "revisions",
-                          *KEPT_TABLES]
+                          "reinterpret_marks", *KEPT_TABLES]
                 if not reembed:
                     tables.append("vectors")
                 for table in tables:

@@ -47,7 +47,7 @@ NOTE_TOOLS = [
     "note_resurface", "note_anniversaries", "note_insight_write", "note_communities_recompute",
     "note_communities_pending", "note_communities_label", "note_consolidation_begin", "note_consolidation_progress",
     "note_consolidation_end", "note_entities_normalize", "note_entities_stale_summaries", "note_entities_set_summaries",
-    "note_then_now_refresh",
+    "note_then_now_refresh", "note_reinterpret_next", "note_mark_reinterpret",
 ]
 
 DRAIN_DEFAULTS = {"max_items": 20, "budget_s": 90}
@@ -1253,11 +1253,15 @@ SUMMARY_RETRY_CODE = (
 )
 #: Why an offered item is skipped for this run (the stage's ``reasons``, the warning log, ``left_out.reasons``).
 NO_LABEL_REASON = "The model gave no name for these groups, even when asked a second time."
+NO_REINTERPRET_REASON = "It could not be understood again this time."
 NO_SUMMARY_REASON = "The model gave no summary for these entries, even when asked a second time."
 
 
 def build_consolidate(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, Any]:
-    """note-consolidate (backlog 0032, docs/cognition.md): normalize -> communities -> labels (loop, 5 per call) ->
+    """note-consolidate (backlog 0032, docs/cognition.md): normalize -> reinterpret (ADR 0008: loop, one marked note at a
+    time through note-process, in history order, each once per pass, budget-bounded; a note whose context did not
+    change is settled unchanged by the next call without a model; a note that cannot be understood again is skipped
+    with its reason and its mark waits) -> communities -> labels (loop, 5 per call) ->
     summaries (loop, 8 per call, budget-bounded) -> then_now -> reflect (subflow), each stage reporting its
     progress. A labelling or summary round whose answer leaves out an offered item asks once more; what is still
     unanswered is skipped for this run (reported with the round's progress, so it is logged and counted; the labels
@@ -1356,7 +1360,8 @@ def build_consolidate(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[
         "        \"labels_continue\": True, \"labels_done\": 0, \"labels_inflight\": False, \"labels_skipped\": [],\n"
         "        \"labels_left\": 0, \"labels_budget\": False, \"labels_answer\": [],\n"
         "        \"sum_continue\": True, \"sum_done\": 0, \"sum_inflight\": False, \"sum_skipped\": 0,\n"
-        "        \"sum_left\": 0, \"sum_budget\": False, \"sum_answer\": []}}",
+        "        \"sum_left\": 0, \"sum_budget\": False, \"sum_answer\": [],\n"
+        "        \"re_continue\": True, \"re_inflight\": False, \"re_failed\": [], \"re_budget\": False}}",
         inputs={"budget_s": ("number", S("budget_s"))}, outputs=[("updates", "object")],
     )
     f.then(begun, "init")
@@ -1370,6 +1375,78 @@ def build_consolidate(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[
            inputs={"merges": ("number", (norm, "merges")), "planned": ("number", (begun, "planned_merges"))},
            outputs=[("done", "number"), ("total", "number")], exec_lane=False)
     cont = report("p_norm_done", "normalize", ("norm_total", "done"), ("norm_total", "total"), cont)
+
+    # ---- reinterpret (loop, ADR 0008): the notes an earlier note made out of date, one at a time, in history order
+    re_first, cont = step("re_count", "Notes to understand again", "note_reinterpret_next", {"limit": ("number", 0)},
+                          [("done", "number"), ("total", "number"), ("pending", "number")], cont)
+    cont = report("p_re_start", "reinterpret", (re_first, "done"), (re_first, "total"), cont)
+    f.get_var("re_go", "re_continue", False)
+    f.while_("re_loop", "While notes wait to be understood again", ("re_go", "value"))
+    f.then(cont[0], "re_loop", cont[1])
+    flags("re_begin", "A re-understanding round", {"re_inflight": True, "re_continue": False}, ("re_loop", "loop"))
+    f.get_var("re_deadline", "cons_deadline", 0)
+    f.code("re_time", "Time left?", "import time\nreturn {\"in_time\": time.time() < float(deadline or 0)}",
+           inputs={"deadline": ("number", ("re_deadline", "value"))}, outputs=[("in_time", "boolean")])
+    f.then("re_begin", "re_time")
+    f.if_("re_in_time", "Time left to understand a note again?", ("re_time", "in_time"))
+    f.then("re_time", "re_in_time")
+    flags("re_spent", "The time is spent", {"re_inflight": False, "re_continue": False, "re_budget": True},
+          ("re_in_time", "false"))
+    f.get_var("re_failed_last", "re_failed", [])
+    re_next, cont = step("re_next", "Next note to understand again", "note_reinterpret_next",
+                         {"limit": ("number", cons.REINTERPRET_BATCH), "failed": ("array", ("re_failed_last", "value"))},
+                         [("items", "array"), ("done", "number"), ("total", "number"), ("pending", "number")],
+                         ("re_in_time", "true"))
+    f.code("re_pick", "The note",
+           "first = items[0] if isinstance(items, list) and items else None\n"
+           "return {\"has_item\": isinstance(first, dict),"
+           " \"note_id\": first.get(\"note_id\") if isinstance(first, dict) else None}",
+           inputs={"items": ("array", (re_next, "items"))}, outputs=[("has_item", "boolean"), ("note_id", "string")])
+    f.then(cont[0], "re_pick", cont[1])
+    f.if_("re_has", "A note to read again?", ("re_pick", "has_item"))
+    f.then("re_pick", "re_has")
+    flags("re_none", "Nothing left to read again", {"re_inflight": False, "re_continue": False, "re_failed": []},
+          ("re_has", "false"))
+    f.subflow("re_process", "Understand the note again", "note-process", {
+        "note_id": ("string", ("re_pick", "note_id")), "provider": ("provider_text", S("provider")),
+        "model": ("model", S("model")), "thinking": ("string", S("thinking")),
+    }, [("revision_id", "string")])
+    f.then("re_has", "re_process", "true")
+    f.code(
+        "re_outcome", "Understood again?",
+        "o = output if isinstance(output, dict) else {}\n"
+        "c = child_output if isinstance(child_output, dict) else {}\n"
+        "err = str(c.get(\"error\") or o.get(\"error\") or \"\")\n"
+        "for prefix in (\"Runtime error: \", \"Execution error: \"):\n"
+        "    if err.startswith(prefix):\n"
+        "        err = err[len(prefix):]\n"
+        "failed = c.get(\"success\") is False or o.get(\"success\") is False or bool(err)\n"
+        f"skipped = [{{\"id\": note_id, \"reason\": err or {NO_REINTERPRET_REASON!r}}}] if failed else []\n"
+        "return {\"skipped\": skipped, \"done\": int(done or 0) + 1, \"total\": max(int(total or 0), int(done or 0) + 1),\n"
+        "        \"updates\": {\"re_failed\": skipped, \"re_inflight\": False, \"re_continue\": True}}",
+        inputs={"output": ("object", ("re_process", "output")), "child_output": ("object", ("re_process", "child_output")),
+                "note_id": ("string", ("re_pick", "note_id")), "done": ("number", (re_next, "done")),
+                "total": ("number", (re_next, "total"))},
+        outputs=[("skipped", "array"), ("done", "number"), ("total", "number"), ("updates", "object")],
+    )
+    f.then("re_process", "re_outcome")
+    cont = report("p_re", "reinterpret", ("re_outcome", "done"), ("re_outcome", "total"), ("re_outcome", "exec-out"),
+                  skipped=("re_outcome", "skipped"), reason=NO_REINTERPRET_REASON)
+    f.set_vars("re_vars", "Remember the round", ("re_outcome", "updates"))
+    f.then(cont[0], "re_vars", cont[1])
+    # after the loop: a round that did not reach its end ends the run; the last failure is recorded on its mark
+    f.get_var("re_unfinished", "re_inflight", False)
+    f.if_("re_broke", "Did understanding again stop half-way?", ("re_unfinished", "value"))
+    f.then("re_loop", "re_broke", "done")
+    f.code("re_broke_msg", "Understanding again failed",
+           "return {\"message\": \"Understanding the notes again did not finish.\"}",
+           inputs={}, outputs=[("message", "string")], exec_lane=False)
+    fail_from("re_broke", "true", ("re_broke_msg", "message"))
+    f.get_var("re_failed_end", "re_failed", [])
+    re_last, cont = step("re_final", "Notes understood again", "note_reinterpret_next",
+                         {"limit": ("number", 0), "failed": ("array", ("re_failed_end", "value"))},
+                         [("done", "number"), ("total", "number"), ("pending", "number")], ("re_broke", "false"))
+    cont = report("p_re_done", "reinterpret", (re_last, "done"), (re_last, "total"), cont)
 
     # ---- communities
     cont = report("p_comm_start", "communities", 0, 1, cont)
@@ -1604,31 +1681,35 @@ def build_consolidate(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[
     # ---- end
     # what the time budget did not reach (the close adds the skipped items still pending: left_out)
     for name, var, default in (("end_sum_budget", "sum_budget", False), ("end_sum_left", "sum_left", 0),
-                               ("end_labels_budget", "labels_budget", False), ("end_labels_left", "labels_left", 0)):
+                               ("end_labels_budget", "labels_budget", False), ("end_labels_left", "labels_left", 0),
+                               ("end_re_budget", "re_budget", False)):
         f.get_var(name, var, default)
     f.code("results", "Results",
-           "sb, lb = bool(sum_budget), bool(labels_budget)\n"
+           "sb, lb, rb = bool(sum_budget), bool(labels_budget), bool(re_budget)\n"
            "return {\"results\": {\"communities\": int(communities or 0), \"insights\": int(insights or 0),\n"
-           "        \"budget_spent\": sb or lb, \"not_reached\": {\"summaries\": int(sum_left or 0) if sb else 0,\n"
-           "                                                \"labels\": int(labels_left or 0) if lb else 0}}}",
+           "        \"budget_spent\": sb or lb or rb, \"not_reached\": {\"summaries\": int(sum_left or 0) if sb else 0,\n"
+           "                                                \"labels\": int(labels_left or 0) if lb else 0,\n"
+           "                                                \"reinterpret\": int(re_left or 0) if rb else 0}}}",
            inputs={"communities": ("number", (comm, "communities")),
                    "insights": ("number", ("reflect_outcome", "insights")),
                    "sum_budget": ("boolean", ("end_sum_budget", "value")), "sum_left": ("number", ("end_sum_left", "value")),
                    "labels_budget": ("boolean", ("end_labels_budget", "value")),
-                   "labels_left": ("number", ("end_labels_left", "value"))},
+                   "labels_left": ("number", ("end_labels_left", "value")),
+                   "re_budget": ("boolean", ("end_re_budget", "value")), "re_left": ("number", (re_last, "pending"))},
            outputs=[("results", "object")], exec_lane=False)
     ended, cont = step("finish", "Close the consolidation", "note_consolidation_end",
                        {"status": ("string", "completed"), "results": ("object", ("results", "results"))},
                        [("merges", "number"), ("labelled", "number"), ("summaries_refreshed", "number"),
                         ("insights", "number"), ("communities", "number"), ("status", "string"),
-                        ("notice", "string")], cont)
+                        ("notice", "string"), ("reinterpreted", "number"), ("unchanged", "number")], cont)
     f.code(
         "report", "Report",
         "def n(x, one, many):\n"
         "    x = int(x or 0)\n"
         "    return str(x) + \" \" + (one if x == 1 else many)\n"
         "head = \"Consolidated with gaps: \" if status == \"completed_with_gaps\" else \"Consolidated: \"\n"
-        "msg = (head + n(merges, \"merge\", \"merges\") + \", \" + n(labelled, \"group named\", \"groups named\")\n"
+        "again = (n(reinterpreted, \"note understood again\", \"notes understood again\") + \", \") if reinterpreted else \"\"\n"
+        "msg = (head + n(merges, \"merge\", \"merges\") + \", \" + again + n(labelled, \"group named\", \"groups named\")\n"
         "       + \", \" + n(summaries, \"summary refreshed\", \"summaries refreshed\") + \", \"\n"
         "       + n(insights, \"insight\", \"insights\") + \".\")\n"
         "if notice:\n"
@@ -1636,7 +1717,8 @@ def build_consolidate(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[
         "return {\"message\": msg}",
         inputs={"merges": ("number", (ended, "merges")), "labelled": ("number", (ended, "labelled")),
                 "summaries": ("number", (ended, "summaries_refreshed")), "insights": ("number", (ended, "insights")),
-                "status": ("string", (ended, "status")), "notice": ("string", (ended, "notice"))},
+                "status": ("string", (ended, "status")), "notice": ("string", (ended, "notice")),
+                "reinterpreted": ("number", (ended, "reinterpreted"))},
         outputs=[("message", "string")],
     )
     f.then(cont[0], "report", cont[1])
