@@ -8,4 +8,5 @@
 | [0004](0004-models-decide-identity-no-text-heuristics.md) | Models decide identity and change; no text heuristics | Accepted |
 | [0005](0005-eventual-consistency-queue-and-processor-automation.md) | Eventual consistency: queue, priorities, processor automation | Accepted |
 | [0006](0006-apple-client-credential-storage.md) | Apple client credential storage is file-sealed | Proposed |
+| [0007](0007-nothing-stops-or-drops-silently.md) | Nothing stops or drops silently (root ADR-0026 in AbstractNote) | Accepted |
 | [0008](0008-interpretation-is-a-derived-view.md) | Interpretation is a derived view; nothing understood is final (retrospective ingestion) | Proposed |

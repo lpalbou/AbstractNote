@@ -151,7 +151,11 @@ vocabulary. It also owns the consolidation: the scheduled pass that joins duplic
 recomputes the themes and names the new or stale ones, refreshes entity summaries that are older
 than what is known about them, refreshes then-and-now, and looks back for insights. Each stage
 reports n of m with a time left measured from its own pace, and "Consolidate now" runs it at
-once (see [cognition.md](cognition.md), "note-consolidate").
+once (see [cognition.md](cognition.md), "note-consolidate"). When a pass could not refresh
+everything (the model gave no answer for some entries, or its time ran out), it says so in one
+quiet line under the last pass ("12 summaries could not be refreshed this time; they will be tried
+again next time.") and the state line reads "Consolidated with gaps"; the next pass tries them
+again. Nothing is left out without a word (ADR 0007).
 
 ## For agents and entities
 

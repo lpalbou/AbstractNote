@@ -289,8 +289,8 @@ keeps the notebook's derived memory fresh, in stages, each reporting its progres
 |---|---|---|
 | `normalize` | `note_entities_normalize`: the entries that share a canonical name are merged (`Notebook.normalize_entities`, one reversible revision per merge) | none |
 | `communities` | `note_communities_recompute` (as in note-reflect) | none |
-| `labels` | loop: `note_communities_pending` (5) -> the reflect naming step (`CommunityLabels`, by index) -> `note_communities_label`, until none waits, a round names nothing, or the budget is spent | 1 call per 5 groups |
-| `summaries` | loop: `note_entities_stale_summaries` (8) -> `llm_call summaries` (`EntitySummaries`: `[{index, summary}]`) -> `note_entities_set_summaries`, until none is stale, a round stores nothing, or the budget is spent | 1 call per 8 entries |
+| `labels` | loop: `note_communities_pending` (5, `exclude` = the groups skipped this run) -> the reflect naming step (`CommunityLabels`, by index; asked once more when a group is left out) -> `note_communities_label`, until none waits that was not skipped, or the budget is spent | 1 call per 5 groups (2 when the first answer leaves one out) |
+| `summaries` | loop: `note_entities_stale_summaries` (8) -> `llm_call summaries` (`EntitySummaries`: `[{index, summary}]`; `summaries_again` when an entry is left out or empty) -> `note_entities_set_summaries`, until none is stale that was not offered this run, or the budget is spent | 1 call per 8 entries (2 when the first answer leaves one out) |
 | `then_now` | `note_then_now_refresh`: the then-versus-now cache of every entry this run merged into or summarised | none |
 | `reflect` | the note-reflect flow as a subflow (open loops, tensions, resurfacing, anniversaries -> insights; its naming finds nothing left) | as note-reflect |
 
@@ -301,16 +301,25 @@ it) was recorded by a revision after its latest summary's revision. Nothing read
 (ADR 0004). Each entry handed to the model carries its name, kind, other names, current summary, its
 strongest statements in words (at most 8) and its 3 newest note excerpts; the prompt
 (`process/prompts/entity_summaries`) asks for at most two sentences, third person, present tense, nothing
-the statements and notes do not say. The answers are mapped back by index; an entry the model skips is not
-offered again in the same run. Each round's summaries are one revision (`action: entity.summary`,
+the statements and notes do not say. The answers are mapped back by index. Nothing stops or is left out
+silently (ADR 0007, the incident of 2026-10-20 where one empty answer ended the stage as "completed" with 536
+summaries stale): a round whose answer leaves out an offered entry or group (or answers it empty) asks once
+more with the same prompt; what is still unanswered is skipped for this run (reported with the round's
+`note_consolidation_progress(..., skipped, reason)`, logged on `abstractnote.consolidation`, recorded on the
+stage) and never offered again in the run, and the loop goes on. A summary over 600 characters or a label over
+4 words is kept whole with an `over_length` warning. At the close, `note_consolidation_end` reports `left_out =
+{summaries, labels, reasons}` (the skipped items still pending, plus what the budget did not reach:
+`budget_spent`, `not_reached`) and closes the run as `completed_with_gaps` when anything was left out; the
+run's answer then reads "Consolidated with gaps: …" followed by the end-user notice ("12 summaries could not be
+refreshed this time; they will be tried again next time."). Each round's summaries are one revision (`action: entity.summary`,
 `run_id` = the consolidation id, source client `consolidation`), so the summary history keeps every version
 and a rebuild replays it.
 
 The start pins are `budget_s` (default 3600: the loops stop starting rounds after it), `limit` (the reflect
 stage's insight limit, default 10), `thinking` (`on` or `off`, default `off`, wired to both model steps) and
 the model pins. Progress: the flow calls `note_consolidation_begin` (an earlier row still open is closed as
-`interrupted`), then `note_consolidation_progress(stage, done, total)` at the start and after each step of
-every stage, then `note_consolidation_end(status, results)`. The rows live in the notebook's
+`interrupted`), then `note_consolidation_progress(stage, done, total, skipped?, reason?)` at the start and
+after each step of every stage, then `note_consolidation_end(status, results)`. The rows live in the notebook's
 `consolidation_runs` table (kept by a rebuild); a stage's seconds per item are measured from its first
 report, and its ETA is the items it has left times that measure (the last completed run's measure for the
 stage until one item is done). After `begin` no tool step raises: a failed step's sentence is remembered and

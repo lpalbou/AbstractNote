@@ -206,7 +206,9 @@ flat; entities carry the structure.
 
 A topic is stored under its canonical name (the entity rule: `Bug-Fix`, `bug fix` and `bug_fix` are
 `bug_fix`), and processing keeps the first 3 topics the model lists for a note (`TOPICS_PER_NOTE`; a
-user revision is not capped). The extraction packet lists the 50 most used topics. Topics stored before
+user revision is not capped); the others are named, never dropped silently (ADR 0007): the revision's result
+lists them under `topics_not_assigned`, its warnings and its summary say which were not kept. Quick filing keeps
+4 (`MAX_FILING_TOPICS`) and names the rest in `note_file`'s `topics_not_assigned`. The extraction packet lists the 50 most used topics. Topics stored before
 that keep their spelling until `abstractnote normalize-topics --notebook DIR [--dry-run]` gives each
 group one name in ONE revision (`topic.unassign` + `topic.assign`): the same canonical name (case,
 `-`, `_` and whitespace). That is spelling, not meaning: no word rule decides that two topics are one
@@ -264,6 +266,22 @@ response lists those labels under `carry_over` (`kept`, `stale`, and `dropped` f
 group overlaps), so a library upgrade never loses a label silently. Tables `communities` and `entity_communities` (one row per member) are
 derived, but because the labels are model work, `rebuild` keeps them (`schema.KEPT_TABLES`). A
 notebook opened without its embedding model reads communities and refuses to recompute or label.
+
+A community's label longer than 4 words is kept whole with an `over_length` warning (ADR 0007).
+
+## Consolidation run
+
+Table `consolidation_runs` (kept by `rebuild`) holds one row per memory consolidation (docs/cognition.md,
+note-consolidate); the open row has no `finished_at`. `status` is `running`, `completed` (nothing was left out),
+`completed_with_gaps` (the run finished its stages but left items for the next one), `failed` (`error` is the
+step's sentence) or `interrupted` (it stopped before closing). `stages_json` holds per stage `{done, total,
+seconds_per_item, started_at, skipped?, reason?, reasons?, skipped_ids?: [{id, reason}]}`: `skipped_ids` are the
+entries or groups the stage skipped for this run after the model left them unanswered twice. `results_json`
+holds the counts and, for a finished run, `left_out: {summaries, labels, reasons}` (skipped items still pending
+at the close plus what the time budget did not reach, never more than pending) and `budget_spent`.
+`offered_json` lists the entries the run already offered (never offered twice in a run), `touched_json` the
+entries it merged into or summarised. A summary longer than 600 characters is kept whole with an `over_length`
+warning in its revision (ADR 0007).
 
 ## Time
 

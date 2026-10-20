@@ -19,6 +19,19 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
   kept apart from the software it works on, even when both carry the same name.
 - **One spelling per topic**: `abstractnote normalize-topics` joins only topics that differ by case,
   hyphens, underscores or spaces; a plural (`bug_fixes`) stays its own topic.
+- **Nothing left out without a word** (ADR 0007): a description longer than 600 characters or a
+  theme name longer than 4 words is kept whole with a warning instead of being cut or dropped;
+  topics a note could not keep are named in what processing did to it; lists chosen under a bound
+  (the graph, recall packets, search, stats, reflection candidates) say how much they left out, and
+  a request for more than a read allows is answered and logged.
+
+### Fixed
+- **Consolidation no longer stops silently**: when the model gives an empty or partial answer, the
+  consolidation asks once more, sets aside what is still unanswered for the next pass and goes on,
+  instead of ending the summaries stage and calling the pass complete with hundreds of summaries
+  still waiting. A pass that could not refresh everything is marked as having gaps, and the
+  Processing page says so in one quiet line ("12 summaries could not be refreshed this time; they
+  will be tried again next time.").
 
 ## [0.1.1] - 2026-10-19
 
