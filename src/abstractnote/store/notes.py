@@ -1338,7 +1338,6 @@ class _OpContext:
         self.c.execute("DELETE FROM note_topics WHERE note_id=? AND topic=?", (note_id, p["topic"]))
         self.s.refresh_topic(self.c, p["topic"])
 
-
     def op_task_open(self, p: Dict[str, Any]) -> None:
         cur = self.c.execute(
             "INSERT OR IGNORE INTO tasks(task_id, note_id, text, status, due, opened_at, opened_revision_id)"
