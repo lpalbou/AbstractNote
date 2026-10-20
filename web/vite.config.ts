@@ -24,7 +24,7 @@ function sessionProxyPlugin(mode: string): Plugin {
         const port = Number(process.env.ABSTRACTNOTE_MOCK_PORT || 18890);
         // Loaded at run time (not bundled into the config): the mock is a plain Node module.
         const { createMockGateway } = await import(pathToFileURL(resolve(__dirname, "mock/server.mjs")).href);
-        const mock = createMockGateway({ processDelayMs: 6000 });
+        const mock = createMockGateway({ processDelayMs: 6000, liveProcessing: true });
         await new Promise<void>((done) => http.createServer(mock.handler).listen(port, "127.0.0.1", () => done()));
         gatewayUrl = `http://127.0.0.1:${port}`;
         server.config.logger.info(`  Mock gateway on ${gatewayUrl} (sign in with the token demo-token)`);

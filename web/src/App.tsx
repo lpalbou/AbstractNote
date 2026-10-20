@@ -13,12 +13,13 @@ import { ViewBoundary } from "./components/ViewBoundary";
 import { CaptureView } from "./views/Capture";
 import { GraphView } from "./views/Graph";
 import { RememberView } from "./views/Remember";
+import { ProcessingView } from "./views/Processing";
 import { SettingsDrawer, needsRepair } from "./views/Settings";
 import pkg from "../package.json";
 
 /** The deck's vocabulary: Capture, Remember (recall), Explore (the graph). The routes keep their names. */
-const LABELS: Record<View, string> = { capture: "Capture", graph: "Explore", remember: "Remember" };
-const ICONS: Record<View, "compose" | "branch" | "history"> = { capture: "compose", graph: "branch", remember: "history" };
+const LABELS: Record<View, string> = { capture: "Capture", graph: "Explore", remember: "Remember", processing: "Processing" };
+const ICONS: Record<View, "compose" | "branch" | "history" | "activity"> = { capture: "compose", graph: "branch", remember: "history", processing: "activity" };
 
 declare global {
   interface Window {
@@ -70,7 +71,7 @@ export function App() {
 
 type Conn = ReturnType<typeof useGatewayConnection>;
 
-/** The header: brand, the three views, and the framework's top-right cluster (appearance, about, account, sign-in pill). */
+/** The header: brand, the four views, and the framework's top-right cluster (appearance, about, account, sign-in pill). */
 function Header({ conn, user, onAppearance, onSettings, tabs }: { conn: Conn; user: string | null; onAppearance: () => void; onSettings?: () => void; tabs: React.ReactNode }) {
   const [versions, setVersions] = useState<AfAboutVersions | undefined>(undefined);
   const identity = useMemo(noteIdentity, []);
@@ -200,6 +201,7 @@ function Shell({ conn, user, onAppearance }: { conn: Conn; user: string | null; 
               {route.view === "capture" ? <CaptureView route={route} processInline={Boolean(settings.data?.process_inline_default)} /> : null}
               {route.view === "graph" ? <GraphView route={route} /> : null}
               {route.view === "remember" ? <RememberView route={route} /> : null}
+              {route.view === "processing" ? <ProcessingView settings={settings} onSave={saveSettings} /> : null}
             </ViewBoundary>
           )}
         </main>

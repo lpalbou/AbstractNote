@@ -152,7 +152,7 @@ export type QueueInfo = {
 /** null = the default model. */
 export type ModelChoice = { provider: string | null; model: string | null };
 /** GET/PUT /note/settings (W1 DEFAULT_SETTINGS). */
-export type NoteSettings = { filing_model: ModelChoice; answering_model: ModelChoice; reflect_schedule: { every: string }; processor_schedule: { every: string; max_items: number }; process_inline_default: boolean };
+export type NoteSettings = { filing_model: ModelChoice; answering_model: ModelChoice; reflect_schedule: { every: string }; processor_schedule: { every: string; max_items: number }; process_inline_default: boolean; consolidate_schedule?: { every: string } };
 export type NoteStatus = { counts?: Record<string, number>; queue?: QueueStats; settings?: NoteSettings; automations: Automations };
 export type ListOf<T> = { items: T[]; next_cursor?: string | null };
 
@@ -204,4 +204,70 @@ export type NoteStats = {
   processing: { understood: number; queued: number; failed: number };
   growth_monthly: Array<{ month: string; entities: number; claims: number }>;
   quiet_entities: Array<{ entity_id: string; name: string; last_seen: string }>;
+};
+
+/** GET /note/processing (processing contract, 2026-10-19): what the notebook is doing right now. */
+export type ProcessingAutomation = {
+  id: string | null;
+  state: string;
+  paused: boolean;
+  healthy: boolean;
+  reason: string | null;
+  schedule?: { every: string; max_items: number } | null;
+  target?: string | null;
+};
+export type ReflectStatus = ProcessingAutomation & {
+  last_run_at: string | null;
+  last_status: string | null;
+  insights_last_run: number | null;
+  communities: { count: number; unlabelled: number; stale_label: number; computed_at: string | null } | null;
+};
+export type ProcessingFlow = "note-drain" | "note-process" | "note-reflect" | "note-recall" | "note-mine" | "note-capture";
+/** One thing running now. `run_id` is only ever sent back (cancel), never shown. */
+export type ActiveWork = {
+  run_id: string;
+  flow: ProcessingFlow | string;
+  started_at: string;
+  note: NoteRef | null;
+  step: string | null;
+  step_started_at: string | null;
+  sections_done: number | null;
+  sections_total: number | null;
+  thinking: "on" | "off" | null;
+  /** docs/api.md ActiveRun: the run that started this one (a drain for its notes). */
+  parent_run_id?: string | null;
+  status?: string;
+};
+export type RecentRevision = {
+  revision_id: string;
+  note: NoteRef;
+  at: string;
+  recorded_at: string;
+  summary: string;
+  entities_created: number;
+  claims_added: number;
+  claims_superseded: number;
+  duration_s: number | null;
+};
+export type FailedWork = { note_id: string; title: string; error: string | null; attempts: number; next_attempt_at: string | null; failed_at: string | null };
+export type Processing = {
+  now: string;
+  processor: ProcessingAutomation;
+  reflect: ReflectStatus;
+  queue: { queued: number; processing: number; failed: number; done: number; by_priority: Record<string, number>; oldest_enqueued_at: string | null; eta_s: number | null };
+  pace: { per_minute_5m: number; per_minute_1h: number; series: Array<{ t: string; understood: number }> };
+  active: ActiveWork[];
+  recent: RecentRevision[];
+  failed: FailedWork[];
+  model: { provider: string | null; model: string | null; thinking_bulk: string; thinking_live: string } | null;
+  /** null: this server has no consolidation (contract "Consolidation"). */
+  consolidation: Consolidation | null;
+};
+export type ConsolidationStage = "normalize" | "communities" | "labels" | "summaries" | "then_now" | "reflect" | "done";
+export type Consolidation = {
+  automation: ProcessingAutomation & { schedule?: { every: string } | null };
+  run: { run_id: string; started_at: string; stage: ConsolidationStage | string; stage_done: number; stage_total: number; eta_s: number | null; elapsed_s: number } | null;
+  /** An interrupted run has no finish time and null counts (W20). */
+  last: { finished_at: string | null; status: string; merges: number | null; communities: number | null; labelled: number | null; summaries_refreshed: number | null; insights: number | null } | null;
+  pending: { stale_labels: number; unlabelled: number; stale_summaries: number };
 };

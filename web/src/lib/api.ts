@@ -136,6 +136,36 @@ export function createApi(options: ApiOptions = {}) {
     throw last;
   }
 
+  /**
+   * One conditional read for a screen that polls (the Processing page): sent once (the next poll is the
+   * retry), with `If-None-Match` when an ETag is known; a 304 answers "unchanged". The browser cache is
+   * bypassed so the 304 reaches the page as it is.
+   */
+  async function poll<T>(path: string, etag: string | null): Promise<{ changed: true; data: T; etag: string | null } | { changed: false }> {
+    const ctrl = typeof AbortController === "undefined" ? null : new AbortController();
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+    let resp: Response;
+    try {
+      const headers: Record<string, string> = { Accept: "application/json" };
+      if (etag) headers["If-None-Match"] = etag;
+      resp = await doFetch(`${API_PREFIX}${path}`, { method: "GET", headers, credentials: "same-origin", cache: "no-store", signal: ctrl?.signal });
+    } catch {
+      throw new ApiError(0, "No answer.", "network");
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    if (resp.status === 304) return { changed: false };
+    const parsed = await parse(resp).catch((e) => {
+      if (resp.ok) throw e;
+      return {};
+    });
+    if (!resp.ok) {
+      if (resp.status === 401) options.onUnauthorized?.();
+      throw errorFrom(resp.status, parsed);
+    }
+    return { changed: true, data: parsed as T, etag: resp.headers.get("ETag") };
+  }
+
   const json = (data: unknown) => ({ body: JSON.stringify(data ?? {}), headers: { "Content-Type": "application/json" } });
 
   async function post<T>(path: string, data?: unknown): Promise<T> {
@@ -162,7 +192,7 @@ export function createApi(options: ApiOptions = {}) {
     return ref as { $artifact: string };
   }
 
-  return { get, post, put, upload, url: (path: string, params?: Record<string, unknown>) => `${API_PREFIX}${path}${queryString(params)}` };
+  return { get, poll, post, put, upload, url: (path: string, params?: Record<string, unknown>) => `${API_PREFIX}${path}${queryString(params)}` };
 }
 
 /**

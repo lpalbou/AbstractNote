@@ -8,7 +8,15 @@
  * through an `answer_user` ledger step and `output.response`, and leaves the
  * note queued; a fake processor picks queued notes up after a few seconds.
  *
- *   node mock/server.mjs [--port 18890] [--host 127.0.0.1] [--process-delay-ms 6000]
+ *   node mock/server.mjs [--port 18890] [--host 127.0.0.1] [--process-delay-ms 6000] [--no-live-processing]
+ *
+ * GET /note/processing (the Processing page) is served from the mock's state; with `liveProcessing` (on for
+ * the CLI and `npm run dev:mock`, `--no-live-processing` turns it off) a simulated import of 136 notes is
+ * worked through live: a drain whose note advances a step every few seconds, the pace, recent revisions,
+ * two failed notes, a consolidation half way through its summaries; pause/resume/run now/cancel/move to front
+ * and "Consolidate now" act on it.
+ * POST /__mock/processing {"paused": true, "healthy": false, "reason": "...", "reflect"|"consolidate": true} sets
+ * the processor's (or the reflect / consolidate automation's) state.
  *
  * Sign in with any user name and the token `demo-token`.
  * POST /__mock/fail {"path": "/api/gateway/note/cues", "count": 3, "status": 503}
@@ -18,7 +26,7 @@
  */
 
 import * as http from "node:http";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import { buildSeed, makeId } from "./seed.mjs";
@@ -65,6 +73,8 @@ async function readJson(req) {
  */
 export function createMockGateway(options = {}) {
   const processDelayMs = Number(options.processDelayMs ?? 6000);
+  const liveProcessing = Boolean(options.liveProcessing);
+  const stepMs = Number(options.stepMs ?? 3000);
   const db = buildSeed();
   const sessions = new Map();
   const runs = new Map();
@@ -74,8 +84,29 @@ export function createMockGateway(options = {}) {
   let drainRunning = false;
   const PROCESSOR_ID = "au_note_processor";
   const REFLECT_ID = "au_note_reflect";
+  const CONSOLIDATE_ID = "au_note_consolidate";
   // W14: each automation's health, as GET /note/status and /note/queue report it.
-  const automationHealth = (id, flow) => ({ id, state: "active", target: `abstractnote@0.1.1:${flow}`, healthy: true, reason: null, paused: false });
+  // The processor's and the reflect automation's state (the Processing page and the mock controls change it).
+  const proc = {
+    processor: { paused: false, healthy: true, reason: null },
+    reflect: { paused: false, healthy: true, reason: null, last_run_at: new Date(Date.now() - 2 * 86400_000 - 3 * 3600_000).toISOString().replace(/\.\d{3}Z$/, "Z"), last_status: "completed", insights_last_run: 4 },
+    consolidate: { paused: false, healthy: true, reason: null },
+    drain: null,
+    reflectRun: null,
+    consRun: null,
+    consLast: { finished_at: new Date(Date.now() - 86400_000 - 4 * 3600_000).toISOString().replace(/\.\d{3}Z$/, "Z"), status: "completed", merges: 17, communities: 35, labelled: 12, summaries_refreshed: 140, insights: 9 },
+    staleSummaries: 88,
+    recent: [],
+    done: [],
+    nextPassAt: 0,
+    seq: 0,
+  };
+  const healthOf = (s) => (!s.healthy ? "failed" : s.paused ? "paused" : "active");
+  const stateOf = (id) => (id === PROCESSOR_ID ? proc.processor : id === CONSOLIDATE_ID ? proc.consolidate : proc.reflect);
+  const automationHealth = (id, flow) => {
+    const s = stateOf(id);
+    return { id, state: healthOf(s), target: `abstractnote@0.1.1:${flow}`, healthy: s.healthy, reason: s.healthy ? null : s.reason || "It is failed and will not run again.", paused: s.paused };
+  };
   const automations = () => ({ processor_id: PROCESSOR_ID, reflect_id: REFLECT_ID, processor: automationHealth(PROCESSOR_ID, "note-drain"), reflect: automationHealth(REFLECT_ID, "note-reflect") });
 
   // ------------------------------------------------------------ views
@@ -278,7 +309,7 @@ export function createMockGateway(options = {}) {
   }
 
   // ------------------------------------------------------------ processing (mock processor)
-  function processNote(n) {
+  function processNote(n, counts = undefined) {
     const linked = [...db.entities.values()].filter((e) => [e.name, ...e.aliases].some((name) => norm(n.text).includes(norm(name))) || (n.about?.kind === "entity" && n.about.id === e.entity_id));
     n.entity_ids = linked.map((e) => e.entity_id);
     const revision_id = makeId("rv", `${n.note_id}:${Date.now()}`);
@@ -291,15 +322,265 @@ export function createMockGateway(options = {}) {
     n.processed_at = at;
     n.revision_id = revision_id;
     db.queue.delete(n.note_id);
-    db.revisions.push({ revision_id, note_id: n.note_id, at: n.occurred_at, recorded_at: at, summary: linked.length > 1 ? `Linked ${linked[0].name} to ${linked.slice(1, 3).map((e) => e.name).join(" and ")}.` : linked.length ? `Added to what you know about ${linked[0].name}.` : "Filed with no new links.", ops: [], source: { client: n.source.client } });
+    const rev = { revision_id, note_id: n.note_id, at: n.occurred_at, recorded_at: at, summary: linked.length > 1 ? `Linked ${linked[0].name} to ${linked.slice(1, 3).map((e) => e.name).join(" and ")}.` : linked.length ? `Added to what you know about ${linked[0].name}.` : "Filed with no new links.", ops: [], source: { client: n.source.client } };
+    db.revisions.push(rev);
+    recordUnderstood(n, rev, counts);
+    return rev;
+  }
+  /** A note understood: on top of "Just understood" and in the pace. */
+  function recordUnderstood(n, rev, counts = {}) {
+    proc.recent.unshift({
+      revision_id: rev.revision_id, note: noteRef(n), at: rev.at, recorded_at: rev.recorded_at, summary: rev.summary,
+      entities_created: counts.entities_created ?? 0, claims_added: counts.claims_added ?? 0, claims_superseded: counts.claims_superseded ?? 0, duration_s: counts.duration_s ?? null,
+    });
+    proc.recent.length = Math.min(proc.recent.length, 20);
+    proc.done.push(ms(rev.recorded_at));
   }
   function scheduleProcessing() {
+    // Live: the simulated processor takes the queue in its own time (the next pass starts now).
+    if (liveProcessing) {
+      proc.nextPassAt = Date.now();
+      return;
+    }
     setTimeout(() => {
       for (const q of db.queue.values()) {
         const n = db.notes.get(q.note_id);
         if (n && n.status === "queued") processNote(n);
       }
     }, processDelayMs);
+  }
+
+  // ------------------------------------------------------------ GET /note/processing and the live simulation
+  const PROCESSOR_EVERY_MS = () => {
+    const m = String(db.settings.processor_schedule?.every || "2m").match(/^(\d+)([smhd])$/);
+    return m ? Number(m[1]) * { s: 1000, m: 60_000, h: 3600_000, d: 86400_000 }[m[2]] : 120_000;
+  };
+  const queuedNotes = () => [...db.queue.values()]
+    .map((q) => ({ q, n: db.notes.get(q.note_id) }))
+    .filter((x) => x.n && x.n.status === "queued")
+    .sort((a, b) => (b.q.priority ?? 1) - (a.q.priority ?? 1) || ms(a.n.occurred_at) - ms(b.n.occurred_at));
+  /** A stable number from a key (the simulated counts never change between reads). */
+  const hashInt = (key, mod) => createHash("sha256").update(String(key)).digest().readUInt32BE(0) % mod;
+
+  function activeView() {
+    const out = [];
+    if (proc.drain) {
+      const d = proc.drain;
+      // As the live router answers: the drain reports the note it is on, and that note's own item names the drain.
+      const n = d.note_id ? db.notes.get(d.note_id) : null;
+      const now = n ? { note: noteRef(n), step: d.step, step_started_at: d.step_started_at, sections_done: d.sections_done, sections_total: d.sections_total, thinking: d.thinking } : { note: null, step: null, step_started_at: null, sections_done: null, sections_total: null, thinking: null };
+      out.push({ run_id: d.run_id, flow: "note-drain", started_at: d.started_at, ...now, status: "running", parent_run_id: null });
+      if (n) out.push({ run_id: d.note_run_id, flow: "note-process", started_at: d.note_started_at, ...now, status: "running", parent_run_id: d.run_id });
+    } else if (drainRunning) {
+      out.push({ run_id: "run_now_mock", flow: "note-drain", started_at: nowIso(), note: null, step: null, step_started_at: null, sections_done: null, sections_total: null, thinking: null, status: "running", parent_run_id: null });
+    }
+    if (proc.reflectRun) out.push({ run_id: proc.reflectRun.run_id, flow: "note-reflect", started_at: proc.reflectRun.started_at, note: null, step: null, step_started_at: null, sections_done: null, sections_total: null, thinking: "on", status: "running", parent_run_id: null });
+    return out;
+  }
+
+  // Consolidation (contract "Consolidation"): stages in order, each with its items and seconds per item.
+  // `per`: items done per step of the simulation (a model call names 5 themes, refreshes 8 summaries).
+  const CONS_STAGES = [
+    { stage: "normalize", total: () => 24, per: 3 },
+    { stage: "communities", total: () => 1, per: 1 },
+    { stage: "labels", total: () => 10, per: 5 },
+    { stage: "summaries", total: () => 140, per: 8 },
+    { stage: "then_now", total: () => 36, per: 6 },
+    { stage: "reflect", total: () => 4, per: 1 },
+  ];
+  const consStepMs = () => stepMs * 2;
+  function startConsolidation(stage = "normalize", done = 0) {
+    proc.seq += 1;
+    const at = CONS_STAGES.findIndex((x) => x.stage === stage);
+    proc.consRun = { run_id: `mock-consolidate-${proc.seq}`, started_at: nowIso(), stage, stage_done: done, stage_total: CONS_STAGES[at].total(), lastStep: Date.now(), merges: 0, labelled: 0, refreshed: 0 };
+  }
+  function consolidationView() {
+    const comms = [...db.communities.values()];
+    const r = proc.consRun;
+    let run = null;
+    if (r) {
+      const at = CONS_STAGES.findIndex((x) => x.stage === r.stage);
+      // The time left: the steps still to do at the simulation's pace (the server measures seconds per item).
+      const steps = Math.ceil((r.stage_total - r.stage_done) / CONS_STAGES[at].per) + CONS_STAGES.slice(at + 1).reduce((a, x) => a + Math.ceil(x.total() / x.per), 0);
+      run = { run_id: r.run_id, started_at: r.started_at, stage: r.stage, stage_done: r.stage_done, stage_total: r.stage_total, eta_s: Math.round((steps * consStepMs()) / 1000), elapsed_s: Math.round((Date.now() - ms(r.started_at)) / 1000) };
+    }
+    return {
+      automation: { id: CONSOLIDATE_ID, state: healthOf(proc.consolidate), paused: proc.consolidate.paused, healthy: proc.consolidate.healthy, reason: automationHealth(CONSOLIDATE_ID, "note-consolidate").reason, schedule: { every: db.settings.consolidate_schedule?.every || "1d" } },
+      run,
+      last: proc.consLast,
+      pending: { stale_labels: comms.filter((c) => c.stale_label).length, unlabelled: comms.filter((c) => !c.label).length, stale_summaries: proc.staleSummaries },
+    };
+  }
+  function consolidationTick() {
+    const r = proc.consRun;
+    if (!r) return;
+    const at = CONS_STAGES.findIndex((x) => x.stage === r.stage);
+    const step = CONS_STAGES[at].per;
+    r.stage_done = Math.min(r.stage_total, r.stage_done + step);
+    if (r.stage === "summaries") proc.staleSummaries = Math.max(0, proc.staleSummaries - step);
+    if (r.stage_done < r.stage_total) return;
+    const next = CONS_STAGES[at + 1];
+    if (next) {
+      r.stage = next.stage;
+      r.stage_done = 0;
+      r.stage_total = next.total();
+      return;
+    }
+    proc.consLast = { finished_at: nowIso(), status: "completed", merges: 2, communities: db.communities.size, labelled: 3, summaries_refreshed: 140, insights: 4 };
+    proc.consRun = null;
+  }
+
+  function processingView() {
+    const now = Date.now();
+    const ps = db.settings.processor_schedule;
+    const stats = queueStats();
+    const within = (minutes) => proc.done.filter((t) => t > now - minutes * 60_000 && t <= now).length;
+    const per5 = Math.round((within(5) / 5) * 100) / 100;
+    const per60 = Math.round((within(60) / 60) * 100) / 100;
+    // 24 buckets of 5 minutes ending now, oldest first.
+    const end = Math.floor(now / 300_000) * 300_000 + 300_000;
+    const series = Array.from({ length: 24 }, (_, i) => {
+      const from = end - (24 - i) * 300_000;
+      return { t: new Date(from).toISOString().replace(/\.\d{3}Z$/, "Z"), understood: proc.done.filter((t) => t >= from && t < from + 300_000).length };
+    });
+    const comms = [...db.communities.values()];
+    const latestLabel = comms.map((c) => c.labelled_at).filter(Boolean).sort().pop() || null;
+    const failed = [...db.notes.values()].filter((n) => n.status === "failed").map((n) => ({ note_id: n.note_id, title: n.title, error: n.error, attempts: db.queue.get(n.note_id)?.attempts ?? 3, next_attempt_at: null, failed_at: n.failed_at || n.received_at }));
+    return {
+      now: nowIso(),
+      processor: { id: PROCESSOR_ID, state: healthOf(proc.processor), paused: proc.processor.paused, healthy: proc.processor.healthy, reason: automationHealth(PROCESSOR_ID, "note-drain").reason, schedule: { every: ps.every, max_items: ps.max_items }, target: "abstractnote@0.1.1:note-drain", last_run_at: proc.drain?.started_at || null, last_status: proc.drain ? "running" : null },
+      reflect: {
+        id: REFLECT_ID, state: healthOf(proc.reflect), paused: proc.reflect.paused, healthy: proc.reflect.healthy, reason: automationHealth(REFLECT_ID, "note-reflect").reason,
+        last_run_at: proc.reflect.last_run_at, last_status: proc.reflect.last_status, insights_last_run: proc.reflect.insights_last_run,
+        communities: { count: comms.length, unlabelled: comms.filter((c) => !c.label).length, stale_label: comms.filter((c) => c.stale_label).length, computed_at: latestLabel },
+      },
+      queue: { ...stats, eta_s: stats.queued && per60 > 0 ? Math.round((stats.queued / per60) * 60) : null },
+      pace: { per_minute_5m: per5, per_minute_1h: per60, series },
+      active: activeView(),
+      recent: proc.recent.slice(0, 20),
+      failed,
+      model: { provider: "mlx", model: "mlx-community/Qwen3.6-9B-4bit", thinking_bulk: "off", thinking_live: "on" },
+      consolidation: consolidationView(),
+    };
+  }
+
+  function startDrain() {
+    proc.seq += 1;
+    proc.drain = { run_id: `mock-drain-${proc.seq}`, started_at: nowIso(), note_id: null, note_run_id: null, note_started_at: null, step: null, step_started_at: null, sections_done: null, sections_total: null, thinking: null };
+  }
+  function endDrain() {
+    proc.drain = null;
+    proc.nextPassAt = Date.now() + PROCESSOR_EVERY_MS();
+  }
+  function setStep(d, step) {
+    d.step = step;
+    d.step_started_at = nowIso();
+  }
+  /** One step of the simulation: the drain takes the next note, walks its steps, files it, takes the next. */
+  function liveTick() {
+    const now = Date.now();
+    if (proc.consRun && now - proc.consRun.lastStep >= consStepMs()) {
+      proc.consRun.lastStep = now;
+      consolidationTick();
+    }
+    if (proc.reflectRun && now - ms(proc.reflectRun.started_at) > stepMs * 4) {
+      proc.reflect.last_run_at = nowIso();
+      proc.reflect.last_status = "completed";
+      proc.reflect.insights_last_run = 3;
+      proc.reflectRun = null;
+    }
+    if (!proc.drain) {
+      if (!proc.processor.paused && proc.processor.healthy && now >= proc.nextPassAt && queuedNotes().length) startDrain();
+      return;
+    }
+    const d = proc.drain;
+    if (!d.note_id) {
+      const next = proc.processor.paused || !proc.processor.healthy ? null : queuedNotes()[0];
+      if (!next) return endDrain();
+      proc.seq += 1;
+      d.note_id = next.n.note_id;
+      d.note_run_id = `mock-process-${proc.seq}`;
+      d.note_started_at = nowIso();
+      d.sections_total = 1 + hashInt(next.n.note_id, 4);
+      d.sections_done = 0;
+      d.thinking = (next.q.priority ?? 1) >= 3 ? "on" : "off";
+      setStep(d, "context");
+      return;
+    }
+    const inStep = now - ms(d.step_started_at);
+    if (d.step === "context" && inStep >= stepMs) setStep(d, "extract");
+    else if (d.step === "extract" && inStep >= stepMs * 0.7) {
+      d.sections_done = Math.min(d.sections_total, d.sections_done + 1);
+      if (d.sections_done >= d.sections_total) setStep(d, "resolve");
+      else d.step_started_at = nowIso();
+    } else if (d.step === "resolve" && inStep >= stepMs * 0.7) setStep(d, "link");
+    else if (d.step === "link" && inStep >= stepMs) setStep(d, "apply");
+    else if (d.step === "apply" && inStep >= stepMs * 0.6) {
+      const n = db.notes.get(d.note_id);
+      if (n && n.status === "queued") {
+        const k = n.note_id;
+        processNote(n, { entities_created: hashInt(`${k}e`, 4), claims_added: 1 + hashInt(`${k}c`, 11), claims_superseded: hashInt(`${k}s`, 7) === 0 ? 1 : 0, duration_s: Math.round((now - ms(d.note_started_at)) / 100) / 10 });
+      }
+      d.note_id = null;
+      d.step = null;
+      d.sections_done = null;
+      d.sections_total = null;
+    }
+  }
+
+  const SUBJECTS = ["Weekly sync", "Reading notes", "Call with Dana", "Kernel benchmark", "Release checklist", "Design review", "Budget follow-up", "Trip planning", "Interview notes", "Paper summary", "Workshop ideas", "One-on-one with Priya"];
+  /** The simulated import: 136 notes from last year waiting at bulk priority, a few live ones above them. */
+  function seedLiveProcessing() {
+    const names = [...db.entities.values()].filter((e) => !e.merged_into).map((e) => e.name);
+    const base = Date.parse("2025-03-03T09:00:00Z");
+    for (let i = 0; i < 136; i++) {
+      const subject = SUBJECTS[i % SUBJECTS.length];
+      const occurred = new Date(base + i * 2.3 * 86400_000 + (i % 7) * 3600_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+      const about = names.length ? names[(i * 7) % names.length] : "the project";
+      const priority = i < 1 ? 3 : i < 4 ? 2 : i < 13 ? 1 : 0;
+      const title = `${subject} — ${about}, ${new Date(occurred).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })}`;
+      const note_id = makeId("nt", `live-import-${i}`);
+      const received = new Date(Date.now() - (priority ? 20 : 95) * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+      db.notes.set(note_id, {
+        note_id, kind: i % 5 === 0 ? "decision" : i % 3 === 0 ? "event" : "log", title, text: `${subject}. Notes about ${about} from ${occurred.slice(0, 10)}.`, summary: title,
+        occurred_at: occurred, received_at: received, processed_at: null, status: "queued", topics: [], priority,
+        source: priority ? { client: "web" } : { importer: "markdown" }, location: null, attachments: [], entity_ids: [], claim_ids: [], revision_id: null, error: null, revisits: [], about: null, similar: [],
+      });
+      db.queue.set(note_id, { note_id, priority, attempts: 0, last_error: null, enqueued_at: received });
+    }
+    // A second failed note (the seed has one).
+    const fid = makeId("nt", "live-failed-receipt");
+    db.notes.set(fid, {
+      note_id: fid, kind: "reference", title: "Scanned receipt from the conference", text: "(a photo)", summary: "", occurred_at: "2026-10-16T18:20:00Z", received_at: "2026-10-16T18:21:00Z",
+      processed_at: null, status: "failed", topics: [], priority: 1, source: { client: "web" }, location: null, attachments: [], entity_ids: [], claim_ids: [], revision_id: null,
+      error: "The picture has no text the notebook could read.", failed_at: new Date(Date.now() - 42 * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z"), revisits: [], about: null, similar: [],
+    });
+    db.queue.set(fid, { note_id: fid, priority: 1, attempts: 3, last_error: "The picture has no text the notebook could read.", enqueued_at: "2026-10-16T18:21:00Z" });
+    // The last two hours: notes understood at a pace that dipped while the computer slept, then came back.
+    const now = Date.now();
+    for (let m = 118; m >= 1; m--) {
+      const rate = m > 95 ? 1.6 : m > 80 ? 0.2 : m > 40 ? 2.4 : 2.0;
+      const n = Math.floor(rate + (hashInt(`pace${m}`, 100) / 100) * 0.9);
+      for (let k = 0; k < n; k++) proc.done.push(now - m * 60_000 + k * 17_000);
+    }
+    // What was understood last: the newest processed seed notes, a few minutes apart.
+    const processed = [...db.notes.values()].filter((n) => n.status === "processed").sort((a, b) => ms(b.occurred_at) - ms(a.occurred_at)).slice(0, 8);
+    processed.reverse().forEach((n, i) => {
+      const recorded_at = new Date(now - (8 - i) * 50_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+      const rev = db.revisions.find((r) => r.revision_id === n.revision_id) || { revision_id: makeId("rv", `live-${n.note_id}`), at: n.occurred_at, summary: "Filed with no new links." };
+      proc.recent.unshift({ revision_id: rev.revision_id, note: noteRef(n), at: rev.at, recorded_at, summary: rev.summary, entities_created: hashInt(`${n.note_id}e`, 4), claims_added: 1 + hashInt(`${n.note_id}c`, 11), claims_superseded: hashInt(`${n.note_id}s`, 4) === 0 ? 1 : 0, duration_s: 6 + hashInt(`${n.note_id}d`, 40) });
+    });
+    proc.nextPassAt = now;
+  }
+  db.settings.consolidate_schedule = db.settings.consolidate_schedule || { every: "1d" };
+  let liveTimer = null;
+  if (liveProcessing) {
+    seedLiveProcessing();
+    startDrain();
+    startConsolidation("summaries", 48);
+    proc.consRun.started_at = new Date(Date.now() - 4 * 60_000 - 12_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+    liveTimer = setInterval(liveTick, Math.max(100, Math.round(stepMs / 6)));
+    liveTimer.unref?.();
   }
 
   // ------------------------------------------------------------ runs
@@ -453,6 +734,14 @@ export function createMockGateway(options = {}) {
       failures.set(String(body.path), { count: Number(body.count || 3), status: Number(body.status || 503) });
       return send(res, 200, { ok: true });
     }
+    if (p === "/__mock/processing" && method === "POST") {
+      const body = await readJson(req);
+      const target = body.reflect ? proc.reflect : body.consolidate ? proc.consolidate : proc.processor;
+      if (typeof body.paused === "boolean") target.paused = body.paused;
+      if (typeof body.healthy === "boolean") target.healthy = body.healthy;
+      if ("reason" in body) target.reason = body.reason || null;
+      return send(res, 200, { ok: true });
+    }
     if (p === "/api/health") return send(res, 200, { ok: true });
     if (p === "/api/gateway/about") return send(res, 200, { abstractgateway: "mock", abstractframework: null, packages: {} });
     if (p === "/api/gateway/session/login" && method === "POST") {
@@ -524,12 +813,51 @@ export function createMockGateway(options = {}) {
       if (m[2]) return send(res, 200, { items: run.records.slice(after).map((record, i) => ({ cursor: after + i + 1, record })), next_after: run.records.length });
       return send(res, 200, { run_id: run.run_id, status: run.status, output: run.output, error: run.error, waiting: null });
     }
+    if (p === "/api/gateway/commands" && method === "POST") {
+      const body = await readJson(req);
+      if (typeof body.command_id !== "string" || typeof body.run_id !== "string") return fail(res, 400, "command_id and run_id are required.");
+      if (body.type !== "cancel") return fail(res, 400, "Unknown command.");
+      // Cancelling the drain (or the note it is on): the note in progress stays queued (its lease ends).
+      if (proc.drain && (body.run_id === proc.drain.run_id || body.run_id === proc.drain.note_run_id)) endDrain();
+      else if (proc.reflectRun && body.run_id === proc.reflectRun.run_id) proc.reflectRun = null;
+      else if (proc.consRun && body.run_id === proc.consRun.run_id) proc.consRun = null;
+      else return fail(res, 404, "Not found.");
+      return send(res, 200, { accepted: true, duplicate: false, seq: ++proc.seq });
+    }
     m = p.match(/^\/api\/gateway\/automations\/([^/]+)\/commands$/);
     if (m && method === "POST") {
       const body = await readJson(req);
-      if (m[1] !== PROCESSOR_ID) return fail(res, 404, "Not found.");
-      if (body.type !== "automation.run_now" || typeof body.command_id !== "string") return fail(res, 400, "Unknown command.");
-      if (drainRunning) return send(res, 409, { detail: { reason_code: "automation_busy", message: "An occurrence is already running or waiting to run.", command_id: body.command_id } });
+      if (![PROCESSOR_ID, REFLECT_ID, CONSOLIDATE_ID].includes(m[1])) return fail(res, 404, "Not found.");
+      if (!["automation.run_now", "automation.pause", "automation.resume"].includes(body.type) || typeof body.command_id !== "string") return fail(res, 400, "Unknown command.");
+      const state = stateOf(m[1]);
+      const accepted = { command_id: body.command_id, accepted: true, duplicate: false, seq: ++proc.seq };
+      if (body.type === "automation.pause" || body.type === "automation.resume") {
+        state.paused = body.type === "automation.pause";
+        if (!state.paused && m[1] === PROCESSOR_ID) proc.nextPassAt = Date.now();
+        return send(res, 200, accepted);
+      }
+      const busy = { detail: { reason_code: "automation_busy", message: "An occurrence is already running or waiting to run.", command_id: body.command_id } };
+      if (m[1] === CONSOLIDATE_ID) {
+        if (proc.consRun) return send(res, 409, busy);
+        startConsolidation();
+        if (!liveProcessing) {
+          const t = setInterval(() => (proc.consRun ? consolidationTick() : clearInterval(t)), Math.max(50, consStepMs()));
+          t.unref?.();
+        }
+        return send(res, 200, accepted);
+      }
+      if (m[1] === REFLECT_ID) {
+        if (proc.reflectRun) return send(res, 409, busy);
+        proc.reflectRun = { run_id: `mock-reflect-${proc.seq}`, started_at: nowIso() };
+        if (!liveProcessing) setTimeout(() => liveTick(), stepMs * 4 + 50);
+        return send(res, 200, accepted);
+      }
+      if (liveProcessing) {
+        if (proc.drain) return send(res, 409, busy);
+        startDrain();
+        return send(res, 200, accepted);
+      }
+      if (drainRunning) return send(res, 409, busy);
       drainRunning = true;
       setTimeout(() => {
         for (const item of db.queue.values()) {
@@ -850,10 +1178,32 @@ export function createMockGateway(options = {}) {
       if (q.get("acked") === "true") items = items.filter((i) => i.acked_at);
       return send(res, 200, { items: items.sort((a, b) => ms(b.occurred_at) - ms(a.occurred_at)).map(insightView), next_cursor: null });
     }
+    if (np === "/processing" && method === "GET") {
+      const body = processingView();
+      const { now: _now, ...stable } = body;
+      const etag = `"${createHash("sha1").update(JSON.stringify(stable)).digest("hex").slice(0, 20)}"`;
+      if (String(req.headers["if-none-match"] || "") === etag) {
+        res.writeHead(304, { ETag: etag, "Cache-Control": "no-store" });
+        return res.end();
+      }
+      return send(res, 200, body, { ETag: etag });
+    }
+    m = np.match(/^\/queue\/([^/]+)\/priority$/);
+    if (m && method === "POST") {
+      const body = await readJson(req);
+      const priority = Number(body.priority);
+      if (!Number.isInteger(priority) || priority < 0 || priority > 3) return fail(res, 400, "priority must be 0 to 3.");
+      const item = db.queue.get(m[1]);
+      const n = db.notes.get(m[1]);
+      if (!item || !n || n.status !== "queued") return fail(res, 404, "Not found.");
+      item.priority = priority;
+      n.priority = priority;
+      return send(res, 200, { note_id: n.note_id, priority });
+    }
     if (np === "/queue") {
       // W1 Queue.summary + W2 automations.
       const failed = [...db.notes.values()].filter((n) => n.status === "failed").map((n) => ({ note_id: n.note_id, last_error: n.error, failed_at: n.received_at, failures: 3, title: n.title, occurred_at: n.occurred_at }));
-      const waiting = [...db.notes.values()].filter((n) => n.status === "queued").map((n) => ({ note_id: n.note_id, priority: 1, state: "queued", attempts: 0, next_attempt_at: null, title: n.title, occurred_at: n.occurred_at }));
+      const waiting = queuedNotes().map(({ q: item, n }) => ({ note_id: n.note_id, priority: item.priority ?? 1, state: "queued", attempts: item.attempts || 0, next_attempt_at: null, title: n.title, occurred_at: n.occurred_at }));
       // W10: the processor's throughput (the processor_schedule setting the automation was created with).
       const ps = db.settings.processor_schedule;
       return send(res, 200, { stats: queueStats(), failed, waiting, automations: automations(), processor: { max_items: ps.max_items, interval: ps.every } });
@@ -878,7 +1228,21 @@ export function createMockGateway(options = {}) {
       }
       return send(res, 200, db.settings);
     }
-    if (np === "/processor/ensure" && method === "POST") return send(res, 200, { processor: { id: PROCESSOR_ID, action: "kept", reason: null }, processor_id: PROCESSOR_ID, reflect: { id: REFLECT_ID, action: "kept", reason: null }, reflect_id: REFLECT_ID, created: [] });
+    if (np === "/processor/ensure" && method === "POST") {
+      // A failed automation is recreated (W14); a healthy one is kept.
+      const fix = (s) => {
+        if (s.healthy) return { action: "kept", reason: null };
+        const reason = s.reason || "It is failed and will not run again.";
+        s.healthy = true;
+        s.reason = null;
+        return { action: "recreated", reason };
+      };
+      const pr = fix(proc.processor);
+      const rf = fix(proc.reflect);
+      const cf = fix(proc.consolidate);
+      if (pr.action === "recreated") proc.nextPassAt = Date.now();
+      return send(res, 200, { processor: { id: PROCESSOR_ID, ...pr }, processor_id: PROCESSOR_ID, reflect: { id: REFLECT_ID, ...rf }, reflect_id: REFLECT_ID, consolidate: { id: CONSOLIDATE_ID, ...cf }, consolidate_id: CONSOLIDATE_ID, created: [] });
+    }
     return fail(res, 404, "Not found.");
   }
 
@@ -927,10 +1291,14 @@ export function createMockGateway(options = {}) {
     const queued = notes.filter((n) => n.status === "queued");
     return {
       queued: queued.length,
-      processing: drainRunning ? Math.min(1, queued.length) : 0,
+      processing: proc.drain?.note_id || drainRunning ? Math.min(1, queued.length) : 0,
       failed: notes.filter((n) => n.status === "failed").length,
       done: notes.filter((n) => n.status === "processed").length,
-      by_priority: { 3: 0, 2: 0, 1: queued.length, 0: 0 },
+      by_priority: queued.reduce((m, n) => {
+        const k = String(db.queue.get(n.note_id)?.priority ?? 1);
+        m[k] = (m[k] || 0) + 1;
+        return m;
+      }, { 3: 0, 2: 0, 1: 0, 0: 0 }),
       oldest_enqueued_at: queued.length ? queued.map((n) => n.received_at).sort()[0] : null,
     };
   }
@@ -976,12 +1344,16 @@ export function createMockGateway(options = {}) {
     }
   }
 
-  return { handler, state: { db, runs, sessions } };
+  return { handler, state: { db, runs, sessions, proc }, stop: () => liveTimer && clearInterval(liveTimer) };
 }
 
 function parseArgs(argv) {
-  const out = { port: 18890, host: "127.0.0.1", processDelayMs: 6000 };
+  const out = { port: 18890, host: "127.0.0.1", processDelayMs: 6000, liveProcessing: true };
   for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--no-live-processing") {
+      out.liveProcessing = false;
+      continue;
+    }
     const [k, inline] = argv[i].split("=");
     const v = inline ?? argv[i + 1];
     if (k === "--port") out.port = Number(v);
@@ -995,7 +1367,7 @@ function parseArgs(argv) {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const args = parseArgs(process.argv.slice(2));
-  const { handler } = createMockGateway({ processDelayMs: args.processDelayMs });
+  const { handler } = createMockGateway({ processDelayMs: args.processDelayMs, liveProcessing: args.liveProcessing });
   http.createServer(handler).listen(args.port, args.host, () => {
     console.log(`Mock gateway for AbstractNote on http://${args.host}:${args.port} (sign in with token ${MOCK_TOKEN})`);
   });

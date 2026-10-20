@@ -5,6 +5,7 @@ import { useRead, type ReadState } from "../lib/hooks";
 import { locationEnabled, setLocationEnabled } from "../lib/location";
 import type { Automations, EnsureResult, ModelChoice, NoteSettings, NoteStatus, QueueInfo } from "../lib/types";
 import { NoteLink, ReadView, useApp } from "../components/common";
+import { ConsolidateSchedule } from "./Processing";
 
 export const REFLECT_CHOICES: Array<[string, string]> = [
   ["1d", "Every day"],
@@ -101,6 +102,10 @@ export function SettingsDrawer(props: Props) {
                 </select>
                 <span className="nt-muted">Finds open loops, contradictions and things worth revisiting.</span>
               </label>
+              <div className="nt-field">
+                <ConsolidateSchedule settings={props.settings} onSave={props.onSave} />
+                <span className="nt-muted">Joins duplicate entries, names your themes and refreshes summaries.</span>
+              </div>
             </>
           )}
         </ReadView>

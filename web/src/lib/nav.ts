@@ -5,14 +5,15 @@
  *   #/capture?about=<id>&kind=<insight|task|cue|entity|note>&title=<title>
  *   #/graph?focus=<id>,<id>&depth=2&entity=<id>&day=YYYY-MM-DD
  *   #/remember
+ *   #/processing
  */
 
 import { useEffect, useState } from "react";
 import { createStore, useStore } from "./hooks";
 
-export type View = "capture" | "graph" | "remember";
-/** In the order the tabs show them (deck: Capture, Recall, Explore). */
-export const VIEWS: View[] = ["capture", "remember", "graph"];
+export type View = "capture" | "graph" | "remember" | "processing";
+/** In the order the tabs show them (deck: Capture, Recall, Explore; then Processing, operator 2026-10-20). */
+export const VIEWS: View[] = ["capture", "remember", "graph", "processing"];
 export type Route = { view: View; params: URLSearchParams };
 
 export function parseHash(hash: string): Route {

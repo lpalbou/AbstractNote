@@ -2,7 +2,9 @@
 
 The AbstractNote web app: capture notes and files, remember what changed since you last looked,
 ask by effort (quick, standard, deep), and explore how people, projects and ideas connect through
-time. Tabs: Capture, Remember and Explore, with a Settings panel. Explore opens on an Overview of what
+time. Tabs: Capture, Remember, Explore and Processing (what the notebook is doing with your notes, live:
+the note being understood and its steps, the pace and the time left, the waiting notes, what was just
+understood, what needs attention, and the consolidation), with a Settings panel. Explore opens on an Overview of what
 the notebook holds (numbers, the activity line, themes, what went quiet) and shows it as a Picture or a List.
 
 It talks to an AbstractGateway that has the AbstractNote integration: install

@@ -45,7 +45,11 @@ export function drift(mock: unknown, rec: unknown, at = ""): string[] {
  * Keys the mock serves ahead of the recordings: W17 adds communities (graph nodes' community_id) after the
  * recordings were made. Re-record, then empty this list (the check above goes red when a listed key is gone).
  */
-const AHEAD: Record<string, string[]> = { note_graph_as_received_200: [".nodes[0].community_id extra"] };
+const AHEAD: Record<string, string[]> = {
+  note_graph_as_received_200: [".nodes[0].community_id extra"],
+  // The consolidation schedule (processing contract "Consolidation", W20/W21) came after the recordings.
+  note_settings_200: [".consolidate_schedule extra"],
+};
 
 let server: http.Server;
 let base = "";
