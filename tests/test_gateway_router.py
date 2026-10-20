@@ -238,7 +238,7 @@ def test_ensure_starts_the_processor_now_and_reflect_only_after_one_interval(gw)
     r = c.post("/api/gateway/note/processor/ensure", headers=h)
     assert r.status_code == 200, r.text
     ids = r.json()
-    assert ids["created"] == ["note-drain", "note-reflect"]
+    assert ids["created"] == ["note-drain", "note-reflect", "note-consolidate"]
 
     def config(automation_id):
         got = c.get(f"/api/gateway/automations/{automation_id}", headers=h)

@@ -118,7 +118,7 @@ def test_ensure_recreates_both_automations_after_a_bundle_version_change(gw, mon
         assert second[kind]["id"] != old and second[kind]["previous_id"] == old
         assert "automation.archive" in _commands(svc, old)
     assert second["processor_id"] == second["processor"]["id"]
-    assert sorted(second["created"]) == ["note-drain", "note-reflect"]
+    assert sorted(second["created"]) == ["note-consolidate", "note-drain", "note-reflect"]
     new_proc, new_refl = second["processor_id"], second["reflect_id"]
     assert _definition(c, h, new_proc)["target"]["workflow_id"] == f"abstractnote@{real}:note-drain"
     assert _definition(c, h, new_refl)["target"]["workflow_id"] == f"abstractnote@{real}:note-reflect"

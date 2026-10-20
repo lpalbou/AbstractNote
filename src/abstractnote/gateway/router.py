@@ -608,7 +608,15 @@ async def note_settings(request: Request) -> Dict[str, Any]:
 
 @router.put("/settings")
 async def note_settings_put(request: Request, changes: Dict[str, Any]) -> Dict[str, Any]:
-    return await _run(request, lambda nb, svc, p: _call(nb, "update_settings", changes))
+    def work(nb, svc, p):
+        out = _call(nb, "update_settings", changes)
+        if "consolidate_schedule" in changes:  # re-create the consolidation with the new interval (0032)
+            from .consolidation import apply_schedule
+
+            apply_schedule(nb, svc, p)
+        return out
+
+    return await _run(request, work)
 
 
 def _model_inputs(model_setting: Any) -> Dict[str, Any]:
@@ -674,6 +682,10 @@ def automations_health(nb: Any, svc: Any) -> Dict[str, Any]:
     out: Dict[str, Any] = dict(_automation_ids(nb))
     for kind, meta_key, flow_id in AUTOMATIONS:
         out[kind] = _health(svc, nb.meta(meta_key), flow_id, served)
+    from .consolidation import META_KEY, consolidation_health  # the third automation (0032)
+
+    out["consolidate_id"] = nb.meta(META_KEY)
+    out["consolidate"] = consolidation_health(nb, svc, served, served_known=True)
     return out
 
 
@@ -793,9 +805,16 @@ def ensure_automations(nb: Any, svc: Any, principal: Any) -> Dict[str, Any]:
         out[kind] = entry
         out[f"{kind}_id"] = automation_id
     out["created"] = created
-    return out
+    from .consolidation import ensure_consolidation  # the third automation (backlog 0032)
+
+    return ensure_consolidation(nb, svc, principal, out)
 
 
 @router.post("/processor/ensure")
 async def note_processor_ensure(request: Request) -> Dict[str, Any]:
     return await _run(request, ensure_automations)
+
+
+from .consolidation import router as _consolidation_router  # noqa: E402  (GET /note/consolidation, backlog 0032)
+
+router.include_router(_consolidation_router)
