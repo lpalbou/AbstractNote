@@ -1,22 +1,23 @@
 # AbstractNote backlog overview
 
-Last reconciled: 2026-10-19 (end of day)
+Last reconciled: 2026-10-20 (afternoon)
 
 ## Counts
 | State | Count |
 |---|---|
 | planned | 1 (track `planned/v1/`: 0029) |
 | proposed | 10 |
-| completed | 19 (track `completed/v1/`) |
+| completed | 21 (track `completed/v1/`) |
 | deprecated | 0 |
 | recurrent | 1 (0901) |
 
-Next free id: 0031.
+Next free id: 0033.
 
 ## Priorities and recommended order
-1. 0011 Corpus evaluation (finish grading, feed prompt findings into a tuning item)
-2. Release preparation (proposed 0023): release abstractmemory `close-assertion`, the gateway seam, then abstractnote 0.1.0 and `@abstractframework/note`; name the versions in README/getting-started/pyproject
-3. Operator rulings (0017), then the proposed items as decided
+1. The global data check of the 1,000-note pass (untracked/eval2/REPORT.md): apply-time guards and the false-cue chain landed (W23, W24); prompt-level quality (summaries, predicates, seats vs packages) and the retrospective-ingestion gate are in flight
+2. 0029 Resume the ingest only after the quality lanes are graded (the one-liner stays the resume path)
+3. Release preparation (proposed 0023): release abstractmemory `close-assertion`, the gateway seam, then abstractnote 0.1.0 and `@abstractframework/note`; name the versions in README/getting-started/pyproject
+4. Operator rulings (0017), then the proposed items as decided
 
 ## Ledgers
 ### Planned
@@ -54,6 +55,8 @@ Next free id: 0031.
 - [0027 Importer fidelity: faithful dates, prompt authorship, agora selection](completed/v1/0027_importer_fidelity_dates_outcomes_agora_selection.md) — completed 2026-10-19
 - [0028 Recall relevance, the standard packet budget, contradiction candidates and read-only reads](completed/v1/0028_recall_relevance_budget_and_read_paths.md) — completed 2026-10-19
 - [0030 Graph communities, their labels, and statistics](completed/v1/0030_graph_communities_labels_and_statistics.md) — completed 2026-10-19
+- [0031 Processing page backend](completed/v1/0031_processing_page_backend.md) — completed 2026-10-20
+- [0032 Memory consolidation: a scheduled, triggerable, observable pass over the notebook](completed/v1/0032_memory_consolidation.md) — completed 2026-10-20
 
 ### Recurrent
 - [0901 Backlog and docs hygiene](recurrent/0901_backlog_and_docs_hygiene.md)
