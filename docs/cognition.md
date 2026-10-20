@@ -19,11 +19,12 @@ AbstractFlow's `wf_common`) into `src/abstractnote/flows/json/*.json`; the bundl
 | `note-recall` | `abstractnote.recall.v1` and `abstractcode.agent.v1` | clients, agents, per question | answer a question at the requested effort |
 | `note-mine` | internal subflow | `note-recall` (deep) | multi-step mining across time; writes a dossier insight |
 | `note-reflect` | `abstractnote.reflect.v1` | a scheduled automation | surface open loops, contradictions, resurfaced material, connections |
+| `note-consolidate` | `abstractnote.consolidate.v1` | the consolidation automation, "Consolidate now" | merge duplicates, refresh the groups and their names, stale summaries and then-and-now, then reflect |
 
 Every flow exposes `provider` and `model` start pins. Blank means the gateway's default text
 model. The processor automation carries the user's "filing model" (a small fast model is
-recommended, for example `mlx-community/Qwen3.6-35B-A3B-4bit` on Apple silicon); the reflect
-automation and recall at standard and deep effort use the user's "answering model". The
+recommended, for example `mlx-community/Qwen3.6-35B-A3B-4bit` on Apple silicon); the reflect and
+consolidation automations and recall at standard and deep effort use the user's "answering model". The
 automations take the models from the notebook settings when they are created.
 
 ### note-capture
@@ -255,6 +256,49 @@ the loose ends from 2 to 4 and the modularity from 0.606 to 0.667; the two large
 mostly of one note (237 and 232 entities, 87 % and 88 % from it) became one (170 entities, 84 %, the
 note whose statements link its 137 own entities) and smaller groups.
 
+### note-consolidate (memory consolidation)
+
+Runs from a third scheduled automation, `consolidate` (backlog 0032; interface
+`abstractnote.consolidate.v1`): the `consolidate_schedule` setting gives its interval (`{"every": "1d"}` by
+default; `12h`, `7d` and any number of hours or days are accepted; `off` keeps it paused), its first
+occurrence is one interval after creation, and "Consolidate now" (`automation.run_now`) runs it at once. It
+keeps the notebook's derived memory fresh, in stages, each reporting its progress:
+
+| Stage | What runs | Model |
+|---|---|---|
+| `normalize` | `note_entities_normalize`: the entries that share a canonical name are merged (`Notebook.normalize_entities`, one reversible revision per merge) | none |
+| `communities` | `note_communities_recompute` (as in note-reflect) | none |
+| `labels` | loop: `note_communities_pending` (5) -> the reflect naming step (`CommunityLabels`, by index) -> `note_communities_label`, until none waits, a round names nothing, or the budget is spent | 1 call per 5 groups |
+| `summaries` | loop: `note_entities_stale_summaries` (8) -> `llm_call summaries` (`EntitySummaries`: `[{index, summary}]`) -> `note_entities_set_summaries`, until none is stale, a round stores nothing, or the budget is spent | 1 call per 8 entries |
+| `then_now` | `note_then_now_refresh`: the then-versus-now cache of every entry this run merged into or summarised | none |
+| `reflect` | the note-reflect flow as a subflow (open loops, tensions, resurfacing, anniversaries -> insights; its naming finds nothing left) | as note-reflect |
+
+A summary is stale when it is empty, when it is still the placeholder an entry was created with (the
+revision builder recorded "No summary was written for <name>; it was described from this note." and no
+summary was written since), or when a note mention or a statement about the entry (or an entry merged into
+it) was recorded by a revision after its latest summary's revision. Nothing reads the summary's wording
+(ADR 0004). Each entry handed to the model carries its name, kind, other names, current summary, its
+strongest statements in words (at most 8) and its 3 newest note excerpts; the prompt
+(`process/prompts/entity_summaries`) asks for at most two sentences, third person, present tense, nothing
+the statements and notes do not say. The answers are mapped back by index; an entry the model skips is not
+offered again in the same run. Each round's summaries are one revision (`action: entity.summary`,
+`run_id` = the consolidation id, source client `consolidation`), so the summary history keeps every version
+and a rebuild replays it.
+
+The start pins are `budget_s` (default 3600: the loops stop starting rounds after it), `limit` (the reflect
+stage's insight limit, default 10), `thinking` (`on` or `off`, default `off`, wired to both model steps) and
+the model pins. Progress: the flow calls `note_consolidation_begin` (an earlier row still open is closed as
+`interrupted`), then `note_consolidation_progress(stage, done, total)` at the start and after each step of
+every stage, then `note_consolidation_end(status, results)`. The rows live in the notebook's
+`consolidation_runs` table (kept by a rebuild); a stage's seconds per item are measured from its first
+report, and its ETA is the items it has left times that measure (the last completed run's measure for the
+stage until one item is done). After `begin` no tool step raises: a failed step's sentence is remembered and
+one failure path closes the consolidation as `failed` and ends the run with that sentence (inside a loop a
+raising node would only end the round); a node that breaks inside a round leaves the round's in-flight flag
+set and the check after the loop fails the run the same way. A model call that fails ends the run at once;
+its row stays open and reads as `interrupted` (`GET /note/consolidation` once the automation's run has
+ended, and the next `begin`).
+
 ## Structured output schemas
 
 All schemas are JSON Schema objects attached as `resp_schema`; the runtime builds pydantic
@@ -311,6 +355,13 @@ and merged into the flow schemas by `flows.build.load_schemas`)
 ```json
 {"communities": [{"index": 0, "label": "at most 4 words", "summary": "one sentence",
                   "kind": "project|theme|people|tooling|process|other"}]}
+```
+
+**EntitySummaries** (the consolidation's summary step; `process.schemas.ENTITY_SUMMARIES`, merged into the
+flow schemas by `flows.build.flow_schemas`)
+
+```json
+{"summaries": [{"index": 0, "summary": "at most two sentences, third person, present tense"}]}
 ```
 
 ## Prompts and bounds
@@ -425,6 +476,7 @@ normally and uses the prompt cache, but with thinking on it reasons for minutes 
 | synthesize, dossier, reflect | the runtime default | 8192 |
 | mining plan, slice findings | the runtime default | 4096 |
 | naming communities (reflect) | off | 2048 |
+| naming communities, entity summaries (note-consolidate) | `thinking` start pin, default off | 2048, 3000 |
 
 Thinking for extraction and linking is a per-run choice: `note-process` takes a `thinking`
 start pin (`on` or `off`, default `on`, anything else is refused) wired to the extract, second
