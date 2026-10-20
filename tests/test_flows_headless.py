@@ -147,7 +147,7 @@ def test_capture_answers_early_and_in_the_output(runner, doubles):
     assert answer_user_messages(runner, out["run_id"]) == [out["response"]]
     (cap,) = doubles.args("note_capture")
     assert cap == {"text": "Met Dana about the LUT budget.", "idempotency_key": "k-1", "session_id": "s-1",
-                   "attachments": [{"$artifact": "a-1"}]}
+                   "attachments": [{"$artifact": "a-1"}], "process_inline": False}
     (filed,) = doubles.args("note_file")
     assert filed["kind"] == "event" and filed["urgency"] == "normal" and filed["note_id"] == "nt_1"
     assert "note_queue_ack" not in doubles.names()
@@ -496,7 +496,9 @@ def test_inline_processing_that_fails_ends_the_capture_with_its_sentence(runner,
     doubles.fail_apply_for = {"nt_1"}
     with pytest.raises(FlowRunError, match=r"^The revision could not be applied\.$"):
         runner.run_capture("Met Dana", process_inline=True)
-    assert doubles.args("note_queue_ack") == []  # never acked as processed
+    # never acked as processed; the failure is recorded (queue_errors, and the inline claim ends with it)
+    assert doubles.args("note_queue_ack") == [{"note_id": "nt_1", "outcome": "error",
+                                               "error": "The revision could not be applied."}]
 
 
 def test_cli_capture_pins_the_embedder_and_says_so(tmp_path, capsys):

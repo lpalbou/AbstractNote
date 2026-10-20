@@ -1838,7 +1838,10 @@ class _OpContext:
     def op_note_redate(self, p: Dict[str, Any]) -> None:
         """Move a note in history time (``{note_id, from, to, basis, quote?, reason?}``): its ``occurred_at``, the
         dates of its mentions, its topics' ranges, its queue place, and the statements and tasks it wrote that
-        carried the old date. ``source.redated`` records the basis (``content`` or ``user``)."""
+        carried the old date. ``source.redated`` records the basis (``content`` or ``user``). ``keep_statements``
+        (a person's re-date of an understood note, ingest/dates.py ``redate_note``): its statements and their
+        reinforcements stay where its interpretation placed them, in this index as in AbstractMemory, until the
+        note is understood again at its new date (ADR 0008 §4, §7)."""
         note_id = p.get("note_id") or self.note_id
         row = self.c.execute("SELECT occurred_at, source_json FROM notes WHERE note_id=?", (note_id,)).fetchone()
         if row is None:
@@ -1853,11 +1856,14 @@ class _OpContext:
             self.dirty_entities.add(eid)
             self.retro.add(eid)
         self.c.execute("UPDATE entity_notes SET at=? WHERE note_id=?", (new, note_id))
-        for cr in self.c.execute("SELECT * FROM claims WHERE note_id=? AND observed_at=?", (note_id, old)).fetchall():
+        moved = [] if p.get("keep_statements") else self.c.execute(
+            "SELECT * FROM claims WHERE note_id=? AND observed_at=?", (note_id, old)).fetchall()
+        for cr in moved:
             self.c.execute("UPDATE claims SET observed_at=?, valid_from=CASE WHEN valid_from=? THEN ? ELSE valid_from"
                            " END WHERE claim_id=?", (new, old, new, cr["claim_id"]))
             self._dirty_claim_relation(cr)
-        self.c.execute("UPDATE claim_reinforcements SET at=? WHERE note_id=? AND at=?", (new, note_id, old))
+        if not p.get("keep_statements"):
+            self.c.execute("UPDATE claim_reinforcements SET at=? WHERE note_id=? AND at=?", (new, note_id, old))
         self.c.execute("UPDATE tasks SET opened_at=? WHERE note_id=? AND opened_at=?", (new, note_id, old))
         for (topic,) in self.c.execute("SELECT topic FROM note_topics WHERE note_id=?", (note_id,)).fetchall():
             self.s.refresh_topic(self.c, topic)

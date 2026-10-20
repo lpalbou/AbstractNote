@@ -58,7 +58,15 @@ flowchart TD
   stream the ledger show it immediately) and as `output.response` when the run ends (clients
   that poll the run read it there). `process_inline` is the client's choice: the web app sends
   its "Instant linking" setting (`process_inline_default`, off by default); the watch always
-  sends `false` and shows the filing answer.
+  sends `false` and shows the filing answer. The answer says where a date from a file came from
+  ("Dated 2 July 2019 from the document."); the processed answer says it when the note's own text
+  dated it (data-model.md "Document dates"). A note with nothing to read is refused by `note_capture`.
+- **Nothing is understood twice** (ADR 0008 §8). `note_capture` with `process_inline` claims the
+  queue row (`inline_run_id`, the capture run's id) in the same transaction as the enqueue, before
+  the quick filing, so no drain leases the note while note-capture files and understands it; the
+  outcome ends the claim either way: `note_queue_ack ok`, or, when note-process failed,
+  `note_queue_ack error` with the child's sentence (a failed attempt in `queue_errors`, retried by
+  the processor) and then the capture run ends with that sentence. See "Claims" under the queue.
 
 ### note-process
 
@@ -141,6 +149,38 @@ Large notes: `note_context` splits texts beyond the model's budget into sections
 loops over sections for extraction and merges mentions and claims before linking, so no text is
 ever truncated.
 
+**Validity of model answers** (ADR 0008 §8, `process/validate.py`). A structured answer can parse and still be
+corrupt: the structured-output lane of a remote model spills the rest of the answer into a string field
+(`...approved by the board.","reason":"same organization","aliases":["Zorn Labs"]},{`), loses decisions, or
+answers `reuse` with no candidate. An answer is invalid when:
+
+- a prose field (`summary`, `reason`, `revision_summary`, `name`, `aliases`; in an extraction also `role` and
+  `topics`) holds a fragment of the answer's own structure: one of the schema's field names closed by `":`
+  (`reason":`, `"aliases":`), or a closing quote followed by a closing brace or bracket and then a comma, another
+  closer or the end (`"},{`, `"]}`); a fragment that appears verbatim in the note's words (or, for a linking, in the
+  extraction it links) is the note's, not a corruption. Fields that quote the note (`evidence`, `quote`, a literal
+  object, a task's text, a time reference) are never read, so a note about a JSON API is never refused;
+- a decision names no candidate from its list (`reuse` or `unsure` without a candidate index of that mention,
+  `merge` without two of them) or decides a mention the note does not have. Until 2026-10-20 such a decision was
+  applied in part (the mention was created as new with a warning); it is now invalid;
+- an index is answered twice in contradiction: a mention with two decisions, a statement with two relations or
+  once naming an existing statement and once none, a task once closing an open task and once none. One statement
+  linked to several existing ones with the same relation (or one task closing several) is valid; the first link
+  is applied.
+
+note-process checks every extraction (per section) and every linking (per part) in a code node that runs the very
+source of `validate.py`: an invalid answer is asked once more with a fresh call (a linking: the same message
+followed by what was wrong, "Your previous answer to this message could not be used: ...", since the bare message
+again gave the same answer in 5 of 7 live retries; an extraction shares the re-read of a section that names
+nothing); a second invalid answer ends note-process with its sentence ("The model's
+linking answer was malformed twice (the summary of “Zorn Labs” holds a piece of the answer's structure
+(reason":)); nothing from it was applied."), which the drain acknowledges as a failed attempt (`queue_errors`,
+the usual backoff and three-failure rule). `note_apply_revision` checks the merged answers again and refuses an
+invalid one with the same sentence, so nothing of a corrupt answer is ever applied in part, whoever calls it.
+Measured on the 2026-10-20 ledgers (gw18080, read-only): retro-B 14 of 27 link answers invalid (3 fragments, 11
+candidate-less reuses, 2 contradicting duplicates), retro-A 17 of 23, the watch 0 of 10, the 1,000-note import 12
+of 1,446 (0.8 %); no extraction answer invalid (0 of 1,495); no fragment found in a quoted field.
+
 ### note-drain and the queue
 
 The queue lives in the note index (`queue` table): `note_id, priority, enqueued_at, leased_by,
@@ -177,6 +217,17 @@ flowchart TD
   were updated (4 groups, 2 to name next time)." A failure is said in the response ("The themes could not
   be updated: ...") and does not fail the drain or undo its notes.
 
+- **Claims.** A note being understood outside a drain carries a claim on its queue row: `inline_run_id`
+  (note-capture with `process_inline`) or `reinterpret_run_id` (the re-understanding stage), each with its
+  `*_until` time. `note_queue_lease` never leases a claimed note; a note leased by a drain, or claimed one way,
+  cannot be claimed the other way (`Queue.claim` answers false). A claim ends with the outcome (`ack`) or
+  `Queue.release`; `Queue.heartbeat` (called by `note_file`) moves its end on. The reinterpret stage claims each
+  note it hands to the model (`note_reinterpret_next`; a note a drain or an inline understanding holds is held
+  with "It is being understood right now; it is read again next time." and its mark waits for the next pass)
+  and the apply of the re-reading releases it (a failure the next round reports releases it too). A claim
+  whose run died is leasable once `CLAIM_S` (15 minutes, as a drain's lease) has passed since its last heartbeat:
+  the next lease clears it and logs "Understanding it right away stopped before it finished; it is understood from
+  the queue instead." in `queue_errors`, not counted as a failure.
 - A lease lasts 15 minutes. Acknowledging a failure increments `attempts` and schedules a retry
   (after 1 minute, then after 10 minutes); the third failure sets the note to `failed`, visible in
   the web app's queue panel with the error, and offers a manual retry.

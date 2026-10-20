@@ -127,6 +127,37 @@ def packet_code(functions: List[str], tail: str) -> str:
     return "\n".join(body)
 
 
+def validate_code(tail: str) -> str:
+    """A code-node body that defines :mod:`abstractnote.process.validate`'s flow functions (its constants first),
+    then ``tail``: the note-process checks of a model answer run the very same source as the apply step."""
+    import ast
+    import inspect
+
+    from ..process import validate
+
+    body = [f"{k} = {getattr(validate, k)!r}" for k in sorted(vars(validate)) if k.isupper()]
+    for name in validate.FLOW_FUNCTIONS:
+        tree = ast.parse(inspect.getsource(getattr(validate, name)))
+        fn = tree.body[0]
+        fn.returns = None
+        for a in [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs, fn.args.vararg, fn.args.kwarg]:
+            if a is not None:
+                a.annotation = None
+        body.append(ast.unparse(fn))
+    body.append(tail.strip())
+    return "\n".join(body)
+
+
+#: note-process: the candidates each mention was offered (``note_resolve_candidates``), by ref.
+_CANDIDATE_COUNTS = (
+    "cands = {}\n"
+    "for r in resolved or []:\n"
+    "    if isinstance(r, dict):\n"
+    "        cands[str(r.get('ref'))] = len([c for c in (r.get('candidates') or []) if isinstance(c, dict)])\n"
+    "texts = [str(s.get('text') or '') for s in (sections or []) if isinstance(s, dict)]\n"
+)
+
+
 # ------------------------------------------------------------------ inputs
 
 
@@ -275,9 +306,12 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
             "attachments": ("array", ("attachments", "value")),
             "about": ("object", ("about", "value")),
             "answer": ("object", ("answer", "value")),
+            # claims the queue row for the inline understanding in the enqueue's transaction (ADR 0008 §8)
+            "process_inline": ("boolean", S("process_inline")),
         },
         [("note_id", "string"), ("status", "string"), ("first_saved_at", "string"), ("received_at", "string"),
-         ("similar", "array"), ("revisits", "array"), ("topics", "array"), ("warnings", "array")],
+         ("similar", "array"), ("revisits", "array"), ("topics", "array"), ("warnings", "array"),
+         ("occurred_at", "string"), ("date_basis", "string"), ("date_sentence", "string")],
         after=("start", "exec-out"),
     )
     f.code(
@@ -348,6 +382,8 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
         "dates = [d for d in dates if d]\n"
         "if dates:\n"
         "    parts.append(\"You noted this on \" + dates[0] + \".\")\n"
+        "if str(dated or \"\").strip():\n"
+        "    parts.append(str(dated).strip())\n"
         "for w in warnings or []:\n"
         "    if isinstance(w, str) and w.strip():\n"
         "        parts.append(w.strip())\n"
@@ -355,7 +391,7 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
         inputs={
             "kind": ("string", ("filing_fields", "kind")), "title": ("string", ("filing_fields", "title")),
             "similar": ("array", (cap, "similar")), "revisits": ("array", (cap, "revisits")),
-            "warnings": ("array", (cap, "warnings")),
+            "warnings": ("array", (cap, "warnings")), "dated": ("string", (cap, "date_sentence")),
         },
         outputs=[("message", "string")],
     )
@@ -374,7 +410,37 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
         "model": ("model", S("model")),
     }, [("response", "string"), ("revision_id", "string"), ("revision", "object")])
     f.then("inline_branch", "process", "true")
-    f.child_check("process_ok", "Understood?", "process")
+    # The outcome is recorded either way (the claim ends with it): a failure is a failed attempt in the queue log
+    # (queue_errors) with the child's own sentence, then the run ends with that sentence.
+    f.code(
+        "inline_outcome", "Understood?",
+        "o = output if isinstance(output, dict) else {}\n"
+        "c = child_output if isinstance(child_output, dict) else {}\n"
+        "err = str(c.get(\"error\") or o.get(\"error\") or \"\")\n"
+        "for prefix in (\"Runtime error: \", \"Execution error: \"):\n"
+        "    if err.startswith(prefix):\n"
+        "        err = err[len(prefix):]\n"
+        "failed = c.get(\"success\") is False or o.get(\"success\") is False or bool(err) or not o.get(\"revision_id\")\n"
+        "return {\"ok\": not failed, \"failure\": (err or \"The note could not be processed.\") if failed else \"\"}",
+        inputs={"output": ("object", ("process", "output")), "child_output": ("object", ("process", "child_output"))},
+        outputs=[("ok", "boolean"), ("failure", "string")],
+    )
+    f.then("process", "inline_outcome")
+    f.if_("inline_ok", "Understood?", ("inline_outcome", "ok"))
+    f.then("inline_outcome", "inline_ok")
+    failed_ack = f.tool_step(
+        "inline_fail", "Record the failure", "note_queue_ack",
+        {"note_id": ("string", (cap, "note_id")), "outcome": ("string", "error"),
+         "error": ("string", ("inline_outcome", "failure"))},
+        [("status", "string")],
+        after=("inline_ok", "false"),
+    )
+    f.code(
+        "inline_failed", "Say why",
+        "raise ValueError(str(failure or \"The note could not be processed.\"))",
+        inputs={"failure": ("string", ("inline_outcome", "failure"))}, outputs=[("checked", "boolean")],
+    )
+    f.then(failed_ack, "inline_failed")
     ack = f.tool_step(
         "inline_ack", "Mark it processed", "note_queue_ack",
         {
@@ -382,13 +448,16 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
             "revision_id": ("string", ("process", "revision_id")),
         },
         [("status", "string")],
-        after=("process_ok", "exec-out"),
+        after=("inline_ok", "true"),
     )
     f.code(
         "processed_msg", "Processed answer",
         "extra = str(summary or \"\").strip()\n"
-        "return {\"message\": (str(message) + \" \" + extra).strip()}",
-        inputs={"message": ("string", ("saved_msg", "message")), "summary": ("string", ("process", "response"))},
+        "rev = revision if isinstance(revision, dict) else {}\n"
+        "dated = str(rev.get(\"date_sentence\") or \"\").strip()\n"
+        "return {\"message\": \" \".join(x for x in (str(message or \"\").strip(), dated, extra) if x)}",
+        inputs={"message": ("string", ("saved_msg", "message")), "summary": ("string", ("process", "response")),
+                "revision": ("object", ("process", "revision"))},
         outputs=[("message", "string")],
     )
     f.then(ack, "processed_msg")
@@ -513,12 +582,16 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
           provider=S("provider"), model=S("model"), thinking_from=TH, **_step("extract", prompts))
     f.then("extract_packet", "extract")
     # A section with text that names nothing is read once more (the model sometimes answers valid
-    # empty lists); a second empty answer is kept and flagged in the revision's warnings.
+    # empty lists); a second empty answer is kept and flagged in the revision's warnings. A structurally
+    # corrupt answer (process/validate.py, ADR 0008 §8) is read once more too; a second one fails the note.
     f.code(
-        "nothing_named", "Nothing named?",
-        "d = data if isinstance(data, dict) else {}\n"
-        "text = str((item or {}).get(\"text\") or \"\") if isinstance(item, dict) else str(item or \"\")\n"
-        f"return {{\"again\": not (d.get(\"mentions\") or []) and len(text.strip()) >= {EMPTY_RETRY_MIN_CHARS}}}",
+        "nothing_named", "Nothing named, or a corrupt answer?",
+        validate_code(
+            "d = data if isinstance(data, dict) else {}\n"
+            "text = str((item or {}).get(\"text\") or \"\") if isinstance(item, dict) else str(item or \"\")\n"
+            "corrupt = extraction_problems(d, text)\n"
+            f"empty = not (d.get(\"mentions\") or []) and len(text.strip()) >= {EMPTY_RETRY_MIN_CHARS}\n"
+            "return {\"again\": bool(corrupt) or empty}"),
         inputs={"data": ("object", ("extract", "data")), "item": ("object", ("each_section", "item"))},
         outputs=[("again", "boolean")],
     )
@@ -531,17 +604,30 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
           provider=S("provider"), model=S("model"), thinking_from=TH, **_step("extract", prompts))
     f.then("read_again", "extract_again", "true")
     f.code(
-        "flag_empty", "Flag a part that names nothing",
-        "d = dict(data) if isinstance(data, dict) else {}\n"
-        "if not (d.get(\"mentions\") or []):\n"
-        "    d[\"warnings\"] = list(d.get(\"warnings\") or []) + [\"A part of this note names nothing although it has \"\n"
-        "                                                  \"text, even when read a second time.\"]\n"
-        "return {\"entry\": d}",
-        inputs={"data": ("object", ("extract_again", "data"))}, outputs=[("entry", "object")],
+        "flag_empty", "Flag a part that names nothing (a corrupt answer fails)",
+        validate_code(
+            "d = dict(data) if isinstance(data, dict) else {}\n"
+            "text = str((item or {}).get(\"text\") or \"\") if isinstance(item, dict) else str(item or \"\")\n"
+            "corrupt = extraction_problems(d, text)\n"
+            "if corrupt:\n"
+            "    return {\"entry\": d, \"failed\": True, \"failure\": problems_sentence(\"reading\", corrupt, True)}\n"
+            "if not (d.get(\"mentions\") or []):\n"
+            "    d[\"warnings\"] = list(d.get(\"warnings\") or []) + [\"A part of this note names nothing although it has \"\n"
+            "                                                  \"text, even when read a second time.\"]\n"
+            "return {\"entry\": d, \"failed\": False, \"failure\": \"\"}"),
+        inputs={"data": ("object", ("extract_again", "data")), "item": ("object", ("each_section", "item"))},
+        outputs=[("entry", "object"), ("failed", "boolean"), ("failure", "string")],
     )
     f.then("extract_again", "flag_empty")
+    # Inside the loop a raising node would only end the iteration: an end node stops the run with the problem.
+    f.if_("reread_corrupt", "Corrupt twice?", ("flag_empty", "failed"))
+    f.then("flag_empty", "reread_corrupt")
+    f.end("stopped_reading", "Stopped: the reading was corrupt twice", {
+        "response": ("string", ("flag_empty", "failure")), "error": ("string", ("flag_empty", "failure")),
+        "success": ("boolean", False)})
+    f.then("reread_corrupt", "stopped_reading", "true")
     f.add_to_list("keep_retry", "Keep the second reading", "extractions", ("flag_empty", "entry"))
-    f.then("flag_empty", "keep_retry")
+    f.then("reread_corrupt", "keep_retry", "false")
     f.get_var("extractions", "extractions", [])
     f.code("merge", "Merge the sections", MERGE_EXTRACTIONS,
            inputs={"extractions": ("array", ("extractions", "value"))},
@@ -569,8 +655,51 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
     f.llm("link", "Link", schema=schemas["Linking"], prompt=("link_prompt", "result"),
           provider=S("provider"), model=S("model"), thinking_from=TH, **_step("link", prompts))
     f.then("each_link", "link", "loop")
+    # A structurally corrupt linking answer (process/validate.py, ADR 0008 §8) is asked once more with a fresh
+    # call; a second corrupt answer fails the note (its error is the problem), so nothing is applied in part.
+    link_inputs = {"resolved": ("array", (res, "mentions")), "extraction": ("object", ("merge", "extraction")),
+                   "sections": ("array", ("sections", "items"))}
+    # The second call is told what was wrong (live 2026-10-20: the same prompt again gave the same candidate-less
+    # reuse in 8 of 8 retries on gpt-oss-120b), after the very same message, so the cached prefix is unchanged.
+    f.code(
+        "link_valid", "A sound answer?",
+        validate_code(_CANDIDATE_COUNTS
+                      + "problems = link_problems(data, cands, context_text(texts, extraction))\n"
+                        "again = str(prompt or \"\")\n"
+                        "if problems:\n"
+                        "    again += (\"\\n\\nYour previous answer to this message could not be used: \" + \"; \".join(problems[:5])\n"
+                        "              + \". Answer again in full: a reuse or unsure decision gives its candidate's index from that \"\n"
+                        "              \"mention's list (or the decision is create), and every text field holds only its own text.\")\n"
+                        "return {\"ok\": not problems, \"retry_prompt\": again}"),
+        inputs={"data": ("object", ("link", "data")), "prompt": ("string", ("link_prompt", "result")), **link_inputs},
+        outputs=[("ok", "boolean"), ("retry_prompt", "string")],
+    )
+    f.then("link", "link_valid")
+    f.if_("link_ok", "Sound?", ("link_valid", "ok"))
+    f.then("link_valid", "link_ok")
     f.add_to_list("keep_linking", "Keep the linking", "linkings", ("link", "data"))
-    f.then("link", "keep_linking")
+    f.then("link_ok", "keep_linking", "true")
+    f.llm("link_again", "Link again", schema=schemas["Linking"], prompt=("link_valid", "retry_prompt"),
+          provider=S("provider"), model=S("model"), thinking_from=TH, **_step("link", prompts))
+    f.then("link_ok", "link_again", "false")
+    f.code(
+        "link_checked", "A sound second answer (else the note fails)",
+        validate_code(_CANDIDATE_COUNTS
+                      + "problems = link_problems(data, cands, context_text(texts, extraction))\n"
+                        "return {\"entry\": data, \"failed\": bool(problems),\n"
+                        "        \"failure\": problems_sentence(\"linking\", problems, True) if problems else \"\"}"),
+        inputs={"data": ("object", ("link_again", "data")), **link_inputs},
+        outputs=[("entry", "object"), ("failed", "boolean"), ("failure", "string")],
+    )
+    f.then("link_again", "link_checked")
+    f.if_("relink_corrupt", "Corrupt twice?", ("link_checked", "failed"))
+    f.then("link_checked", "relink_corrupt")
+    f.end("stopped_linking", "Stopped: the linking was corrupt twice", {
+        "response": ("string", ("link_checked", "failure")), "error": ("string", ("link_checked", "failure")),
+        "success": ("boolean", False)})
+    f.then("relink_corrupt", "stopped_linking", "true")
+    f.add_to_list("keep_relinking", "Keep the second linking", "linkings", ("link_checked", "entry"))
+    f.then("relink_corrupt", "keep_relinking", "false")
     f.get_var("linkings", "linkings", [])
     f.code("merge_links", "Merge the linking parts",
            packet_code(["merge_linkings"], "return {\"linking\": merge_linkings(linkings)}"),

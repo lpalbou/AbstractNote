@@ -378,11 +378,21 @@ class RedateBody(BaseModel):
 
 @router.post("/notes/{note_id}/redate")
 async def note_redate(request: Request, note_id: str, body: RedateBody) -> Dict[str, Any]:
-    """Set when a note happened ("Set the date"): a revision with the signed-in account (data-model.md "Time")."""
+    """Set when a note happened ("Set the date"): a revision with the signed-in account (data-model.md "Time").
+    An understood note keeps its statements and is understood again at its new date, with the notes that depend
+    on it (ADR 0008 §4, §7; ingest/dates.py ``redate_note``); until this notebook can understand notes again the
+    re-date of an understood note is refused with 409 and one sentence, and nothing is written."""
+    from ..ingest.dates import RedateRefused, redate_note
+
     def work(nb, svc, p):
         _require(nb, "note", note_id, "note")
-        return _call(nb, "redate_note", note_id, body.occurred_at, _account(p), body.reason,
-                     client=action_client(request))
+        try:
+            return redate_note(nb, note_id, body.occurred_at, _account(p), body.reason,
+                               client=action_client(request))
+        except RedateRefused as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
 
     return await _run(request, work)
 

@@ -10,6 +10,7 @@ from abstractnote.flows.runner import NoteRunner, ScriptedLLM
 
 STEPS = {("note-capture", "filing"): "quick_filing", ("note-process", "extract"): "extract",
          ("note-process", "extract_again"): "extract", ("note-process", "link"): "link",
+         ("note-process", "link_again"): "link",
          ("note-recall", "synthesize"): "synthesize", ("note-mine", "plan"): "mine_plan",
          ("note-mine", "findings"): "mine_findings", ("note-mine", "dossier"): "mine_dossier",
          ("note-reflect", "reflect"): "reflect", ("note-reflect", "communities_names"): "label_communities",
@@ -35,7 +36,7 @@ def test_every_model_node_pins_thinking_and_an_output_budget():
     pins = {k[1]: (llm[k]["data"]["pinDefaults"].get("thinking"), llm[k]["data"]["pinDefaults"]["max_output_tokens"])
             for k in llm if k[0] in ("note-capture", "note-process")}
     assert pins == {"filing": ("off", 400), "extract": ("on", 4000), "extract_again": ("on", 4000),
-                    "link": ("on", 6000)}
+                    "link": ("on", 6000), "link_again": ("on", 6000)}
 
 
 def test_sections_are_bounded_for_the_extract_budget():

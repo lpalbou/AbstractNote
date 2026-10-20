@@ -79,15 +79,17 @@ def test_the_files_importer_uses_the_shared_detector(tmp_path):
 
 
 def test_capture_dates_an_undated_note_from_its_attachment(nb):
-    r = nb.capture("", attachments=[{"data": PDF, "mime": "application/pdf", "filename": "letter.pdf"}])
+    r = nb.capture("the letter", attachments=[{"data": PDF, "mime": "application/pdf", "filename": "letter.pdf"}])
     note = nb.note(r.note_id)
     assert note["occurred_at"] == "2019-04-05T08:30:00Z"
     assert (note["date_basis"], note["date_approximate"]) == ("pdf_created", False)
-    # a date the client gives always wins, and a live note's basis is the client
+    assert r.date_sentence == "Dated 5 April 2019 from the document."
+    # a date the client gives always wins; on an upload it is the moment of the upload (ADR 0008 §7): a stand-in
+    # the document's own stated date may correct
     r2 = nb.capture("see attached", occurred_at="2026-10-20T10:00:00Z",
                     attachments=[{"data": _docx(), "filename": "report.docx"}])
     n2 = nb.note(r2.note_id)
-    assert (n2["occurred_at"], n2["date_basis"], n2["date_approximate"]) == ("2026-10-20T10:00:00Z", "client", False)
+    assert (n2["occurred_at"], n2["date_basis"], n2["date_approximate"]) == ("2026-10-20T10:00:00Z", "upload", True)
 
 
 def test_date_basis_of_stored_notes():

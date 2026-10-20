@@ -365,21 +365,33 @@ def test_a_document_date_never_moves_a_live_note_or_an_unquoted_or_near_date(nb)
     assert "note.redate" not in ops_of(nb, near[3]) and nb.note(near[0])["date_basis"] == "file_mtime"
 
 
-def test_a_person_sets_the_date_of_a_note(nb):
-    nid, out = castor(nb, "2026-10-01T10:00:00Z", "Llama")
-    res = nb.redate_note(nid, "2020-05-05", "alice", "the letter's date")
-    rev = nb.revision(res["revision_id"])
-    assert rev["source"] == {"client": "web", "account": "alice"} and rev["action"] == "note.redate"
-    note = nb.note(nid)
-    assert (note["occurred_at"], note["date_basis"], note["date_approximate"]) == ("2020-05-05T00:00:00Z", "user",
-                                                                                  False)
-    [c] = note["claims"]
-    assert c["observed_at"] == c["valid_from"] == "2020-05-05T00:00:00Z"
-    assert nb.store.entity_row(CASTOR)["first_seen"] == "2020-05-05T00:00:00Z"
+def test_a_person_sets_the_date_of_a_note(nb, monkeypatch):
+    """A note not understood yet moves whole; an understood one is refused while the notebook cannot understand it
+    again (ADR 0008 §4, §7: its statements are never moved in the note index alone). The re-placement path itself:
+    test_capture_dates.py."""
     import pytest
 
+    from abstractnote.ingest.dates import NEEDS_REUNDERSTANDING, RedateRefused
+
+    waiting = nb.capture("A letter about Castor, not understood yet.", occurred_at="2026-10-01T10:00:00Z").note_id
+    res = nb.redate_note(waiting, "2020-05-05", "alice", "the letter's date")
+    rev = nb.revision(res["revision_id"])
+    assert rev["source"] == {"client": "web", "account": "alice"} and rev["action"] == "note.redate"
+    note = nb.note(waiting)
+    assert (note["occurred_at"], note["date_basis"], note["date_approximate"]) == ("2020-05-05T00:00:00Z", "user",
+                                                                                  False)
+    assert nb.queue.item(waiting)["occurred_at"] == "2020-05-05T00:00:00Z"  # its place in the queue moves too
+    nid, out = castor(nb, "2026-10-01T10:00:00Z", "Llama")
+    revisions = nb.store.q1("SELECT COUNT(*) FROM revisions")[0]
+    from abstractnote.store import kg
+
+    monkeypatch.setattr(kg, "supports_reinterpreted", lambda: False)  # a notebook that cannot understand it again
+    with pytest.raises(RedateRefused, match=NEEDS_REUNDERSTANDING):
+        nb.redate_note(nid, "2020-05-05", "alice", "the letter's date")
+    assert nb.store.q1("SELECT COUNT(*) FROM revisions")[0] == revisions  # nothing written
+    assert nb.note(nid)["occurred_at"] == "2026-10-01T10:00:00Z"
     with pytest.raises(ValueError):
-        nb.redate_note(nid, "2020-05-05", "alice")
+        nb.redate_note(waiting, "2020-05-05", "alice")
     with pytest.raises(ValueError):
         nb.redate_note("nt_nope", "2020-05-05", "alice")
 

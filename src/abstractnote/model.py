@@ -231,3 +231,8 @@ class CaptureResult(_Model):
     topics: List[str] = Field(default_factory=list)
     attachments: List[Dict[str, Any]] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+    # How the note is dated (ADR 0008 §7, docs/api.md "Capture a note"): its time, the basis, and the capture
+    # answer's sentence when the date came from a file ("Dated 2 July 2019 from the document.").
+    occurred_at: Optional[str] = None
+    date_basis: Optional[str] = None
+    date_sentence: Optional[str] = None

@@ -51,11 +51,11 @@ from datetime import timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .. import ids
-from ..ingest.dates import CONTENT, date_basis, is_approximate
+from ..ingest.dates import CONTENT, date_basis, document_date, is_approximate, redate_sentence
 from ..ingest.normalise import normalize_topic, text_norm
 from ..store.names import strip_kind_suffix
 from ..store.notes import _TakenIds
-from . import schemas
+from . import schemas, validate
 from .context import empty_packet, load_packet, words
 from .packets import later_than
 from .demote import literal_reason
@@ -210,7 +210,7 @@ class _Builder:
                 self.warnings.append("The note's date is not approximate; the date its text states was not used.")
             return
         try:
-            to = ids.normalize_time(dd.iso, field="document date")
+            to, stated = document_date(dd.iso)  # a month or a year alone stays approximate (stated_month/_year)
         except ValueError:
             self.warnings.append(f"The document date {dd.iso!r} is not a date; it was ignored.")
             return
@@ -222,7 +222,7 @@ class _Builder:
             return
         if abs(ids.parse_time(to) - ids.parse_time(self.at)) <= REDATE_MIN:
             return
-        self.ops.append(_op("note.redate", note_id=self.note_id, **{"from": self.at}, to=to, basis=CONTENT,
+        self.ops.append(_op("note.redate", note_id=self.note_id, **{"from": self.at}, to=to, basis=stated,
                             quote=dd.quote.strip()))
         self.at = to
 
@@ -908,6 +908,8 @@ def apply_note_revision(nb: Any, note_id: str, extraction: Any, linking: Any, *,
         out["warnings"] = list(out.get("warnings") or []) + ["This note was already processed; the earlier revision stands."]
         out["already_applied"] = True
         return with_retro_counts(nb, out)
+    # ADR 0008 §8: a structurally corrupt answer is invalid; nothing of it is applied (process/validate.py).
+    validate.check_apply(nb, note_id, extraction, linking, load_packet(nb, note_id))
     attempt = nb.queue.attempt_for(note_id)
     while True:
         row = nb.store.revision_row(ids.revision_id_for_note(note_id, attempt))
@@ -915,7 +917,11 @@ def apply_note_revision(nb: Any, note_id: str, extraction: Any, linking: Any, *,
             break
         attempt += 1
     rev = build_revision(nb, note_id, extraction, linking, attempt=attempt, run_id=run_id)
-    return _with_stale(with_retro_counts(nb, nb.apply_revision(rev)), rev.get("stale_context"))
+    out = _with_stale(with_retro_counts(nb, nb.apply_revision(rev)), rev.get("stale_context"))
+    dated = redate_sentence(rev["ops"])  # "Dated 14 March 2019 from the document." for the capture answer
+    if dated:
+        out["date_sentence"] = dated
+    return out
 
 
 def _with_stale(out: Dict[str, Any], built: Optional[Sequence[str]]) -> Dict[str, Any]:
@@ -1244,8 +1250,8 @@ def plan_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any, 
                                          f" processing; not assigned: {p['topic']}.")
                 continue
             topics.add(t)
-        elif name in ("entity.create", "entity.merge", "claim.revise", "claim.start_earlier"):
-            changes += 1  # claim.start_earlier (R1): this reading moves a belief back, an effect the old one lacked
+        elif name in ("entity.create", "entity.merge", "claim.revise"):
+            changes += 1
         elif name in ("entity.summary", "note.summary", "entity.alias", "entity.rename"):
             summary_ops += 1
         out.append({"op": name, "payload": p})
@@ -1350,11 +1356,15 @@ def apply_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any,
 
     require_reinterpreted()
     nb.recover()
+    # ADR 0008 §8 (R4): a structurally corrupt answer is invalid for a re-reading too; nothing of it is applied
+    validate.check_apply(nb, note_id, extraction, linking, load_packet(nb, note_id))
     plan = plan_reinterpretation(nb, note_id, extraction, linking, run_id=run_id, reason=reason)
     packet_row = nb.store.q1("SELECT created_at FROM context_packets WHERE note_id=?", (note_id,))
     before = packet_row[0] if packet_row else None
     if plan["unchanged"]:
         _consume(nb, note_id, pass_id, "unchanged", None, before)
+        if pass_id:
+            nb.queue.release(note_id, "reinterpret", pass_id)
         return {"revision_id": None, "unchanged": True, "summary_only": plan["summary_only"],
                 "previous_revision_id": plan["previous_revision_id"], "summary": "Understood again: nothing changed.",
                 "entities_created": [], "entities_merged": [], "claims_added": [], "claims_reinforced": [],
@@ -1363,6 +1373,8 @@ def apply_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any,
                 "reinterpret_marked": {"count": 0, "notes": [], "by_entity": []}}
     out = _with_stale(with_retro_counts(nb, nb.apply_revision(plan["revision"])), plan["stale_context"])
     _consume(nb, note_id, pass_id, "reinterpreted", out["revision_id"], before)
+    if pass_id:
+        nb.queue.release(note_id, "reinterpret", pass_id)  # the stage's claim (consolidation.reinterpret_next)
     out.update({"reinterpreted": True, "unchanged": False, "previous_revision_id": plan["previous_revision_id"],
                 "diff": plan["diff"]})
     return out

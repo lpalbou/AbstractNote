@@ -82,6 +82,8 @@ REINTERPRET_BATCH = 1
 REINTERPRET_PER_DAY = 3
 HELD_REASON = "It was understood again three times today; it waits for tomorrow."
 FAILED_REASON = "It could not be understood again this time."
+#: A note a drain or an inline understanding holds (its queue claim or lease, R4) waits for the next pass.
+BUSY_REASON = "It is being understood right now; it is read again next time."
 
 _log = logging.getLogger("abstractnote.consolidation")
 
@@ -533,6 +535,7 @@ def reinterpret_next(nb: Any, limit: Any = REINTERPRET_BATCH, failed: Any = None
     pid = row["consolidation_id"]
     for f in _skips(failed, FAILED_REASON):
         nb.store.fail_mark(f["id"], pid, f["reason"])
+        nb.queue.release(f["id"], "reinterpret", pid)
     try:
         n = int(REINTERPRET_BATCH if limit in (None, "") else limit)
     except (TypeError, ValueError):
@@ -558,6 +561,13 @@ def reinterpret_next(nb: Any, limit: Any = REINTERPRET_BATCH, failed: Any = None
         if digest_unchanged(nb, nid):
             nb.store.consume_marks(nid, pid, "unchanged", None, calls=0)
             unchanged.append(nid)
+            continue
+        # the note is read again outside a drain: claimed on its queue row (R4, ADR 0008 §8) until the apply (or the
+        # failure the next round reports) releases it; a drain's lease or an inline claim on it holds it for now
+        if not nb.queue.claim(nid, "reinterpret", pid):
+            nb.store.fail_mark(nid, pid, BUSY_REASON)
+            held.append({"id": nid, "reason": BUSY_REASON})
+            _log.warning("consolidation %s, stage reinterpret: %s held: %s", pid, nid, BUSY_REASON)
             continue
         items.append({"note_id": nid, "occurred_at": m["occurred_at"], "reasons": m["reasons"]})
     counts = pass_counts(nb, pid)

@@ -24,7 +24,7 @@ POST /api/gateway/runs/start
     "idempotency_key": "<client uuid per capture>",
     "priority": null,
     "process_inline": false,
-    "context": {"attachments": [{"$artifact": "<id from /attachments/upload>"}]}
+    "context": {"attachments": [{"$artifact": "<id from /attachments/upload>", "last_modified": 1541412000000}]}
   }
 }
 ```
@@ -32,6 +32,24 @@ POST /api/gateway/runs/start
 Response: `{"run_id": "..."}`. Read the answer from `GET /runs/{run_id}` when `status` is
 `completed` (`output.response`, `output.note_id`, `output.status`), or follow
 `GET /runs/{run_id}/ledger/stream` and show the `answer_user` message as soon as it appears.
+
+Dates (ADR 0008 §7, data-model.md "Document dates"). `occurred_at` is when the person wrote the note: send it for
+a note typed now (basis `client`, never moved by its text). On an upload it is the moment of the upload (basis
+`upload`; the watch's recordings, made now, keep `client`) and on a pasted text the moment of the paste (`source: {"client": "web", "origin": {"pasted": true}}`,
+basis `pasted_text`); a capture without `occurred_at` is dated by its first attachment's own metadata date, else
+by the first `last_modified` sent with a file (the file's modification time as the client knows it: ISO 8601 or
+epoch milliseconds, the web's `File.lastModified`; basis `file_mtime`; the watch sends none), else by the moment
+of the capture (basis `capture_time`). `upload`, `pasted_text` and `capture_time` are stand-ins: when the
+document states its own date the understanding dates the note by it (basis `content`, or `stated_month` /
+`stated_year` when only a month or a year is stated) and the processed answer says "Dated 14 March 2019 from the
+document."; a date from a file is said at once ("Dated 2 July 2019 from the document.", "... from the file's last
+change."). The web app sends no `occurred_at` for a note of files only. A note with no words, no title and no
+readable text in any of its files is refused at once ("The file “x.docx” has no readable text, so the note was not
+saved; add a few words about it and send it again."), nothing saved and nothing queued.
+
+`process_inline: true` claims the note for this run's own understanding when it is stored, so no drain takes it
+meanwhile (cognition.md "Claims"); when that understanding fails, the failure is logged as a failed attempt
+(`GET /note/queue` errors) and the run ends with its sentence; the processor retries the note.
 
 Attachments go through `POST /api/gateway/attachments/upload` first (25 MB per file by default,
 the gateway's limit); larger files are imported with `abstractnote import files` on the machine
@@ -96,7 +114,7 @@ signed-in principal for their own notebook. The few write actions are bookkeepin
 | `GET /note/relations/{a}/{b}` | the relationship between two entities through time: claims in history order, supersessions, then-versus-now of the link | `since, until` |
 | `GET /note/claims/{claim_id}` | why do I believe this: the claim, the claims it superseded or was superseded by, the notes and attachment excerpts behind it | |
 | `POST /note/claims/{claim_id}/retract` | user action: retract a claim (a revision with the account as source) | `reason` |
-| `POST /note/notes/{note_id}/redate` | user action "Set the date": when the note happened (a `note.redate` revision with the account as source, basis `user`; its mentions, statements and tasks move with it; data-model.md "Time"); `400` for a date that cannot be read or the date it already has | `occurred_at, reason?` |
+| `POST /note/notes/{note_id}/redate` | user action "Set the date": when the note happened (a `note.redate` revision with the account as source, basis `user`; data-model.md "Document dates"). A note not understood yet moves with its mentions, tasks and queue place. An understood note moves, keeps its statements where its understanding placed them and is marked, with the notes that depend on it, for re-understanding at its new date (the answer carries `reinterpret`); while this notebook cannot understand notes again that re-date is refused with `409` and one sentence, nothing written. `400` for a date that cannot be read or the date it already has | `occurred_at, reason?` |
 | `POST /note/tasks/{task_id}/close` | user action: close an open loop | `note?` |
 | `POST /note/entities/{entity_id}/unmerge` | user action: undo a merge | `from_id, reason` |
 | `POST /note/entities/normalize` | user action: merge every group of live entities that share a canonical name (or are that name with its kind echoed in parentheses) into the earliest one, one reversible `entity.merge` revision each (source `{client, account}`); `dry_run` only lists the groups | `dry_run` |
@@ -220,11 +238,11 @@ Flows call them through `tool_calls` nodes; agents may list them in `allowed_too
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `note_capture` | `text, idempotency_key?, title?, occurred_at?, location?, source?, priority?, attachments? ([{"$artifact": id}] inside the gateway; [{"path": ...}] only headless, inside the folder given to bind as allow_paths_under), session_id?, about?, answer? ({question, evidence_note_ids})` | `{note_id, status: new|duplicate, duplicate_of?, first_saved_at?, received_at, revisits: [{note_id, occurred_at}], similar: [{note_id, title, occurred_at, score}], topics: [...], attachments: [{attachment_id, sha256, mime, size, extracted_by, extracted_chars}], warnings: [...]}` |
+| `note_capture` | `text, idempotency_key?, title?, occurred_at?, location?, source?, priority?, attachments? ([{"$artifact": id, "last_modified"?}] inside the gateway; [{"path": ..., "last_modified"?}] only headless, inside the folder given to bind as allow_paths_under), session_id?, about?, answer? ({question, evidence_note_ids}), process_inline? (claims the note for the caller's own understanding)` | `{note_id, status: new|duplicate, duplicate_of?, first_saved_at?, received_at, occurred_at, date_basis, date_sentence (null unless the date came from a file), revisits: [{note_id, occurred_at}], similar: [{note_id, title, occurred_at, score}], topics: [...], attachments: [{attachment_id, sha256, mime, size, extracted_by, extracted_chars}], warnings: [...]}` |
 | `note_file` | `note_id, title, kind, topics, urgency, language, one_line` | `{note_id, priority, status, topics_not_assigned}`: a note keeps the first 4 filing topics; the others are named in `topics_not_assigned` and logged |
 | `note_context` | `note_id, max_chars?` | `{note: {...}, sections: [...], similar_notes: [...], candidate_entities: [{entity_id, name, kind, aliases, summary, last_seen, active_claims: [...]}], open_tasks: [...], topics: [...], vocabulary: [{predicate, gloss}]}` |
 | `note_resolve_candidates` | `note_id, mentions: [{ref, name, kind, aliases}]` | `{mentions: [{ref, candidates: [{entity_id, name, kind, aliases, summary, last_seen, score, matched_by}]}]}` |
-| `note_apply_revision` | `note_id, extraction, linking, reinterpret=false` | `{revision_id, summary, entities_created, entities_merged, claims_added, claims_reinforced, claims_superseded, claims_retracted, tasks_opened, tasks_closed, claims_inserted_before, retrospective, warnings, marked, reinterpret_marked: {count, notes, by_entity: [{entity_id, name, notes}]}}` (`claims_inserted_before`: statements of an older note placed before a later belief; `retrospective`: entities the note marked, data-model.md "Retrospective insertion"; `marked`: the later notes this revision marked to be understood again, ADR 0008; `stale_context`: statements the linking named that are no longer believed, with a warning); references outside the context packet are rejected into `create`/`new` with a warning. A note already understood answers `already_applied`, unless `reinterpret` is true or a consolidation pass took its re-understanding mark: then it is read again (`note.reinterpret`, data-model.md "Re-understanding"): the result adds `reinterpreted`, `previous_revision_id`, `diff` and `claims_reinterpreted`, `claims_revised`, `claims_reopened`, `tasks_reopened`, `tasks_retired`, `entities_retired` when they apply, or is `{revision_id: null, unchanged: true, summary_only, previous_revision_id, ...}` when the new reading equals the old one |
+| `note_apply_revision` | `note_id, extraction, linking, reinterpret=false` | `{revision_id, summary, entities_created, entities_merged, claims_added, claims_reinforced, claims_superseded, claims_retracted, tasks_opened, tasks_closed, claims_inserted_before, retrospective, warnings, marked, reinterpret_marked: {count, notes, by_entity: [{entity_id, name, notes}]}}` (`claims_inserted_before`: statements of an older note placed before a later belief; `retrospective`: entities the note marked, data-model.md "Retrospective insertion"; `marked`: the later notes this revision marked to be understood again, ADR 0008; `stale_context`: statements the linking named that are no longer believed, with a warning; `date_sentence` when the note's text dated it: "Dated 14 March 2019 from the document."); a structurally corrupt answer (cognition.md "Validity of model answers": a fragment of the answer inside a prose field, a decision that names no candidate from its list or a mention the note does not have, an index answered twice in contradiction) is refused with one sentence and nothing is applied, for a re-reading too; other references outside the context packet (an existing statement, an open task, a statement's subject) are rejected into `create`/`new` with a warning. A note already understood answers `already_applied`, unless `reinterpret` is true or a consolidation pass took its re-understanding mark: then it is read again (`note.reinterpret`, data-model.md "Re-understanding"): the result adds `reinterpreted`, `previous_revision_id`, `diff` and `claims_reinterpreted`, `claims_revised`, `claims_reopened`, `tasks_reopened`, `tasks_retired`, `entities_retired` when they apply, or is `{revision_id: null, unchanged: true, summary_only, previous_revision_id, ...}` when the new reading equals the old one |
 | `note_queue_lease` | `worker_id, max_items=1` (1 to 100) | `{items: [{note_id, priority, attempts}], limit_applied}` (`limit_applied`: `max_items` after the clamp, which is logged) |
 | `note_queue_ack` | `note_id, outcome: ok|error, error?, revision_id?` | `{note_id, status, next_attempt_at?}` |
 | `note_queue_stats` | | `{queued, processing, failed, by_priority, oldest_enqueued_at}` |
@@ -269,7 +287,8 @@ day = nb.day("2026-09-14")
 nb.recompute_communities()                                 # community detection, no model
 groups = nb.communities()                                  # {computed_at, items: [Community], ...}
 stats = nb.stats()                                         # the GET /note/stats answer
-nb.redate_note(note.note_id, "2021-03-03", "me", "the letter's date")  # "Set the date" (a user revision)
+nb.redate_note(note.note_id, "2021-03-03", "me", "the letter's date")  # "Set the date" (refused for an understood
+                                                                         # note until it can be understood again)
 nb.retro_state()                    # what retrospective insertions left to refresh (stale summaries, graph_version)
 ```
 

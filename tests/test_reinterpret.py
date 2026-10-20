@@ -721,3 +721,50 @@ def test_a_failed_reinterpretation_is_skipped_with_its_reason_and_its_mark_waits
         assert stage["reinterpret"]["skipped"] == 1 and stage["reinterpret"]["skipped_ids"][0]["id"] == a["note_id"]
     finally:
         nbk.close()
+
+
+def test_the_stage_claims_the_note_and_leaves_one_another_run_holds(nb):
+    """Integration R2 x R4 (ADR 0008 §8): the reinterpret stage takes a note only with a ``reinterpret`` claim on its
+    queue row; a note an inline understanding holds is held with its reason and its mark waits; the apply releases
+    the claim. MUTATION: drop the Queue.claim in consolidation.reinterpret_next, or the release after the apply."""
+    from abstractnote.recall import consolidation as cons
+
+    clock = Clock()
+    a = day20_budget(nb, clock.next())
+    day05_budget(nb, clock.next())
+    assert pending(nb) == [a["note_id"]]
+    assert nb.queue.claim(a["note_id"], "inline", "inline@test")
+    cons.begin(nb)
+    got = cons.reinterpret_next(nb, 1)
+    assert got["items"] == [] and got["held"] == [{"id": a["note_id"], "reason": cons.BUSY_REASON}]
+    assert [m["note_id"] for m in nb.store.pending_marks()] == [a["note_id"]]  # the mark waits for the next pass
+    cons.end(nb, "completed")
+    nb.queue.release(a["note_id"], "inline")
+    cons.begin(nb)
+    got = cons.reinterpret_next(nb, 1)
+    assert [i["note_id"] for i in got["items"]] == [a["note_id"]]
+    assert (nb.queue.claimed(a["note_id"]) or {}).get("kind") == "reinterpret"
+    assert not nb.queue.claim(a["note_id"], "inline", "inline@other")  # the two claim kinds exclude each other
+    ext = extraction([mention("m1", "LUT", "project")],
+                     [stmt("m1", "ex:budget", "40k", literal=True, evidence="LUT budget 40k")])
+    run(nb, "", D20, ext, link({"m1": LUT}), note_id=a["note_id"], now=clock.next())
+    assert nb.queue.claimed(a["note_id"]) is None
+
+
+def test_a_corrupt_answer_is_refused_for_a_re_reading_too(nb):
+    """Integration R2 x R4 (ADR 0008 §8): the structural check runs before a re-understanding is planned, so a
+    corrupt answer (a reuse naming no candidate) writes nothing and the mark waits. MUTATION: drop the
+    validate.check_apply call in apply_reinterpretation."""
+    from abstractnote.process.validate import InvalidAnswer
+
+    clock = Clock()
+    a = day20_budget(nb, clock.next())
+    day05_budget(nb, clock.next())
+    revisions = nb.store.q1("SELECT COUNT(*) FROM revisions")[0]
+    ext = extraction([mention("m1", "LUT", "project")],
+                     [stmt("m1", "ex:budget", "40k", literal=True, evidence="LUT budget 40k")])
+    corrupt = lambda packet, cands: {"mentions": [{"ref": "m1", "decision": "reuse", "candidate": None,  # noqa: E731
+                                                   "reason": "same"}], "claims": [], "tasks": []}
+    with pytest.raises(InvalidAnswer):
+        run(nb, "", D20, ext, corrupt, reinterpret=True, note_id=a["note_id"], now=clock.next())
+    assert nb.store.q1("SELECT COUNT(*) FROM revisions")[0] == revisions and pending(nb) == [a["note_id"]]

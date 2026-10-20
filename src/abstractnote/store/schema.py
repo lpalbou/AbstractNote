@@ -108,7 +108,11 @@ CREATE TABLE IF NOT EXISTS queue (
   next_attempt_at TEXT,
   last_error TEXT,
   failed_at TEXT,
-  done_at TEXT
+  done_at TEXT,
+  inline_run_id TEXT,
+  inline_until TEXT,
+  reinterpret_run_id TEXT,
+  reinterpret_until TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_queue_order ON queue(state, priority DESC, occurred_at ASC, size ASC);
 
@@ -466,6 +470,9 @@ _ADDED_COLUMNS = {
     "tasks": [("removed_revision_id", "TEXT")],
     "entity_aliases": [("alias_key", "TEXT")],
     "revisions": [("context_json", "TEXT")],
+    # the claims of an understanding outside a drain (store/queue.py, ADR 0008 §8; R4)
+    "queue": [("inline_run_id", "TEXT"), ("inline_until", "TEXT"), ("reinterpret_run_id", "TEXT"),
+              ("reinterpret_until", "TEXT")],
 }
 
 #: Created after the added columns exist. One live entity per canonical name: ``name_key`` is unique among

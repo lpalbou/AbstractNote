@@ -35,3 +35,29 @@ def test_set_the_date_of_an_imported_note_over_http(gw):  # noqa: F811
                   json={"occurred_at": "2019-04-05"}).status_code == 404
     assert c.post(f"/api/gateway/note/notes/{nid}/redate", headers=gw["bob"],
                   json={"occurred_at": "2018-01-01"}).status_code == 404  # another person's notebook
+
+
+def test_the_redate_of_an_understood_note_is_refused_over_http_until_it_can_be_understood_again(gw, monkeypatch):  # noqa: F811
+    """ADR 0008 §4/§7 (R4): 409 with one sentence, nothing written. MUTATION: map RedateRefused to 200."""
+    from abstractnote.gateway.router import notebook_for
+    from abstractnote.ingest.dates import NEEDS_REUNDERSTANDING
+    from abstractnote.tools.context import ToolContext
+    from abstractnote.tools.process import note_apply_revision, note_context, note_resolve_candidates
+
+    c, h = gw["client"], gw["alice"]
+    nb = notebook_for(_plane(gw, "alice"))
+    nid = nb.capture("Castor runs on Llama.", occurred_at="2026-10-01T10:00:00Z").note_id
+    ctx = ToolContext(nb=nb)
+    note_context(ctx, nid)
+    note_resolve_candidates(ctx, nid, [{"ref": "m1", "name": "Castor", "kind": "project", "aliases": []}])
+    note_apply_revision(ctx, nid, {"summary": "Castor.", "mentions": [{"ref": "m1", "name": "Castor",
+                                                                      "kind": "project", "role": "the project"}],
+                                   "claims": [], "tasks": [], "time_refs": [], "topics": []},
+                        {"mentions": [{"ref": "m1", "decision": "create", "name": "Castor", "kind": "project",
+                                       "summary": "Castor."}], "claims": [], "tasks": [], "revision_summary": "x"})
+    from abstractnote.store import kg
+
+    monkeypatch.setattr(kg, "supports_reinterpreted", lambda: False)  # an AbstractMemory without the kind
+    r = c.post(f"/api/gateway/note/notes/{nid}/redate", headers=h, json={"occurred_at": "2019-04-05"})
+    assert r.status_code == 409 and r.json()["detail"] == NEEDS_REUNDERSTANDING, r.text
+    assert c.get(f"/api/gateway/note/notes/{nid}", headers=h).json()["occurred_at"] == "2026-10-01T10:00:00Z"

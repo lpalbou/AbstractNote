@@ -37,8 +37,8 @@ revision points back to the note(s) that caused it.
 | `text` | text | The note body as received (Markdown allowed). Never truncated. |
 | `text_norm` | text | Whitespace-normalised, lower-cased copy used for hashing and full-text search. |
 | `summary` | text | One to three sentences written by the processor. |
-| `occurred_at` | ISO 8601 UTC | When the note was made or the event happened. From the client clock, the importer (message timestamp, file date, EXIF), the attachment's own metadata date for a capture that gives none, or an explicit value; moved only by a `note.redate` (see Time). |
-| `date_basis`, `date_approximate` | read only | How `occurred_at` was found (`GET /note/notes/{id}`): the latest redate's basis (`content`, `user`), else the importer's `source.origin.date_basis` (docs/importers.md), else `client` for a live note and `unrecorded` for an older import; `date_approximate` is true for a stand-in date (`file_mtime`, `git_added`, `bulk_commit`, `store_updated`, `last_record`, `origin_session`, `front_matter_modified`, `unrecorded`), the ones a client offers to "Set the date". |
+| `occurred_at` | ISO 8601 UTC | When the note was made or the event happened. From the client clock, the importer (message timestamp, file date, EXIF), the attachment's own metadata date or the file date the client sent for a capture that gives none, the moment of the capture, or an explicit value; moved only by a `note.redate` (see "Document dates"). |
+| `date_basis`, `date_approximate` | read only | How `occurred_at` was found (`GET /note/notes/{id}`, and the capture answer): the latest redate's basis (`content`, `stated_month`, `stated_year`, `user`), else `source.origin.date_basis` (an importer's, docs/importers.md, or a live capture's `upload`, `pasted_text`, `capture_time`, `file_mtime`, `exif`, `pdf_created` ...), else `client` for a note typed now and `unrecorded` for an older import; `date_approximate` is true for a stand-in date (`upload`, `pasted_text`, `capture_time`, `stated_month`, `stated_year`, `file_mtime`, `git_added`, `bulk_commit`, `store_updated`, `last_record`, `origin_session`, `front_matter_modified`, `unrecorded`), the ones a client offers to "Set the date". |
 | `received_at` | ISO 8601 UTC | When AbstractNote stored it. |
 | `processed_at` | ISO 8601 UTC or null | When the last successful revision was applied. |
 | `source` | object | Provenance: `{client: web|watch|iphone|cli|agent|importer, importer?: claude-sessions|agora|markdown|files, origin: {...source-specific ids...}, author?: user id or agent name}`. |
@@ -480,20 +480,49 @@ them all, and the as-received axis shows what the notebook believed before.
 
 ### Document dates
 
-A note's date can be a stand-in: a file's modification time, a commit, a session start, a store update. When the
-date basis is approximate (`date_approximate`), the extraction header says so and the model may give
-`document_date` `{iso, basis: "stated in the text", quote}`: the date the text gives itself (a dated letter, a
-report's date line). At apply time it is used only when the quote is the note's own words (a whole-word sequence),
-the date is not in the future and it differs from `occurred_at` by more than a day: the revision's first op is
-`note.redate {from, to, basis: "content", quote}`, and the revision, its statements (`observed_at`, `valid_from`)
-and its mentions carry the stated date; the basis becomes `content`. A live note (basis `client`) or a note with an
-exact basis (`record`, `message`, `front_matter`, `exif`, `pdf_created` ...) is never redated from its text.
+Dates come with their basis (ADR 0008 §7). A live capture is dated by `ingest.dates.capture_date`:
+
+| The capture | `occurred_at` | `date_basis` |
+|---|---|---|
+| a note typed now (the client's time, no attachment, no paste) | the client's time | `client` (never moved by its text) |
+| an upload with the client's time (the watch's recordings excepted: made now, they keep `client`) | the moment of the upload | `upload` |
+| a pasted text (`source.origin.pasted`, the web app sets it on a paste) | the moment of the paste | `pasted_text` |
+| no client time, an attachment with its own metadata date | that date | `exif`, `xmp`, `pdf_created`, `office_created` |
+| no client time, a file whose `last_modified` the client sent (web: `File.lastModified`; the watch has none) | that time | `file_mtime` |
+| no client time, nothing else (an upload, or a call that sent no date) | the moment of the capture | `upload` or `capture_time` |
+
+A note with no words, no title and no readable text in any of its files is refused at capture (nothing written,
+nothing queued): it could never be understood.
+
+A note's date can be a stand-in: the moment of an upload, a paste or a capture, a file's modification time, a
+commit, a session start, a store update. When the date basis is approximate (`date_approximate`), the extraction
+header says so ("this date is approximate, from the upload") and the model may give `document_date`
+`{iso, basis: "stated in the text", quote}`: the date the text gives itself (a dated letter, a report's date line,
+a meeting's minutes); `iso` is `YYYY-MM` or `YYYY` when the text states only a month or a year. At apply time it is
+used only when the quote is the note's own words (a whole-word sequence), the date is not in the future and it
+differs from `occurred_at` by more than a day: the revision's first op is `note.redate {from, to, basis, quote}`
+with basis `content` (`stated_month` / `stated_year`, on the first day, still approximate, for a month or a year
+alone), and the revision, its statements (`observed_at`, `valid_from`) and its mentions carry the stated date; the
+processed capture answer says "Dated 14 March 2019 from the document.". A note typed now (basis `client`) or a note
+with an exact basis (`record`, `message`, `front_matter`, `exif`, `pdf_created` ...) is never redated from its text.
 
 A person can set the date: `POST /note/notes/{id}/redate {occurred_at, reason}` is a user revision (`action
-note.redate`, source `{client, account}`) with one `note.redate` op, basis `user`. Its mentions, statements and
-tasks that carried the old date move in the note index; AbstractMemory keeps the statements' original
-`observed_at` and `valid_from` (its content is append-only), so a person's redate of an already-understood note is
-reflected in the note index and the graph views, and in the triple store only through later revisions.
+note.redate`, source `{client, account}`) with one `note.redate` op, basis `user`
+(`ingest.dates.redate_note`):
+
+- A note not understood yet moves with its mentions, tasks, topics' ranges and queue place; it is understood later
+  at its new date.
+- An understood note's statements are where its understanding placed them, in the note index and in AbstractMemory
+  (whose windows can be closed but never reopened or moved earlier at their start). Moving them in the note index
+  alone would leave the two stores disagreeing and, when the move crosses another belief of the same slot,
+  overlapping beliefs (retro-B P7b: 2022 believed 18k and 40k at once). So the op carries `keep_statements`: the
+  note, its mentions, tasks and topics move, its statements and their reinforcements stay, and the note is marked
+  for re-understanding together with the notes that depend on it, forward from the earlier of the old and the new
+  date (a note moved earlier is a new foundation for the notes between; a note moved later was known to them):
+  `Notebook.mark_reinterpret(note_id, since, reason="redated", by_note_id)`. Its re-understanding re-places the
+  statements at the new date in both stores. While the notebook cannot understand notes again, that re-date is
+  refused ("This note was already understood, and its date can only change once the notebook can understand it
+  again."), nothing written.
 
 ## Identity and de-duplication
 

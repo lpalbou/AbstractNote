@@ -41,9 +41,9 @@ STEPS = ("context", "extract", "resolve", "link", "apply", "filing", "search", "
 CHILD = "<child>"
 STEP_OF_NODE: Dict[str, Dict[str, Optional[str]]] = {
     "note-process": {"context": "context", "extract": "extract", "extract_again": "extract",
-                     "resolve": "resolve", "link": "link", "apply": "apply"},
+                     "resolve": "resolve", "link": "link", "link_again": "link", "apply": "apply"},
     "note-capture": {"capture": "filing", "filing": "filing", "file": "filing", "process": CHILD,
-                     "inline_ack": None},
+                     "inline_ack": None, "inline_fail": None},
     "note-drain": {"lease": None, "process": CHILD, "ack": None, "communities": None},
     "note-recall": {"search": "search", "expand": "search", "synthesize": "synthesize", "mine": CHILD},
     "note-mine": {"search": "search", "step_search": "search", "plan": "synthesize", "findings": "synthesize",

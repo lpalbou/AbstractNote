@@ -420,9 +420,18 @@ class Notebook:
 
     def redate_note(self, note_id: str, occurred_at: Any, account: Optional[str], reason: str = "", *,
                     client: str = "web") -> Dict[str, Any]:
-        """Set when a note happened (``POST /note/notes/{id}/redate``): a user revision with one ``note.redate`` op
-        (basis ``user``). The note, its mentions, its topics' ranges and the statements and tasks it wrote with the
-        old date move to the new one; nothing else changes."""
+        """Set when a note happened (``POST /note/notes/{id}/redate``, basis ``user``): see
+        :func:`abstractnote.ingest.dates.redate_note` (an understood note keeps its statements and is understood
+        again at its new date with the notes that depend on it; refused while that is not possible)."""
+        from ..ingest.dates import redate_note
+
+        return redate_note(self, note_id, occurred_at, account, reason, client=client)
+
+    def _redate_op(self, note_id: str, occurred_at: Any, account: Optional[str], reason: str = "", *,
+                   client: str = "web", keep_statements: bool = False) -> Dict[str, Any]:
+        """The user revision of a re-date: one ``note.redate`` op (basis ``user``). The note, its mentions, its
+        topics' ranges and its tasks move to the new date; so do the statements it wrote with the old date unless
+        ``keep_statements`` (an understood note: its statements wait for its re-understanding)."""
         from ..ingest.dates import USER
 
         row = self.store.note_row(note_id)
@@ -437,6 +446,7 @@ class Notebook:
         day = new[:10]
         return self._user_revision("note.redate", note_id, [{"op": "note.redate", "payload": {
             "note_id": note_id, "from": row["occurred_at"], "to": new, "basis": USER,
+            **({"keep_statements": True} if keep_statements else {}),
             **({"reason": reason} if reason else {})}}], account,
             f"Set the note's date to {day}." + (f" {reason}" if reason else ""), client=client)
 

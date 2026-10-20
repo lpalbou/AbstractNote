@@ -34,14 +34,20 @@ Every `source.origin` also carries `date_basis`: how `occurred_at` was found.
 | `xmp` | an XMP creation date in an image or a PDF (`xmp:CreateDate`, `photoshop:DateCreated`, `exif:DateTimeOriginal`) | no |
 | `pdf_created` | a PDF's Info `/CreationDate` | no |
 | `office_created` | an Office Open XML document's `docProps/core.xml` `dcterms:created` (docx, xlsx, pptx) | no |
-| `file_mtime` | the file's modification time | yes |
+| `file_mtime` | the file's modification time (a live capture: the `last_modified` the client sent with the file, the web's `File.lastModified`) | yes |
+| `upload`, `pasted_text`, `capture_time` | a live capture: the moment of an upload, of a paste, or of a capture that sent no date (data-model.md "Document dates") | yes |
+| `client` | a live note typed now: the client's time | no |
+| `content` / `stated_month`, `stated_year` | written after import: the date the text states itself (`note.redate` at processing) / only its month or year | no / yes |
+| `user` | written after import: a person set the date | no |
 
 Files and captures share one detector, `abstractnote.ingest.dates.detect_file_date(path or bytes, mime)`: images
 `exif` then `xmp`, PDFs `pdf_created` then `xmp`, Office documents `office_created`, then (for a path) `file_mtime`.
-A capture that gives no `occurred_at` takes the first attachment's metadata date and records its basis. Two bases
-are written after import (data-model.md "Time"): `content` when processing found the date the text states
-itself on a note whose date was approximate (`note.redate`), and `user` when a person set the date; a live note's
-basis is `client`, and an import from before date bases were recorded reads as `unrecorded` (approximate).
+An import that gives no `occurred_at` takes the first attachment's metadata date and records its basis; a live
+capture is dated by `ingest.dates.capture_date` (data-model.md "Document dates": typed now `client`; an upload or a
+paste is a stand-in; without a client time the file's metadata date, then the `last_modified` the client sent,
+then the moment of the capture). Bases written after import: `content` (or `stated_month` / `stated_year`) when
+processing found the date the text states itself on a note whose date was approximate (`note.redate`), and `user`
+when a person set the date; an import from before date bases were recorded reads as `unrecorded` (approximate).
 
 The order for a memory file is `origin_session`, `front_matter_modified`, `git_added`,
 `file_mtime`; for a Markdown file `front_matter`, `created_line` (or `git_added` when the first commit is
