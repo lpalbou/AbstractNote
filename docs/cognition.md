@@ -430,6 +430,17 @@ Rules that every prompt states:
 Predicates outside the vocabulary are accepted as `ex:snake_case` and reported in the revision
 warnings so the vocabulary can grow deliberately.
 
+**Kinds: seats are not packages (eval2 D7).** The eval2 corpus folded agora seats (`gateway`, `core`,
+the agents that write the messages) into the packages they own (`abstractgateway`, `abstractcore`). The
+extraction and linking prompts carry one glossary line for the nine kinds (a person is a human, or an
+AI agent or seat that writes, decides or acts; software is a program, package, library, service or
+tool; ...); extraction gives two mentions with two kinds when one name means both in the text; the
+linking packet shows every mention and candidate as `name — kind`, and the prompt says to compare kinds
+as well as names (a person is never the software, project or artifact it owns or works on) and, when
+a candidate has the very same name but is a different thing, to create the new entity under a name
+that tells them apart as the text would say it (`gateway seat`) with the shared name as an alias (an
+entity of the same canonical name would otherwise be the same entity, data-model.md "Entity").
+
 **Choosing a predicate (eval2 D6).** The eval2 notebook's claims collapsed onto a few generic
 predicates (`schema:mentions` 32 %, `schema:participant` 10 %, `schema:name` 8 %, `schema:nextItem` 5 %),
 so a later value rarely met the earlier one on the same predicate. The extraction prompt therefore

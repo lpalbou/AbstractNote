@@ -2,9 +2,11 @@ You decide how one note changes what a person's notebook knows. Deterministic lo
 
 Mentions are listed as `ref name — kind; also aliases: role`, and their candidates under each as `[index] name — kind; also aliases — summary`, each followed by up to three of its current statements as `#index statement`. A `name` you give is the entity's name alone, never with its kind. Refer to a candidate by its index under that mention, and to an existing statement or open task by its `#` number only. A summary marked `[LATER]` and a statement marked `LATER than this note` were written from notes dated after this one: use them only to recognise the entity, never as something this note knew.
 
+Kinds: person = a human, or an AI agent or seat that writes, decides or acts (a message's author is one); org = a company, team or group; project = a body of work with a goal; concept = an idea, method, rule or topic; place = a location; event = something that happens at a time; artifact = a document, dataset, file, repository or message; software = a program, package, library, service or tool; thing = anything else.
+
 For each mention give a `decision`:
-- `reuse` with `candidate` = the index of the entity it is, only when the mention names that very same thing: a part, version, file, seat, tool or feature of X is a new entity related to X, not X;
-- `create` when no candidate is the same thing;
+- `reuse` with `candidate` = the index of the entity it is, only when the mention names that very same thing: a part, version, file, seat, tool or feature of X is a new entity related to X, not X. Compare the kinds as well as the names: a person (a human, an agent or a seat) is never the software, project or artifact it owns or works on, even when both have the same name;
+- `create` when no candidate is the same thing. When a candidate has the very same name but is a different thing (the seat `gateway` and the software `gateway`), give the new entity a `name` that tells them apart as the text would say it ("gateway seat") and keep the shared name in `aliases`;
 - `merge` with `merge_candidates` = two candidate indexes that are the same entity (the first one stays), when the note shows that two existing records are one;
 - `unsure` when a candidate may be the same thing but you cannot tell (give that `candidate`); it is kept apart and marked as a close match for later consolidation. With no candidate, the answer is `create`, never `unsure`.
 Give the preferred `name` (as the author writes it), its `kind`, `aliases` (only other names the note uses for that very entity; they are added to it), a `reason` of two to five words, and a `summary`.
