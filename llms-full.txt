@@ -662,7 +662,7 @@ Both `note-drain` and `note-process` accept a `thinking` input (`on` or `off`): 
 inline processing at capture uses `on`; `{"input_data": {"max_items": 50, "budget_s": 3600, "thinking": "on"}}`
 starts a drain with reasoning on.
 
-A drain's output is `{response, processed, failed, errors: [{note_id, error}], communities}`. It ends by finding
+A drain's output is `{response, processed, failed, errors: [{note_id, error}], requeued: [{note_id, reason}], communities}` (`requeued`: notes put back once because the notebook changed while they were read, cognition.md "note-drain and the queue"). It ends by finding
 the themes again when the batch made them due (cognition.md "note-drain and the queue", ADR 0008 §5):
 `communities` = `{recomputed, due, reasons: [never_computed|earlier_notes|reinterpreted|revisions],
 revisions_since, retro_notes_since, reinterpreted_since, revisions_threshold, labels_waiting, label_calls}` plus
@@ -746,6 +746,7 @@ bodies cannot set it (an unknown field such as `client` is refused with 422).
 | `POST /note/notes/{note_id}/archive` | archive a note (never delete) | |
 | `GET /note/settings` and `PUT /note/settings` | per-notebook settings: filing model, answering model, reflect schedule, processor schedule (`{every, max_items}`, default `2m` and 20; `max_items` 1 to 200), consolidation schedule (`consolidate_schedule`: `{every}`, a number of hours or days such as `12h`, `1d` (default) or `7d`, or `off`), inline processing default; the automations take them when `processor/ensure` creates them; a `consolidate_schedule` change re-creates the consolidation automation at once (paused for `off`, resumed when only `off` had paused it) | |
 | `POST /note/processor/ensure` | create the processor, reflect and consolidate automations if missing, repair them when unhealthy (another workflow version or tool list after an upgrade, failed, archived, gone), keep them otherwise; says what it did for each (shape below) | |
+| `POST /note/refile` and `GET /note/refile` | `refile --missing` through the gateway: file the understood notes that have no kind (imports skipped the quick filing), oldest first, one `note-file` run each on your own runtime (the served workflow version, the filing model setting, the processor's tool list); `POST` answers `202` with the repair as soon as it is open and files in the background, one at a time per notebook (`409` "Notes are being filed already; wait for that to end."), `400` unless `missing` is true, `503` when the note workflows are not served; a repair left running by a stopped server is closed `interrupted` by the next `POST`; `GET` reads the newest repair | `POST`: `{missing: true, max_items? (1..500, default 50), budget_s? (default 600)}` |
 
 Three dates (data-model.md "Time"): `at` asks what was true or known as of a moment of history (the
 authored and valid dates); `as_received` (ISO) asks what the archive held on a date: only the notes received
@@ -774,9 +775,9 @@ Pinned response shapes (clients decode these strictly; absent lists mean empty):
 | `GET /note/cues` | `{items: [{cue_id, text, kind, subject: {kind, id, title}, evidence_note_ids, entity_ids}]}` (cues are insight notes; `cue_id` is the note id; `evidence_note_ids` and `entity_ids` are the insight's own: the notes it rests on and the entities it is about) |
 | `GET /note/tasks` | `{items: [{task_id, note_id, text, status, due, closed_at, age_days, stale}]}` (`age_days`: whole days since the task opened, until it closed for a closed one; `stale`: still open after 60 days, `STALE_DAYS` in `abstractnote.recall.reflect`, and never for a task whose note's date is approximate: a commit, a file date, a store update) |
 | `GET /note/search` | `{query, order, as_of, considered, omitted: {entities, claims, facet_entities}, notes: [{note_id, title, kind, occurred_at, excerpt, score, relevance, matched_by, matched_entities, matched_claims, entity_ids, topics, insight_kind}], entities: [{entity_id, name, display_name, kind, aliases, summary, note_count, first_seen, last_seen, first_at, latest_at, note_ids, score, matched_by, merged_into}], claims: [{claim_id, subject_id, subject_name, predicate, object_id, object_name, object_literal, certainty, stance, status, observed_at, valid_from, valid_until, evidence, note_id, note_ids, superseded_by, disputed_with, reinforced_count, score}], facets, warnings}` |
-| `GET /note/entities/{id}` | `{entity_id, name, display_name, kind, aliases, summary, summary_history, first_seen, last_seen, note_count, as_of, beliefs: [claim], relations: [{predicate, direction, other_id, other_name, count, first_seen, last_seen, active}], notes: [NoteRef], open_tasks, sparkline, community: {community_id, label, kind, size, stale_label} or null, merged_into, merged_from, resolved_from}` |
+| `GET /note/entities/{id}` | `{entity_id, name, display_name, kind, aliases, summary, summary_history, first_seen, last_seen, note_count, as_of, beliefs: [claim], relations: [{predicate, direction, other_id, other_name, count, first_seen, last_seen, active}], notes: [NoteRef], open_tasks, sparkline, community: {community_id, label, kind, size, stale_label} or null, merged_into, merged_from, resolved_from, retired: {at, revision_id, note_id, note_title, reason, into: [{entity_id, name}], sentence} or null}` (`retired`: set when a note understood again withdrew the entry, ADR 0008; `into` are the entries the new reading uses for the words that made it; null with `at`) |
 | `GET /note/entities/{id}/timeline` | `{entity_id, since, until, items: [{type: note|claim|superseded|retracted, at, note?: NoteRef, claim?: claim}]}` (claims carry `evidence`, not a rendered sentence) |
-| `GET /note/notes/{id}` | `{note_id, title, text, kind, occurred_at, date_basis, date_approximate, received_at, status, topics, summary, source, location, attachments: [...], revision: {...} or null, entities: [...], claims: [...], revisits: [NoteRef], insight: {kind, evidence_note_ids, entity_ids, acked_at} or null, interpretations: [{revision_id, at, recorded_at, action, summary, context, context_unknown, superseded_by}], reinterpret_pending: [string]}` (`insight` is set on an insight note, `kind` being its `insight_kind`, and null on every other note; `date_basis` says how `occurred_at` was found, `date_approximate` whether it is a stand-in a client may offer to correct: data-model.md "Note"; `interpretations` is how the notebook understood the note over time (ADR 0008), oldest first: `action` null for the first understanding and `note.reinterpret` for each re-understanding, `context` `{as_of, entities, claims, summaries}` what that reading saw (null and `context_unknown` true for a reading recorded before schema 3), `superseded_by` the reading that replaced it; `reinterpret_pending` the reasons the note waits to be understood again, [] when it does not; `revision` is the latest reading) |
+| `GET /note/notes/{id}` | `{note_id, title, text, kind, occurred_at, date_basis, date_approximate, received_at, status, topics, summary, source, location, attachments: [...], revision: {...} or null, entities: [...], claims: [...], revisits: [NoteRef], insight: {kind, evidence_note_ids, entity_ids, acked_at} or null, interpretations: [{revision_id, at, recorded_at, action, summary, context, context_unknown, superseded_by, changes}], reinterpret_pending: [string]}` (`insight` is set on an insight note, `kind` being its `insight_kind`, and null on every other note; `date_basis` says how `occurred_at` was found, `date_approximate` whether it is a stand-in a client may offer to correct: data-model.md "Note"; `interpretations` is how the notebook understood the note over time (ADR 0008), oldest first: `action` null for the first understanding and `note.reinterpret` for each re-understanding, `context` `{as_of, entities, claims, summaries}` what that reading saw (null and `context_unknown` true for a reading recorded before schema 3), `superseded_by` the reading that replaced it; `changes` for a re-understanding `[{entity_id, name, magnitude, deep, notes_marked}]` how deeply it changed each idea and how many later notes its deep changes marked (ADR 0008 §4a, data-model.md "Deep changes reach the ideas that relied on them"), [] for a first reading; `reinterpret_pending` the reasons the note waits to be understood again, [] when it does not; `revision` is the latest reading) |
 | `GET /note/review` | `{items: [{review_id, kind, why, reason, at, sides: [ReviewSide], evidence_note_ids, actions: [{action, method, path, body}]}], next_cursor}` (newest first; `kind` `close_match`, `merge` or `contradiction`; `why` the rule; `reason` the processor's stated reason for a merge, else null; `at` when the notebook recorded it; `evidence_note_ids` starts with the note that raised it; `next_cursor` is always null) |
 | `ReviewSide` | `{type, id, name, kind, note_ids}` (`type` `entity`: `name` its canonical name, `kind` its entity kind, `note_ids` its newest notes; `type` `claim`: `name` the statement in plain words, `kind` null, `note_ids` the note it came from) |
 | `POST /note/review/{id}/confirm` | the revision result (`{revision_id, summary, entities_merged, ...}`) plus `review_id` |
@@ -790,12 +791,13 @@ Pinned response shapes (clients decode these strictly; absent lists mean empty):
 | `Automations` (`GET /note/status`, `GET /note/queue`) | `{processor_id, reflect_id, consolidate_id, processor: AutomationHealth, reflect: AutomationHealth, consolidate: AutomationHealth + {schedule: {every}}}`; the consolidate automation is also unhealthy ("The schedule changed.") when it runs another interval than `consolidate_schedule` (never while the setting is `off`, when it is paused) |
 | `AutomationHealth` | `{id, state, target, healthy, reason, paused}`: `state` is the automation's state (`active`, `paused`, `failed`, `completed`, `archived`) or `missing` (never created, or gone); `target` the workflow it runs (`abstractnote@<version>:note-drain`); `healthy` is true only when it is active or paused AND runs the version of the note workflows this gateway serves AND its run input allows exactly the current note tools (`abstractnote.tools.TOOL_NAMES`; otherwise `reason` is "The tool list changed."); `reason` one sentence when it is not (null otherwise); `paused` whether the user paused it. Unhealthy = `POST /note/processor/ensure` repairs it |
 | `POST /note/processor/ensure` | `{processor_id, reflect_id, consolidate_id, created, processor: EnsureAction, reflect: EnsureAction, consolidate: EnsureAction}`; `EnsureAction` = `{id, action, reason, previous_id?}`: `action` `created` (there was none), `kept` (healthy) or `recreated` (the previous one, `previous_id`, was archived and replaced; `reason` is its health reason); `created` lists the flows of every new automation (`[]` when all were kept). The consolidate automation's first occurrence is one interval after it is created, like reflect's; it is created paused when `consolidate_schedule` is `off`, and a replacement of one the user paused is paused again. `503` when the note workflows are not loaded: nothing is archived |
-| `Consolidation` (`GET /note/consolidation`, `consolidation` of `GET /note/processing`) | `{automation: {id, state, paused, healthy, reason, schedule: {every}}, run: {run_id, started_at, stage, stage_done, stage_total, eta_s, elapsed_s} or null, last: {consolidation_id, started_at, finished_at, status, error, merges, communities, labelled, summaries_refreshed, insights, reinterpreted, unchanged, reinterpret_failed, left_out: {summaries, labels, reinterpret, reasons} or null, budget_spent, notice} or null, pending: {stale_labels, unlabelled, stale_summaries, reinterpret}, reinterpret: {pending, by_entity: [{entity_id, name, notes}], reasons, context_unknown, consumed_today, last_marked_at}}` (`reinterpret`: what waits to be understood again and why, readable before the stage runs: the notes marked, the entities most marked by, up to 10 distinct reason sentences, the marked notes whose reading predates the dependency record, the marks taken today, the last mark's time). `stage` is `normalize`, `reinterpret`, `communities`, `labels`, `summaries`, `then_now` or `reflect` (cognition.md "note-consolidate"); `reinterpreted`, `unchanged`, `reinterpret_failed` (ADR 0008): the notes the reinterpret stage understood again, found unchanged without a model call, or could not read again (their marks wait); `pending.reinterpret` the notes marked to be understood again; `stage_done` of `stage_total` items; `eta_s` = the stage's items left x its measured seconds per item (the last completed run's measure until one item is done; null when neither exists); `elapsed_s` since the consolidation began; `run_id` the automation's running occurrence (null for a consolidation started otherwise). `last.status` is `completed` (nothing was left out), `completed_with_gaps` (the run finished its stages but left items for the next one: `left_out` counts the skipped entries, groups and notes still pending at the close plus what the time budget did not reach, never more than `pending`; `reasons` are the sentences why; `budget_spent` says the budget stopped a stage; `notice` is the end-user sentence, for example "12 summaries could not be refreshed this time; they will be tried again next time.", ADR 0007), `failed` (`error` = the step's sentence) or `interrupted` (it stopped before closing: its automation run ended, or a later one began; `left_out` null); `merges`, `labelled` and `summaries_refreshed` count this run's work, `communities` the groups found, `insights` those the reflect stage wrote. `pending`: communities with a stale label, without one, and entries whose summary is stale (empty, still the placeholder they were created with, or older than their notes and statements) |
+| `POST /note/refile` (202), `GET /note/refile` | `POST`: `{refile: Refile}`; `GET`: `{refile: Refile or null, missing}` (`missing`: understood notes still without a kind). `Refile` = `{refile_id, started_at, finished_at, status, total, done, filed: [{note_id, kind, topics, seconds}], skipped: [{note_id, reason}], kinds: {kind: count}, not_reached, max_items, budget_s, seconds, model, notice}`: `status` `running`, `completed`, `completed_with_gaps` (a note could not be filed, or the count or time did not reach every note: `not_reached`) or `interrupted`; `total` the notes without a kind when it opened; a note whose run did not end within the time is skipped with "Its filing did not end within the time given; it goes on, and the note is filed when it ends."; `notice` the one sentence of what is left (null while running or when nothing is) |
+| `Consolidation` (`GET /note/consolidation`, `consolidation` of `GET /note/processing`) | `{automation: {id, state, paused, healthy, reason, schedule: {every}}, run: {run_id, started_at, stage, stage_done, stage_total, eta_s, elapsed_s, propagated} or null, last: {consolidation_id, started_at, finished_at, status, error, merges, communities, labelled, summaries_refreshed, insights, reinterpreted, unchanged, reinterpret_failed, left_out: {summaries, labels, reinterpret, propagated, propagated_from: [{entity_id, name, notes}], reasons} or null, budget_spent, notice} or null, pending: {stale_labels, unlabelled, stale_summaries, reinterpret}, reinterpret: {pending, by_entity: [{entity_id, name, notes}], reasons, context_unknown, consumed_today, last_marked_at, propagated: {pending, by_source: [{entity_id, name, notes}], may_follow, may_follow_from: [{entity_id, name, notes}]}}}` (`reinterpret`: what waits to be understood again and why, readable before the stage runs: the notes marked, the entities most marked by, up to 10 distinct reason sentences, the marked notes whose reading predates the dependency record, the marks taken today, the last mark's time; `propagated` (ADR 0008 §4a): the notes waiting only because an idea they rely on was understood differently, by source idea (display names), and `may_follow`, an upper bound of the notes such marks may add when the waiting notes are read again, with the ideas it comes from. `run.propagated` is `{notes, names, sources}` during the reinterpret stage (of the notes the pass reads, those read because an idea they rely on changed, the most frequent ideas' names, at most 3, and how many ideas), null in the other stages; `left_out.propagated` the notes left for that reason, `propagated_from` their source ideas, and the notice adds "of which 5 follow from ideas understood differently"). `stage` is `normalize`, `reinterpret`, `communities`, `labels`, `summaries`, `then_now` or `reflect` (cognition.md "note-consolidate"); `reinterpreted`, `unchanged`, `reinterpret_failed` (ADR 0008): the notes the reinterpret stage understood again, found unchanged without a model call, or could not read again (their marks wait); `pending.reinterpret` the notes marked to be understood again; `stage_done` of `stage_total` items; `eta_s` = the stage's items left x its measured seconds per item (the last completed run's measure until one item is done; null when neither exists); `elapsed_s` since the consolidation began; `run_id` the automation's running occurrence (null for a consolidation started otherwise). `last.status` is `completed` (nothing was left out), `completed_with_gaps` (the run finished its stages but left items for the next one: `left_out` counts the skipped entries, groups and notes still pending at the close plus what the time budget did not reach, never more than `pending`; `reasons` are the sentences why; `budget_spent` says the budget stopped a stage; `notice` is the end-user sentence, for example "12 summaries could not be refreshed this time; they will be tried again next time.", ADR 0007), `failed` (`error` = the step's sentence) or `interrupted` (it stopped before closing: its automation run ended, or a later one began; `left_out` null); `merges`, `labelled` and `summaries_refreshed` count this run's work, `communities` the groups found, `insights` those the reflect stage wrote. `pending`: communities with a stale label, without one, and entries whose summary is stale (empty, still the placeholder they were created with, or older than their notes and statements) |
 | `GET /note/communities` | `{computed_at, resolution, networkx, revision_count_at_compute, revisions_since, loose_ends, items: [Community]}` (`networkx` the version the last computation ran under, null if it recorded none; `computed_at` null, `items` empty before the first computation; `revisions_since` counts revisions applied after it, so a client can say the groups are being refreshed; `loose_ends` counts the live entities in no community) |
 | `Community` | `{community_id, label, summary, kind, size, top_entities: [{entity_id, name, kind, note_count}], stale_label, labelled_at, created_at}`, largest first: `label` (at most 4 words), `summary` (one sentence) and `kind` (`project`, `theme`, `people`, `tooling`, `process` or `other`) are null until the reflect flow names it; `top_entities` are its 5 members with the most notes; `stale_label` true when the label is kept but more than 20 % of the members changed since it was given (the next reflect run names it again) |
 | `POST /note/communities/recompute` | `{communities, loose_ends, entities, edges, new, labels_kept, stale_labels, unlabelled, resolution, computed_at, networkx, carry_over}` (`new`: communities that matched no previous one; `labels_kept`: labelled communities that kept their id; `carry_over` is null unless the previous computation ran under another networkx version or recorded none, then `{from_networkx, to_networkx, floor: 0.5, kept: [{community_id, label, jaccard}], stale: [{community_id, previous_community_id, label, jaccard}], dropped: [{community_id, label}]}`: `kept` the labels that kept their id only thanks to the lower floor, `stale` labels handed, marked stale, to the new group that overlaps them most, `dropped` labels no new group overlaps; a resolution that is not a number above 0 and at most 100 is 400; a notebook opened without its embedding model is 400) |
 | graph node `community_id`, entity card `community` | every `GET /note/graph` node carries `community_id` (null for an entity in no community, or before the first computation); `GET /note/entities/{id}` carries `community: {community_id, label, kind, size, stale_label}` or null. Both are the communities as last computed, also with `at` or `as_received` |
-| `GET /note/stats` | `{generated_at, span: {first_note_at, last_note_at, first_received_at, last_received_at}, totals, activity_weekly: [WeekActivity], recorded_weekly: [{week, notes_received, revisions_recorded}], entities_by_kind: {kind: n}, top_entities: [{entity_id, name, display_name, kind, note_count, first_seen, last_seen}], claims_by_predicate: [{predicate, words, count, active}], tasks: {open, closed, done, dropped}, insights_by_kind: {insight_kind: n}, communities, processing: {understood, queued, processing, failed, duplicate}, growth_monthly: [{month, entities, claims, new_entities, new_claims}], quiet_entities: [{entity_id, name, kind, note_count, last_seen, days_silent}], omitted: {top_entities, claims_by_predicate, quiet_entities}}` (`omitted`: how many each of the three lists leaves out). Notes are the ones you sent (not insights, not archived). `totals` = `{notes, notes_archived, insights, attachments, attachment_bytes, entities, entities_merged, claims, claims_active, revisions, topics, notes_by_kind: {kind or "unfiled": n}, notes_by_source: {client or "importer:<name>": n}, attachments_by_mime: {mime: n}}`. `top_entities`: the 20 live entities with the most notes. `claims_by_predicate`: the 15 most used predicates (`words` its plain words, `active` how many are still current), ties by predicate. `processing.queued` includes notes not filed yet. `communities` counts the stored communities. Maps are ordered by count |
+| `GET /note/stats` | `{generated_at, span: {first_note_at, last_note_at, first_received_at, last_received_at}, totals, activity_weekly: [WeekActivity], recorded_weekly: [{week, notes_received, revisions_recorded}], entities_by_kind: {kind: n}, top_entities: [{entity_id, name, display_name, kind, note_count, first_seen, last_seen}], claims_by_predicate: [{predicate, words, count, active}], tasks: {open, closed, done, dropped}, insights_by_kind: {insight_kind: n}, communities, processing: {understood, queued, processing, failed, duplicate}, growth_monthly: [{month, entities, claims, new_entities, new_claims}], quiet_entities: [{entity_id, name, kind, note_count, last_seen, days_silent}], omitted: {top_entities, claims_by_predicate, quiet_entities}}` (`omitted`: how many each of the three lists leaves out). Notes are the ones you sent (not insights, not archived). `totals` = `{notes, notes_archived, insights, attachments, attachment_bytes, entities, entities_merged, entities_retired, claims, claims_active, revisions, topics, notes_by_kind: {kind or "unfiled": n}, notes_by_source: {client or "importer:<name>": n}, attachments_by_mime: {mime: n}}`. `top_entities`: the 20 live entities with the most notes. `claims_by_predicate`: the 15 most used predicates (`words` its plain words, `active` how many are still current), ties by predicate. `processing.queued` includes notes not filed yet. `communities` counts the stored communities. Maps are ordered by count |
 | `WeekActivity` | `{week, notes, revisions, new_entities, claims_added, claims_superseded}`: `week` is the Monday (`YYYY-MM-DD`); in history time, "happened" (a note's date, a revision's `at`, an entity's `first_seen`: its earliest mention, which moves back when an earlier note arrives, a statement's `observed_at`, a supersession's end), every week from the earliest to the latest one, empty weeks included |
 | `recorded_weekly[]` | `{week, notes_received, revisions_recorded}`: the same weeks in system time (when notes reached the notebook and when it applied revisions), from the first to the last such week, so a page shows "happened" (`activity_weekly`) beside "recorded"; `span` adds `first_received_at`, `last_received_at` beside `first_note_at`, `last_note_at` |
 | `ThenNow` (`GET /note/entities/{id}/then-now`) | `{entity_id, first_seen, earliest, latest, earliest_claims: [Claim], current_beliefs: [Claim], turning_points: [TurningPoint], revision_count}`, everything in history order (dated knowledge, ADR 0008 §2), never the order notes arrived or summaries were written. `first_seen` = the earliest dated knowledge (the first note about it, or its earliest statement). `earliest` = `{at: first_seen, summary, note_id, revision_id, recorded_at, text?}`: `summary` is the summary that describes that first day (null when none does; then `earliest_claims` are the statements observed that day, and with none, `text` is the first note's own one line). `latest` = the current summary `{at, summary, note_id, revision_id, recorded_at}` (the last in the summary history, the card's). A summary of a superseded interpretation is in neither |
@@ -827,11 +829,12 @@ Flows call them through `tool_calls` nodes; agents may list them in `allowed_too
 |---|---|---|
 | `note_capture` | `text, idempotency_key?, title?, occurred_at?, location?, source?, priority?, attachments? ([{"$artifact": id, "last_modified"?}] inside the gateway; [{"path": ..., "last_modified"?}] only headless, inside the folder given to bind as allow_paths_under), session_id?, about?, answer? ({question, evidence_note_ids}), process_inline? (claims the note for the caller's own understanding)` | `{note_id, status: new|duplicate, duplicate_of?, first_saved_at?, received_at, occurred_at, date_basis, date_sentence (null unless the date came from a file), revisits: [{note_id, occurred_at}], similar: [{note_id, title, occurred_at, score}], topics: [...], attachments: [{attachment_id, sha256, mime, size, extracted_by, extracted_chars}], warnings: [...]}` |
 | `note_file` | `note_id, title, kind, topics, urgency, language, one_line` | `{note_id, priority, status, topics_not_assigned}`: a note keeps the first 4 filing topics; the others are named in `topics_not_assigned` and logged |
+| `note_filing_context` | `note_id` | `{needed, note_id, occurred_at, title, text, similar, revisits, topics}`: `needed` = the note has no kind, is not an insight or archived and has something to read; the rest is what the capture's quick filing sees (note-process and the `note-file` flow, cognition.md "note-process" step 0) |
 | `note_context` | `note_id, max_chars?` | `{note: {...}, sections: [...], similar_notes: [...], candidate_entities: [{entity_id, name, kind, aliases, summary, last_seen, active_claims: [...]}], open_tasks: [...], topics: [...], vocabulary: [{predicate, gloss}]}` |
 | `note_resolve_candidates` | `note_id, mentions: [{ref, name, kind, aliases}]` | `{mentions: [{ref, candidates: [{entity_id, name, kind, aliases, summary, last_seen, score, matched_by}]}]}` |
-| `note_apply_revision` | `note_id, extraction, linking, reinterpret=false` | `{revision_id, summary, entities_created, entities_merged, claims_added, claims_reinforced, claims_superseded, claims_retracted, tasks_opened, tasks_closed, claims_inserted_before, retrospective, warnings, marked, reinterpret_marked: {count, notes, by_entity: [{entity_id, name, notes}]}}` (`claims_inserted_before`: statements of an older note placed before a later belief; `retrospective`: entities the note marked, data-model.md "Retrospective insertion"; `marked`: the later notes this revision marked to be understood again, ADR 0008; `stale_context`: statements the linking named that are no longer believed, with a warning; `date_sentence` when the note's text dated it: "Dated 14 March 2019 from the document."); a structurally corrupt answer (cognition.md "Validity of model answers": a fragment of the answer inside a prose field, a decision that names no candidate from its list or a mention the note does not have, an index answered twice in contradiction) is refused with one sentence and nothing is applied, for a re-reading too; other references outside the context packet (an existing statement, an open task, a statement's subject) are rejected into `create`/`new` with a warning. A note already understood answers `already_applied`, unless `reinterpret` is true or a consolidation pass took its re-understanding mark: then it is read again (`note.reinterpret`, data-model.md "Re-understanding"): the result adds `reinterpreted`, `previous_revision_id`, `diff` and `claims_reinterpreted`, `claims_revised`, `claims_reopened`, `claims_start_restored`, `tasks_reopened`, `tasks_retired`, `entities_retired` when they apply, or is `{revision_id: null, unchanged: true, summary_only, previous_revision_id, ...}` when the new reading equals the old one |
+| `note_apply_revision` | `note_id, extraction, linking, reinterpret=false` | `{revision_id, summary, entities_created, entities_merged, claims_added, claims_reinforced, claims_superseded, claims_retracted, tasks_opened, tasks_closed, claims_inserted_before, retrospective, warnings, marked, reinterpret_marked: {count, notes, by_entity: [{entity_id, name, notes}]}}` (`claims_inserted_before`: statements of an older note placed before a later belief; `retrospective`: entities the note marked, data-model.md "Retrospective insertion"; `marked`: the later notes this revision marked to be understood again, ADR 0008; `stale_context`: statements the linking named that are no longer believed, with a warning (when one was closed after the note's context was read and a drain holds the note, nothing is applied the first time: `{revision_id: null, requeue: true, reason, stale_context}`, cognition.md "note-drain and the queue"); `date_sentence` when the note's text dated it: "Dated 14 March 2019 from the document."); a structurally corrupt answer (cognition.md "Validity of model answers": a fragment of the answer inside a prose field, a decision that names no candidate from its list or a mention the note does not have, an index answered twice in contradiction) is refused with one sentence and nothing is applied, for a re-reading too; other references outside the context packet (an existing statement, an open task, a statement's subject) are rejected into `create`/`new` with a warning. A note already understood answers `already_applied`, unless `reinterpret` is true or a consolidation pass took its re-understanding mark: then it is read again (`note.reinterpret`, data-model.md "Re-understanding"): the result adds `reinterpreted`, `previous_revision_id`, `diff` and `claims_reinterpreted`, `claims_revised`, `claims_reopened`, `claims_start_restored`, `tasks_reopened`, `tasks_retired`, `entities_retired` when they apply, and `propagation` `{records, deep, carried, hops, marked, upgraded, reached, below_floor, hop_cut, invisible, already_spread, sources}` (ADR 0008 §4a: how many ideas it measured and found deeply changed, the impact it was given, and the later notes of proximal ideas it marked), or is `{revision_id: null, unchanged: true, summary_only, previous_revision_id, ...}` when the new reading equals the old one |
 | `note_queue_lease` | `worker_id, max_items=1` (1 to 100) | `{items: [{note_id, priority, attempts}], limit_applied}` (`limit_applied`: `max_items` after the clamp, which is logged) |
-| `note_queue_ack` | `note_id, outcome: ok|error, error?, revision_id?` | `{note_id, status, next_attempt_at?}` |
+| `note_queue_ack` | `note_id, outcome: ok|error|requeue, error?, revision_id?` | `{note_id, status, next_attempt_at?}`; an error for a note with no text to read is final (`status` `failed` at once, the reason recorded); `requeue` (a drain's note whose reading was refused because the notebook changed while it was read) puts it back at its priority without a failure, the reason in `queue_errors` (`{note_id, status: queued, requeued: true, priority}`) |
 | `note_queue_stats` | | `{queued, processing, failed, by_priority, oldest_enqueued_at}` |
 | `note_search` | `query, since?, until?, kinds?, entities?, topics?, limit=20, as_of?, order? (relevance or earliest)` | `{query, order, notes: [...], entities: [...], claims: [...], facets: {...}, considered, omitted, warnings}` (`omitted`: the entity and statement hits past their 10 and the entity facets past 20; a limit outside 1 to 200 is applied and named in `warnings`): each note carries `score` (rank fusion), `relevance` (0 to 1), `matched_entities` and `matched_claims`; an entity or statement is a hit only when its relevance reaches 0.5 (`HIT_MIN_SCORE`) and a returned note carries it, and lists those `note_ids` (an entity also `first_at` and `latest_at`: the first and latest date among the matching notes that carry it); `order=earliest` lists the notes whose relevance reaches 0.75 (`EARLIEST_MIN_SCORE`) oldest first ([remembering.md](remembering.md#quick-relevance)) |
 | `note_expand` | `note_ids, entity_ids, as_of?, query?, budget_chars?` | the standard recall packet, chosen within `budget_chars` (default 24000, `EXPAND_BUDGET_CHARS`, measured as JSON): `{as_of, budget_chars, used_chars, notes: [NoteRef with an excerpt around the match of query, else of the focus entities' names, and summary?], entities: [{entity_id, line, focus}], claims_timeline: [{entity_id, claims: [{claim_id, at, text, status, note_id, closed?}]}], relation_timelines: [{a, b, claims}], neighbours: [{entity_id, name, kind, count, via}], then_now: [{entity_id, earliest, latest, turning_points}], omitted: {notes, entities, claims, turning_points, relation_timelines, neighbours, then_now}}` (`omitted` counts what was not shown, for the budget or a part's bound: focus entities past 5, statements between the earliest and the latest kept, pairs past 10, neighbours past 10, ADR 0007; excerpts and one-line cards are marked previews ending with "…", aliases with "+n more"); the given `entity_ids` are the focus: their one-line cards come first, then the notes in the order given (best first, up to 60 % of the budget), the other entities those notes mention as one line each, and for the focus entities only the claim timelines (earliest and latest kept), then-versus-now, relations and neighbours; what is left goes to further notes |
@@ -924,6 +927,7 @@ abstractnote day YYYY-MM-DD --notebook DIR [--tz ZONE]
 abstractnote status --notebook DIR
 abstractnote changes --notebook DIR [--since CURSOR_OR_ISO] [--limit N]
 abstractnote process --local --notebook DIR --provider P --model M [--max-items 20] [--budget-s 90]
+abstractnote refile --missing --local --notebook DIR --provider P --model M [--max-items 50] [--budget-s 600]  # file understood notes without a kind
 abstractnote recover --notebook DIR                              # finish revisions a stopped process left half applied
 abstractnote rebuild --notebook DIR [--reembed]                  # replay revisions into fresh stores
 abstractnote normalize --notebook DIR [--dry-run] [--account NAME]  # merge entities that share a canonical name
@@ -1180,7 +1184,8 @@ is missing, or call `POST /api/gateway/note/processor/ensure` with your account 
 ### A note failed to process
 
 The queue retries a failed note after one minute and then after ten minutes; the third failure
-marks it `failed` with the error. "Processing stopped before it finished." means a run ended
+marks it `failed` with the error. A note with no text to read ("The note has no text to read.") is marked
+`failed` at its first failure: no retry can give it text; add words to it or capture it again. "Processing stopped before it finished." means a run ended
 while it held the note (the lease expired). Fix the cause the error names (most often the model
 or provider), then press **Retry** in the web app's queue panel or call
 `POST /api/gateway/note/queue/{note_id}/retry`.
@@ -1378,7 +1383,7 @@ generic thing.
 | `first_seen`, `last_seen` | `occurred_at` of the first and latest note mentioning it |
 | `note_count` | number of notes that mention it |
 | `merged_into` | set when the model decided this entity is the same as another; the record stays so old links still resolve |
-| `retired_revision_id`, `retired_at` | set when only a superseded interpretation created the entity and nothing references it any more (`entity.retire`, ADR 0008): it leaves lists, the graph, search and candidates; the archive as received before shows it; a later mention brings it back |
+| `retired_revision_id`, `retired_at` | set when only a superseded interpretation created the entity and nothing references it any more (`entity.retire`, ADR 0008): it leaves lists, counts (stats, timeline, the day view, the overview, changes), communities, the graph, search, cues and the summary refresh; its own page says what retired it (`retired` on the card: the note, and `into`, the entries the new reading uses for the same words, from the op's `read_as`); the archive as received before shows it; a later mention brings it back |
 | `embedding` | vector of `name + aliases + summary`, refreshed when the summary changes |
 
 Entities are created only by revisions. The id is minted from the canonical name of the name chosen
@@ -1492,7 +1497,7 @@ Operations:
 | `claim.start_restore` | `{claim_id, observed_at, valid_from, earlier_assertions: [{assertion_id, empty_at}], reason}`: the inverse of `claim.start_earlier`: the superseded reading's earlier evidence moved the belief's start back and the new reading no longer restates it: `observed_at` and `valid_from` return to the start replayed from the claim's own add and the moves that remain; AbstractMemory closes each additive earlier-evidence assertion empty with the kind `reinterpreted`; as received before the re-understanding the moved start is still shown |
 | `task.reopen` | `{task_id, closed_revision_id}`: a task the superseded reading closed that the new one does not close |
 | `task.retire` | `{task_id, reason}`: a task of the superseded reading the new one does not have: status `retired` |
-| `entity.retire` | `{entity_id, reason}`: an entity only the superseded reading created and that nothing references any more (see Entity) |
+| `entity.retire` | `{entity_id, reason, read_as}`: an entity only the superseded reading created and that nothing references any more (see Entity); `read_as`: the entries the new reading uses for a mention whose name or alias has the retired entry's name or alias as its lookup key (empty when it no longer names it) |
 | `note.redate` | `{note_id, from, to, basis, quote?, reason?}`: the note moves in history time (`basis` `content` when its text states its date, `user` when a person sets it); its mentions, its topics' ranges, its queue place, and the statements and tasks it wrote with the old date move with it; `source.redated` keeps `{basis, from, to, revision_id}` |
 
 User actions (`close a task`, `retract a claim`, `undo a merge`, `confirm a match`) produce revisions with
@@ -1757,7 +1762,9 @@ them all, and the as-received axis shows what the notebook believed before.
 
   When the new reading's statements (subject, predicate, object, certainty, stance, window), mentions, tasks and
   topics equal the old ones, nothing is written: the mark is consumed `unchanged` (a summary rewrite alone is
-  `summary_only`, still unchanged). Before any model call, the stage's no-call check compares the note's context
+  `summary_only`, still unchanged), and the current reading's dependency record becomes what that re-reading was
+  read against (its packet's record, `related` included), so a later wave from the same unchanged idea, or a note
+  that arrived before it, is settled without a call. Before any model call, the stage's no-call check compares the note's context
   looked up again with the dependency record (what was known at the note's date only, without the reading's own
   entities, statements and summaries): equal means the foundation did not change, `unchanged` with zero calls.
   The revision's id is deterministic from the revision it supersedes, so a replay is a no-op.
@@ -1775,6 +1782,94 @@ them all, and the as-received axis shows what the notebook believed before.
 - **Upgrade** (schema 3): `meta.dependency_record = {schema: 3, since_seq, upgraded_at}`; revisions up to `since_seq`
   have no record (`context_unknown`): they are reached through their mentions and the name match, and a mark on such
   a note is always read again with the model.
+
+#### Deep changes reach the ideas that relied on them (ADR 0008 §4a)
+
+A re-understanding is the one place where two readings of the same note can be compared, so it is where a change of
+meaning is measured and from where it spreads (`recall/propagation.py`).
+
+- **Change records** (`idea_changes`, truth: written once when the re-understanding is applied, copied by a
+  rebuild, never recomputed by a replay; key `(revision_id, entity_id)`): for every entity the old or the new
+  reading touched (canonical; the entities of its ops, the subjects and objects of the statements it changed, the
+  mentions it soft-removed), four signals in [0, 1] comparing the note's OLD reading with its NEW one:
+  - `kind_change` (K): 1 when the re-understanding retired, created, joined or separated the entity (a change of
+    kind shows as a retire plus a create);
+  - `summary_distance` (d): the cosine distance between the summary of the entity the old reading wrote and the one
+    the new reading wrote, both embedded now with the notebook's pinned embedder (`embedder_model`); null with
+    `summary_basis` `none` when either reading wrote none (the signal is 0); normalised `s = (d - SUMMARY_NOISE) /
+    (SUMMARY_DIFFERENT - SUMMARY_NOISE)` clamped to [0, 1];
+  - `claim_share` (C): the statements on the entity (as subject or object, merged members included) the
+    re-understanding added, closed, re-opened, repointed, restored or changed in certainty or stance (the key
+    `(subject, predicate, object, certainty, stance)`; a change of evidence or window alone does not count), over
+    `support_claims` = its active statements known at the note's date before plus those added;
+  - `relation_share` (R): the Jaccard distance between its relations `(predicate, other entity, direction)` over
+    active statements known at the note's date, before and after (`support_relations` = their union).
+
+  `magnitude = max(K, s, C, R)`; `deep` when K = 1, d >= `DEEP_SUMMARY_DISTANCE`, C >= `DEEP_CLAIM_SHARE` or R >=
+  `DEEP_RELATION_SHARE`; `summary_only` when only d crossed its threshold. Every record is kept, deep or not, so the
+  thresholds can be tuned offline from real records without a model call. `carried`, `hops`, `pass_id`: the mark
+  that took the note (below); `spread`, `spread_json` `{m0, capped_by, reached: [{entity_id, impact, reliance,
+  notes}], below_floor, hop_cut, invisible}` or `{skipped}`: where it spread.
+- **The relation graph**: live entities (not merged away, not retired), tied by statements between two entities;
+  an open statement weighs 1, an ended or superseded one `ENDED_CLAIM_WEIGHT`, a retracted or `reinterpreted` one
+  nothing (`store.notes.claim_live_sql`). A co-mention is no reliance (a note that mentions both used both, so §4
+  marks it directly).
+- **Reliance**: `r(E -> F) = a(E, F) * recency / A(F)`, where `a(E, F)` is the weight of the statements between
+  them and `A(F)` F's whole relation weight: normalised by the TARGET, so a leaf that is only about E relies on it
+  fully and a hub with hundreds of relations barely relies on one neighbour. `recency` = 1 when the relation was
+  stated (or reinforced) on or after the change date, else `1 / (1 + days / RECENCY_DAYS)`.
+- **The hop** (one per re-understanding, in the same transaction as its change records): for each deep record of
+  entity E not yet spread in this pass, `m0 = min(magnitude, carried)` (`carried` = the impact of the mark that
+  took the note: 1 for a direct mark or a person's request, the impact for a propagated one: a re-reading never
+  passes on more than it was given); for every neighbour F the re-reading did not touch itself (its users have
+  direct marks), `impact = m0 * PROPAGATION_DECAY * r(E -> F)`; under `PROPAGATION_FLOOR` nothing is marked
+  (`below_floor`), beyond `MAX_PROPAGATION_HOPS` neither (`hop_cut`, a guard: the floor binds first); otherwise the
+  notes after the re-read note in history order whose current reading used F (the §4 rule: `note_dependencies`,
+  mentions, the exact name and alias keys) are marked when the change is visible at their date.
+- **Visibility**: a change of statements, relations or identity is dated at the re-read note's date, so every later
+  note sees it; a summary-only change is seen only by the notes whose known-then summary of E (the latest at or
+  before their date) is the one this re-understanding wrote: the notes between it and the next note that described
+  E (`invisible` counts the others).
+- **Propagated marks** (`reinterpret_marks` columns since schema 4): `reason_code` `direct` (the default: §4) or
+  `propagated`, `source_entity_id` (E), `source_revision_id` (the re-understanding), `impact`, `hops` (from the
+  first change). The reason names no number: "Zorn is understood differently since a note of 2026-03-20 was read
+  again, and the budget board relies on it.". An untaken mark gives way to a direct one and to a stronger
+  propagated one (max, never a sum); a direct mark is never replaced.
+- **Order**: the waiting notes are read in two tiers, each one forward sweep in history order: tier A = notes with
+  a direct mark or a propagated one of impact >= `TIER_A_IMPACT`, tier B = the rest (a single queue by impact would
+  read a note before its own earlier foundation was read again).
+- **What the model sees and decides**: a note taken through a propagated mark gets, in its linking packet, the block
+  "Understood differently since this note was read": per source idea (at most 3, the rest counted) its name and
+  kind, what it is now as known on the note's date, what it was taken to be before, and the statements the
+  re-understanding no longer reads and now reads (at most 6, the rest counted); never an impact. Its dependency
+  record keeps `related: {entity_id: {summary, claims}}` (the known-then summary revision and a hash of the live
+  statements known then); the no-call check settles a later propagated mark from the same idea without a call
+  when that state did not change, and reads the note when the reading never recorded it. A re-reading the model
+  answers the same writes no revision: nothing is measured, the spread stops there.
+- **Termination**: each entity spreads at most once per pass (a later deep change of it in the same pass records
+  `skipped`), every propagated mark is strictly after the note that raised it, and the carried impact shrinks by at
+  least `PROPAGATION_DECAY` per hop, so a wave dies within `floor(log(FLOOR) / log(DECAY))` = 3 hops whatever the
+  cycles and the number of passes; a second pass without new earlier notes finds no mark and makes no call.
+- **Before the run**: `reinterpret.propagated.may_follow` is an upper bound of the notes propagated marks may add
+  (a numeric dry run: every idea a waiting note uses changes with magnitude 1, recency taken as 1, strongest path
+  to the fixed point; the later users of a reached idea after that note, not waiting already), with the ideas it
+  comes from: a bound over the ideas the waiting notes use now, never a promise.
+- **Constants** (`recall.propagation.PropagationTuning`, one frozen object; a value outside its band is refused):
+
+| Constant | Value | What it decides (measured basis: untracked/reports/R6.md) |
+|---|---|---|
+| `DEEP_SUMMARY_DISTANCE` | 0.56 | d at or above is deep: the H0 rule (noise p95 + 0.05) on the closest noise proxy, summary rewrites that came with no new statement about the entity (p95 0.511 on notebook-1000); the design's first value was 0.40 |
+| `SUMMARY_NOISE` / `SUMMARY_DIFFERENT` | 0.10 / 0.61 | the paraphrase end (noise-proxy p25 0.111) and where another idea begins (different entities of one kind: median 0.609) |
+| `DEEP_CLAIM_SHARE` / `DEEP_RELATION_SHARE` | 0.5 / 0.5 | half of the entity's statements or relations replaced |
+| `PROPAGATION_DECAY` | 0.5 | impact kept per hop |
+| `PROPAGATION_FLOOR` | 0.1 | under it nothing is marked (without it two hops reach the whole notebook) |
+| `TIER_A_IMPACT` | 0.25 | propagated marks read with the direct ones |
+| `MAX_PROPAGATION_HOPS` | 3 | a guard (0.5^3 = 0.125, 0.5^4 < 0.1) |
+| `RECENCY_DAYS` | 180 | the hyperbolic recency scale of a relation |
+| `ENDED_CLAIM_WEIGHT` | 0.5 | an ended statement's weight in the reliance |
+
+- **Upgrade** (schema 4): `meta.propagation_record = {schema: 4, since_seq, upgraded_at}`; re-understandings up to
+  `since_seq` have no change record and spread nothing; marks written before are `direct` with impact 1.
 
 ### Document dates
 
@@ -1971,7 +2066,10 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    S[on_flow_start note_id, provider?, model?] --> X[tool note_context<br/>text, extracted attachment text,<br/>similar notes, candidate entities,<br/>recent claims about them, topics]
+    S[on_flow_start note_id, provider?, model?] --> FN{tool note_filing_context<br/>no kind yet?}
+    FN -- yes --> NF[subflow note-file<br/>the capture's quick filing]
+    FN -- no --> X
+    NF --> X[tool note_context<br/>text, extracted attachment text,<br/>similar notes, candidate entities,<br/>recent claims about them, topics]
     X --> P1[code: extraction packet<br/>per section]
     P1 --> E[llm_call extract<br/>resp_schema Extraction]
     E --> R[tool note_resolve_candidates<br/>per mention: alias, full-text, vector candidates]
@@ -1982,6 +2080,20 @@ flowchart TD
     A --> Z[on_flow_end revision summary]
 ```
 
+0. **Filing, when the note has none** (W27). Imports store notes without the quick filing a live capture gets
+   (eval2: 985 of 988 understood imported notes had no kind and no filing topics). `note_filing_context` answers
+   `needed` (no kind, not an insight, not archived, something to read) with what the capture's filing sees (the
+   note's own text, whole, or its files' extracted text when it has none; the nearest notes by its stored vector;
+   its recorded revisits; the topic names); `needed` runs the `note-file` subflow: the capture's own filing
+   packet, prompt, `QuickFiling` schema and settings (one call, thinking off, 400 output tokens), then
+   `note_file` with the kind, up to 4 topics, the title when the note has none, the language and the one line,
+   never the urgency (the note keeps its place in the queue). A filing that fails fails the note (its sentence
+   in `queue_errors`), never a silent skip. A note filed at capture goes straight on. The notes understood
+   before this step existed are filed by `abstractnote refile --missing` (api.md "CLI") or `POST /note/refile`
+   (the same repair on the gateway, each note one run on your runtime): the same `note-file`
+   flow per note, oldest first, within `--max-items` and `--budget-s`, one `refile_runs` row per repair updated
+   after every note (`done`, `filed`, `skipped` with each reason, `kinds`, `not_reached`) and closed
+   `completed`, `completed_with_gaps` or `interrupted`, with one sentence of what is left (ADR 0007).
 1. **Context** (`note_context`): what the notebook already knows that is relevant, **as of the note's
    date** (ADR 0008 §2; `as_of` = the note's `occurred_at`): the nearest notes, entities whose names or
    aliases appear in the text or whose embeddings are close, each as it was known then (its latest summary
@@ -2063,9 +2175,11 @@ answers `reuse` with no candidate. An answer is invalid when:
   `merge` without two of them) or decides a mention the note does not have. Until 2026-10-20 such a decision was
   applied in part (the mention was created as new with a warning); it is now invalid;
 - an index is answered twice in contradiction: a mention with two decisions, a statement with two relations or
-  once naming an existing statement and once none, a task once closing an open task and once none. One statement
-  linked to several existing ones with the same relation (or one task closing several) is valid; the first link
-  is applied.
+  once naming an existing statement and once none, a task once closing an open task and once none (null, an
+  empty string and an empty list are the same absent value). One statement linked to several existing ones with
+  the same relation (or one task closing several) is valid; the first link is applied and the others are named in
+  a `multi_link` revision warning ("multi_link: statement 0 was linked to 2 existing statements; only the link to
+  #3 (supersedes) was applied, the link to #5 was not."), never dropped silently (ADR 0007).
 
 note-process checks every extraction (per section) and every linking (per part) in a code node that runs the very
 source of `validate.py`: an invalid answer is asked once more with a fresh call (a linking: the same message
@@ -2134,7 +2248,20 @@ flowchart TD
   the queue instead." in `queue_errors`, not counted as a failure.
 - A lease lasts 15 minutes. Acknowledging a failure increments `attempts` and schedules a retry
   (after 1 minute, then after 10 minutes); the third failure sets the note to `failed`, visible in
-  the web app's queue panel with the error, and offers a manual retry.
+  the web app's queue panel with the error, and offers a manual retry. A note with no text to read (no words,
+  no title, no extracted file text: `process.context.note_sections` finds no section; note-process stops with
+  "The note has no text to read.") fails at its first failure: `note_queue_ack` checks the stored note, records
+  the reason in `queue_errors` and `last_error` and sets it `failed` at once, since no retry can give it text.
+- **The notebook changed while a note was read** (review 4.1, ADR 0008 §5). A reading that would replace a
+  statement closed by a revision recorded after the note's context packet was stored (a person retracted it, a
+  re-understanding closed it) is not applied when a drain holds the note: `note_apply_revision` answers
+  `{revision_id: null, requeue: true, reason, stale_context}`, the drain acknowledges `requeue`, and the note goes
+  back to the queue once, at its priority, available at once, no failure counted, "The notebook changed while
+  this note was being read (a statement it builds on was closed meanwhile); it is read again." in `queue_errors`
+  and `last_error`. The next reading builds a fresh packet; if it is stale again it is applied (its statement kept
+  as new, with the warning): a note is put back at most once (`Queue.requeued_stale`). The drain's answer lists it
+  under `requeued` and says "1 note is read again: the notebook changed while it was being read." An inline
+  understanding (not leased) applies with the warning.
 - An expired lease (the drain stopped, for example on a gateway restart) is not taken over at once:
   the next drain that leases counts it as a failure ("Processing stopped before it finished.") with
   the same backoff, and a drain retakes the note once that backoff has passed. It counts toward the
@@ -2282,7 +2409,7 @@ keeps the notebook's derived memory fresh, in stages, each reporting its progres
 | Stage | What runs | Model |
 |---|---|---|
 | `normalize` | `note_entities_normalize`: the entries that share a canonical name are merged (`Notebook.normalize_entities`, one reversible revision per merge) | none |
-| `reinterpret` | loop (ADR 0008): `note_reinterpret_next` (1) -> the `note-process` flow as a subflow for that note -> the next, until no marked note is left for this pass or the budget is spent (below) | as note-process, per note read again (0 for a note settled unchanged) |
+| `reinterpret` | loop (ADR 0008): `note_reinterpret_next` (1) -> the `note-process` flow as a subflow for that note -> the next, until no marked note is left for this pass or the budget is spent (below). Two tiers, each in history order: the notes marked directly (they used what changed) and those marked because an idea they rely on changed deeply with an impact of at least 0.25 first, then the weaker ones (§4a, data-model.md "Deep changes reach the ideas that relied on them"); a re-reading that changes an idea deeply marks, one hop further, the later notes of the ideas that rely on it, and they are read in the same pass | as note-process, per note read again (0 for a note settled unchanged) |
 | `communities` | `note_communities_recompute` (as in note-reflect) | none |
 | `labels` | loop: `note_communities_pending` (5, `exclude` = the groups skipped this run) -> the reflect naming step (`CommunityLabels`, by index; asked once more when a group is left out) -> `note_communities_label`, until none waits that was not skipped, or the budget is spent | 1 call per 5 groups (2 when the first answer leaves one out) |
 | `summaries` | loop: `note_entities_stale_summaries` (8) -> `llm_call summaries` (`EntitySummaries`: `[{index, summary}]`; `summaries_again` when an entry is left out or empty) -> `note_entities_set_summaries`, until none is stale that was not offered this run, or the budget is spent | 1 call per 8 entries (2 when the first answer leaves one out) |
@@ -2345,10 +2472,12 @@ model call it runs the no-call check: the note's context is looked up again (the
 dependency record of its current interpretation, on what was known at the note's date (the entities, the
 statements and similar notes recorded on or before it, the summaries written for a date on or before it), leaving
 out what that reading itself wrote; equal: the note is `unchanged`, its mark is consumed and no model is called.
-Otherwise the note goes through `note-process` (filing is not repeated): its context leaves out its own previous
+Otherwise the note goes through `note-process` (filing is not repeated; a note without a kind is filed first): its context leaves out its own previous
 reading (its statements and tasks) and shows again what that reading had closed; the apply sees that the pass took
 the note's mark and builds a `note.reinterpret` revision (or records `unchanged` when the new reading's statements,
-mentions, tasks and topics equal the old ones; summaries alone do not count). A re-understanding marks only
+mentions, tasks and topics equal the old ones; summaries alone do not count; the current reading's dependency record
+then becomes what this re-reading saw, `related` included, so the next wave from the same unchanged idea needs no
+call). A re-understanding marks only
 notes after it in history order, so a pass is one forward sweep and ends; a second pass with no new earlier note
 has no mark to read and calls no model. A note read again three times in one UTC day waits for the next day
 (`REINTERPRET_PER_DAY`, skipped with that reason). A note that cannot be read again (the model fails) is skipped
@@ -2361,6 +2490,19 @@ budget did not reach; a run that left notes is `completed_with_gaps` and its not
 understood again this time; they will be read again next time." The progress line reads "Re-understanding 12
 notes" (web: "Re-understanding 3 of 12 notes"); `GET /note/consolidation` `pending.reinterpret` gives the count
 before the run, and `consolidation.state(nb)["reinterpret"]` the count by entity and the reasons.
+
+Deep changes spread (ADR 0008 §4a). Each applied re-understanding is measured against the reading it replaced (per
+entity: retired or joined, the summary's embedding distance, the share of its statements and of its relations
+replaced) and, when an idea changed deeply, the later notes of the ideas that rely on it through statements are
+marked `propagated` with the impact the change carries (decay 0.5 per hop, nothing under 0.1, never more than the
+re-reading was given), so a wave dies within three hops and cycles end. Those notes are read in the same pass, after
+the direct ones when their impact is low, with the "Understood differently since this note was read" block in
+their linking packet (what changed about the idea, as known on their date; never a number). The model decides: a
+re-reading that comes out the same writes nothing and the spread stops there. Before the run,
+`reinterpret.propagated` gives the notes waiting for that reason by source idea and `may_follow`, an upper bound of
+how many more may follow; during it the progress line says "Re-understanding 12 notes (5 because Zorn changed)"
+(`run.propagated`); a budget stop reports `left_out.propagated` and its sources, and the notice adds "of which 5
+follow from ideas understood differently".
 
 The start pins are `budget_s` (default 3600: the loops stop starting rounds after it), `limit` (the reflect
 stage's insight limit, default 10), `thinking` (`on` or `off`, default `off`, wired to both model steps) and
@@ -2404,13 +2546,23 @@ models from them and repairs invalid output. Python mirrors live in `abstractnot
  "document_date": {"iso": "ISO date", "basis": "stated in the text", "quote": "the exact words"} or null}
 ```
 
-Fields with a default may be left out by the model (the runtime fills the default): in
-Extraction `aliases` ([]), `object_is_literal` (false), `certainty` (stated), `stance` (assert),
-`valid_from`, `valid_until`, `due`, `iso` and `document_date` (null; given only when the header says the note's
-date is approximate and the text states its own date); in Linking `candidate` (null),
-`merge_candidates` ([]), `name` (""), `kind` (null), `aliases` ([]), `reason` (""), `existing`
-(null), `closes_open_task` (null) and `evidence` ("": a close without it is not applied). `claims` lists only the statements that relate to an
-existing one (a statement left out is `new`) and `tasks` only those that close an open task.
+**Every schema a model is handed is strict** (`process.schemas.strict`, applied once in `flows.build.load_schemas`,
+the source of every `llm_call` node's `resp_schema`): every property of every object, nested objects and array
+items included, is listed in `required`; a property that has a default in the definitions below becomes nullable
+(`"type": ["<t>", "null"]`, and `null` joins an enumeration), its description says "null when not applicable" (or
+"null when empty", `null means "stated"`), and its `default` is dropped. The model writes every field, null when it
+has nothing to say, and the parsing reads null as the default (the pydantic mirrors' `_null_means_default`;
+`validate.py` reads null as absent). Why: a remote structured-output decoder (OVH) writes an object's properties in
+alphabetical order and skips the optional ones (see "Validity" above). `tests/test_strict_schemas.py` fails on any
+sent schema with a property outside `required`, checks the schema AbstractCore's openai-compatible provider sends
+(the runtime's pydantic model, `model_json_schema()`), and compiles each schema with Outlines, the local MLX
+provider's constrained decoding. The nullable fields: in Extraction `aliases` (null = []), `object_is_literal`
+(false), `certainty` (stated), `stance` (assert), `valid_from`, `valid_until`, `due`, `iso` and `document_date`
+(null; given only when the header says the note's date is approximate and the text states its own date); in
+Linking `candidate`, `merge_candidates` ([]), `name` (""), `kind`, `aliases` ([]), `reason` (""), `existing`,
+`closes_open_task` and `evidence` ("": a close without it is not applied); in EntitySummaries `ties` ([]). `claims`
+lists only the statements that relate to an existing one (a statement left out is `new`) and `tasks` only those
+that close an open task.
 
 **Linking** (indexes refer to the candidate lists in the context packet; enumerations are JSON
 Schema enums)
@@ -3061,6 +3213,13 @@ Rules shared by all importers:
   skipped by reason), the time range covered, and the `date_basis` histogram with
   `approximate_dates` (how many dates are a session start, a last edit, a commit or a file date), in
   a dry run too, so a user sees how many dates are approximate before writing anything.
+- Leave out a row with nothing to read, by name (ADR 0007): a Markdown file that is only its front matter
+  (at draft time, a dry run too) and a file whose content gives no readable text (the files importer's
+  title is the file name, not text, so the capture refuses it with `NoReadableText`, R4's rule for a live
+  upload; a dry run does not extract and counts it as new) are counted under `skipped.no_readable_text`
+  and listed in `left_out: [{source_key, reason, why}]` ("“pixel.png” has no readable text; it was not
+  imported."), never stored as a note made of its name and never counted as an error. An image without a
+  vision extractor is such a file: import it again with one.
 
 ## Re-imports after the 2026-10-19 date and outcome fixes
 
@@ -3077,8 +3236,10 @@ notebook pinned to an embedding server is opened with the same `--embed-base-url
 `--embed-model` that `capture` and `process` take
 ([troubleshooting.md](troubleshooting.md#this-notebooks-vectors-were-made-with-the-embedding-model-)).
 
-Processing an import runs through the same `note-process` flow as live notes. Expect roughly two
-model calls per note; with a small local model this is a few seconds per note, so a corpus of a
+Processing an import runs through the same `note-process` flow as live notes. An import skips the
+quick filing a live capture gets, so its processing files it first (one more small call: kind and up
+to 4 topics, thinking off; cognition.md "note-process" step 0); notes understood before that are filed
+with `abstractnote refile --missing --local` (or, on a gateway, `POST /note/refile` with `{"missing": true}`). Expect roughly three model calls per note; with a small local model this is a few seconds per note, so a corpus of a
 few thousand notes takes hours. Run `abstractnote process --local` on the machine that holds the
 model, or let the gateway's processor automation drain the queue over time.
 
@@ -3240,6 +3401,14 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 
 ## [Unreleased]
 
+### Added
+- **Ideas understood differently reach what relies on them** (ADR 0008 §4a): when an earlier note changes what
+  an idea is (its statements, its relations, what it is, or deeply its description), the later notes about the
+  ideas that rest on it are understood again too, strongest first and in the order things happened, and each
+  one is shown what changed. The Processing page says why: "Re-understanding 12 notes (5 because Zorn changed)",
+  and before a consolidation runs it says how many more may follow. A wave of changes always ends; a second
+  consolidation with nothing new changes nothing.
+
 ### Changed
 - **What a thing is**: the description of a person, project or tool now says what it is (its kind,
   its role or purpose, and what it belongs to or works with), instead of the latest thing
@@ -3266,6 +3435,30 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
   still waiting. A pass that could not refresh everything is marked as having gaps, and the
   Processing page says so in one quiet line ("12 summaries could not be refreshed this time; they
   will be tried again next time.").
+- **Imported notes are filed too**: an imported note now gets the same quick filing as a note you
+  send (its kind and up to four topics) when it is understood, and `abstractnote refile --missing
+  --local` files the notes that were understood before, a batch at a time, saying how many are left.
+  The same repair runs through the server (`POST /note/refile` with `{"missing": true}`), each note
+  filed on your own runtime, and `GET /note/refile` says how far it got.
+- **A note found unchanged is not read again for the same reason**: when a note read again because
+  an idea it relies on changed comes out the same, the notebook remembers what it was read against,
+  so the next change wave from that idea passes it by without a model call.
+- **A note read while the notebook changed is read again**: when a statement a note builds on is
+  withdrawn while the note is being understood, nothing of that reading is kept and the note goes
+  back to the queue once, at its place, with the reason shown in the queue; the next reading is made
+  on what holds now.
+- **Imports leave out what cannot be read**: a file the notebook cannot read (an image without a
+  description model, for example) and a Markdown file that is only its header are no longer stored
+  as notes made of their names; the import report counts them and names each one with the reason.
+- **Web app, developer mock**: the mock server answers a note's date basis, a failed note's recent
+  errors and how each changed note changed, as the server does, so the screens built on it read the
+  same answers.
+- **Withdrawn entries stay out of sight**: an entry that only an earlier reading of a note made,
+  and that the note no longer names once it is understood again, is no longer counted in the
+  numbers, the timeline, the day view or the overview, and is in no theme, cue or description
+  refresh. Its own page says when and why it was withdrawn and what the note now reads it as
+  ("…was understood again and now reads it as Helix calibration plan."); looking at the notebook
+  as it was received before that still shows it.
 
 ## [0.1.1] - 2026-10-19
 
