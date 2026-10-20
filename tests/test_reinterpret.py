@@ -768,3 +768,56 @@ def test_a_corrupt_answer_is_refused_for_a_re_reading_too(nb):
     with pytest.raises(InvalidAnswer):
         run(nb, "", D20, ext, corrupt, reinterpret=True, note_id=a["note_id"], now=clock.next())
     assert nb.store.q1("SELECT COUNT(*) FROM revisions")[0] == revisions and pending(nb) == [a["note_id"]]
+
+
+def test_a_withdrawn_reading_gives_back_the_start_its_earlier_evidence_moved(nb):
+    """Integration R1 x R2 (ADR 0008 §1, the inverse table): day 10 restated day 20's "budget 40k", so the belief
+    started on day 10 (R1's claim.start_earlier: index start moved, day 1's 30k narrowed to day 10, an additive
+    earlier-evidence assertion in AbstractMemory). Day 10 understood again WITHOUT that statement: the belief starts
+    on day 20 again in both stores, 30k holds until day 20 again, and as received before the re-reading the moved
+    start is still shown. MUTATION: drop the claim.start_restore op from plan_reinterpretation, its projection in
+    notes.py, its closure in kg.py, or its replay in archive.claim_start."""
+    d01, d10, d15 = "2026-03-01T09:00:00Z", "2026-03-10T09:00:00Z", "2026-03-15T09:00:00Z"
+    clock = Clock()
+    budget = lambda v: extraction([mention("m1", "LUT", "project")],  # noqa: E731
+                                  [stmt("m1", "ex:budget", v, literal=True, evidence=f"LUT budget {v}")])
+    c = run(nb, "LUT budget 30k.", d01, budget("30k"), link({"m1": {"name": "LUT", "kind": "project"}}),
+            now=clock.next())
+    p30 = c["out"]["claims_added"][0]
+    b = run(nb, "LUT budget 40k now.", D20, budget("40k"), link({"m1": LUT}, claims=[
+        lambda p, cs: {"index": 0, "relation_to_existing": "supersedes", "existing": claim_index(p, cs, p30),
+                       "reason": "new figure"}]), now=clock.next())
+    x40 = b["out"]["claims_added"][0]
+    assert nb.store.claim_row(p30)["valid_until"] == D20
+    a = run(nb, "LUT budget 40k already.", d10, budget("40k"), link({"m1": LUT}, claims=[
+        lambda p, cs: {"index": 0, "relation_to_existing": "restates", "existing": claim_index(p, cs, x40),
+                       "reason": "same figure"}]), now=clock.next())
+    assert a["out"]["claims_started_earlier"] == [x40]
+    moved = nb.store.claim_row(x40)
+    assert (moved["observed_at"], moved["valid_from"], nb.store.claim_row(p30)["valid_until"]) == (d10, d10, d10)
+    assert x40 in nb.kg.active_claim_ids(d15) and p30 not in nb.kg.active_claim_ids(d15)
+    before = clock.next()
+    r = run(nb, "", d10, extraction([mention("m1", "LUT", "project")]), link({"m1": LUT}), reinterpret=True,
+            note_id=a["note_id"], now=clock.next())
+    assert r["out"]["diff"]["starts_restored"] == [x40] and x40 in r["out"]["claims_start_restored"]
+    back = nb.store.claim_row(x40)
+    assert (back["observed_at"], back["valid_from"]) == (D20, D20)
+    assert nb.store.claim_row(p30)["valid_until"] == D20
+    index = sorted(x["claim_id"] for x in nb.beliefs_at(d15, entity_id=LUT) if x["predicate"] == "ex:budget")
+    assert index == [p30]
+    assert sorted(cid for cid in nb.kg.active_claim_ids(d15) if cid in (p30, x40)) == [p30]
+    held = {x["claim_id"]: x for x in nb.store.beliefs_at(d15, entity_id=LUT, as_received=before)}
+    assert x40 in held and held[x40]["valid_from"] == d10
+    # a later earlier-evidence note (day 12) moves it again; as received between the re-reading and that note, the
+    # start is day 20 (the archive replays the restore), not day 10
+    import time
+
+    time.sleep(1.1)  # a re-reading belongs to the archive by the time it was recorded (wall clock)
+    between = ids.utc_now()
+    time.sleep(1.1)
+    run(nb, "LUT budget 40k already then.", "2026-03-12T09:00:00Z", budget("40k"), link({"m1": LUT}, claims=[
+        lambda p, cs: {"index": 0, "relation_to_existing": "restates", "existing": claim_index(p, cs, x40),
+                       "reason": "same figure"}]))
+    assert nb.store.claim_row(x40)["valid_from"] == "2026-03-12T09:00:00Z"
+    held = {x["claim_id"]: x for x in nb.store.beliefs_at(D20, entity_id=LUT, as_received=between)}
+    assert held[x40]["valid_from"] == D20

@@ -231,8 +231,8 @@ class Archive:
         claim's own ``claim.add`` and the moves that do belong."""
         cid = row["claim_id"]
         moves = [] if not row["observed_at"] else self.store.q(
-            "SELECT revision_id, ops_json FROM revisions WHERE applied_index=1 AND ops_json LIKE ? ORDER BY seq",
-            (f'%"claim.start_earlier"%"{cid}"%',))
+            "SELECT revision_id, ops_json FROM revisions WHERE applied_index=1 AND (ops_json LIKE ? OR ops_json LIKE ?)"
+            " ORDER BY seq", (f'%"claim.start_earlier"%"{cid}"%', f'%"claim.start_restore"%"{cid}"%'))
         if not moves or all(r["revision_id"] in self.revisions for r in moves):
             return {"observed_at": row["observed_at"], "valid_from": row["valid_from"]}
         start = {"observed_at": row["observed_at"], "valid_from": row["valid_from"]}
@@ -251,6 +251,8 @@ class Archive:
                         start["observed_at"] = p["observed_at"]
                     if start["valid_from"] and p.get("valid_from") and p["valid_from"] < start["valid_from"]:
                         start["valid_from"] = p["valid_from"]
+                elif op.get("op") == "claim.start_restore" and p.get("claim_id") == cid:  # ADR 0008: withdrawn
+                    start = {"observed_at": p["observed_at"], "valid_from": p.get("valid_from")}
         return start
 
     def claim_dict(self, row: Any) -> Dict[str, Any]:

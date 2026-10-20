@@ -957,6 +957,7 @@ def with_retro_counts(nb: Any, out: Dict[str, Any]) -> Dict[str, Any]:
 # its reinforcements, mentions, topics and tasks are replaced, entities only it created and nothing references any
 # more are retired. Nothing changes when the new reading equals the old one (structural key, no revision written).
 
+from ..store.kg import earlier_evidence_id as kg_earlier_evidence_id  # noqa: E402
 from ..store.notes import REINTERPRET_ACTION, REINTERPRETED, TOPICS_PER_NOTE  # noqa: E402
 
 
@@ -1090,6 +1091,36 @@ def replay_claim_state(nb: Any, claim_id: str, exclude: Sequence[str]) -> Dict[s
             elif name == "claim.repoint":
                 st = {**st, "superseded_by": p.get("superseded_by")}
     return st
+
+
+def replay_claim_start(nb: Any, claim_id: str, exclude: Sequence[str]) -> Dict[str, Optional[str]]:
+    """``{observed_at, valid_from}`` of a claim from its own add and the start moves of every applied revision
+    (``claim.start_earlier``: the earlier of the two; ``claim.start_restore``: set), leaving out the revisions in
+    ``exclude`` (a superseded reading): the start a belief returns to when the earlier evidence is withdrawn."""
+    row = nb.store.claim_row(claim_id)
+    start: Dict[str, Optional[str]] = {"observed_at": row["observed_at"], "valid_from": row["valid_from"]}
+    added = nb.store.revision_row(row["revision_id"])
+    for op in json.loads(added["ops_json"]) if added else []:
+        p = op.get("payload") or {}
+        if op.get("op") == "claim.add" and p.get("claim_id") == claim_id:
+            start = {"observed_at": p.get("observed_at"), "valid_from": p.get("valid_from")}
+    skip = set(exclude)
+    for r in nb.store.q("SELECT revision_id, ops_json FROM revisions WHERE applied_index=1 AND abandoned=0 AND"
+                        " ops_json LIKE ? ORDER BY seq", (f'%"{claim_id}"%',)):
+        if r["revision_id"] in skip or r["revision_id"] == row["revision_id"]:
+            continue
+        for op in json.loads(r["ops_json"]):
+            p = op.get("payload") or {}
+            if p.get("claim_id") != claim_id:
+                continue
+            if op.get("op") == "claim.start_earlier":
+                if p.get("observed_at") and (not start["observed_at"] or p["observed_at"] < start["observed_at"]):
+                    start["observed_at"] = p["observed_at"]
+                if start["valid_from"] and p.get("valid_from") and p["valid_from"] < start["valid_from"]:
+                    start["valid_from"] = p["valid_from"]
+            elif op.get("op") == "claim.start_restore":
+                start = {"observed_at": p["observed_at"], "valid_from": p.get("valid_from")}
+    return start
 
 
 def _claim_fields(row: Any) -> Dict[str, Any]:
@@ -1259,8 +1290,8 @@ def plan_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any, 
     pre: List[Dict[str, Any]] = [_op("note.reinterpret", note_id=note_id, supersedes=current,
                                      reason=reason or "understood again", by_note_ids=[])]
     diff: Dict[str, List[str]] = {k: [] for k in ("claims_closed", "claims_revised", "claims_reopened",
-                                                  "claims_repointed", "reinforcements_dropped", "tasks_reopened",
-                                                  "tasks_retired", "entities_retired")}
+                                                  "claims_repointed", "reinforcements_dropped", "starts_restored",
+                                                  "tasks_reopened", "tasks_retired", "entities_retired")}
     diff["claims_revised"] = list(revised)
     for r in own_rows:
         if r["claim_id"] not in kept:
@@ -1289,6 +1320,29 @@ def plan_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any, 
                          [cid, *chain]):
             pre.append(_op("reinforcement.drop", claim_id=cid, revision_id=rv))
         diff["reinforcements_dropped"].append(cid)
+    # the inverse of claim.start_earlier (R1): a belief the withdrawn reading moved back as earlier evidence and the
+    # new reading no longer restates returns to the start replayed without it; its additive earlier-evidence
+    # assertions close empty in AbstractMemory, and the belief it narrowed re-opens (claim.reopen above)
+    still = {o["payload"].get("claim_id") for o in built["ops"] if o["op"] in ("claim.reinforce", "claim.start_earlier")}
+    moved: Dict[str, List[Dict[str, Any]]] = {}
+    for rv in chain:
+        r = s.revision_row(rv)
+        for op in json.loads(r["ops_json"]) if r is not None and r["applied_index"] else []:
+            if op.get("op") == "claim.start_earlier" and (op.get("payload") or {}).get("claim_id"):
+                moved.setdefault(op["payload"]["claim_id"], []).append({**op["payload"], "_note": r["note_id"]})
+    for cid in sorted(moved):
+        if cid in still or cid in claim_map or s.claim_row(cid) is None:
+            continue
+        back = replay_claim_start(nb, cid, chain)
+        evidence = []
+        for mp in moved[cid]:
+            aid = kg_earlier_evidence_id(mp, mp["_note"])
+            if aid:
+                evidence.append({"assertion_id": aid, "empty_at": mp["valid_from"]})
+        pre.append(_op("claim.start_restore", claim_id=cid, observed_at=back["observed_at"],
+                       valid_from=back["valid_from"], earlier_assertions=evidence,
+                       reason=reason or "the earlier evidence was understood again"))
+        diff["starts_restored"].append(cid)
     for tid, t in cross_tasks.items():
         if tid not in kept_cross_tasks:
             pre.append(_op("task.reopen", task_id=tid, closed_revision_id=t["closed_revision_id"]))

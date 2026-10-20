@@ -580,12 +580,12 @@ class NoteStore:
 
         at = ids.normalize_time(at, field="at")
         arch = archive_for(self, as_received)
-        sql = "SELECT * FROM claims WHERE (valid_from IS NULL OR valid_from<=?)"
-        params: List[Any] = [at]
+        sql = "SELECT * FROM claims WHERE 1"
+        params: List[Any] = []
         if arch is None:
-            sql += " AND (valid_until IS NULL OR valid_until>?) AND status!=?"  # ADR 0008: a withdrawn reading
-            params += [at, REINTERPRETED]
-        else:
+            sql += " AND (valid_from IS NULL OR valid_from<=?) AND (valid_until IS NULL OR valid_until>?) AND status!=?"
+            params += [at, at, REINTERPRETED]  # ADR 0008: a withdrawn reading
+        else:  # the start is the archive's (a start a later re-reading gave back is still moved as received then)
             frag, fp = arch.revisions_in("revision_id")
             sql += f" AND {frag}"
             params += fp
@@ -1739,6 +1739,19 @@ class _OpContext:
             if cur.rowcount:
                 self.stats["claims_superseded"].append(p["after_claim_id"])
             self._dirty_claim_relation(prev)
+
+    def op_claim_start_restore(self, p: Dict[str, Any]) -> None:
+        """The inverse of ``claim.start_earlier`` (ADR 0008, data-model.md "Re-understanding"): the reading whose
+        earlier evidence moved the belief's start back was withdrawn; ``observed_at`` and ``valid_from`` return to
+        the start replayed without it (``{observed_at, valid_from}``, from the claim's own add and the moves that
+        remain). The belief it had narrowed is re-opened by the same revision's ``claim.reopen``."""
+        row = self._claim(p["claim_id"])
+        cur = self.c.execute("UPDATE claims SET observed_at=?, valid_from=? WHERE claim_id=? AND (observed_at IS NOT ?"
+                             " OR valid_from IS NOT ?)", (p["observed_at"], p.get("valid_from"), p["claim_id"],
+                                                          p["observed_at"], p.get("valid_from")))
+        if cur.rowcount:
+            self.stats.setdefault("claims_start_restored", []).append(p["claim_id"])
+        self._dirty_claim_relation(row)
 
     def op_claim_retract(self, p: Dict[str, Any]) -> None:
         row = self._claim(p["claim_id"])

@@ -112,19 +112,27 @@ def claim_assertion(payload: Dict[str, Any], rev: Dict[str, Any], subject_kind: 
 EARLIER_OF_ATTR = "earlier_evidence_of"
 
 
+def earlier_evidence_id(payload: Dict[str, Any], rev_note_id: Optional[str]) -> Optional[str]:
+    """The id of the additive assertion a ``claim.start_earlier`` writes (None when it writes none: no known start,
+    or the window already covered the date); deterministic from the claim and the earlier note."""
+    start, before = payload.get("valid_from"), payload.get("previous_valid_from")
+    if not start or not before or start >= before:
+        return None
+    return ids.claim_id(payload.get("note_id") or rev_note_id or "", payload["claim_id"], "claim.start_earlier", start)
+
+
 def earlier_evidence_assertion(payload: Dict[str, Any], rev: Dict[str, Any], subject_kind: Optional[str],
                                object_kind: Optional[str]) -> Optional[TripleAssertion]:
     """The additive assertion of a ``claim.start_earlier``: the same statement from the earlier note, valid from the
     new start to the claim's previous start (``observed_at`` = the earlier note's date). None when the window did
     not move (no known start, or it already covered the date): nothing to add. Its id is deterministic from the
     claim and the earlier note, so a replay adds nothing twice."""
-    start, before = payload.get("valid_from"), payload.get("previous_valid_from")
-    if not start or not before or start >= before:
+    aid = earlier_evidence_id(payload, rev.get("note_id"))
+    if aid is None:
         return None
+    start, before = payload["valid_from"], payload["previous_valid_from"]
     base = claim_assertion({**payload, "valid_from": start, "valid_until": before,
-                            "observed_at": payload["observed_at"],
-                            "claim_id": ids.claim_id(payload.get("note_id") or rev.get("note_id") or "",
-                                                     payload["claim_id"], "claim.start_earlier", start)},
+                            "observed_at": payload["observed_at"], "claim_id": aid},
                            rev, subject_kind, object_kind)
     attrs = dict(base.attributes or {})
     attrs[EARLIER_OF_ATTR] = payload["claim_id"]
@@ -227,6 +235,13 @@ class ClaimStore:
                                    "kind": "supersede", "narrow": True,
                                    "reason": p.get("reason") or "an earlier note shows the later belief held then",
                                    "replacement_ids": (p["claim_id"],)})
+            elif name == "claim.start_restore":
+                # ADR 0008 (R1 x R2): the reading whose earlier evidence moved the start back was withdrawn; each
+                # additive earlier-evidence assertion it wrote closes empty with the kind reinterpreted
+                for e in p.get("earlier_assertions") or []:
+                    closes.append({"assertion_id": e["assertion_id"], "valid_until": e["empty_at"],
+                                   "kind": REINTERPRETED_KIND, "narrow": True, "replacement_ids": (),
+                                   "reason": p.get("reason") or "the earlier evidence was understood again"})
             elif name == "claim.retract":
                 closes.append({"assertion_id": p["claim_id"], "valid_until": p.get("valid_until") or rev["at"],
                                "kind": "retract", "reason": p.get("reason") or "retracted", "replacement_ids": ()})

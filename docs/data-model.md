@@ -193,6 +193,7 @@ Operations:
 | `claim.reopen` | `{claim_id, status, valid_until, superseded_by, closed_reason, closed_revision_id, closed_by_revision, assertion_id, previous_assertion_id, empty_at, assertion}`: a statement of another note that the superseded reading had closed (superseded, retracted, narrowed) and the new reading leaves alone: restored to the state the other revisions give it; AbstractMemory gets a re-opened copy (a window cannot widen there) |
 | `claim.repoint` | `{claim_id, superseded_by, previous}`: a statement the superseded reading closed and the new reading closes on the same slot: it stays closed, superseded by the new reading's statement |
 | `reinforcement.drop` | `{claim_id, revision_id}`: a reinforcement the superseded reading made that the new one does not repeat |
+| `claim.start_restore` | `{claim_id, observed_at, valid_from, earlier_assertions: [{assertion_id, empty_at}], reason}`: the inverse of `claim.start_earlier`: the superseded reading's earlier evidence moved the belief's start back and the new reading no longer restates it: `observed_at` and `valid_from` return to the start replayed from the claim's own add and the moves that remain; AbstractMemory closes each additive earlier-evidence assertion empty with the kind `reinterpreted`; as received before the re-understanding the moved start is still shown |
 | `task.reopen` | `{task_id, closed_revision_id}`: a task the superseded reading closed that the new one does not close |
 | `task.retire` | `{task_id, reason}`: a task of the superseded reading the new one does not have: status `retired` |
 | `entity.retire` | `{entity_id, reason}`: an entity only the superseded reading created and that nothing references any more (see Entity) |
@@ -450,6 +451,7 @@ them all, and the as-received axis shows what the notebook believed before.
 | `claim.add` (its own statements) | same subject, predicate and object in the new reading: kept as is, or `claim.revise` in place when certainty, stance, window or evidence differ; otherwise `claim.reinterpret` |
 | `claim.supersede`, `claim.retract`, `claim.insert_before` (`after_claim_id`) on another note's statement | the new reading writes on the same slot (subject and predicate): stays closed (`claim.repoint` to the new statement); otherwise `claim.reopen` to the state the other revisions give it |
 | `claim.reinforce` | repeated: kept; otherwise `reinforcement.drop` |
+| `claim.start_earlier` (earlier evidence moved another note's belief back) | restated again by the new reading: kept; otherwise `claim.start_restore` (the start the other revisions give it; its earlier-evidence assertions close empty in AbstractMemory) and the belief it had narrowed is re-opened (`claim.reopen` above) |
 | `entity.mention` | soft-removed (`entity_notes_removed`); the new reading's mentions are added |
 | `topic.assign` | soft-removed (`note_topics_removed`); the new reading's topics are added (the first 3) |
 | `task.open` (its own tasks) | the same task (same words) in the new reading: kept (re-opened when the new reading no longer says it is done); otherwise `task.retire` |

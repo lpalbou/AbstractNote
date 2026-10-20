@@ -356,7 +356,8 @@ class Notebook:
             "marked": int((result.get("reinterpret_marked") or {}).get("count") or 0),
             "reinterpret_marked": result.get("reinterpret_marked") or {"count": 0, "notes": [], "by_entity": []},
         }
-        for k in ("claims_reinterpreted", "claims_revised", "claims_reopened", "reinforcements_dropped",
+        for k in ("claims_reinterpreted", "claims_revised", "claims_reopened", "claims_start_restored",
+                  "reinforcements_dropped",
                   "tasks_reopened", "tasks_retired", "entities_retired", "stale_context", "reinterpreted"):
             if result.get(k):
                 out[k] = result[k]
