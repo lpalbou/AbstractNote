@@ -378,13 +378,14 @@ def community_ids(nb: Any) -> Dict[str, str]:
 
 
 def pending(nb: Any, limit: int = PENDING_LIMIT) -> Dict[str, Any]:
-    """Communities without a label or with a stale one, largest first, with what the model needs to name them:
+    """Communities with a stale label, then those without one, largest first within each (a stale label is named
+    again at every reflect however many new groups wait, eval2 D14), with what the model needs to name them:
     ``{count, items: [{index, community_id, size, stale_label, previous_label, previous_summary, top_entities:
     [{entity_id, name, kind, note_count, summary}], claims: [{claim_id, text}], excerpts: [NoteRef]}]}``."""
     from .changes import claim_text
 
     limit = clamp_limit(limit, PENDING_LIMIT, 20)
-    rows = nb.store.q("SELECT * FROM communities WHERE label IS NULL OR stale_label=1 ORDER BY size DESC,"
+    rows = nb.store.q("SELECT * FROM communities WHERE label IS NULL OR stale_label=1 ORDER BY stale_label DESC, size DESC,"
                       " community_id LIMIT ?", (limit,))
     canon, _ = _canonical_map(nb)
     active = nb.store.q("SELECT * FROM claims WHERE status='active'") if rows else []
