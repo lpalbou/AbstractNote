@@ -379,8 +379,10 @@ def run_view(nb: Any, row: Optional[Dict[str, Any]] = None) -> Optional[Dict[str
 
 
 def history(nb: Any, limit: int = 10) -> List[Dict[str, Any]]:
+    from ..store.notes import clamp_limit
+
     rows = nb.store.q("SELECT * FROM consolidation_runs WHERE finished_at IS NOT NULL ORDER BY started_ts DESC"
-                      " LIMIT ?", (max(1, min(int(limit or 10), LAST_RUNS)),))
+                      " LIMIT ?", (clamp_limit(limit or 10, 10, LAST_RUNS),))  # a clamp is logged (ADR 0007)
     return [_last_view(_row_dict(r)) for r in rows]
 
 
@@ -484,23 +486,27 @@ def _packet(nb: Any, item: Dict[str, Any], canon: Dict[str, str]) -> Dict[str, A
     claims = sorted(claims, key=lambda c: (-int(c["reinforced_count"] or 0), _CERTAINTY_RANK.get(c["certainty"], 9),
                                            c["observed_at"] or "", c["claim_id"]))
     notes = s.q(f"SELECT DISTINCT n.* FROM entity_notes en JOIN notes n ON n.note_id=en.note_id WHERE en.entity_id IN"
-                f" ({marks}) AND n.archived_at IS NULL ORDER BY n.occurred_at DESC, n.note_id LIMIT ?",
-                [*members, PACKET_NOTES])
+                f" ({marks}) AND n.archived_at IS NULL ORDER BY n.occurred_at DESC, n.note_id", [*members])
+    # a selection (the strongest statements, the newest notes), recorded: ``omitted`` counts what is not shown
     return {**item, "name": r["display_name"] or r["name"], "kind": r["kind"], "aliases": s.aliases(eid),
             "summary": r["summary"], "claims": [claim_text(nb, c) for c in claims[:PACKET_CLAIMS]],
             "notes": [{"title": n["title"] or "", "date": str(n["occurred_at"] or "")[:10],
-                       "excerpt": excerpt(n["summary"] or n["one_line"] or n["text"])} for n in notes]}
+                       "excerpt": excerpt(n["summary"] or n["one_line"] or n["text"])} for n in notes[:PACKET_NOTES]],
+            "omitted": {"claims": max(0, len(claims) - PACKET_CLAIMS), "notes": max(0, len(notes) - PACKET_NOTES)}}
 
 
 def stale_summaries(nb: Any, limit: Any = SUMMARY_BATCH) -> Dict[str, Any]:
-    """``{count, items}``: the next ``limit`` (0..50) stale entries as packets ``{entity_id, reason, since_summary:
-    {notes, claims}, summary_revision_count, note_count, name, kind, aliases, summary, claims: [line], notes:
-    [{title, date, excerpt}]}``. While a consolidation is open, an entry it was already offered is not offered
+    """``{count, items, limit_applied}``: the next ``limit`` (0..50) stale entries as packets ``{entity_id, reason,
+    since_summary: {notes, claims}, summary_revision_count, note_count, name, kind, aliases, summary, claims: [line],
+    notes: [{title, date, excerpt}], omitted: {claims, notes}}`` (the strongest :data:`PACKET_CLAIMS` statements and
+    newest :data:`PACKET_NOTES` notes; ``omitted`` counts the rest). While a consolidation is open, an entry it was already offered is not offered
     again (so an entry the model skips cannot hold the loop), and ``count`` is what remains for it."""
     try:
         n = int(SUMMARY_BATCH if limit in (None, "") else limit)
     except (TypeError, ValueError):
         raise ValueError("The limit must be a whole number.") from None
+    if not 0 <= n <= 50:
+        _log.warning("stale_summaries: the limit %d is outside 0..50; %d was applied", n, max(0, min(n, 50)))
     n = max(0, min(n, 50))
     row = open_row(nb)
     offered = set(_ids(row, "offered_json")) if row else set()
@@ -509,7 +515,7 @@ def stale_summaries(nb: Any, limit: Any = SUMMARY_BATCH) -> Dict[str, Any]:
     items = [_packet(nb, x, canon) for x in stale[:n]]
     if row is not None and items:
         _add_ids(nb, row["consolidation_id"], "offered_json", [x["entity_id"] for x in items])
-    return {"count": len(stale), "items": items}
+    return {"count": len(stale), "items": items, "limit_applied": n}
 
 
 def set_summaries(nb: Any, items: Sequence[Dict[str, Any]], *, account: Optional[str] = None) -> Dict[str, Any]:

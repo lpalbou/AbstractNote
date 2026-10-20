@@ -28,7 +28,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from .. import ids
 from ..process.demote import literal_reason
 from ..store.embeddings import top_k, vector_key
-from ..store.notes import clamp_limit, fts_terms
+from ..store.notes import clamp_note, fts_terms
 from . import shapes
 
 RRF_K = 60
@@ -36,6 +36,7 @@ POOL = 200
 NOTE_VECTOR_MIN = 0.2
 ENTITY_LIMIT = 10
 CLAIM_LIMIT = 10
+FACET_ENTITIES = 20   # entity facets listed (most notes first); the rest is counted in omitted.facet_entities
 HIT_MIN_SCORE = 0.5     # minimum fused relevance of an entity or statement hit (and of a note dating an entity)
 EARLIEST_MIN_SCORE = 0.75  # minimum fused relevance of a note in earliest order (history order, so stricter)
 EARLIEST_POOL = 2000    # full-text candidates read for earliest order (history order, not rank, decides)
@@ -110,7 +111,7 @@ def _list(value: Any) -> List[str]:
 def search(nb: Any, query: str = "", *, since: Optional[str] = None, until: Optional[str] = None,
            kinds: Any = None, entities: Any = None, topics: Any = None, limit: int = 20,
            as_of: Optional[str] = None, order: Optional[str] = None) -> Dict[str, Any]:
-    limit = clamp_limit(limit, 20, 200)
+    limit, clamped = clamp_note(limit, 20, 200)
     order_by = str(order or "relevance").strip().lower()
     if order_by not in ORDERS:
         raise ValueError("The order is relevance or earliest.")
@@ -158,7 +159,10 @@ def search(nb: Any, query: str = "", *, since: Optional[str] = None, until: Opti
                 [terms, *params, EARLIEST_POOL if earliest else POOL]):
             fts_notes.append(r[0])
             snippets[r[0]] = r[1]
-    warnings: List[str] = []
+    warnings: List[str] = [clamped] if clamped else []  # a clamped limit is answered (ADR 0007)
+    # ADR 0007: what the selections below leave out is counted (entity and statement hits beyond their limits,
+    # entity facets beyond FACET_ENTITIES)
+    omitted: Dict[str, int] = {"entities": 0, "claims": 0, "facet_entities": 0}
     qvec = None
     if query:
         if nb.cache.embedder is None and nb.cache.get(vector_key(query, nb.cache.model_id)) is None:
@@ -257,9 +261,12 @@ def search(nb: Any, query: str = "", *, since: Optional[str] = None, until: Opti
                 scored.append((rel, fe[eid], canon, eid))
         seen: Set[str] = set()
         for rel, rrf, canon, eid in sorted(scored, key=lambda x: (-x[0], -x[1], x[2])):
-            if canon in seen or len(ent_items) >= ENTITY_LIMIT:
+            if canon in seen:
                 continue
             seen.add(canon)
+            if len(ent_items) >= ENTITY_LIMIT:  # a selection, the most relevant first: counted in omitted
+                omitted["entities"] += 1
+                continue
             b = store.entity_brief(canon)
             if not b or literal_reason(b.get("display_name") or b.get("name") or ""):
                 continue  # a value stored as an entity before the structural demotion is never an entity hit
@@ -312,6 +319,7 @@ def search(nb: Any, query: str = "", *, since: Optional[str] = None, until: Opti
             rel = relevance(c_words.get(cid, ()), weights, vec_c.get(cid) if qvec is not None else None)
             if rel >= HIT_MIN_SCORE:
                 scored_c.append((rel, fc[cid], cid))
+        omitted["claims"] += max(0, len(scored_c) - CLAIM_LIMIT)  # a selection, the most relevant first
         for rel, rrf, cid in sorted(scored_c, key=lambda x: (-x[0], -x[1], x[2]))[:CLAIM_LIMIT]:
             row = store.claim_row(cid)
             if row is None:
@@ -326,15 +334,17 @@ def search(nb: Any, query: str = "", *, since: Optional[str] = None, until: Opti
                 by_note[nid]["matched_claims"].append(cid)
 
     names = {e: store._name(e) for e in facet_entity}
+    omitted["facet_entities"] = max(0, len(facet_entity) - FACET_ENTITIES)
     facets = {
         "kinds": [{"kind": k, "count": v} for k, v in sorted(facet_kind.items(), key=lambda x: (-x[1], x[0]))],
         "topics": [{"topic": k, "count": v} for k, v in sorted(facet_topic.items(), key=lambda x: (-x[1], x[0]))],
         "entities": [{"entity_id": k, "name": names[k], "count": v}
-                     for k, v in sorted(facet_entity.items(), key=lambda x: (-x[1], x[0]))[:20]],
+                     for k, v in sorted(facet_entity.items(), key=lambda x: (-x[1], x[0]))[:FACET_ENTITIES]],
         "months": [{"month": k, "count": v} for k, v in sorted(facet_month.items())],
     }
     return {"query": query, "order": order_by, "as_of": as_of_n, "notes": note_items, "entities": ent_items,
-            "claims": claim_items, "facets": facets, "considered": len(order), "warnings": warnings}
+            "claims": claim_items, "facets": facets, "considered": len(order), "omitted": omitted,
+            "warnings": warnings}
 
 
 def _first_latest(store: Any, entity_id: str, carriers: Sequence[str], note_rel: Dict[str, float]

@@ -171,6 +171,9 @@ def test_model_nodes_carry_static_system_prompts_thinking_and_caps():
     assert again["system"] == LABEL_SYSTEM_PROMPT and again["max_output_tokens"] == 2048
     summaries = llm.pop(("note-consolidate", "summaries"))["data"]["pinDefaults"]
     assert summaries["system"] == summary_system_prompt() and summaries["thinking"] == "off"
+    # the second asking of a round (ADR 0007) is the same step
+    assert llm.pop(("note-consolidate", "communities_names_again"))["data"]["pinDefaults"] == again
+    assert llm.pop(("note-consolidate", "summaries_again"))["data"]["pinDefaults"] == summaries
     assert set(llm) == set(steps)
     for key, step in steps.items():
         d = llm[key]["data"]["pinDefaults"]

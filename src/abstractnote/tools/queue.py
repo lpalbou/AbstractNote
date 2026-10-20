@@ -10,7 +10,7 @@ from .context import ToolContext
 def note_queue_lease(ctx: ToolContext, worker_id: str, max_items: int = 1) -> Dict[str, Any]:
     out = ctx.nb.queue.lease(worker_id, max_items)
     return {"items": [{"note_id": i["note_id"], "priority": i["priority"], "attempts": i["attempts"]}
-                      for i in out["items"]]}
+                      for i in out["items"]], "limit_applied": out["limit_applied"]}
 
 
 def note_queue_ack(ctx: ToolContext, note_id: str, outcome: str, error: Optional[str] = None,

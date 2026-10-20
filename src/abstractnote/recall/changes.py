@@ -11,7 +11,7 @@ from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from .. import ids
-from ..store.notes import clamp_limit, decode_cursor, encode_cursor
+from ..store.notes import clamp_limit, clamp_note, decode_cursor, encode_cursor
 from . import shapes
 
 
@@ -136,7 +136,7 @@ def claim_text(nb: Any, r: Any) -> str:
 
 def overview(nb: Any, days: int = 30, *, now: Optional[str] = None) -> Dict[str, Any]:
     """``{recent, entities, insights, resurfacing, activity}`` for the landing screen."""
-    days = max(1, min(366, int(days or 30)))
+    days, _ = clamp_note(days or 30, 30, 366)  # a clamp is logged (ADR 0007); ``activity`` has the days applied
     now = ids.normalize_time(now) if now else ids.utc_now()
     start = (ids.parse_time(now) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     q = nb.store.q

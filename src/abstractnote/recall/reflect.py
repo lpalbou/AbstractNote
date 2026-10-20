@@ -109,6 +109,12 @@ def _fresh(nb: Any, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             if _provenance(it.get("note_ids"), [canon(e) for e in it.get("entity_ids") or []]) not in done]
 
 
+def _selected(items: List[Dict[str, Any]], limit: int) -> Dict[str, Any]:
+    """``{items, omitted}``: the first ``limit`` candidates in the list's order (a selection, ADR 0007) and how many
+    further candidates were not listed."""
+    return {"items": items[:limit], "omitted": max(0, len(items) - limit)}
+
+
 def _entities_of_note(nb: Any, note_id: Optional[str]) -> List[str]:
     if not note_id:
         return []
@@ -160,7 +166,7 @@ def open_loops(nb: Any, limit: int = 20, since: Optional[str] = None, *, now: Op
                       **loop_age(r["occurred_at"], now), "note_ids": [r["note_id"]],
                       "entity_ids": _entities_of_note(nb, r["note_id"])})
     items.sort(key=lambda it: (0 if it["rule"] == "task_mentioned_repeatedly" else 1, it["opened_at"]))
-    return {"items": _fresh(nb, items)[:limit]}
+    return _selected(_fresh(nb, items), limit)
 
 
 def contradictions(nb: Any, limit: int = 20, since: Optional[str] = None) -> Dict[str, Any]:
@@ -192,7 +198,7 @@ def contradictions(nb: Any, limit: int = 20, since: Optional[str] = None) -> Dic
                           "text": " / ".join(_claim_line(c) for c in claims),
                           "note_ids": sorted({c["note_id"] for c in claims if c["note_id"]}),
                           "entity_ids": sorted({nb.store.canonical(c["subject_id"]) for c in claims})})
-    return {"items": _fresh(nb, items)[:limit]}
+    return _selected(_fresh(nb, items), limit)
 
 
 def _claim_line(c: Dict[str, Any]) -> str:
@@ -243,7 +249,7 @@ def resurface(nb: Any, limit: int = 20, since: Optional[str] = None, *, now: Opt
                           "last_seen": prev[0], "silent_days": _days(prev[0], recent_from),
                           "note_ids": (prev[1] or "").split(",")[-3:], "entity_ids": []})
     items.sort(key=lambda it: -it["silent_days"])
-    return {"items": _fresh(nb, items)[:limit]}
+    return _selected(_fresh(nb, items), limit)
 
 
 def anniversary_rows(nb: Any, limit: int = 20, since: Optional[str] = None, *, now: Optional[str] = None
@@ -265,18 +271,20 @@ def anniversary_rows(nb: Any, limit: int = 20, since: Optional[str] = None, *, n
     for r in nb.store.q(base + " AND substr(occurred_at,9,2)=? AND substr(occurred_at,1,7)<? AND occurred_at>=?"
                         " AND substr(occurred_at,6,5)!=? ORDER BY occurred_at DESC", [*params, d, ym, year_ago, md]):
         out.append((r, "same_day_previous_month"))
-    return out[: clamp_limit(limit, 20, 200)]
+    return out[: clamp_limit(limit, 20, 200)]  # a selection, newest first: anniversaries() counts what it leaves
 
 
 def anniversaries(nb: Any, limit: int = 20, since: Optional[str] = None, *, now: Optional[str] = None
                   ) -> Dict[str, Any]:
     now_n = _now(now)
     items = []
-    for r, rule in anniversary_rows(nb, limit, since, now=now_n):
+    every = anniversary_rows(nb, 200, since, now=now_n)
+    limit = clamp_limit(limit, 20, 200)
+    for r, rule in every:
         if date_is_approximate(r["source_json"]):
             continue  # a commit or file date has no anniversary
         ref = shapes.note_ref(r)
         items.append({"rule": rule, "kind": "note", **ref, "text": ref["title"] or ref["excerpt"],
                       "years_ago": int(now_n[:4]) - int(r["occurred_at"][:4]),
                       "note_ids": [r["note_id"]], "entity_ids": _entities_of_note(nb, r["note_id"])})
-    return {"items": _fresh(nb, items)}
+    return _selected(_fresh(nb, items), limit)

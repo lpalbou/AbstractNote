@@ -149,4 +149,13 @@ def stats(nb: Any, *, now: Optional[str] = None) -> Dict[str, Any]:
                        "duplicate": status.get("duplicate", 0)},
         "growth_monthly": _growth(q),
         "quiet_entities": quiet,
+        # ADR 0007: the three lists above are selections (most notes first); what they leave out is counted
+        "omitted": {
+            "top_entities": max(0, n("SELECT COUNT(*) FROM entities WHERE merged_into IS NULL AND note_count>0")
+                                - len(top)),
+            "claims_by_predicate": max(0, n("SELECT COUNT(DISTINCT predicate) FROM claims") - len(predicates)),
+            "quiet_entities": max(0, int(q("SELECT COUNT(*) FROM entities WHERE merged_into IS NULL AND note_count>=?"
+                                           " AND last_seen IS NOT NULL AND julianday(?) - julianday(last_seen) >= ?",
+                                           (QUIET_MIN_NOTES, now_n, SILENT_DAYS))[0][0] or 0) - len(quiet)),
+        },
     }

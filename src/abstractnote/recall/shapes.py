@@ -10,7 +10,10 @@ EXCERPT_CHARS = 280
 
 
 def excerpt(text: Optional[str], limit: int = EXCERPT_CHARS) -> str:
-    """A list excerpt of a note body (the full text is always available from the note itself)."""
+    """A list excerpt of a note body (the full text is always available from the note itself).
+
+    #[WARNING:TRUNCATION] a bounded preview (root ADR-0026 "hierarchical views", ADR 0007): a cut text always ends
+    with the "…" marker, and every shape that carries an excerpt carries the id that opens the whole text."""
     t = " ".join(str(text or "").split())
     return t if len(t) <= limit else t[: limit - 1].rstrip() + "…"
 

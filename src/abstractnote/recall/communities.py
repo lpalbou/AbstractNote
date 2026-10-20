@@ -436,6 +436,8 @@ def pending(nb: Any, limit: int = PENDING_LIMIT, exclude: Optional[Iterable[str]
             "previous_label": r["label"], "previous_summary": r["summary"], "top_entities": tops,
             "claims": [{"claim_id": cr["claim_id"], "text": claim_text(nb, cr)} for cr in claims[:PENDING_CLAIMS]],
             "excerpts": [shapes.note_ref(n) for n in notes[:PENDING_EXCERPTS]],
+            # a selection (the strongest statements, the notes naming the most members), recorded (ADR 0007)
+            "omitted": {"claims": max(0, len(claims) - PENDING_CLAIMS), "excerpts": max(0, len(notes) - PENDING_EXCERPTS)},
         })
     return {"count": len(items), "items": items, "waiting": len(waiting), "limit_applied": limit_applied}
 

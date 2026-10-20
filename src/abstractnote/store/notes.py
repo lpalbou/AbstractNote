@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -57,12 +58,32 @@ def decode_cursor(cursor: Optional[str]) -> Optional[List[Any]]:
     return value
 
 
-def clamp_limit(limit: Any, default: int = 50, maximum: int = 500) -> int:
+_limits_log = logging.getLogger("abstractnote.limits")
+
+
+def clamp_note(limit: Any, default: int = 50, maximum: int = 500) -> Tuple[int, Optional[str]]:
+    """``(applied, sentence)``: the limit a read applies (1..``maximum``; ``default`` when none is given) and, when
+    the caller's request was moved into that range, the sentence that says so (None otherwise). ADR 0007: a clamp
+    of a caller's request is answered, never silent; it is also logged on ``abstractnote.limits`` with the
+    function that clamped."""
     try:
         n = int(limit) if limit is not None else default
     except (TypeError, ValueError):
         raise ValueError("The limit must be a whole number.") from None
-    return max(1, min(maximum, n))
+    applied = max(1, min(maximum, n))
+    if applied == n:
+        return applied, None
+    import sys
+
+    caller = sys._getframe(2 if sys._getframe(1).f_code.co_name == "clamp_limit" else 1).f_code
+    where = f"{caller.co_filename.rsplit('/', 1)[-1]}:{caller.co_name}"
+    _limits_log.warning("%s: the limit %d is outside 1..%d; %d was applied", where, n, maximum, applied)
+    return applied, f"The limit {n} is outside 1 to {maximum}; {applied} was applied."
+
+
+def clamp_limit(limit: Any, default: int = 50, maximum: int = 500) -> int:
+    """The limit a read applies (see :func:`clamp_note`; a clamp is logged with its caller)."""
+    return clamp_note(limit, default, maximum)[0]
 
 
 def entity_text(name: str, aliases: Sequence[str], summary: Optional[str]) -> str:
@@ -81,7 +102,13 @@ def note_vector_text(title: Optional[str], text: str, attachment_texts: Sequence
     searchable through FTS)."""
     parts = [p for p in [title or "", text or "", *attachment_texts] if p]
     joined = "\n".join(parts)
-    return joined[:budget]  # embedder input bound; the stored note is never cut
+    if len(joined) <= budget:
+        return joined
+    # #[WARNING:TRUNCATION] the embedder's input bound (NOTE_EMBED_BUDGET): the search vector reads the first
+    # ``budget`` characters; the stored note is never cut and its whole text stays searchable by words (FTS)
+    _limits_log.warning("note vector: the text has %d characters; the vector reads the first %d (NOTE_EMBED_BUDGET);"
+                        " the whole text stays stored and searchable by words", len(joined), budget)
+    return joined[:budget]
 
 
 #: Topics a note keeps from processing: the first the model lists (eval2 D13); a user revision is not capped.
@@ -186,7 +213,8 @@ class NoteStore:
             out["text"] = r["text"]
         else:
             text = r["text"] or ""
-            out["excerpt"] = text[:280] + ("…" if len(text) > 280 else "")  # excerpt for lists; full text via get
+            # #[WARNING:TRUNCATION] a list preview with its "…" marker; the full text comes with the note (full=True)
+            out["excerpt"] = text[:280] + ("…" if len(text) > 280 else "")
         return out
 
     def insert_note(self, conn: sqlite3.Connection, row: Dict[str, Any]) -> None:
@@ -557,7 +585,7 @@ class NoteStore:
         since_n = ids.optional_time(since, field="since")
         until_n = ids.optional_time(until, field="until")
         limit = clamp_limit(limit, 200, 2000)
-        depth = max(1, min(3, int(depth or 1)))
+        depth, _ = clamp_note(depth or 1, 1, 3)  # a clamp is logged (ADR 0007)
         bound = at_n
         if until_n and (bound is None or until_n < bound):
             bound = until_n
@@ -629,9 +657,15 @@ class NoteStore:
             nodes = {k: v for k, v in nodes.items() if k in touched or (
                 (not since_n or (v["last_seen"] or "") >= since_n) and (not until_n or (v["first_seen"] or "") <= until_n))}
 
-        ranked = sorted(nodes.values(), key=lambda r: (-(r["note_count"] or 0), r["entity_id"]))[:limit]
+        # a selection (the most mentioned first), recorded (ADR 0007): ``omitted`` counts the nodes past ``limit``
+        # and the edges that touch them
+        ranked = sorted(nodes.values(), key=lambda r: (-(r["note_count"] or 0), r["entity_id"]))
+        omitted = {"nodes": max(0, len(ranked) - limit), "edges": 0}
+        ranked = ranked[:limit]
         keep_ids = {r["entity_id"] for r in ranked}
-        edge_list = [e for e in edge_list if e["source"] in keep_ids and e["target"] in keep_ids]
+        kept_edges = [e for e in edge_list if e["source"] in keep_ids and e["target"] in keep_ids]
+        omitted["edges"] = len(edge_list) - len(kept_edges)
+        edge_list = kept_edges
         out_nodes = []
         for r in ranked:
             summary = r["summary"]
@@ -646,7 +680,8 @@ class NoteStore:
         for e in edge_list:
             e.pop("claim_ids", None)
         edge_list.sort(key=lambda e: (e["source"], e["target"], e["predicate"]))
-        out: Dict[str, Any] = {"as_of": at_n or ids.utc_now(), "nodes": out_nodes, "edges": edge_list}
+        out: Dict[str, Any] = {"as_of": at_n or ids.utc_now(), "nodes": out_nodes, "edges": edge_list,
+                               "omitted": omitted}
         if arch:
             out["as_received"] = arch.at
         return out
@@ -1329,6 +1364,9 @@ class _OpContext:
             have = {r[0] for r in self.c.execute("SELECT topic FROM note_topics WHERE note_id=? AND"
                                                  " assigned_by='revision'", (note_id,)).fetchall()}
             if len(have) >= TOPICS_PER_NOTE and ids.canonical_name(p["topic"]) not in have:
+                # a selection (the model lists the main ones first), recorded (ADR 0007): the result's
+                # topics_not_assigned, the revision's warnings and its summary say which were not kept
+                self.stats.setdefault("topics_not_assigned", []).append(p["topic"])
                 return
         self.s.assign_topic(self.c, note_id, p["topic"], by="revision", revision_id=self.rid, at=self.at)
 
@@ -1415,6 +1453,30 @@ class _OpContext:
             self.s.refresh_topic(self.c, topic)
 
     # --- end of revision
+    def _record_topics_not_assigned(self) -> None:
+        """Say which of the model's topics the note did not keep (TOPICS_PER_NOTE): a warning and a sentence added
+        to the revision once (a rebuild replays the same ops and finds them there)."""
+        topics = list(dict.fromkeys(self.stats.get("topics_not_assigned") or []))
+        if not topics:
+            return
+        self.stats["topics_not_assigned"] = topics
+        names = ", ".join(topics)
+        warning = (f"topics_not_assigned: a note keeps the first {TOPICS_PER_NOTE} topics from processing; not"
+                   f" assigned: {names}.")
+        sentence = f"Topics not kept (a note keeps {TOPICS_PER_NOTE}): {names}."
+        row = self.c.execute("SELECT summary, warnings_json FROM revisions WHERE revision_id=?", (self.rid,)).fetchone()
+        if row is None:
+            return
+        warnings = list(_uj(row["warnings_json"], []) or [])
+        summary = str(row["summary"] or "")
+        if warning not in warnings:
+            warnings.append(warning)
+        if sentence not in summary:
+            summary = f"{summary.rstrip()} {sentence}".strip()
+        self.c.execute("UPDATE revisions SET summary=?, warnings_json=? WHERE revision_id=?",
+                       (summary, json.dumps(warnings), self.rid))
+        _limits_log.warning("revision %s, note %s: %s", self.rid, self.note_id, warning)
+
     def finish(self) -> None:
         if self.dirty_relation_entities:
             self.s.refresh_relations_for(self.c, self.dirty_relation_entities)
@@ -1435,6 +1497,7 @@ class _OpContext:
                            (key, eid))
             self.s.refresh_entity_fts(self.c, eid)
         self.stats["touched_entities"] = sorted(stat_targets)
+        self._record_topics_not_assigned()
         if self.retro:
             retro = sorted({self.s.canonical(e, self.c) for e in self.retro})
             self.stats["retro_entities"] = retro

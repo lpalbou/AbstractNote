@@ -24,6 +24,7 @@ from .. import ids
 LEASE_S = 15 * 60
 RETRY_BACKOFF_S = (60, 10 * 60, 60 * 60)
 MAX_FAILURES = 3
+LEASE_MAX_ITEMS = 100   # notes one lease takes at most (the processor's max_items is 1..200 over several leases)
 PRIORITY_BULK, PRIORITY_NORMAL, PRIORITY_HIGH, PRIORITY_URGENT = 0, 1, 2, 3
 STOPPED_ERROR = "Processing stopped before it finished."
 ERRORS_SHOWN = 3  # recent causes per failed note in the queue summary
@@ -54,7 +55,10 @@ class Queue:
         worker = str(worker_id or "").strip()
         if not worker:
             raise ValueError("A worker id is needed to take notes from the queue.")
-        n = max(1, min(100, int(max_items or 1)))
+        from .notes import clamp_note
+
+        # ADR 0007: a request above 100 notes is answered (limit_applied) and logged, never silently cut
+        n, _ = clamp_note(max_items or 1, 1, LEASE_MAX_ITEMS)
         now = now or ids.utc_now()
         items: List[Dict[str, Any]] = []
         with self.store.tx() as c:
@@ -76,7 +80,7 @@ class Queue:
                           (r["note_id"],))
                 items.append({"note_id": r["note_id"], "priority": r["priority"], "attempts": r["attempts"] + 1,
                               "lease_until": until})
-        return {"items": items}
+        return {"items": items, "limit_applied": n}
 
     def _fail(self, c: Any, note_id: str, failures: int, error: str, now: str) -> Dict[str, Any]:
         row = c.execute("SELECT attempts FROM queue WHERE note_id=?", (note_id,)).fetchone()

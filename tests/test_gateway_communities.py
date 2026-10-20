@@ -55,7 +55,8 @@ def test_stats_over_http(gw):
     body = c.get("/api/gateway/note/stats", headers=h).json()
     assert set(body) == {"generated_at", "span", "totals", "activity_weekly", "entities_by_kind", "top_entities",
                          "claims_by_predicate", "tasks", "insights_by_kind", "communities", "processing",
-                         "growth_monthly", "quiet_entities"}
+                         "growth_monthly", "quiet_entities", "omitted"}
+    assert body["omitted"] == {"top_entities": 0, "claims_by_predicate": 0, "quiet_entities": 0}
     assert body["totals"]["notes"] == 5 and body["tasks"]["open"] == 1
     assert c.get("/api/gateway/note/stats", headers=gw["bob"]).json()["totals"]["notes"] == 0
     assert c.get("/api/gateway/note/stats").status_code == 401

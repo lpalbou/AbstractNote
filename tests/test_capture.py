@@ -125,7 +125,7 @@ def test_note_file_sets_kind_topics_and_priority(nb):
     r = nb.capture("Pareto due Friday", occurred_at="2026-10-19T09:00:00Z")
     out = nb.file_note(r.note_id, title="Pareto", kind="task", topics=["#LUT", "Release work", "lut"],
                        urgency="urgent", language="en", one_line="Send the Pareto by Friday.")
-    assert out == {"note_id": r.note_id, "priority": 3, "status": "queued"}
+    assert out == {"note_id": r.note_id, "priority": 3, "status": "queued", "topics_not_assigned": []}
     note = nb.note(r.note_id)
     assert note["topics"] == ["lut", "release_work"] and note["kind"] == "task"  # canonical topic names (eval2 D13)
     assert nb.queue.item(r.note_id)["priority"] == 3

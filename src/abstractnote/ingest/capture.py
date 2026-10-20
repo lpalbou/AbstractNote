@@ -10,6 +10,7 @@ nothing. ``file_note`` stores the quick-filing answer.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Dict, List, Optional, Sequence
 
 from pydantic import ValidationError
@@ -27,6 +28,8 @@ NEAR_DUPLICATE_COSINE = 0.92  # data-model.md: near-duplicate notes are linked w
 SIMILAR_MIN_COSINE = 0.35     # floor for the "similar notes" list returned to the filing step
 SIMILAR_LIMIT = 5
 MAX_FILING_TOPICS = 4
+
+_log = logging.getLogger("abstractnote.capture")
 
 
 def _source(source: Optional[Dict[str, Any]], default_client: str, account: Optional[str]) -> Dict[str, Any]:
@@ -257,7 +260,13 @@ def file_note(nb: Any, note_id: str, *, title: Optional[str] = None, kind: Optio
         t = normalize_topic(tpc)
         if t and t not in clean_topics:
             clean_topics.append(t)
+    # a selection (the filing model lists the main topics first), recorded (ADR 0007): the topics beyond
+    # MAX_FILING_TOPICS are named in the answer (topics_not_assigned) and logged, never dropped silently
+    not_assigned = clean_topics[MAX_FILING_TOPICS:]
     clean_topics = clean_topics[:MAX_FILING_TOPICS]
+    if not_assigned:
+        _log.warning("file_note %s: a note keeps %d filing topics; not assigned: %s", note_id, MAX_FILING_TOPICS,
+                     ", ".join(not_assigned))
     priority = row["priority"]
     if urgency is not None and not row["priority_explicit"]:
         priority = URGENCY_PRIORITY[urgency]
@@ -272,4 +281,4 @@ def file_note(nb: Any, note_id: str, *, title: Optional[str] = None, kind: Optio
         nb.queue.set_priority(c, note_id, priority)
         nb.store.refresh_note_fts(c, note_id)
     status = nb.store.note_row(note_id)["status"]
-    return {"note_id": note_id, "priority": priority, "status": status}
+    return {"note_id": note_id, "priority": priority, "status": status, "topics_not_assigned": not_assigned}

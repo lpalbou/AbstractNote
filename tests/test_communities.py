@@ -275,7 +275,8 @@ def test_pending_hands_the_model_the_top_entities_the_strongest_statements_and_n
     by_first = {i["top_entities"][0]["entity_id"]: i for i in got["items"]}
     item = [i for i in got["items"] if any(e["entity_id"] == "ex:project-lut" for e in i["top_entities"])][0]
     assert set(item) == {"index", "community_id", "size", "stale_label", "previous_label", "previous_summary",
-                         "top_entities", "claims", "excerpts"}
+                         "top_entities", "claims", "excerpts", "omitted"}
+    assert set(item["omitted"]) == {"claims", "excerpts"}
     assert {e["entity_id"] for e in item["top_entities"]} == set(A)
     assert set(item["top_entities"][0]) == {"entity_id", "name", "kind", "note_count", "summary"}
     assert len(item["claims"]) == 12 and all(c["text"] and c["claim_id"] for c in item["claims"])

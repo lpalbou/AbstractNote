@@ -288,6 +288,11 @@ def relation(nb: Any, a: str, b: str, since: Optional[str] = None, until: Option
 
 
 def neighbours(nb: Any, entity_ids: Sequence[str], at: Optional[str] = None, limit: int = 20) -> List[Dict[str, Any]]:
+    """The entities related to ``entity_ids`` (not among them), most linked first, at most ``limit`` (1..200)."""
+    return _ranked_neighbours(nb, entity_ids, at)[: clamp_limit(limit, 20, 200)]
+
+
+def _ranked_neighbours(nb: Any, entity_ids: Sequence[str], at: Optional[str] = None) -> List[Dict[str, Any]]:
     seen = {nb.store.canonical_at(e, at) for e in entity_ids}
     out: Dict[str, Dict[str, Any]] = {}
     for e in seen:
@@ -298,7 +303,7 @@ def neighbours(nb: Any, entity_ids: Sequence[str], at: Optional[str] = None, lim
                                                "count": 0})
             n["via"].append({"entity_id": e, "predicate": r["predicate"], "direction": r["direction"]})
             n["count"] += r["count"]
-    ranked = sorted(out.values(), key=lambda n: (-n["count"], n["entity_id"]))[: clamp_limit(limit, 20, 200)]
+    ranked = sorted(out.values(), key=lambda n: (-n["count"], n["entity_id"]))
     for n in ranked:
         row = nb.store.entity_row(n["entity_id"])
         n["kind"] = row["kind"] if row else None
@@ -324,7 +329,10 @@ class _Budget:
 
 
 def _excerpt(nb: Any, row: Any, match: Optional[str]) -> str:
-    """Words around the best match of ``match`` (an FTS5 query) in the note, else its start."""
+    """Words around the best match of ``match`` (an FTS5 query) in the note, else its start.
+
+    #[WARNING:TRUNCATION] a preview of :data:`EXCERPT_CHARS` with its "…" marker (root ADR-0026: hierarchical view);
+    the packet's notes carry their ``note_id`` and ``GET /note/notes/{id}`` / ``note_entity`` read the whole text."""
     if match:
         hit = nb.store.q1("SELECT snippet(notes_fts, -1, '', '', '…', ?) FROM notes_fts WHERE notes_fts MATCH ? AND"
                           " note_id=?", (EXCERPT_TOKENS, match, row["note_id"]))
@@ -352,8 +360,12 @@ def _entity_line(nb: Any, eid: str, at: Optional[str], focus: bool) -> Optional[
     summary = summary[0] if summary else (row["summary"] if at is None else None)
     stats = s.q1(f"SELECT MIN(at), MAX(at), COUNT(DISTINCT note_id) FROM entity_notes WHERE entity_id IN ({q}) AND"
                  " at<=?", [*members, ref])
-    aliases = distinct_names([a for m in members for a in s.aliases(m, at)], exclude=[row["name"]])[:3]
-    line = f"{row['name']} ({row['kind']}" + (f"; also {', '.join(aliases)}" if aliases else "") + ")"
+    every_alias = distinct_names([a for m in members for a in s.aliases(m, at)], exclude=[row["name"]])
+    # #[WARNING:TRUNCATION] a one-line card: 3 other names and "+n more", the summary as a "…" preview; the
+    # entity card (note_entity) has them all
+    aliases = every_alias[:3]
+    more = f" (+{len(every_alias) - 3} more)" if len(every_alias) > 3 else ""
+    line = f"{row['name']} ({row['kind']}" + (f"; also {', '.join(aliases)}{more}" if aliases else "") + ")"
     if summary:
         line += ": " + shapes.excerpt(summary, ENTITY_SUMMARY_CHARS)
     if stats and stats[0]:
@@ -388,7 +400,11 @@ def expand(nb: Any, note_ids: Any = None, entity_ids: Any = None, as_of: Optiona
     order given (best scored first) with an excerpt around the match of ``query`` (else of the focus
     entities' names), the other entities those notes mention (one line each), then for the focus
     entities only: claim timelines (earliest and latest kept), then-versus-now, the relations between
-    them and their neighbours; what is left goes to further notes. ``omitted`` counts what did not fit."""
+    them and their neighbours; what is left goes to further notes. ``omitted`` counts what was not shown, for
+    the budget or a per-part bound (ADR 0007: a selection says what it left out): ``notes``, ``entities`` (focus
+    entities beyond :data:`MAX_FOCUS_ENTITIES` included), ``claims`` (timeline and relation statements between the
+    earliest and the latest kept), ``turning_points``, ``relation_timelines`` (pairs beyond
+    :data:`MAX_RELATION_PAIRS`), ``neighbours`` (beyond :data:`MAX_NEIGHBOURS`) and ``then_now``."""
     as_of_n = ids.optional_time(as_of, field="as_of")
     total = max(MIN_BUDGET_CHARS, min(int(budget_chars or EXPAND_BUDGET_CHARS), MAX_BUDGET_CHARS))
     budget = _Budget(total)
@@ -399,7 +415,8 @@ def expand(nb: Any, note_ids: Any = None, entity_ids: Any = None, as_of: Optiona
             c = s.canonical_at(str(e), as_of_n)
             if c not in focus:
                 focus.append(c)
-    focus = focus[:MAX_FOCUS_ENTITIES]
+    focus_beyond = max(0, len(focus) - MAX_FOCUS_ENTITIES)
+    focus = focus[:MAX_FOCUS_ENTITIES]  # a selection: the first given (best first); counted in omitted.entities
     rows = []
     for nid in dict.fromkeys(str(n) for n in (note_ids or [])):
         r = s.note_row(nid)
@@ -414,7 +431,8 @@ def expand(nb: Any, note_ids: Any = None, entity_ids: Any = None, as_of: Optiona
     terms = fts_terms(query or "")
     names = " OR ".join(p for p in (_phrase(s.entity_row(e)["name"]) for e in focus) if p)
     match = terms or names or None
-    omitted = {"notes": 0, "entities": 0, "claims": 0}
+    omitted = {"notes": 0, "entities": focus_beyond, "claims": 0, "turning_points": 0, "relation_timelines": 0,
+               "neighbours": 0, "then_now": 0}
     out: Dict[str, Any] = {"as_of": as_of_n, "budget_chars": total, "used_chars": 0, "notes": [], "entities": [],
                            "claims_timeline": [], "relation_timelines": [], "neighbours": [], "then_now": [],
                            "omitted": omitted}
@@ -468,26 +486,33 @@ def expand(nb: Any, note_ids: Any = None, entity_ids: Any = None, as_of: Optiona
                 omitted["claims"] += 1
     for e in known_focus:
         tn = then_now(nb, e)
-        add("then_now", {"entity_id": e,
-                         "earliest": {k: (tn["earliest"] or {}).get(k) for k in ("at", "summary", "note_id")}
-                         if tn["earliest"] else None,
-                         "latest": {k: (tn["latest"] or {}).get(k) for k in ("at", "summary", "note_id")}
-                         if tn["latest"] else None,
-                         "turning_points": [{k: t.get(k) for k in ("at", "kind", "text", "note_id")}
-                                            for t in _ends(tn["turning_points"], MAX_TURNING_POINTS)]})
+        points = _ends(tn["turning_points"], MAX_TURNING_POINTS)
+        if add("then_now", {"entity_id": e,
+                            "earliest": {k: (tn["earliest"] or {}).get(k) for k in ("at", "summary", "note_id")}
+                            if tn["earliest"] else None,
+                            "latest": {k: (tn["latest"] or {}).get(k) for k in ("at", "summary", "note_id")}
+                            if tn["latest"] else None,
+                            "turning_points": [{k: t.get(k) for k in ("at", "kind", "text", "note_id")}
+                                               for t in points]}, "then_now"):
+            omitted["turning_points"] += len(tn["turning_points"]) - len(points)
     pairs = []
     for i, a in enumerate(sorted(known_focus)):
         for b in sorted(known_focus)[i + 1:]:
             if s.q1("SELECT 1 FROM relations WHERE (subject_id=? AND object_id=?) OR (subject_id=? AND object_id=?)",
                     (a, b, b, a)):
                 pairs.append((a, b))
+    omitted["relation_timelines"] += max(0, len(pairs) - MAX_RELATION_PAIRS)
     for a, b in pairs[:MAX_RELATION_PAIRS]:
         rel = relation(nb, a, b, until=as_of_n)
-        add("relation_timelines", {"a": a, "b": b, "claims": [_claim_brief(nb, c)
-                                                             for c in _ends(rel["claims"], MAX_TIMELINE_CLAIMS)]})
-    for n in neighbours(nb, known_focus, as_of_n, limit=MAX_NEIGHBOURS) if known_focus else []:
+        kept_claims = _ends(rel["claims"], MAX_TIMELINE_CLAIMS)
+        if add("relation_timelines", {"a": a, "b": b, "claims": [_claim_brief(nb, c) for c in kept_claims]},
+               "relation_timelines"):
+            omitted["claims"] += len(rel["claims"]) - len(kept_claims)
+    near = _ranked_neighbours(nb, known_focus, as_of_n) if known_focus else []
+    omitted["neighbours"] += max(0, len(near) - MAX_NEIGHBOURS)
+    for n in near[:MAX_NEIGHBOURS]:
         add("neighbours", {"entity_id": n["entity_id"], "name": n["name"], "kind": n["kind"], "count": n["count"],
-                           "via": sorted({v["predicate"] for v in n["via"]})})
+                           "via": sorted({v["predicate"] for v in n["via"]})}, "neighbours")
     for r in pending:  # what is left of the budget goes to further notes
         item = {**shapes.note_ref(r), "excerpt": _excerpt(nb, r, match)}
         add("notes", item, "notes")
@@ -495,8 +520,10 @@ def expand(nb: Any, note_ids: Any = None, entity_ids: Any = None, as_of: Optiona
     while _size(out) > total:  # the overhead estimate was short: drop from the least useful end
         for key in ("neighbours", "relation_timelines", "notes", "then_now", "claims_timeline", "entities"):
             if out[key]:
-                out[key].pop()
-                if key in ("notes", "entities"):
+                dropped = out[key].pop()
+                if key == "claims_timeline":  # a timeline left out with its statements
+                    omitted["claims"] += len(dropped.get("claims") or [])
+                else:
                     omitted[key] += 1
                 break
         else:

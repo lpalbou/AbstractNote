@@ -23,6 +23,7 @@ ledger holds the sections as an offloaded reference).
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -71,6 +72,7 @@ DURATION_SETTLE_S = 120        # a revision without a run found this long after 
 TEXT_DEFAULT_TTL_S = 30.0
 
 _PROCESSING = "applied_index=1 AND action IS NULL AND note_id IS NOT NULL"
+_log = logging.getLogger("abstractnote.processing")
 
 
 # --------------------------------------------------------------------------- small helpers
@@ -186,6 +188,7 @@ class GatewayPlane:
         self._finished: Dict[str, Dict[str, Any]] = {}
         self._durations: Dict[str, Optional[float]] = {}
         self._text_default: Tuple[float, Optional[Dict[str, Any]]] = (0.0, None)
+        self._scan_warned = 0.0
 
     # ---- ledger
 
@@ -212,7 +215,14 @@ class GatewayPlane:
 
         rows: List[Dict[str, Any]] = []
         for status in (RunStatus.RUNNING, RunStatus.WAITING):
-            rows.extend(self.run_store.list_run_index(status=status, limit=ACTIVE_SCAN_LIMIT))
+            got = list(self.run_store.list_run_index(status=status, limit=ACTIVE_SCAN_LIMIT))
+            if len(got) >= ACTIVE_SCAN_LIMIT and time.time() - self._scan_warned > 600:
+                # a scan bound, not a choice: say it (ADR 0007), at most every ten minutes (the page polls)
+                self._scan_warned = time.time()
+                _log.warning("processing: %d %s runs on this plane reach ACTIVE_SCAN_LIMIT; active note runs past"
+                             " the newest %d are not listed", len(got), getattr(status, "value", status),
+                             ACTIVE_SCAN_LIMIT)
+            rows.extend(got)
         runs: Dict[str, Dict[str, Any]] = {}
         for row in rows:
             flow = flow_of(row.get("workflow_id"))
