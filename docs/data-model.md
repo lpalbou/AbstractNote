@@ -175,11 +175,13 @@ Operations:
 | `claim.retract` | `{claim_id, reason, valid_until?}` (without `valid_until`, the window closes at the revision's time) |
 | `claim.reinforce` | `{claim_id, note_id}` (the same statement seen again) |
 | `claim.insert_before` | `{claim_id, before_claim_id, valid_until, reason, after_claim_id?, after_valid_until?}`: the claim just added by this revision comes from a note older than `before_claim_id`, the belief it gives way to; it is closed at `valid_until` (that belief's start) and superseded by it, which stays untouched; `after_claim_id`, the belief before it, now ends at `after_valid_until` (this claim's start) and is superseded by it (see Time) |
-| `topic.assign` | `{note_id, topic}` |
+| `topic.assign` | `{note_id, topic}` (stored under the topic's canonical name; processing keeps the first 3 per note) |
+| `topic.unassign` | `{note_id, topic}`: the note leaves the topic as stored (`abstractnote normalize-topics`) |
 | `task.open` / `task.close` / `task.drop` | `{task_id, text, due?, by_note_id?}` |
 | `entity.unmerge` | `{entity_id, from_id, reason}` (a user action; re-points the claims that came from `from_id`) |
 | `entity.mention` | `{entity_id, note_id}` (the note talks about the entity; drives `note_count`, `first_seen`, `last_seen`) |
 | `note.summary` | `{note_id, summary, kind, language}` |
+| `note.archive` | `{note_id, duplicate_of?, reason?}`: the note is archived (it leaves lists, search and the queue, keeps its links) and names the copy it duplicates (`abstractnote dedupe-sources`) |
 | `note.redate` | `{note_id, from, to, basis, quote?, reason?}`: the note moves in history time (`basis` `content` when its text states its date, `user` when a person sets it); its mentions, its topics' ranges, its queue place, and the statements and tasks it wrote with the old date move with it; `source.redated` keeps `{basis, from, to, revision_id}` |
 
 User actions (`close a task`, `retract a claim`, `undo a merge`, `confirm a match`) produce revisions with
@@ -201,6 +203,15 @@ claims; a supersession keeps the old claim with its window closed.
 A topic is a lightweight category (`#lut`, `#release`, `#family`). The filing step chooses from
 existing topics first and proposes new ones sparingly; the processor may refine. Topics are
 flat; entities carry the structure.
+
+A topic is stored under its canonical name (the entity rule: `Bug-Fix`, `bug fix` and `bug_fix` are
+`bug_fix`), and processing keeps the first 3 topics the model lists for a note (`TOPICS_PER_NOTE`; a
+user revision is not capped). The extraction packet lists the 50 most used topics. Topics stored before
+that keep their spelling until `abstractnote normalize-topics --notebook DIR [--dry-run]` gives each
+group one name in ONE revision (`topic.unassign` + `topic.assign`): the same canonical name, and a
+plural whose last word ends in `s` or `es` when the singular is itself a stored topic (`bug_fixes` ->
+`bug_fix`). That is spelling, not meaning: `gateway` and `abstractgateway` stay two topics. Search and
+note lists filter by a topic's given and canonical spelling.
 
 ## Task
 

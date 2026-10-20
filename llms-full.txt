@@ -736,13 +736,13 @@ Pinned response shapes (clients decode these strictly; absent lists mean empty):
 
 | Endpoint | Shape |
 |---|---|
-| `GET /note/changes` | `{cursor, notes: [NoteRef], entities: [{entity_id, name, display_name, kind, first_seen}], superseded_claims: [{claim_id, kind, text, superseded_by, note_id}], closed_loops: [{task_id, text, closed_at}], failed_notes: [{note_id, title, error}], insights: [Insight]}` |
+| `GET /note/changes` | `{cursor, notes: [NoteRef + {how}], entities: [{entity_id, name, display_name, kind, first_seen}], superseded_claims: [{claim_id, kind, text, superseded_by, note_id}], closed_loops: [{task_id, text, closed_at}], failed_notes: [{note_id, title, error}], insights: [Insight]}`; `notes` lists the notes received after the cursor (`how: "captured"`) and those whose latest processing revision was recorded after it (`how: "understood"`, so an import's notes show up again as they are understood), each note once, at its latest event |
 | `superseded_claims[]` | `kind` is `superseded` (a later note replaced the claim; `superseded_by` is the new claim's id) or `retracted` (withdrawn by a note or by you; `superseded_by` is null); `text` is the claim in plain words built from entity names and the predicate's label ("dana works at acme"), never ids or vocabulary terms |
 | `NoteRef` | `{note_id, title, kind, occurred_at, excerpt}` |
 | `Insight` | `{note_id, title, body, insight_kind, occurred_at, acked_at, evidence_note_ids, entity_ids}` |
 | `GET /note/overview` | `{recent: [NoteRef], entities: [{entity_id, name, display_name, kind, note_count, last_seen}], insights: [Insight], resurfacing: [NoteRef], activity: [{day, notes, revisions}]}` |
 | `GET /note/cues` | `{items: [{cue_id, text, kind, subject: {kind, id, title}, evidence_note_ids, entity_ids}]}` (cues are insight notes; `cue_id` is the note id; `evidence_note_ids` and `entity_ids` are the insight's own: the notes it rests on and the entities it is about) |
-| `GET /note/tasks` | `{items: [{task_id, note_id, text, status, due, closed_at, age_days, stale}]}` (`age_days`: whole days since the task opened, until it closed for a closed one; `stale`: still open after 60 days, `STALE_DAYS` in `abstractnote.recall.reflect`) |
+| `GET /note/tasks` | `{items: [{task_id, note_id, text, status, due, closed_at, age_days, stale}]}` (`age_days`: whole days since the task opened, until it closed for a closed one; `stale`: still open after 60 days, `STALE_DAYS` in `abstractnote.recall.reflect`, and never for a task whose note's date is approximate: a commit, a file date, a store update) |
 | `GET /note/search` | `{query, order, as_of, considered, notes: [{note_id, title, kind, occurred_at, excerpt, score, relevance, matched_by, matched_entities, matched_claims, entity_ids, topics, insight_kind}], entities: [{entity_id, name, display_name, kind, aliases, summary, note_count, first_seen, last_seen, first_at, latest_at, note_ids, score, matched_by, merged_into}], claims: [{claim_id, subject_id, subject_name, predicate, object_id, object_name, object_literal, certainty, stance, status, observed_at, valid_from, valid_until, evidence, note_id, note_ids, superseded_by, disputed_with, reinforced_count, score}], facets, warnings}` |
 | `GET /note/entities/{id}` | `{entity_id, name, display_name, kind, aliases, summary, summary_history, first_seen, last_seen, note_count, as_of, beliefs: [claim], relations: [{predicate, direction, other_id, other_name, count, first_seen, last_seen, active}], notes: [NoteRef], open_tasks, sparkline, community: {community_id, label, kind, size, stale_label} or null, merged_into, merged_from, resolved_from}` |
 | `GET /note/entities/{id}/timeline` | `{entity_id, since, until, items: [{type: note|claim|superseded|retracted, at, note?: NoteRef, claim?: claim}]}` (claims carry `evidence`, not a rendered sentence) |
@@ -753,7 +753,7 @@ Pinned response shapes (clients decode these strictly; absent lists mean empty):
 | `GET /note/entities/{id}?as_merged=true` | `{entity_id, kind, name, display_name, aliases, summary, first_seen, last_seen, note_count, merged_into, merged_at, merge: {revision_id, at, recorded_at, reason, summary, note_id} or null, notes: [NoteRef]}` (the entry's own name, aliases, summary and notes; `merge` is the revision that joined it into `merged_into`, null when it is not merged; `at` is refused with 400) |
 | `POST /note/entities/normalize` | `{dry_run, groups: [{into_id, from_ids, name, names, kinds, kind_suffix}], merges: [{from_id, into_id, revision_id}]}` (`kind_suffix` the entries of `from_ids` that are the name with its kind echoed in parentheses, `memory (software)` next to `Memory`, data-model.md "Entity"; `name` the shared canonical name, `names` and `kinds` each entry's surface form and kind, the surviving entry first; `merges` is empty on a dry run; a notebook opened without its embedding model answers the dry run and refuses the merge with 400) |
 | entity `name`, `display_name` | everywhere an entity appears (lists, cards, graph nodes, overview, changes), `name` is its one canonical name (lower case, whitespace and punctuation as one `_`: `laurent_philippe_albou`) and is what a client shows; `display_name` is the first way a note wrote it (`Laurent-Philippe Albou`); `aliases` list other names once per canonical name |
-| `GET /note/queue` | `{stats: {queued, processing, failed, by_priority, oldest_enqueued_at}, failed: [{note_id, title, occurred_at, last_error, failed_at, failures}], waiting: [{note_id, title, occurred_at, priority, state, attempts, next_attempt_at}], automations: Automations, processor: {max_items, interval}}` (`processor` is what the processor automation was created with while it exists, otherwise the `processor_schedule` setting it will be created with; `interval` is a duration such as `2m`) |
+| `GET /note/queue` | `{stats: {queued, processing, failed, by_priority, oldest_enqueued_at}, failed: [{note_id, title, occurred_at, last_error, failed_at, failures, errors: [{attempt, at, error}]}], waiting: [{note_id, title, occurred_at, priority, state, attempts, next_attempt_at}], automations: Automations, processor: {max_items, interval}}` (`processor` is what the processor automation was created with while it exists, otherwise the `processor_schedule` setting it will be created with; `interval` is a duration such as `2m`; `errors` are a failed note's last 3 logged failures, newest first, from the `queue_errors` log every failed attempt writes, an expired lease included, that nothing clears) |
 | `GET /note/processing` | `{now, processor: {id, state, paused, healthy, reason, target, schedule: {every, max_items}, last_run_at, last_status}, reflect: {id, state, paused, healthy, reason, target, last_run_at, last_status, last_ended_at?, insights_last_run, communities: {count, unlabelled, stale_label, computed_at}}, queue: {queued, processing, failed, done, by_priority: {"3","2","1","0"}, oldest_enqueued_at, eta_s}, pace: {per_minute_5m, per_minute_1h, series: [{t, understood}]}, active: [ActiveRun], recent: [{revision_id, note: NoteRef, at, recorded_at, summary, entities_created, claims_added, claims_superseded, duration_s}], failed: [{note_id, title, error, attempts, next_attempt_at, failed_at}], model: {provider, model, source, thinking_bulk: "off", thinking_live: "on"}, consolidation: object or null, consolidation_error?}`. Automation fields as `AutomationHealth` (null states without a server); `last_run_at`/`last_status` are the automation's latest occurrence (`running`, `waiting`, `completed`, `failed`: a run that ended with `success: false` is `failed`); `insights_last_run` the insights that run wrote. "Understood" = an applied processing revision (user actions are not counted) by `recorded_at`; `series` is 24 five-minute buckets on the UTC clock, the last one the current partial bucket (`t` its start); `per_minute_1h` = understood in the last 60 minutes / 60; `eta_s` = queued / that rate (null when nothing was understood in the last hour). `recent`: the last 20 processing revisions, newest recorded first, counts of what each created; `duration_s` the start-to-end seconds of the note-process run that applied it (confirmed by the run's own output), null when no such run is found (headless processing). `failed` lists at most 50 failed notes, newest first. `model`: the notebook's `filing_model` when set (`source: "notebook"`), else the server's text default (`source: "server"`), else nulls. `consolidation` is what the consolidation module answers, null while it is not installed; a failure inside it is logged and named in `consolidation_error` (the page still answers) |
 | `ActiveRun` | `{run_id, flow, status, started_at, parent_run_id, child_run_id?, note: NoteRef or null, step, step_started_at, sections_done, sections_total, thinking}`: a RUNNING or WAITING run of `note-drain`, `note-process`, `note-reflect`, `note-recall`, `note-mine` or `note-capture` in your plane, oldest first. `step` (`context`, `extract`, `resolve`, `link`, `apply`, `filing`, `search`, `synthesize` or null) is the node of the run's latest started effect, mapped by `abstractnote.recall.processing.STEP_OF_NODE` (a lease or an acknowledgement has none); a run whose latest effect is a subflow (a drain on its note-process, a recall on its mine, a capture processing inline) takes note, step, sections and thinking from that active child (`child_run_id`), so a drain and its note-process both appear. `sections_total` = the sections the note's context returned, `sections_done` = extractions completed since (null before the context is read); `thinking` = the run's `thinking` input (`on`/`off`), null for flows without one |
 | `POST /note/queue/{id}/priority` | `{note_id, priority}`; `404` for a note not in your notebook, `400` for a priority outside 0..3 or a note that is not waiting, `422` for a priority that is not a whole number or any other field |
@@ -805,10 +805,10 @@ Flows call them through `tool_calls` nodes; agents may list them in `allowed_too
 | `note_changes` | `since, limit` | the since-you-last-looked delta (same shape as `GET /note/changes`) |
 | `note_entity` | `entity_id, at?` | the entity card |
 | `note_timeline` | `since, until, granularity` | buckets |
-| `note_open_loops`, `note_contradictions`, `note_resurface`, `note_anniversaries` | `limit, since?` | candidate lists for the reflect flow (`{items}`, each with its `rule`, `note_ids` and `entity_ids`; an open loop also carries `age_days` and `stale`, as `GET /note/tasks` does; contradictions are only the disputed pairs a note's linking marked) |
-| `note_insight_write` | `kind, title, body, evidence_note_ids, entity_ids, run_id?` | `{note_id}` |
+| `note_open_loops`, `note_contradictions`, `note_resurface`, `note_anniversaries` | `limit, since?` | candidate lists for the reflect flow (`{items}`, each with its `rule`, `note_ids` and `entity_ids`; an open loop also carries `age_days` and `stale`, as `GET /note/tasks` does, counted from `last_mentioned_at` (its note or the latest note revisiting it), with `date_approximate`; contradictions are only the disputed pairs a note's linking marked; a candidate whose notes and entities already back an unacknowledged insight is left out) |
+| `note_insight_write` | `kind, title, body, evidence_note_ids, entity_ids, run_id?` | `{note_id, status: new|duplicate, warnings}`; `duplicate` returns the existing note: the same insight, or an unacknowledged one of the same kind with the same evidence notes and entities |
 | `note_communities_recompute` | `resolution?` | the counts of `POST /note/communities/recompute` |
-| `note_communities_pending` | `limit=5` (at most 20) | `{count, items: [{index, community_id, size, stale_label, previous_label, previous_summary, top_entities: [{entity_id, name, kind, note_count, summary}], claims: [{claim_id, text}], excerpts: [NoteRef]}]}`: communities without a label or with a stale one, largest first; `claims` are up to 8 active statements among the members (links between members first, then the most reinforced and the most certain), `excerpts` the 3 notes that mention the most members |
+| `note_communities_pending` | `limit=5` (at most 20) | `{count, items: [{index, community_id, size, stale_label, previous_label, previous_summary, top_entities: [{entity_id, name, kind, note_count, summary}], claims: [{claim_id, text}], excerpts: [NoteRef]}]}`: communities with a stale label first, then those without one, largest first within each; `claims` are up to 8 active statements among the members (links between members first, then the most reinforced and the most certain), `excerpts` the 3 notes that mention the most members |
 | `note_communities_label` | `items: [{community_id, label, summary, kind}]` | `{labelled, warnings}`: a label of more than 4 words keeps its first 4, an unknown kind becomes `other`, an unknown community or an empty label is left out, each with a warning; labelling clears `stale_label` |
 | `note_consolidation_begin` | | `{consolidation_id, started_at, planned_merges, pending: {stale_labels, unlabelled, stale_summaries}}`: opens a consolidation row (an earlier one still open is closed as `interrupted`) |
 | `note_consolidation_progress` | `stage, done, total, note?` | `{consolidation_id, stage, stage_done, stage_total, seconds_per_item, eta_s, elapsed_s}`: records the open consolidation's progress (`stage` one of the six stages; the first report of a stage starts its clock) |
@@ -891,6 +891,8 @@ abstractnote process --local --notebook DIR --provider P --model M [--max-items 
 abstractnote recover --notebook DIR                              # finish revisions a stopped process left half applied
 abstractnote rebuild --notebook DIR [--reembed]                  # replay revisions into fresh stores
 abstractnote normalize --notebook DIR [--dry-run] [--account NAME]  # merge entities that share a canonical name
+abstractnote normalize-topics --notebook DIR [--dry-run] [--account NAME]  # one spelling per topic, one revision
+abstractnote dedupe-sources --notebook DIR [--dry-run] [--account NAME]    # archive memory files imported twice
 abstractnote bundle [--out DIR]                                  # pack abstractnote@<version>.flow
 
 abstractnote import claude-sessions DIR --notebook DIR [--exclude-session ID ...] [--author NAME]
@@ -1433,11 +1435,13 @@ Operations:
 | `claim.retract` | `{claim_id, reason, valid_until?}` (without `valid_until`, the window closes at the revision's time) |
 | `claim.reinforce` | `{claim_id, note_id}` (the same statement seen again) |
 | `claim.insert_before` | `{claim_id, before_claim_id, valid_until, reason, after_claim_id?, after_valid_until?}`: the claim just added by this revision comes from a note older than `before_claim_id`, the belief it gives way to; it is closed at `valid_until` (that belief's start) and superseded by it, which stays untouched; `after_claim_id`, the belief before it, now ends at `after_valid_until` (this claim's start) and is superseded by it (see Time) |
-| `topic.assign` | `{note_id, topic}` |
+| `topic.assign` | `{note_id, topic}` (stored under the topic's canonical name; processing keeps the first 3 per note) |
+| `topic.unassign` | `{note_id, topic}`: the note leaves the topic as stored (`abstractnote normalize-topics`) |
 | `task.open` / `task.close` / `task.drop` | `{task_id, text, due?, by_note_id?}` |
 | `entity.unmerge` | `{entity_id, from_id, reason}` (a user action; re-points the claims that came from `from_id`) |
 | `entity.mention` | `{entity_id, note_id}` (the note talks about the entity; drives `note_count`, `first_seen`, `last_seen`) |
 | `note.summary` | `{note_id, summary, kind, language}` |
+| `note.archive` | `{note_id, duplicate_of?, reason?}`: the note is archived (it leaves lists, search and the queue, keeps its links) and names the copy it duplicates (`abstractnote dedupe-sources`) |
 | `note.redate` | `{note_id, from, to, basis, quote?, reason?}`: the note moves in history time (`basis` `content` when its text states its date, `user` when a person sets it); its mentions, its topics' ranges, its queue place, and the statements and tasks it wrote with the old date move with it; `source.redated` keeps `{basis, from, to, revision_id}` |
 
 User actions (`close a task`, `retract a claim`, `undo a merge`, `confirm a match`) produce revisions with
@@ -1459,6 +1463,15 @@ claims; a supersession keeps the old claim with its window closed.
 A topic is a lightweight category (`#lut`, `#release`, `#family`). The filing step chooses from
 existing topics first and proposes new ones sparingly; the processor may refine. Topics are
 flat; entities carry the structure.
+
+A topic is stored under its canonical name (the entity rule: `Bug-Fix`, `bug fix` and `bug_fix` are
+`bug_fix`), and processing keeps the first 3 topics the model lists for a note (`TOPICS_PER_NOTE`; a
+user revision is not capped). The extraction packet lists the 50 most used topics. Topics stored before
+that keep their spelling until `abstractnote normalize-topics --notebook DIR [--dry-run]` gives each
+group one name in ONE revision (`topic.unassign` + `topic.assign`): the same canonical name, and a
+plural whose last word ends in `s` or `es` when the singular is itself a stored topic (`bug_fixes` ->
+`bug_fix`). That is spelling, not meaning: `gateway` and `abstractgateway` stay two topics. Search and
+note lists filter by a topic's given and canonical spelling.
 
 ## Task
 
@@ -1906,7 +1919,7 @@ candidates; the model judges and writes:
 
 | Tool | Candidates |
 |---|---|
-| `note_open_loops` | open tasks older than N days, questions never answered |
+| `note_open_loops` | open tasks last mentioned more than 14 days ago (or revisited at least twice), questions never answered |
 | `note_contradictions` | disputed claim pairs only (a note's `contradicts` decision); a subject with several current objects of one predicate is never a candidate, since processing records no single-valued predicates |
 | `note_resurface` | entities and topics active before but silent for N days that relate to recent notes |
 | `note_anniversaries` | notes from the same day in previous months or years |
@@ -1915,10 +1928,22 @@ candidates; the model judges and writes:
 as an `insight` note (`warning`, `reminder`, `connection`, `contradiction`, `evolution`). The
 web app's Remember view and the watch's Today screen show unacknowledged insights.
 
+A cue is said once until you acknowledge it (`abstractnote.recall.reflect`, data check D5). A
+candidate whose provenance (the notes and entities an insight written from it would cite) already backs
+an unacknowledged insight is not offered again; `note_insight_write` returns that insight as a
+`duplicate` when another of the same kind about the same notes and entities is written, however it is
+worded. An age counts from the LAST mention of the subject: a task from its note or the latest note that
+revisits it. A date that is only an approximation (`date_basis` `git_added`, `bulk_commit`,
+`file_mtime`, `store_updated`, `last_record`, `front_matter_modified`; importers.md "Dates") never ages
+anything: such a task or question is not offered as old and is never `stale` (the tasks view too), an
+entity or topic whose last mention is so dated is not offered as gone quiet, and such a note has no
+anniversary. A run writes at most 3 insights of one kind (`REFLECT_PER_KIND`) and one per candidate.
+
 Then the flow refreshes the communities of the graph and names them (backlog 0030):
 `note_communities_recompute` runs Louvain over the entity graph without a model (data-model.md
-"Community"); `note_communities_pending` lists up to 5 communities without a label or with a stale
-one, each with its top entities, its strongest statements and 3 representative notes; when the list
+"Community"); `note_communities_pending` lists up to 5 communities with a stale label or without one
+(stale labels first, so every reflect names them again however many new groups wait; then the largest),
+each with its top entities, its strongest statements and 3 representative notes; when the list
 is empty the run ends there (no model call); otherwise ONE `llm_call` (`CommunityLabels` schema,
 thinking off, at most 2048 output tokens) names them all by index, a code node maps each index back to
 its community (an index the list does not have is dropped), and `note_communities_label` stores the
@@ -2095,7 +2120,7 @@ sections, each read whole).
 
 | Packet | Bound (`abstractnote.process.packets`) |
 |---|---|
-| Extraction orientation | names and kinds of at most 15 known entities (no claims), at most 40 topics (the note's own first), 5 similar notes by title and date, 8 open tasks, one line each |
+| Extraction orientation | names and kinds of at most 15 known entities (no claims), at most 50 topics (the note's own first, then the most used), 5 similar notes by title and date, 8 open tasks, one line each |
 | Candidates per mention | 3 (`note_resolve_candidates`) |
 | Candidate card | name, kind, up to 5 aliases, summary (at most 240 characters), last seen, and at most 3 active claims as one line each, those with a predicate the note also uses first |
 | Mentions per linking call | 15; the rest go to further calls for the same note, merged back |
@@ -2495,7 +2520,8 @@ Every `source.origin` also carries `date_basis`: how `occurred_at` was found.
 | `front_matter` | a Markdown front matter `date`, `created` or `created_at` | no |
 | `created_line` | a Markdown `Created:` field line anywhere in the file (`- **Created:** 2026-09-12`) | no |
 | `date_line` | a Markdown `Date:` field line in the first 40 lines (later ones date completion reports) | no |
-| `git_added` | the commit that first added the file, following moves (`git log --follow --diff-filter=A`) | yes |
+| `git_added` | the commit that first added the file, following moves (`git log --follow --diff-filter=A`); also when that commit is earlier than the file's `Created:` line | yes |
+| `bulk_commit` | the file was first added by a bulk import commit (10 or more files first added in the same second, `markdown.BULK_COMMIT_FILES`) and has no field line: the earlier of its modification time and that commit | yes |
 | `exif` | a photo's EXIF `DateTimeOriginal` (else `DateTime`; Pillow, when installed) | no |
 | `xmp` | an XMP creation date in an image or a PDF (`xmp:CreateDate`, `photoshop:DateCreated`, `exif:DateTimeOriginal`) | no |
 | `pdf_created` | a PDF's Info `/CreationDate` | no |
@@ -2510,11 +2536,26 @@ itself on a note whose date was approximate (`note.redate`), and `user` when a p
 basis is `client`, and an import from before date bases were recorded reads as `unrecorded` (approximate).
 
 The order for a memory file is `origin_session`, `front_matter_modified`, `git_added`,
-`file_mtime`; for a Markdown file `front_matter`, `created_line`, `date_line`, `git_added`,
-`file_mtime`. A field line is a labelled metadata line (an optional list marker and bold around
+`file_mtime`; for a Markdown file `front_matter`, `created_line` (or `git_added` when the first commit is
+earlier than that line), `date_line`, `git_added`, `file_mtime`. A commit that first added 10 or more files in
+the same second is an import of an existing tree, not the files' creation: its files without a field line get
+`bulk_commit` instead of `git_added`. An approximate date never makes anything old, quiet or stale in reflect
+(cognition.md "note-reflect"). A field line is a labelled metadata line (an optional list marker and bold around
 the label) whose value starts with an ISO date. A Markdown `Completed:` field line is kept as
 written in `source.origin.completed` (`2026-09-27`), ready to be stated as a fact; `N/A` is not
 kept. `added_as` is the path the file was first added under, when it has moved since.
+
+## Memory folders
+
+A Claude Code curated memory folder (`<project>/memory/*.md` of a `~/.claude/projects` folder: the project
+folder holds session transcripts or sits in `~/.claude/projects`) belongs to the `claude-sessions` importer.
+`abstractnote import markdown` on such a folder hands each file over (`claude_sessions.memory_draft`), so both
+importers give the same importer and source key (`memory:<project>:<file>:<content hash>`) and the second
+import of a file is a duplicate; `MEMORY.md`, the index, is never a note. Pairs written before that rule (a
+`markdown` note and a `claude-sessions` memory note with the same file name and content hash) are archived
+by `abstractnote dedupe-sources --notebook DIR [--dry-run] [--account NAME]`: the later received copy of
+each pair, in ONE revision of `note.archive` ops naming the copy kept (`duplicate_of`); a waiting copy leaves
+the queue. A second run finds nothing.
 
 ## Prompt notes
 

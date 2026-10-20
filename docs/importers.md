@@ -28,7 +28,8 @@ Every `source.origin` also carries `date_basis`: how `occurred_at` was found.
 | `front_matter` | a Markdown front matter `date`, `created` or `created_at` | no |
 | `created_line` | a Markdown `Created:` field line anywhere in the file (`- **Created:** 2026-09-12`) | no |
 | `date_line` | a Markdown `Date:` field line in the first 40 lines (later ones date completion reports) | no |
-| `git_added` | the commit that first added the file, following moves (`git log --follow --diff-filter=A`) | yes |
+| `git_added` | the commit that first added the file, following moves (`git log --follow --diff-filter=A`); also when that commit is earlier than the file's `Created:` line | yes |
+| `bulk_commit` | the file was first added by a bulk import commit (10 or more files first added in the same second, `markdown.BULK_COMMIT_FILES`) and has no field line: the earlier of its modification time and that commit | yes |
 | `exif` | a photo's EXIF `DateTimeOriginal` (else `DateTime`; Pillow, when installed) | no |
 | `xmp` | an XMP creation date in an image or a PDF (`xmp:CreateDate`, `photoshop:DateCreated`, `exif:DateTimeOriginal`) | no |
 | `pdf_created` | a PDF's Info `/CreationDate` | no |
@@ -43,11 +44,26 @@ itself on a note whose date was approximate (`note.redate`), and `user` when a p
 basis is `client`, and an import from before date bases were recorded reads as `unrecorded` (approximate).
 
 The order for a memory file is `origin_session`, `front_matter_modified`, `git_added`,
-`file_mtime`; for a Markdown file `front_matter`, `created_line`, `date_line`, `git_added`,
-`file_mtime`. A field line is a labelled metadata line (an optional list marker and bold around
+`file_mtime`; for a Markdown file `front_matter`, `created_line` (or `git_added` when the first commit is
+earlier than that line), `date_line`, `git_added`, `file_mtime`. A commit that first added 10 or more files in
+the same second is an import of an existing tree, not the files' creation: its files without a field line get
+`bulk_commit` instead of `git_added`. An approximate date never makes anything old, quiet or stale in reflect
+(cognition.md "note-reflect"). A field line is a labelled metadata line (an optional list marker and bold around
 the label) whose value starts with an ISO date. A Markdown `Completed:` field line is kept as
 written in `source.origin.completed` (`2026-09-27`), ready to be stated as a fact; `N/A` is not
 kept. `added_as` is the path the file was first added under, when it has moved since.
+
+## Memory folders
+
+A Claude Code curated memory folder (`<project>/memory/*.md` of a `~/.claude/projects` folder: the project
+folder holds session transcripts or sits in `~/.claude/projects`) belongs to the `claude-sessions` importer.
+`abstractnote import markdown` on such a folder hands each file over (`claude_sessions.memory_draft`), so both
+importers give the same importer and source key (`memory:<project>:<file>:<content hash>`) and the second
+import of a file is a duplicate; `MEMORY.md`, the index, is never a note. Pairs written before that rule (a
+`markdown` note and a `claude-sessions` memory note with the same file name and content hash) are archived
+by `abstractnote dedupe-sources --notebook DIR [--dry-run] [--account NAME]`: the later received copy of
+each pair, in ONE revision of `note.archive` ops naming the copy kept (`duplicate_of`); a waiting copy leaves
+the queue. A second run finds nothing.
 
 ## Prompt notes
 

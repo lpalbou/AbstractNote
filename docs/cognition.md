@@ -234,7 +234,7 @@ candidates; the model judges and writes:
 
 | Tool | Candidates |
 |---|---|
-| `note_open_loops` | open tasks older than N days, questions never answered |
+| `note_open_loops` | open tasks last mentioned more than 14 days ago (or revisited at least twice), questions never answered |
 | `note_contradictions` | disputed claim pairs only (a note's `contradicts` decision); a subject with several current objects of one predicate is never a candidate, since processing records no single-valued predicates |
 | `note_resurface` | entities and topics active before but silent for N days that relate to recent notes |
 | `note_anniversaries` | notes from the same day in previous months or years |
@@ -243,10 +243,22 @@ candidates; the model judges and writes:
 as an `insight` note (`warning`, `reminder`, `connection`, `contradiction`, `evolution`). The
 web app's Remember view and the watch's Today screen show unacknowledged insights.
 
+A cue is said once until you acknowledge it (`abstractnote.recall.reflect`, data check D5). A
+candidate whose provenance (the notes and entities an insight written from it would cite) already backs
+an unacknowledged insight is not offered again; `note_insight_write` returns that insight as a
+`duplicate` when another of the same kind about the same notes and entities is written, however it is
+worded. An age counts from the LAST mention of the subject: a task from its note or the latest note that
+revisits it. A date that is only an approximation (`date_basis` `git_added`, `bulk_commit`,
+`file_mtime`, `store_updated`, `last_record`, `front_matter_modified`; importers.md "Dates") never ages
+anything: such a task or question is not offered as old and is never `stale` (the tasks view too), an
+entity or topic whose last mention is so dated is not offered as gone quiet, and such a note has no
+anniversary. A run writes at most 3 insights of one kind (`REFLECT_PER_KIND`) and one per candidate.
+
 Then the flow refreshes the communities of the graph and names them (backlog 0030):
 `note_communities_recompute` runs Louvain over the entity graph without a model (data-model.md
-"Community"); `note_communities_pending` lists up to 5 communities without a label or with a stale
-one, each with its top entities, its strongest statements and 3 representative notes; when the list
+"Community"); `note_communities_pending` lists up to 5 communities with a stale label or without one
+(stale labels first, so every reflect names them again however many new groups wait; then the largest),
+each with its top entities, its strongest statements and 3 representative notes; when the list
 is empty the run ends there (no model call); otherwise ONE `llm_call` (`CommunityLabels` schema,
 thinking off, at most 2048 output tokens) names them all by index, a code node maps each index back to
 its community (an index the list does not have is dropped), and `note_communities_label` stores the
@@ -423,7 +435,7 @@ sections, each read whole).
 
 | Packet | Bound (`abstractnote.process.packets`) |
 |---|---|
-| Extraction orientation | names and kinds of at most 15 known entities (no claims), at most 40 topics (the note's own first), 5 similar notes by title and date, 8 open tasks, one line each |
+| Extraction orientation | names and kinds of at most 15 known entities (no claims), at most 50 topics (the note's own first, then the most used), 5 similar notes by title and date, 8 open tasks, one line each |
 | Candidates per mention | 3 (`note_resolve_candidates`) |
 | Candidate card | name, kind, up to 5 aliases, summary (at most 240 characters), last seen, and at most 3 active claims as one line each, those with a predicate the note also uses first |
 | Mentions per linking call | 15; the rest go to further calls for the same note, merged back |
