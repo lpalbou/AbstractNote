@@ -25,7 +25,7 @@ CLAIMS_PER_CANDIDATE = 3
 KNOWN_NAMES = 15
 SIMILAR_NOTES = 5
 OPEN_TASKS = 8
-TOPICS = 40
+TOPICS = 50  # the most used existing topics (eval2 D13), the note's own first
 #: Characters kept of a summary, an evidence excerpt or a role in a packet line.
 SUMMARY_CHARS = 240
 EVIDENCE_CHARS = 200

@@ -458,6 +458,14 @@ class Notebook:
             self._normalizing = False
         return out
 
+    def normalize_topics(self, account: Optional[str] = None, *, client: str = "cli", dry_run: bool = False
+                         ) -> Dict[str, Any]:
+        """Give every topic one spelling (its canonical name; plurals of a stored singular), in one revision
+        (``abstractnote normalize-topics``; :mod:`abstractnote.store.topics`)."""
+        from .topics import normalize_topics
+
+        return normalize_topics(self, account, client=client, dry_run=dry_run)
+
     def dedupe_sources(self, account: Optional[str] = None, *, client: str = "cli", dry_run: bool = False
                        ) -> Dict[str, Any]:
         """Archive the later copy of each memory file imported by two importers, in one revision

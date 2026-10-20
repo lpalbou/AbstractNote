@@ -84,6 +84,10 @@ def note_vector_text(title: Optional[str], text: str, attachment_texts: Sequence
     return joined[:budget]  # embedder input bound; the stored note is never cut
 
 
+#: Topics a note keeps from processing: the first the model lists (eval2 D13); a user revision is not capped.
+TOPICS_PER_NOTE = 3
+
+
 #: Meta entry written by :meth:`NoteStore.mark_retro` (retrospective insertions; data-model.md "Time").
 RETRO_META = "retro"
 RETRO_EVENTS_KEPT = 500
@@ -483,6 +487,11 @@ class NoteStore:
 
     def assign_topic(self, c: sqlite3.Connection, note_id: str, topic: str, *, by: str,
                      revision_id: Optional[str], at: str) -> bool:
+        """File the note under the topic's canonical name (:func:`abstractnote.ids.canonical_name`: ``Bug-Fix``,
+        ``bug fix`` and ``bug_fix`` are one topic)."""
+        topic = ids.canonical_name(topic)
+        if not topic:
+            return False
         cur = c.execute("INSERT OR IGNORE INTO note_topics(note_id, topic, assigned_by, revision_id, at)"
                         " VALUES (?,?,?,?,?)", (note_id, topic, by, revision_id, at))
         self.refresh_topic(c, topic)
@@ -686,8 +695,8 @@ class NoteStore:
             if status != "archived":
                 params.append(status)
         if topic:
-            sql += " AND n.note_id IN (SELECT note_id FROM note_topics WHERE topic=?)"
-            params.append(topic)
+            sql += " AND n.note_id IN (SELECT note_id FROM note_topics WHERE topic IN (?, ?))"
+            params += [topic, ids.canonical_name(topic)]
         if entity:
             members = self.merged_members(self.canonical(entity))
             sql += f" AND n.note_id IN (SELECT note_id FROM entity_notes WHERE entity_id IN ({','.join('?' for _ in members)}))"
@@ -1313,7 +1322,19 @@ class _OpContext:
     # --- topics, tasks, notes
     def op_topic_assign(self, p: Dict[str, Any]) -> None:
         note_id = p.get("note_id") or self.note_id
+        if not self.rev.get("action"):  # processing keeps the first TOPICS_PER_NOTE topics the model lists
+            have = {r[0] for r in self.c.execute("SELECT topic FROM note_topics WHERE note_id=? AND"
+                                                 " assigned_by='revision'", (note_id,)).fetchall()}
+            if len(have) >= TOPICS_PER_NOTE and ids.canonical_name(p["topic"]) not in have:
+                return
         self.s.assign_topic(self.c, note_id, p["topic"], by="revision", revision_id=self.rid, at=self.at)
+
+    def op_topic_unassign(self, p: Dict[str, Any]) -> None:
+        """Take a note out of a topic as it is stored (``abstractnote normalize-topics``)."""
+        note_id = p.get("note_id") or self.note_id
+        self.c.execute("DELETE FROM note_topics WHERE note_id=? AND topic=?", (note_id, p["topic"]))
+        self.s.refresh_topic(self.c, p["topic"])
+
 
     def op_task_open(self, p: Dict[str, Any]) -> None:
         cur = self.c.execute(

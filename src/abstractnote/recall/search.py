@@ -118,7 +118,8 @@ def search(nb: Any, query: str = "", *, since: Optional[str] = None, until: Opti
     since_n = ids.optional_time(since, field="since")
     until_n = ids.optional_time(until, field="until")
     as_of_n = ids.optional_time(as_of, field="as_of")
-    kinds_l, topics_l = _list(kinds), [t.lstrip("#").lower() for t in _list(topics)]
+    kinds_l = _list(kinds)
+    topics_l = sorted({f for t in _list(topics) for f in (t.lstrip("#").lower(), ids.canonical_name(t.lstrip("#")))})
     entity_l = _list(entities)
     store = nb.store
 

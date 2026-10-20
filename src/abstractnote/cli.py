@@ -98,6 +98,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="only list the groups that would be merged")
     p.add_argument("--account", help="who asked, recorded in each merge's source")
 
+    p = sub.add_parser("normalize-topics", help="give every topic one spelling (one revision)")
+    _common(p)
+    p.add_argument("--dry-run", action="store_true", help="only list the groups")
+    p.add_argument("--account", help="who asked, recorded in the revision's source")
+
     p = sub.add_parser("dedupe-sources", help="archive the second copy of memory files imported by two importers")
     _common(p)
     p.add_argument("--dry-run", action="store_true", help="only list the pairs")
@@ -249,6 +254,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                 out = nb.rebuild(reembed=args.reembed, embedder=_embedder(args))
         elif args.command == "normalize":
             out = _cmd_normalize(args)
+        elif args.command == "normalize-topics":
+            with _open(args) as nb:
+                out = nb.normalize_topics(args.account, client="cli", dry_run=args.dry_run)
         elif args.command == "dedupe-sources":
             with _open(args) as nb:
                 out = nb.dedupe_sources(args.account, client="cli", dry_run=args.dry_run)
