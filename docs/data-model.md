@@ -461,7 +461,9 @@ them all, and the as-received axis shows what the notebook believed before.
 
   When the new reading's statements (subject, predicate, object, certainty, stance, window), mentions, tasks and
   topics equal the old ones, nothing is written: the mark is consumed `unchanged` (a summary rewrite alone is
-  `summary_only`, still unchanged). Before any model call, the stage's no-call check compares the note's context
+  `summary_only`, still unchanged), and the current reading's dependency record becomes what that re-reading was
+  read against (its packet's record, `related` included), so a later wave from the same unchanged idea, or a note
+  that arrived before it, is settled without a call. Before any model call, the stage's no-call check compares the note's context
   looked up again with the dependency record (what was known at the note's date only, without the reading's own
   entities, statements and summaries): equal means the foundation did not change, `unchanged` with zero calls.
   The revision's id is deterministic from the revision it supersedes, so a replay is a no-op.

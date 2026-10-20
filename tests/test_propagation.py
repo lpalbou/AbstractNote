@@ -538,6 +538,69 @@ def test_the_packet_shows_what_changed_and_the_no_call_check_reads_related(nb):
     assert note_context(ToolContext(nb=nb), plain)["note"].get("understood_differently") is None
 
 
+def test_an_unchanged_propagated_re_reading_keeps_related_so_a_later_wave_needs_no_call(nb):
+    """INT2 seam (R6 x R2): a re-reading taken through a propagated mark that comes out ``unchanged`` writes no
+    revision, but its ``related`` record (Zorn as known on day 22) goes into the current reading's dependency
+    record: a later propagated mark from the same, unchanged Zorn is settled with no call, and one after Zorn
+    changes again (at an earlier date) is not. MUTATION: drop the keep_related write in apply_reinterpretation."""
+    w, n = zorn_world(nb)
+    reread_d20(w, n)
+    assert [m["reason_code"] for m in marks_of(nb, n["d22"]) if m["consumed_at"] is None] == ["propagated"]
+    rid = nb.store.current_interpretation(n["d22"])
+    assert not json.loads(nb.store.revision_row(rid)["context_json"]).get("related")
+    r = w.read("", day(22), [("m1", "the budget board", "org", n["board"], None)],
+               [stmt("m1", "ex:approved", "the budget")], note_id=n["d22"], reinterpret=True)
+    assert r["out"]["unchanged"] is True and r["out"]["revision_id"] is None
+    assert nb.store.current_interpretation(n["d22"]) == rid  # no revision of its own
+    stored = json.loads(nb.store.revision_row(rid)["context_json"])
+    assert stored["related"] == {n["zorn"]: prop.related_state(nb.store, n["zorn"], day(22))}
+    assert stored["looked_up"] is True  # the rest of the record is kept
+    with nb.store.tx() as c:
+        nb.store.mark_reinterpret(c, [{"note_id": n["d22"], "reason": "again", "reason_code": "propagated",
+                                       "impact": 0.3, "source_entity_id": n["zorn"], "hops": 1}], ids.utc_now())
+    assert cons.digest_unchanged(nb, n["d22"]) is True
+    w.read("Zorn signed with Quill.", day(18), [("m1", "Zorn", "org", n["zorn"], None)],
+           [stmt("m1", "ex:signed_with", "Quill")])
+    assert cons.digest_unchanged(nb, n["d22"]) is False
+
+
+def test_schema_3_to_4_adds_the_change_records_and_the_refile_rows_in_order(tmp_path):
+    """INT2 (R6 x W27): a schema-3 notebook (no ``idea_changes``, no propagated mark columns, no ``refile_runs``)
+    opens as schema 4 with R6's tables and flag and W27's repair table, and both are usable. MUTATION: drop
+    refile_runs from the DDL or _flag_propagation_record."""
+    import sqlite3
+
+    from abstractnote.store.schema import PROPAGATION_RECORD_META
+
+    path = tmp_path / "old"
+    nbk = Notebook.open(path)
+    try:
+        World(nbk).read("The budget board meets on Fridays.", day(15), [("m1", "the budget board", "org", None, None)],
+                        [stmt("m1", "ex:meets_on", "Fridays")])
+        db = nbk.store.path
+    finally:
+        nbk.close()
+    conn = sqlite3.connect(db)
+    with conn:
+        conn.execute("DROP TABLE idea_changes")
+        conn.execute("DROP TABLE refile_runs")
+        conn.execute("DELETE FROM meta WHERE key=?", (PROPAGATION_RECORD_META,))
+        conn.execute("UPDATE meta SET value='3' WHERE key='schema_version'")
+    conn.close()
+    nbk = Notebook.open(path)
+    try:
+        s = nbk.store
+        assert s.meta_get("schema_version") == 4
+        flag = s.meta_get(PROPAGATION_RECORD_META)
+        assert flag["schema"] == 4 and flag["since_seq"] >= 1
+        assert s.q1("SELECT COUNT(*) FROM idea_changes")[0] == 0
+        assert s.q1("SELECT COUNT(*) FROM refile_runs")[0] == 0
+        cols = {r[1] for r in s.q("PRAGMA table_info(reinterpret_marks)")}
+        assert {"reason_code", "source_entity_id", "impact", "hops"} <= cols
+    finally:
+        nbk.close()
+
+
 # ----------------------------------------------------------------------------- budget, bound, rebuild, recovery
 
 

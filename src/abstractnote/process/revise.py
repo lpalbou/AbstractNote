@@ -1489,7 +1489,11 @@ def apply_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any,
     packet_row = nb.store.q1("SELECT created_at FROM context_packets WHERE note_id=?", (note_id,))
     before = packet_row[0] if packet_row else None
     if plan["unchanged"]:
-        _consume(nb, note_id, pass_id, "unchanged", None, before)
+        # ADR 0008 §4a: an unchanged re-reading writes no revision, but it WAS read against this packet (a propagated
+        # one against the source ideas' state as known then, ``related``): the current reading's record becomes what
+        # it saw, so a later wave from the same, unchanged idea is settled with no call (_keep_related)
+        _consume(nb, note_id, pass_id, "unchanged", None, before,
+                 keep_related=(plan["previous_revision_id"], load_packet(nb, note_id)))
         if pass_id:
             nb.queue.release(note_id, "reinterpret", pass_id)
         return {"revision_id": None, "unchanged": True, "summary_only": plan["summary_only"],
@@ -1508,9 +1512,11 @@ def apply_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any,
 
 
 def _consume(nb: Any, note_id: str, pass_id: Optional[str], outcome: str, revision_id: Optional[str],
-             before: Optional[str]) -> None:
+             before: Optional[str], keep_related: Optional[Tuple[Optional[str], Optional[Dict[str, Any]]]] = None) -> None:
     s = nb.store
     with s.tx() as c:
+        if keep_related is not None:
+            _keep_related(c, s, *keep_related)
         if pass_id:
             s.consume_marks(note_id, pass_id, outcome, revision_id, c=c)
             return
@@ -1519,6 +1525,28 @@ def _consume(nb: Any, note_id: str, pass_id: Optional[str], outcome: str, revisi
                   " pass_id=COALESCE(pass_id, 'direct'), taken_at=COALESCE(taken_at, ?) WHERE note_id=? AND"
                   " consumed_at IS NULL AND (pass_id IS NOT NULL OR marked_at<=?)",
                   (now, outcome, revision_id, now, note_id, before or now))
+
+
+def _keep_related(c: Any, store: Any, revision_id: Optional[str], packet: Optional[Dict[str, Any]]) -> None:
+    """An unchanged re-reading writes no revision (R2), but it WAS read against the stored packet: the dependency
+    record of the note's current reading ``revision_id`` becomes what that re-reading saw (:func:`context_digest`
+    of the packet, its ``related`` included: ADR 0008 §4a, each source idea's state as known at the note's date),
+    so the no-call check of a later wave compares against the foundation the reading was last confirmed on. Only
+    ``related`` would not do: an earlier note that arrived since (a similar note the re-reading was shown) left the
+    old record stale, and every later wave paid a call again. A reading without a record (``context_unknown``,
+    before schema 3) stays without one."""
+    from ..store.notebook import context_digest
+
+    if not revision_id or packet is None:
+        return
+    row = c.execute("SELECT r.context_json, n.note_id FROM revisions r JOIN notes n ON n.note_id=r.note_id WHERE"
+                    " r.revision_id=?", (revision_id,)).fetchone()
+    stored = json.loads(row[0]) if row is not None and row[0] else None
+    if not isinstance(stored, dict):
+        return
+    record = context_digest(store, store.note_row(row[1]), packet)
+    c.execute("UPDATE revisions SET context_json=? WHERE revision_id=?",
+              (json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")), revision_id))
 
 
 def reinterpret_view(nb: Any, note_id: str, out: Dict[str, Any]) -> Dict[str, Any]:

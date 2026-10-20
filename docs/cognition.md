@@ -477,10 +477,12 @@ model call it runs the no-call check: the note's context is looked up again (the
 dependency record of its current interpretation, on what was known at the note's date (the entities, the
 statements and similar notes recorded on or before it, the summaries written for a date on or before it), leaving
 out what that reading itself wrote; equal: the note is `unchanged`, its mark is consumed and no model is called.
-Otherwise the note goes through `note-process` (filing is not repeated): its context leaves out its own previous
+Otherwise the note goes through `note-process` (filing is not repeated; a note without a kind is filed first): its context leaves out its own previous
 reading (its statements and tasks) and shows again what that reading had closed; the apply sees that the pass took
 the note's mark and builds a `note.reinterpret` revision (or records `unchanged` when the new reading's statements,
-mentions, tasks and topics equal the old ones; summaries alone do not count). A re-understanding marks only
+mentions, tasks and topics equal the old ones; summaries alone do not count; the current reading's dependency record
+then becomes what this re-reading saw, `related` included, so the next wave from the same unchanged idea needs no
+call). A re-understanding marks only
 notes after it in history order, so a pass is one forward sweep and ends; a second pass with no new earlier note
 has no mark to read and calls no model. A note read again three times in one UTC day waits for the next day
 (`REINTERPRET_PER_DAY`, skipped with that reason). A note that cannot be read again (the model fails) is skipped
