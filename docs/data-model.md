@@ -37,7 +37,8 @@ revision points back to the note(s) that caused it.
 | `text` | text | The note body as received (Markdown allowed). Never truncated. |
 | `text_norm` | text | Whitespace-normalised, lower-cased copy used for hashing and full-text search. |
 | `summary` | text | One to three sentences written by the processor. |
-| `occurred_at` | ISO 8601 UTC | When the note was made or the event happened. From the client clock, the importer (message timestamp, file date, EXIF), or an explicit value. |
+| `occurred_at` | ISO 8601 UTC | When the note was made or the event happened. From the client clock, the importer (message timestamp, file date, EXIF), the attachment's own metadata date for a capture that gives none, or an explicit value; moved only by a `note.redate` (see Time). |
+| `date_basis`, `date_approximate` | read only | How `occurred_at` was found (`GET /note/notes/{id}`): the latest redate's basis (`content`, `user`), else the importer's `source.origin.date_basis` (docs/importers.md), else `client` for a live note and `unrecorded` for an older import; `date_approximate` is true for a stand-in date (`file_mtime`, `git_added`, `bulk_commit`, `store_updated`, `last_record`, `origin_session`, `front_matter_modified`, `unrecorded`), the ones a client offers to "Set the date". |
 | `received_at` | ISO 8601 UTC | When AbstractNote stored it. |
 | `processed_at` | ISO 8601 UTC or null | When the last successful revision was applied. |
 | `source` | object | Provenance: `{client: web|watch|iphone|cli|agent|importer, importer?: claude-sessions|agora|markdown|files, origin: {...source-specific ids...}, author?: user id or agent name}`. |
@@ -128,7 +129,7 @@ graph.
 | `certainty` | `stated`, `probable`, `possible`, `reported`, `disputed` (tokens, not numbers) |
 | `stance` | `assert`, `revise`, `retract`: what the note does to earlier knowledge |
 | `observed_at` | the note's `occurred_at` |
-| `valid_from`, `valid_until` | the validity window; `valid_from` defaults to `observed_at` for state claims and is null for timeless facts; `valid_until` is set when a later note supersedes or retracts the claim, and equals `valid_from` when you retract it ("never true") |
+| `valid_from`, `valid_until` | the validity window; `valid_from` defaults to `observed_at` for state claims and is null for timeless facts or for a statement that stopped before its note was written (`valid_until` earlier than the note); `valid_until` is set when a later note supersedes or retracts the claim, when the claim is an earlier belief placed before a later one (`claim.insert_before`: the later one's start), and equals `valid_from` when you retract it ("never true"); it is never earlier than `valid_from` |
 | `status` | `active`, `superseded`, `retracted` |
 | `superseded_by` | the claim that replaced it |
 | `evidence` | the verbatim excerpt of the note that supports the claim |
@@ -173,11 +174,13 @@ Operations:
 | `claim.supersede` | `{claim_id, by_claim_id, reason, valid_until}` |
 | `claim.retract` | `{claim_id, reason, valid_until?}` (without `valid_until`, the window closes at the revision's time) |
 | `claim.reinforce` | `{claim_id, note_id}` (the same statement seen again) |
+| `claim.insert_before` | `{claim_id, before_claim_id, valid_until, reason, after_claim_id?, after_valid_until?}`: the claim just added by this revision comes from a note older than `before_claim_id`, the belief it gives way to; it is closed at `valid_until` (that belief's start) and superseded by it, which stays untouched; `after_claim_id`, the belief before it, now ends at `after_valid_until` (this claim's start) and is superseded by it (see Time) |
 | `topic.assign` | `{note_id, topic}` |
 | `task.open` / `task.close` / `task.drop` | `{task_id, text, due?, by_note_id?}` |
 | `entity.unmerge` | `{entity_id, from_id, reason}` (a user action; re-points the claims that came from `from_id`) |
 | `entity.mention` | `{entity_id, note_id}` (the note talks about the entity; drives `note_count`, `first_seen`, `last_seen`) |
 | `note.summary` | `{note_id, summary, kind, language}` |
+| `note.redate` | `{note_id, from, to, basis, quote?, reason?}`: the note moves in history time (`basis` `content` when its text states its date, `user` when a person sets it); its mentions, its topics' ranges, its queue place, and the statements and tasks it wrote with the old date move with it; `source.redated` keeps `{basis, from, to, revision_id}` |
 
 User actions (`close a task`, `retract a claim`, `undo a merge`, `confirm a match`) produce revisions with
 `source = {client, account}` and no note; they are the human side of an actionable graph. Through
@@ -203,7 +206,10 @@ flat; entities carry the structure.
 
 Open loops extracted from notes: `{task_id, note_id, text, status open|done|dropped, due?,
 closed_by_note_id?}`; `task_id` is `tk_<...>` deterministic from `(note_id, normalised text)`. A later note that reports the task done closes it with a `task.close` op,
-decided by the model during processing.
+decided by the model during processing, applied only when the linking quotes the note's own words that say it is
+done (`evidence`, a whole-word sequence of the note) and the note is not older than the task; otherwise the open task
+stays open and the note's task is its own (opened, and closed when reported done), with a warning. So no task closes
+before it opened.
 
 ## Insight
 
@@ -285,7 +291,60 @@ Rules:
   history stays truthful.
 - Explicit time references inside a note ("last Tuesday", "in 2024") are extracted as claims with
   literal dates when the model can resolve them from the note's own `occurred_at`; they never
-  move the note itself.
+  move the note itself. Only the date the text gives ITSELF can (below).
+
+### Retrospective insertion
+
+Notes and archives from earlier dates (and other projects that name known entities) keep arriving into a graph
+built from later ones, while live notes arrive too. History adapts; nothing is rewritten in place except windows:
+
+- **Beliefs in history order.** Supersession and contradiction are applied with regard to time. For a statement
+  `C_new` (its note's `occurred_at` = `t_new`) that the linking says supersedes an existing `C_old` (`observed_at`
+  = `t_old`), on the same resolved subject and predicate:
+  - `t_new >= t_old`: as always, `C_old` closes at `t_new` (`claim.supersede`, or `claim.retract` for a
+    `retract` stance).
+  - `t_new < t_old`: an older note never closes a later belief. `C_new` is inserted as the EARLIER belief
+    (`claim.add` + `claim.insert_before`): placed in its interval of the supersession lineage of `C_old` (the
+    claims linked to it by `superseded_by`, same subject and predicate, retracted ones left out), it ends at the
+    start of the next later belief and is superseded by it; the belief before it, if its window covered `t_new`,
+    now ends at `t_new` and is superseded by `C_new`. Out of order 2026, then 2022, then 2024: 2022 holds
+    [2022, 2024), 2024 holds [2024, 2026), 2026 is the active belief.
+  - `contradicts` with `t_new < t_old` is the earlier belief the same way, unless the model marked the statement
+    `disputed` and the two dates are at most 30 days apart: then it is a dispute (both kept, marked disputed).
+  - A window never ends before it starts: a closing date earlier than the closed claim's `valid_from` closes it
+    empty (at `valid_from`), in the builder (so the note index and AbstractMemory agree) and again in the
+    projection (for replays of earlier revisions); an extracted end before an extracted start is ignored.
+- **Tasks**: an older note cannot close a task opened later; a later note can (see Task).
+- **Entities**: `first_seen` moves back to the older note (it is the earliest mention); the graph as of T shows
+  the entity from then.
+- **Retrospective marks** (`meta.retro`, written in the projection transaction): a note that mentions an entity
+  already seen at a later date, a `claim.insert_before` (its subject, object and neighbours) or a `note.redate`
+  marks the entities: their summaries are stale (until a summary recorded after the mark is the current one, the
+  consolidation's refresh), their then-versus-now cards are dropped, `graph_version` is bumped and the event is
+  logged. `Notebook.retro_state()` reports `{graph_version, insertions, stale_summaries, retro_notes_since_communities,
+  communities_due}` (due after 20 retrospective notes since the communities were last computed);
+  `Notebook.after_retro_insert(entity_ids)` records one by hand. The revision result lists `retrospective` (the
+  marked entities) and `claims_inserted_before`.
+- **History order everywhere history is shown**: timelines, then-versus-now and relation timelines order by
+  `occurred_at`/`observed_at` and end a superseded belief at its `valid_until` (not when the closing revision was
+  applied); new entities are counted where they were first seen. `GET /note/changes` stays in system time.
+
+### Document dates
+
+A note's date can be a stand-in: a file's modification time, a commit, a session start, a store update. When the
+date basis is approximate (`date_approximate`), the extraction header says so and the model may give
+`document_date` `{iso, basis: "stated in the text", quote}`: the date the text gives itself (a dated letter, a
+report's date line). At apply time it is used only when the quote is the note's own words (a whole-word sequence),
+the date is not in the future and it differs from `occurred_at` by more than a day: the revision's first op is
+`note.redate {from, to, basis: "content", quote}`, and the revision, its statements (`observed_at`, `valid_from`)
+and its mentions carry the stated date; the basis becomes `content`. A live note (basis `client`) or a note with an
+exact basis (`record`, `message`, `front_matter`, `exif`, `pdf_created` ...) is never redated from its text.
+
+A person can set the date: `POST /note/notes/{id}/redate {occurred_at, reason}` is a user revision (`action
+note.redate`, source `{client, account}`) with one `note.redate` op, basis `user`. Its mentions, statements and
+tasks that carried the old date move in the note index; AbstractMemory keeps the statements' original
+`observed_at` and `valid_from` (its content is append-only), so a person's redate of an already-understood note is
+reflected in the note index and the graph views, and in the triple store only through later revisions.
 
 ## Identity and de-duplication
 
@@ -297,8 +356,10 @@ Rules:
 | Near-duplicate note | vector cosine over note embeddings, threshold 0.92 | kept as a distinct note, linked with `ex:revisits` to the earlier one: a revisit is a signal, not noise |
 | Same canonical name | `name_key` of the mention's name equal to a live entity's: deterministic normalisation (case, spacing, punctuation, NFKC), not an identity judgement | always the first candidate; a create of that name is filed under the existing entity at apply time (warning, `kind_conflict` when the kinds differ); older notebooks repaired by `normalize_entities` |
 | Entity | candidates from exact key match on names and aliases (`name_key`, `alias_key`), full-text on name and aliases, vector k-nearest on entity embeddings; the model decides `same`, `different`, `unsure` per mention and may propose a merge of two existing entities (`Gateway` versus `abstractgateway` is this level) | `entity.create`, `entity.alias`, `entity.merge` ops |
+| Model merge (guard) | a proposed merge is applied only when the two entities have the same kind, share a name or alias key, the merged entry has fewer than 5 notes and neither was merged earlier in the same note (no chains); structural checks, never a reading of the names | otherwise a `skos:closeMatch` claim from the entry to merge to the other: a review item ("kept for review"), confirmed by a person |
+| Values are not entities | a mention whose whole name is a bare number, a version (`0.9.0`, `v15`), a message or thread id (`c1234`, `dm#7`, `dm:a--b`), a link, an invite or hash token, or one word of the editable list `abstractnote/process/generic_words.txt` (`time`, `model`, `provider`, `triggers` ...): shape checks and an explicit list (operator ruling 2026-10-20), never a reading of meaning | never an entity: its statements keep it as a literal object (a statement whose subject it is is left out), with a warning |
 | Claim | same `(subject, predicate, object)` after resolution | `claim.reinforce` instead of a new claim |
-| Conflicting claim | same `(subject, predicate)` with a different object and the model marks the predicate single-valued, or the note's stance is `revise` or `retract` | `claim.supersede` or `claim.retract` with reason; history kept |
+| Conflicting claim | same `(subject, predicate)` with a different object and the model marks the predicate single-valued, or the note's stance is `revise` or `retract`; a `supersedes` or `contradicts` naming a statement on another resolved subject or predicate is refused (a new statement, with a warning) | `claim.supersede` or `claim.retract` with reason, or `claim.insert_before` when the note is older (Time); history kept |
 
 No regular-expression or keyword heuristics decide identity. Deterministic steps only produce
 candidates, exact-hash matches and the canonical name key (ADR 0004, amended).
@@ -324,7 +385,10 @@ closes the old assertion in place with `close_assertion(assertion_id, valid_unti
 AbstractMemory store method introduced for this purpose (it updates `valid_until` only when it is
 still open and leaves everything else untouched), and records a journal
 `ClosureRecord(kind="supersede")` so both `TripleQuery(active_at=...)` and ranked retrieval agree
-with the note index. AbstractMemory lowercases subjects, predicates and objects that are not
+with the note index. A `claim.insert_before` closes the OLDER copy the same way (never the later belief), and moves
+the window of the belief before it back with `ClaimStore.narrow_assertion` (`valid_until` only, earlier only, with
+its own closure record): AbstractMemory has no public method for an already-closed window yet, so AbstractNote
+writes that one column of its own triple store's table (a seam: an additive AbstractMemory method should replace it). AbstractMemory lowercases subjects, predicates and objects that are not
 literals; the note index keeps the original case, and every AbstractMemory query from AbstractNote
 passes `owner_id="abstractnote"`.
 

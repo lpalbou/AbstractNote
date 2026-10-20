@@ -92,7 +92,8 @@ flowchart TD
    mention, `reuse` (a candidate index), `create`, or `merge` (two candidate indexes); per
    claim, whether it `restates` an existing claim (reinforce), `refines` it (new claim, old stays
    active), `supersedes` it (close the old one) or `contradicts` it (both stay, marked disputed),
-   naming the existing claim by its `#` index in the packet; per task, open or close by index.
+   naming the existing claim by its `#` index in the packet; per task, open or close by index, quoting
+   the note's words that say it is done (`evidence`).
    Each part carries the claims whose subject is one of its mentions (the first part also the
    tasks and the open tasks they may close); claim, task and packet indexes stay those of the
    whole note, so the parts merge back into one Linking without renumbering. The schema uses
@@ -103,9 +104,17 @@ flowchart TD
    something new about. A missing summary is never a failed note: a created entity gets one
    built from its role in the note (or where it was seen) and a reused entity keeps its current
    summary, each with a warning in the revision.
-5. **Apply** (`note_apply_revision`): writes the revision ops to the index and the triple store in
-   one transaction per store, updates relations, topics, tasks, embeddings, and marks the note
-   `processed`. The response lists created and merged entities, claims added and superseded, and
+5. **Apply** (`note_apply_revision`): checks the decisions structurally, then writes the revision ops to the
+   index and the triple store in one transaction per store, updates relations, topics, tasks, embeddings, and
+   marks the note `processed`. The checks (data-model.md "Identity and de-duplication" and "Time"): a merge applies
+   only with the same kind, a shared name or alias key, fewer than 5 notes on the merged entry and one merge per
+   entry per note (else a close match for review); values (numbers, versions, ids, links, tokens, the generic
+   words list) are literals, never entities; `supersedes`/`contradicts` only on the same resolved subject and
+   predicate; time-aware placement: a note older than the statement it supersedes is inserted before it as the
+   earlier belief (`claim.insert_before`), never closing it; a task closes only with the note's own words and never
+   from an older note; a stated `document_date` redates a note whose date is approximate (`note.redate`); no window
+   ends before it starts. A note older than what is known about an entity marks it (stale summary, then-versus-now
+   dropped, `graph_version`) for the consolidation. The response lists created and merged entities, claims added and superseded, and
    any warnings (unknown predicates mapped to `ex:`, unresolved references, missing summaries).
 
 Large notes: `note_context` splits texts beyond the model's budget into sections; `note-process`
@@ -323,14 +332,16 @@ models from them and repairs invalid output. Python mirrors live in `abstractnot
              "stance": "assert|revise|retract", "evidence": "verbatim excerpt", "valid_from": "ISO or null", "valid_until": "ISO or null"}],
  "tasks": [{"text": "string", "status": "open|done", "due": "ISO or null"}],
  "time_refs": [{"text": "string", "iso": "ISO or null"}],
- "topics": ["string"]}
+ "topics": ["string"],
+ "document_date": {"iso": "ISO date", "basis": "stated in the text", "quote": "the exact words"} or null}
 ```
 
 Fields with a default may be left out by the model (the runtime fills the default): in
 Extraction `aliases` ([]), `object_is_literal` (false), `certainty` (stated), `stance` (assert),
-`valid_from`, `valid_until`, `due` and `iso` (null); in Linking `candidate` (null),
+`valid_from`, `valid_until`, `due`, `iso` and `document_date` (null; given only when the header says the note's
+date is approximate and the text states its own date); in Linking `candidate` (null),
 `merge_candidates` ([]), `name` (""), `kind` (null), `aliases` ([]), `reason` (""), `existing`
-(null) and `closes_open_task` (null). `claims` lists only the statements that relate to an
+(null), `closes_open_task` (null) and `evidence` ("": a close without it is not applied). `claims` lists only the statements that relate to an
 existing one (a statement left out is `new`) and `tasks` only those that close an open task.
 
 **Linking** (indexes refer to the candidate lists in the context packet; enumerations are JSON
@@ -342,7 +353,7 @@ Schema enums)
                "aliases": ["..."], "summary": "one sentence for create and unsure, and for a reused entity this note tells something new about; otherwise null (a missing one is a warning, never a failed note)", "reason": "short"}],
  "claims": [{"index": 0, "relation_to_existing": "new|restates|refines|supersedes|contradicts",
              "existing": 0, "reason": "short"}],
- "tasks": [{"index": 0, "closes_open_task": 0}],
+ "tasks": [{"index": 0, "closes_open_task": 0, "evidence": "the note's words that say it is done"}],
  "revision_summary": "one sentence"}
 ```
 

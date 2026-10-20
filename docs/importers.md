@@ -11,7 +11,7 @@ ids derive from the source key.
 | Claude Code sessions | `abstractnote import claude-sessions DIR` | human-typed prompt (the operator's words; the final assistant text of that turn is its outcome); one note per session summary (title, compaction and away summaries); one note per subagent run (its brief and its last report); one note per curated memory file | the record timestamp; a memory file: see [Dates](#dates) | `{session_id, uuid, prompt_id, cwd, git_branch, model, file, line, outcome, outcome_author}` |
 | Agora hub | `abstractnote import agora DB` | recorded decision (`store decision:*`), claim and work entry, resolved or answered thread (root plus replies), operator message | `created_at` (a store entry without a message: its `updated_at`) | `{message_id, channel, seq, sender, reply_to, status, hash, retracted_at?}` |
 | Markdown tree | `abstractnote import markdown DIR` | file (ADRs, backlog items, notes), with front-matter and headings kept | see [Dates](#dates) | `{repo, path, blob_sha, commit, added_as?, completed?}` |
-| Files | `abstractnote import files PATH...` | file (documents, images, audio, video, logs) | EXIF date, else the file date | `{path, sha256}` |
+| Files | `abstractnote import files PATH...` | file (documents, images, audio, video, logs) | the file's own metadata date (EXIF, XMP, PDF `CreationDate`, Office `core.xml` created), else the file date | `{path, sha256}` |
 
 Every `source.origin` also carries `date_basis`: how `occurred_at` was found.
 
@@ -29,8 +29,18 @@ Every `source.origin` also carries `date_basis`: how `occurred_at` was found.
 | `created_line` | a Markdown `Created:` field line anywhere in the file (`- **Created:** 2026-09-12`) | no |
 | `date_line` | a Markdown `Date:` field line in the first 40 lines (later ones date completion reports) | no |
 | `git_added` | the commit that first added the file, following moves (`git log --follow --diff-filter=A`) | yes |
-| `exif` | a photo's EXIF date | no |
+| `exif` | a photo's EXIF `DateTimeOriginal` (else `DateTime`; Pillow, when installed) | no |
+| `xmp` | an XMP creation date in an image or a PDF (`xmp:CreateDate`, `photoshop:DateCreated`, `exif:DateTimeOriginal`) | no |
+| `pdf_created` | a PDF's Info `/CreationDate` | no |
+| `office_created` | an Office Open XML document's `docProps/core.xml` `dcterms:created` (docx, xlsx, pptx) | no |
 | `file_mtime` | the file's modification time | yes |
+
+Files and captures share one detector, `abstractnote.ingest.dates.detect_file_date(path or bytes, mime)`: images
+`exif` then `xmp`, PDFs `pdf_created` then `xmp`, Office documents `office_created`, then (for a path) `file_mtime`.
+A capture that gives no `occurred_at` takes the first attachment's metadata date and records its basis. Two bases
+are written after import (data-model.md "Time"): `content` when processing found the date the text states
+itself on a note whose date was approximate (`note.redate`), and `user` when a person set the date; a live note's
+basis is `client`, and an import from before date bases were recorded reads as `unrecorded` (approximate).
 
 The order for a memory file is `origin_session`, `front_matter_modified`, `git_added`,
 `file_mtime`; for a Markdown file `front_matter`, `created_line`, `date_line`, `git_added`,
