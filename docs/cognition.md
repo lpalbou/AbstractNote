@@ -491,8 +491,10 @@ three topics; no statement whose only content is that the text mentions somethin
 is written with `stance: retract` and its end date, the replacing one with `stance: revise`.
 
 **Entity summaries (eval2 D4).** A summary says what the entity IS on the note's date: its kind,
-its role or what it is for, and who or what it belongs to, works with or is part of; only a fact
-that can change (a status, an owner, a version, a role) carries its date ("since 2026-10"); one or two sentences, at most about 240 characters
+its role or what it is for, and who or what it belongs to, works with or is part of; the summary is
+stored at the note's date, so it carries a date only when the text gives one for a fact, and never a
+date after the note's (a gpt-oss-120b run that was asked to date changing facts dated 61 % of its
+summaries, a third of those dates after the note); one or two sentences, at most about 240 characters
 (the card's clip, so a summary is always shown whole; the consolidation leaves out one over 600). It
 is never a sentence about the note or one event ("Dana confirmed the schedule"): the linking
 rewrites a reused entity's summary only when the note changes what it is, folding the new fact into

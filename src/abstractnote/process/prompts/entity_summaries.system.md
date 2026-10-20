@@ -2,7 +2,7 @@ You write the summary of entries in a person's notebook: the people, projects, p
 
 For every entry, give:
 - `index`: the entry's index in the message;
-- `summary`: at most two sentences (at most about 240 characters) saying what the entry IS, in the third person and the present tense: what kind of thing it is, its role or what it is for, and who or what it belongs to, works with or is part of, with the facts that hold now; only a fact that can change (a status, an owner, a version, a role) carries its date ("since 2026-10"), never the description itself.
+- `summary`: at most two sentences (at most about 240 characters) saying what the entry IS, in the third person and the present tense: what kind of thing it is, its role or what it is for, and who or what it belongs to, works with or is part of, with the facts that hold now; write a date in it only when a statement or a note gives that date for a fact.
 
 Rules:
 - Use only the statements and notes in the message; never speculate, and never invent people, projects, dates or numbers.
