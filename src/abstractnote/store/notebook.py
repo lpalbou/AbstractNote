@@ -777,6 +777,30 @@ class Notebook:
         sched = applied if isinstance(applied, dict) else self.settings()["processor_schedule"]
         return {"max_items": int(sched["max_items"]), "interval": str(sched["every"])}
 
+    def processing(self, *, plane: Any = None, automations: Optional[Dict[str, Any]] = None,
+                   now: Optional[str] = None) -> Dict[str, Any]:
+        """What the processing is doing (``GET /note/processing``; :func:`abstractnote.recall.processing.processing`).
+        Headless (no ``plane``), the active runs are empty and the run-dependent fields null."""
+        from ..recall.processing import processing
+
+        return processing(self, plane=plane, automations=automations, now=now)
+
+    def set_priority(self, note_id: str, priority: Any) -> Dict[str, Any]:
+        """Move a waiting note in the line (``POST /note/queue/{note_id}/priority``; 3 = front of the line).
+        Bookkeeping only: the queue row and the note's priority change (kept by later filing), no revision."""
+        from .queue import PRIORITY_BULK, PRIORITY_URGENT
+
+        if isinstance(priority, bool) or not isinstance(priority, int) or not (
+                PRIORITY_BULK <= priority <= PRIORITY_URGENT):
+            raise ValueError("The priority must be a whole number from 0 to 3.")
+        with self.store.tx() as c:
+            row = c.execute("SELECT state FROM queue WHERE note_id=?", (note_id,)).fetchone()
+            if row is None or row["state"] != "queued":
+                raise ValueError("Only a note that is waiting in the queue can be moved.")
+            self.queue.set_priority(c, note_id, priority)
+            c.execute("UPDATE notes SET priority=?, priority_explicit=1 WHERE note_id=?", (priority, note_id))
+        return {"note_id": note_id, "priority": priority}
+
     def meta(self, key: str, default: Any = None) -> Any:
         return self.store.meta_get(key, default)
 

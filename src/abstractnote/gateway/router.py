@@ -17,7 +17,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, StrictInt
 
 from ..flows.build import BUNDLE_ID, DRAIN_DEFAULTS
 from .tools import notebook_dir
@@ -527,6 +527,75 @@ async def note_queue_retry(request: Request, note_id: str) -> Dict[str, Any]:
         return _call(nb.queue, "retry", note_id)
 
     return await _run(request, work)
+
+
+class PriorityBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    priority: StrictInt
+
+
+@router.post("/queue/{note_id}/priority")
+async def note_queue_priority(request: Request, note_id: str, body: PriorityBody) -> Dict[str, Any]:
+    """Move a waiting note in the line (0..3, 3 = front); no revision is recorded."""
+    def work(nb, svc, p):
+        _require(nb, "note", note_id, "note")
+        return _call(nb, "set_priority", note_id, body.priority)
+
+    return await _run(request, work)
+
+
+CONSOLIDATION_MODULE = "abstractnote.gateway.consolidation"
+
+
+def _consolidation(nb: Any, svc: Any, principal: Any) -> Dict[str, Any]:
+    """``{"consolidation": view | None}`` from the consolidation lane's ``consolidation_view`` (null while that
+    module is not installed; a failure inside it is logged and named in ``consolidation_error``, never a 500)."""
+    import importlib
+    import importlib.util
+    import logging
+
+    if importlib.util.find_spec(CONSOLIDATION_MODULE) is None:
+        return {"consolidation": None}
+    try:
+        view = importlib.import_module(CONSOLIDATION_MODULE).consolidation_view(nb, svc, principal)
+    except Exception as e:  # noqa: BLE001 - the page still answers; the failure is logged and reported
+        logging.getLogger(__name__).exception("consolidation_view failed")
+        return {"consolidation": None, "consolidation_error": str(e) or type(e).__name__}
+    return {"consolidation": view}
+
+
+def _etag(body: Dict[str, Any]) -> str:
+    """A weak validator over everything but ``now`` (so an unchanged page answers 304 between polls)."""
+    import hashlib
+    import json
+
+    stable = {k: v for k, v in body.items() if k != "now"}
+    digest = hashlib.sha256(json.dumps(stable, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:32]
+    return f'W/"{digest}"'
+
+
+@router.get("/processing")
+async def note_processing(request: Request) -> Response:
+    """What the processing is doing right now: automations, queue, pace, active runs and their step, recent
+    revisions, failed notes, model (docs/api.md). Every number is read from the store or the plane's runs.
+    Carries an ETag; ``If-None-Match`` with the same value answers 304 without a body."""
+    import json
+
+    from ..recall.processing import plane_for
+
+    def work(nb, svc, principal):
+        body = _call(nb, "processing", plane=plane_for(svc), automations=automations_health(nb, svc))
+        body.update(_consolidation(nb, svc, principal))
+        return body
+
+    body = await _run(request, work)
+    etag = _etag(body)
+    headers = {"ETag": etag, "Cache-Control": "private, no-cache"}
+    wanted = [t.strip() for t in str(request.headers.get("if-none-match") or "").split(",") if t.strip()]
+    if etag in wanted or "*" in wanted:
+        return Response(status_code=304, headers=headers)
+    return Response(content=json.dumps(body, default=str), media_type="application/json", headers=headers)
 
 
 # --------------------------------------------------------------------------- settings and automations
