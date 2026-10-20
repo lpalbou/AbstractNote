@@ -151,6 +151,9 @@ relationship, so the evolution of a link is as visible as the evolution of a nod
 A revision is the append-only record of what one processed note did to the graph. It is the
 authoritative history: replaying revisions in order rebuilds entities, claims, relations, topics
 and tasks.
+The store enforces it: a trigger (`revisions_append_only`) refuses any change to a written revision's identity,
+ops, source or dependency record (`context_json`), and to its summary and warnings once it is applied; only the
+bookkeeping of its application (`applied_index`, `applied_kg`, `result_json`, `abandoned`, `error`) moves.
 
 | Field | Meaning |
 |---|---|
@@ -461,9 +464,11 @@ them all, and the as-received axis shows what the notebook believed before.
 
   When the new reading's statements (subject, predicate, object, certainty, stance, window), mentions, tasks and
   topics equal the old ones, nothing is written: the mark is consumed `unchanged` (a summary rewrite alone is
-  `summary_only`, still unchanged), and the current reading's dependency record becomes what that re-reading was
-  read against (its packet's record, `related` included), so a later wave from the same unchanged idea, or a note
-  that arrived before it, is settled without a call. Before any model call, the stage's no-call check compares the note's context
+  `summary_only`, still unchanged). What that re-reading was read against (its packet's record, `related`
+  included) is appended to `reading_confirmations` (truth, copied by a rebuild) for the current reading; the
+  revision's own `context_json` stays as written. The no-call check and the next wave read the newest confirmation
+  of the current reading, else its revision's record, so a later wave from the same unchanged idea, or a note that
+  arrived before it, is settled without a call. Before any model call, the stage's no-call check compares the note's context
   looked up again with the dependency record (what was known at the note's date only, without the reading's own
   entities, statements and summaries): equal means the foundation did not change, `unchanged` with zero calls.
   The revision's id is deterministic from the revision it supersedes, so a replay is a no-op.

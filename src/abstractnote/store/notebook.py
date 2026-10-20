@@ -1175,7 +1175,7 @@ class Notebook:
                 c.execute("DELETE FROM meta")
                 c.execute("INSERT INTO meta SELECT * FROM old.meta" + (" WHERE key!='embedding_pin'" if reembed else ""))
                 tables = ["notes", "attachments", "note_links", "queue", "queue_errors", "context_packets", "revisions",
-                          "reinterpret_marks", "idea_changes", *KEPT_TABLES]
+                          "reinterpret_marks", "idea_changes", "reading_confirmations", *KEPT_TABLES]
                 if not reembed:
                     tables.append("vectors")
                 for table in tables:

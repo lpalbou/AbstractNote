@@ -499,7 +499,8 @@ def test_a_notebook_from_schema_2_is_flagged_and_its_revisions_have_no_record(tm
     nbk = Notebook.open(tmp_path / "old")
     try:
         a = day20_budget(nbk, "2026-10-20T12:01:00Z")
-        with nbk.store.tx() as c:  # as a schema-2 notebook left it
+        with nbk.store.tx() as c:  # as a schema-2 notebook left it (no record, no append-only trigger yet)
+            c.execute("DROP TRIGGER revisions_append_only")
             c.execute("UPDATE revisions SET context_json=NULL")
             c.execute("UPDATE meta SET value='2' WHERE key='schema_version'")
             c.execute("DELETE FROM meta WHERE key=?", (DEPENDENCY_RECORD_META,))

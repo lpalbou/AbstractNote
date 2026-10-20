@@ -19,7 +19,7 @@ SCHEMA_VERSION = 4  # 2: entities.name_key/display_name/key_clash_with, entity_a
 #                    4: ADR 0008 §4a (idea_changes, the propagated fields of reinterpret_marks)
 
 TRUTH_TABLES = ("meta", "notes", "attachments", "note_links", "queue", "revisions", "vectors", "context_packets",
-                "reinterpret_marks", "idea_changes")
+                "reinterpret_marks", "idea_changes", "reading_confirmations")
 #: Derived tables a rebuild copies (entity ids are stable, and the community labels are the model's work), and the
 #: consolidation bookkeeping (its progress rows and the measured seconds per item the next ETA starts from), and the
 #: ``refile --missing`` repairs' progress rows.
@@ -206,6 +206,21 @@ CREATE TABLE IF NOT EXISTS idea_changes (
   PRIMARY KEY (revision_id, entity_id)
 );
 CREATE INDEX IF NOT EXISTS idx_idea_changes_pass ON idea_changes(pass_id, entity_id);
+
+-- ADR 0008 §4a with ADR 0003 (INT2): a re-reading that came out unchanged writes no revision; what it was read
+-- against (the stored packet's dependency record, ``related`` included) is appended here for the reading it confirmed
+-- (``revision_id``). The no-call check and the next wave read the newest row of the CURRENT reading, else the
+-- revision's own ``context_json``, which stays exactly as written at apply time. Truth: append-only, copied by a
+-- rebuild.
+CREATE TABLE IF NOT EXISTS reading_confirmations (
+  confirmation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  note_id TEXT NOT NULL,
+  revision_id TEXT NOT NULL,
+  context_json TEXT NOT NULL,
+  pass_id TEXT,
+  recorded_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reading_confirmations_note ON reading_confirmations(note_id, revision_id);
 
 CREATE TABLE IF NOT EXISTS vectors (
   vector_key TEXT PRIMARY KEY,
@@ -487,6 +502,23 @@ CREATE TABLE IF NOT EXISTS then_now_cache (
 );
 """
 
+#: Created after the added columns exist (an old notebook gains ``context_json`` in ensure_schema).
+TRIGGERS = """
+-- ADR 0003: the revision log is append-only. What a revision IS (its identity, ops, source and dependency record)
+-- never changes once written; only the bookkeeping of its application (applied_index, applied_kg, result_json,
+-- abandoned, error) moves, and its summary/warnings are completed by its own apply, never after it was applied.
+CREATE TRIGGER IF NOT EXISTS revisions_append_only BEFORE UPDATE ON revisions
+WHEN OLD.revision_id IS NOT NEW.revision_id OR OLD.note_id IS NOT NEW.note_id OR OLD.attempt IS NOT NEW.attempt
+  OR OLD.action IS NOT NEW.action OR OLD.target IS NOT NEW.target OR OLD.at IS NOT NEW.at
+  OR OLD.recorded_at IS NOT NEW.recorded_at OR OLD.run_id IS NOT NEW.run_id OR OLD.ops_json IS NOT NEW.ops_json
+  OR OLD.source_json IS NOT NEW.source_json OR OLD.context_json IS NOT NEW.context_json
+  OR (OLD.applied_index = 1 AND (OLD.summary IS NOT NEW.summary OR OLD.warnings_json IS NOT NEW.warnings_json))
+BEGIN
+  SELECT RAISE(ABORT, 'The revision log is append-only (ADR 0003): a written revision is never changed.');
+END;
+"""
+
+
 FTS_DDL = """
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(note_id UNINDEXED, title, body, summary, attachments);
 CREATE VIRTUAL TABLE IF NOT EXISTS entities_fts USING fts5(entity_id UNINDEXED, name, aliases, summary);
@@ -633,6 +665,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ROLLBACK")
         raise
     conn.executescript(POST_DDL)
+    conn.executescript(TRIGGERS)
     try:
         conn.executescript(FTS_DDL)
     except sqlite3.OperationalError as exc:  # pragma: no cover - every supported Python ships FTS5

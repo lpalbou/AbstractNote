@@ -529,7 +529,7 @@ def digest_unchanged(nb: Any, note_id: str) -> bool:
     cur = s.current_interpretation(note_id)
     if cur is None:
         return False
-    stored = json.loads(s.revision_row(cur)["context_json"] or "null")
+    stored = s.reading_record(note_id, cur)  # the revision's record, or what an unchanged re-reading confirmed
     if not isinstance(stored, dict) or not stored.get("looked_up"):
         return False
     # ADR 0008 §4a: a note waiting because an idea it relies on was understood differently never saw that idea's

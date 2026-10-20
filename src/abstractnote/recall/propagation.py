@@ -567,7 +567,7 @@ def understood_differently(nb: Any, note_id: str) -> Tuple[List[Dict[str, Any]],
     cur = s.current_interpretation(note_id)
     seen = {}
     if cur:
-        ctx = json.loads(s.revision_row(cur)["context_json"] or "null") or {}
+        ctx = s.reading_record(note_id, cur) or {}
         seen = ctx.get("summaries") or {}
     blocks: List[Dict[str, Any]] = []
     related: Dict[str, Any] = {}

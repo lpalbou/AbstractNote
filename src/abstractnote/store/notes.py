@@ -1173,6 +1173,21 @@ class NoteStore:
                                 " (action IS NULL OR action=?) ORDER BY seq", (note_id, REINTERPRET_ACTION)).fetchall()
         return [r[0] for r in rows]
 
+    def reading_record(self, note_id: str, revision_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """The dependency record the note's current reading (or ``revision_id``) stands on: the newest
+        ``reading_confirmations`` row for it (an unchanged re-reading: what it was read against), else the revision's
+        own ``context_json`` as written at apply time; None for a reading without a record (``context_unknown``)."""
+        rid = revision_id or self.current_interpretation(note_id)
+        if rid is None:
+            return None
+        row = self.q1("SELECT context_json FROM reading_confirmations WHERE note_id=? AND revision_id=? ORDER BY"
+                      " confirmation_id DESC LIMIT 1", (note_id, rid))
+        if row is None:
+            rev = self.revision_row(rid)
+            row = (rev["context_json"],) if rev is not None else None
+        value = _uj(row[0]) if row is not None and row[0] else None
+        return value if isinstance(value, dict) else None
+
     def current_interpretation(self, note_id: str, c: Optional[sqlite3.Connection] = None) -> Optional[str]:
         """The note's current interpretation revision (the latest applied one no ``note.reinterpret`` superseded),
         or None when the note was never understood."""

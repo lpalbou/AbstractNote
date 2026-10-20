@@ -1516,7 +1516,7 @@ def _consume(nb: Any, note_id: str, pass_id: Optional[str], outcome: str, revisi
     s = nb.store
     with s.tx() as c:
         if keep_related is not None:
-            _keep_related(c, s, *keep_related)
+            _keep_related(c, s, *keep_related, pass_id=pass_id)
         if pass_id:
             s.consume_marks(note_id, pass_id, outcome, revision_id, c=c)
             return
@@ -1527,26 +1527,28 @@ def _consume(nb: Any, note_id: str, pass_id: Optional[str], outcome: str, revisi
                   (now, outcome, revision_id, now, note_id, before or now))
 
 
-def _keep_related(c: Any, store: Any, revision_id: Optional[str], packet: Optional[Dict[str, Any]]) -> None:
-    """An unchanged re-reading writes no revision (R2), but it WAS read against the stored packet: the dependency
-    record of the note's current reading ``revision_id`` becomes what that re-reading saw (:func:`context_digest`
-    of the packet, its ``related`` included: ADR 0008 §4a, each source idea's state as known at the note's date),
-    so the no-call check of a later wave compares against the foundation the reading was last confirmed on. Only
-    ``related`` would not do: an earlier note that arrived since (a similar note the re-reading was shown) left the
-    old record stale, and every later wave paid a call again. A reading without a record (``context_unknown``,
-    before schema 3) stays without one."""
+def _keep_related(c: Any, store: Any, revision_id: Optional[str], packet: Optional[Dict[str, Any]],
+                  pass_id: Optional[str] = None) -> None:
+    """An unchanged re-reading writes no revision (R2), but it WAS read against the stored packet: what it saw
+    (:func:`context_digest` of the packet, its ``related`` included: ADR 0008 §4a, each source idea's state as known
+    at the note's date) is appended to ``reading_confirmations`` for the current reading ``revision_id``, so the
+    no-call check of a later wave compares against the foundation the reading was last confirmed on
+    (``NoteStore.reading_record``). The revision's own ``context_json`` is never touched (ADR 0003, append-only).
+    Only ``related`` would not do: an earlier note that arrived since (a similar note the re-reading was shown) left
+    the old record stale, and every later wave paid a call again. A reading without a record (``context_unknown``,
+    before schema 3) gets none: it is never settled without a call."""
     from ..store.notebook import context_digest
 
     if not revision_id or packet is None:
         return
-    row = c.execute("SELECT r.context_json, n.note_id FROM revisions r JOIN notes n ON n.note_id=r.note_id WHERE"
-                    " r.revision_id=?", (revision_id,)).fetchone()
-    stored = json.loads(row[0]) if row is not None and row[0] else None
-    if not isinstance(stored, dict):
+    row = c.execute("SELECT note_id, context_json FROM revisions WHERE revision_id=?", (revision_id,)).fetchone()
+    if row is None or not row[1]:
         return
-    record = context_digest(store, store.note_row(row[1]), packet)
-    c.execute("UPDATE revisions SET context_json=? WHERE revision_id=?",
-              (json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")), revision_id))
+    record = context_digest(store, store.note_row(row[0]), packet)
+    c.execute("INSERT INTO reading_confirmations(note_id, revision_id, context_json, pass_id, recorded_at)"
+              " VALUES (?,?,?,?,?)", (row[0], revision_id,
+                                     json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                                     pass_id, ids.utc_now()))
 
 
 def reinterpret_view(nb: Any, note_id: str, out: Dict[str, Any]) -> Dict[str, Any]:

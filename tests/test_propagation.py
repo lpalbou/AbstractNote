@@ -540,21 +540,27 @@ def test_the_packet_shows_what_changed_and_the_no_call_check_reads_related(nb):
 
 def test_an_unchanged_propagated_re_reading_keeps_related_so_a_later_wave_needs_no_call(nb):
     """INT2 seam (R6 x R2): a re-reading taken through a propagated mark that comes out ``unchanged`` writes no
-    revision, but its ``related`` record (Zorn as known on day 22) goes into the current reading's dependency
-    record: a later propagated mark from the same, unchanged Zorn is settled with no call, and one after Zorn
-    changes again (at an earlier date) is not. MUTATION: drop the keep_related write in apply_reinterpretation."""
+    revision; what it was read against (``related``: Zorn as known on day 22) is appended to
+    ``reading_confirmations`` for the current reading, whose own ``context_json`` stays exactly as written (ADR 0003):
+    a later propagated mark from the same, unchanged Zorn is settled with no call, and one after Zorn changes again
+    (at an earlier date) is not. MUTATION: drop the keep_related write / record only ``related`` / read the
+    revision's context_json instead of reading_record in digest_unchanged."""
     w, n = zorn_world(nb)
     reread_d20(w, n)
     assert [m["reason_code"] for m in marks_of(nb, n["d22"]) if m["consumed_at"] is None] == ["propagated"]
     rid = nb.store.current_interpretation(n["d22"])
-    assert not json.loads(nb.store.revision_row(rid)["context_json"]).get("related")
+    written = nb.store.revision_row(rid)["context_json"]
+    assert not json.loads(written).get("related")
     r = w.read("", day(22), [("m1", "the budget board", "org", n["board"], None)],
                [stmt("m1", "ex:approved", "the budget")], note_id=n["d22"], reinterpret=True)
     assert r["out"]["unchanged"] is True and r["out"]["revision_id"] is None
     assert nb.store.current_interpretation(n["d22"]) == rid  # no revision of its own
-    stored = json.loads(nb.store.revision_row(rid)["context_json"])
+    assert nb.store.revision_row(rid)["context_json"] == written  # the revision log is not touched
+    [conf] = nb.store.q("SELECT note_id, revision_id FROM reading_confirmations")
+    assert tuple(conf) == (n["d22"], rid)
+    stored = nb.store.reading_record(n["d22"])
     assert stored["related"] == {n["zorn"]: prop.related_state(nb.store, n["zorn"], day(22))}
-    assert stored["looked_up"] is True  # the rest of the record is kept
+    assert stored["looked_up"] is True
     with nb.store.tx() as c:
         nb.store.mark_reinterpret(c, [{"note_id": n["d22"], "reason": "again", "reason_code": "propagated",
                                        "impact": 0.3, "source_entity_id": n["zorn"], "hops": 1}], ids.utc_now())
@@ -562,6 +568,43 @@ def test_an_unchanged_propagated_re_reading_keeps_related_so_a_later_wave_needs_
     w.read("Zorn signed with Quill.", day(18), [("m1", "Zorn", "org", n["zorn"], None)],
            [stmt("m1", "ex:signed_with", "Quill")])
     assert cons.digest_unchanged(nb, n["d22"]) is False
+    nb.rebuild()  # the confirmation is truth: a rebuild keeps it
+    assert nb.store.q1("SELECT COUNT(*) FROM reading_confirmations")[0] == 1
+    assert nb.store.reading_record(n["d22"])["related"] == stored["related"]
+
+
+#: What a revision IS; only the bookkeeping of its application (applied_index, applied_kg, result_json, abandoned,
+#: error) may move after it was written.
+REVISION_CONTENT = ("revision_id", "note_id", "attempt", "action", "target", "at", "recorded_at", "run_id", "ops_json",
+                    "summary", "source_json", "warnings_json", "context_json")
+
+
+def test_the_revision_log_is_append_only_on_every_path(nb):
+    """ADR 0003 (INT2): no code path changes a written revision. The store refuses it (trigger
+    ``revisions_append_only``), and a scenario through every re-understanding path (deep re-reading with its
+    spread, unchanged re-reading, the no-call check, a consolidation-style pass, recover, rebuild) leaves every
+    revision as it was written. MUTATION: drop the trigger (the direct UPDATE goes through) / write the confirmation
+    into revisions.context_json again (the trigger aborts the re-reading)."""
+    import sqlite3
+
+    w, n = zorn_world(nb)
+    snap = lambda: {r["revision_id"]: tuple(r[k] for k in REVISION_CONTENT)  # noqa: E731
+                    for r in nb.store.q(f"SELECT {', '.join(REVISION_CONTENT)} FROM revisions")}
+    before = snap()
+    with pytest.raises(sqlite3.DatabaseError, match="append-only"):
+        with nb.store.tx() as c:
+            c.execute("UPDATE revisions SET context_json='{}' WHERE revision_id=?", (next(iter(before)),))
+    with pytest.raises(sqlite3.DatabaseError, match="append-only"):
+        with nb.store.tx() as c:
+            c.execute("UPDATE revisions SET summary='edited' WHERE applied_index=1")
+    reread_d20(w, n)
+    w.read("", day(22), [("m1", "the budget board", "org", n["board"], None)],
+           [stmt("m1", "ex:approved", "the budget")], note_id=n["d22"], reinterpret=True)
+    cons.digest_unchanged(nb, n["d22"])
+    nb.recover()
+    nb.rebuild()
+    after = snap()
+    assert {k: after[k] for k in before} == before and len(after) == len(before) + 1  # day 20's re-reading added
 
 
 def test_schema_3_to_4_adds_the_change_records_and_the_refile_rows_in_order(tmp_path):
@@ -595,6 +638,7 @@ def test_schema_3_to_4_adds_the_change_records_and_the_refile_rows_in_order(tmp_
         assert flag["schema"] == 4 and flag["since_seq"] >= 1
         assert s.q1("SELECT COUNT(*) FROM idea_changes")[0] == 0
         assert s.q1("SELECT COUNT(*) FROM refile_runs")[0] == 0
+        assert s.q1("SELECT COUNT(*) FROM reading_confirmations")[0] == 0
         cols = {r[1] for r in s.q("PRAGMA table_info(reinterpret_marks)")}
         assert {"reason_code", "source_entity_id", "impact", "hops"} <= cols
     finally:
