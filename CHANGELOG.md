@@ -4,6 +4,22 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- **What a thing is**: the description of a person, project or tool now says what it is (its kind,
+  its role or purpose, and what it belongs to or works with), with the date of a fact that can
+  change, instead of the latest thing that happened to it. It is rewritten only when a note changes
+  what the thing is, and a note dated before what the notebook learned later describes the thing
+  as it stood then.
+- **Statements**: understanding a note now names how two things relate with a specific verb (runs
+  on, depends on, fixed in, status, version) read from the first to the second, and keeps the same
+  wording for the same kind of fact, so a new status or version replaces the old one.
+- **Agents and their packages**: an agent that writes messages (such as a seat named `gateway`) is
+  kept apart from the software it works on, even when both carry the same name.
+- **One spelling per topic**: `abstractnote normalize-topics` joins only topics that differ by case,
+  hyphens, underscores or spaces; a plural (`bug_fixes`) stays its own topic.
+
 ## [0.1.1] - 2026-10-19
 
 Install with `pip install "abstractnote[gateway]"` (AbstractGateway 0.15.11 or later carries the
