@@ -187,6 +187,12 @@ def test_retro_insertion_marks_summaries_stale_and_drops_then_now(nb):
     assert CASTOR in [s["entity_id"] for s in out["stale_summaries"]]
 
 
+def test_live_notes_a_few_minutes_out_of_order_are_not_retrospective(nb):
+    castor(nb, "2026-03-01T09:30:00Z", "Qwen")
+    _, out = castor(nb, "2026-03-01T09:10:00Z", "Qwen and more")
+    assert out["retrospective"] == [] and nb.retro_state()["insertions"] == 0
+
+
 def test_a_later_note_still_supersedes_as_before(nb):
     _, o22 = castor(nb, T22, "Llama")
     [c22] = o22["claims_added"]

@@ -212,7 +212,7 @@ Flows call them through `tool_calls` nodes; agents may list them in `allowed_too
 | `note_file` | `note_id, title, kind, topics, urgency, language, one_line` | `{note_id, priority, status}` |
 | `note_context` | `note_id, max_chars?` | `{note: {...}, sections: [...], similar_notes: [...], candidate_entities: [{entity_id, name, kind, aliases, summary, last_seen, active_claims: [...]}], open_tasks: [...], topics: [...], vocabulary: [{predicate, gloss}]}` |
 | `note_resolve_candidates` | `note_id, mentions: [{ref, name, kind, aliases}]` | `{mentions: [{ref, candidates: [{entity_id, name, kind, aliases, summary, last_seen, score, matched_by}]}]}` |
-| `note_apply_revision` | `note_id, extraction, linking` | `{revision_id, summary, entities_created, entities_merged, claims_added, claims_reinforced, claims_superseded, tasks_opened, tasks_closed, warnings}`; references outside the context packet are rejected into `create`/`new` with a warning |
+| `note_apply_revision` | `note_id, extraction, linking` | `{revision_id, summary, entities_created, entities_merged, claims_added, claims_reinforced, claims_superseded, claims_retracted, tasks_opened, tasks_closed, claims_inserted_before, retrospective, warnings}` (`claims_inserted_before`: statements of an older note placed before a later belief; `retrospective`: entities the note marked, data-model.md "Retrospective insertion"); references outside the context packet are rejected into `create`/`new` with a warning |
 | `note_queue_lease` | `worker_id, max_items=1` | `{items: [{note_id, priority, attempts}]}` |
 | `note_queue_ack` | `note_id, outcome: ok|error, error?, revision_id?` | `{note_id, status, next_attempt_at?}` |
 | `note_queue_stats` | | `{queued, processing, failed, by_priority, oldest_enqueued_at}` |

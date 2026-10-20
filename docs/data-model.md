@@ -318,7 +318,7 @@ built from later ones, while live notes arrive too. History adapts; nothing is r
 - **Entities**: `first_seen` moves back to the older note (it is the earliest mention); the graph as of T shows
   the entity from then.
 - **Retrospective marks** (`meta.retro`, written in the projection transaction): a note that mentions an entity
-  already seen at a later date, a `claim.insert_before` (its subject, object and neighbours) or a `note.redate`
+  already seen more than a day later (live notes a few minutes out of order are not), a `claim.insert_before` (its subject, object and neighbours) or a `note.redate`
   marks the entities: their summaries are stale (until a summary recorded after the mark is the current one, the
   consolidation's refresh), their then-versus-now cards are dropped, `graph_version` is bumped and the event is
   logged. `Notebook.retro_state()` reports `{graph_version, insertions, stale_summaries, retro_notes_since_communities,

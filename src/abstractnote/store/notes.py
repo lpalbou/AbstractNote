@@ -91,6 +91,8 @@ TOPICS_PER_NOTE = 3
 #: Meta entry written by :meth:`NoteStore.mark_retro` (retrospective insertions; data-model.md "Time").
 RETRO_META = "retro"
 RETRO_EVENTS_KEPT = 500
+#: A note counts as retrospective for an entity when the entity was already seen more than this much later.
+RETRO_MIN_GAP = timedelta(days=1)
 
 
 class NoteStore:
@@ -1190,9 +1192,10 @@ class _OpContext:
             nrow = self.c.execute("SELECT occurred_at FROM notes WHERE note_id=?", (note_id,)).fetchone()
             if nrow:
                 at = nrow[0]
-        if row["last_seen"] and row["last_seen"] > at and eid not in self.stats["entities_created"]:
-            # A note older than what is already known about the entity: a retrospective insertion
-            # (Notebook.after_retro_insert marks its summary stale and drops its then-versus-now card).
+        if row["last_seen"] and eid not in self.stats["entities_created"] and \
+                ids.parse_time(row["last_seen"]) - ids.parse_time(at) > RETRO_MIN_GAP:
+            # A note older than what is already known about the entity: a retrospective insertion (its summary is
+            # marked stale, its then-versus-now card dropped). Live notes a few minutes out of order are not.
             self.retro.add(eid)
         self.c.execute("INSERT OR IGNORE INTO entity_notes(entity_id, note_id, at, revision_id) VALUES (?,?,?,?)",
                        (eid, note_id, at, self.rid))
