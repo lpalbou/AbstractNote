@@ -477,13 +477,13 @@ refused); a statement about it is skipped, one pointing at it keeps the name as 
 entity gains only the aliases the linking lists for it, and `unsure` without a candidate is
 created as new with a warning. The prompts also state: reuse an entity only when the mention
 names that very thing (a part, version, file or tool of X is a new entity related to X); one to
-three topics; no statement whose only content is that the text mentions something, and
+three topics; no statement whose only content is that the text mentions something (`schema:mentions`, `ex:mentions` or any other word for it), and
 `dcterms:hasPart` only when stated; proposals and plans are `possible`; a superseded statement
 is written with `stance: retract` and its end date, the replacing one with `stance: revise`.
 
 **Entity summaries (eval2 D4).** A summary says what the entity IS on the note's date: its kind,
-its role or what it is for, and who or what it belongs to, works with or is part of, a fact that
-can change carrying its date ("since 2026-10"); one or two sentences, at most about 240 characters
+its role or what it is for, and who or what it belongs to, works with or is part of; only a fact
+that can change (a status, an owner, a version, a role) carries its date ("since 2026-10"); one or two sentences, at most about 240 characters
 (the card's clip, so a summary is always shown whole; the consolidation leaves out one over 600). It
 is never a sentence about the note or one event ("Dana confirmed the schedule"): the linking
 rewrites a reused entity's summary only when the note changes what it is, folding the new fact into

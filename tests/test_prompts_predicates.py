@@ -42,6 +42,7 @@ def test_the_extraction_prompt_guides_the_predicate_without_a_closed_list():
     assert "Never a vague predicate" in text and "examples, not a list to choose from" in text
     assert "A fact with one value at a time" in text and "one statement per value" in text
     assert "use the same one for the same relation" in text
+    assert "(`schema:mentions`, `ex:mentions` or any other word for it)" in text  # the OVH trial wrote ex:mentions
     assert "schema:participant" not in text.split("The answer has this shape")[1]  # the example is specific
     desc = schemas.EXTRACTION["properties"]["claims"]["items"]["properties"]["predicate"]["description"]
     assert "from the subject to the object" in desc and "same one for the same kind of fact" in desc

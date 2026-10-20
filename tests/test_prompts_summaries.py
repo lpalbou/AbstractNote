@@ -52,6 +52,7 @@ def test_the_prompts_ask_for_what_the_entity_is_within_the_clip():
     assert "never the note or an event" in link and "Something the entity did" in link
     assert "`[LATER]`" in link and "LATER than this note" in link
     assert f"at most about {packets.SUMMARY_CHARS} characters" in link
+    assert "only a fact that can change (a status, an owner, a version, a role) carries its date" in link
     summaries = consolidation.summary_system_prompt()
     assert "saying what the entry IS" in summaries and "never about the notes or one event" in summaries
     assert f"at most about {packets.SUMMARY_CHARS} characters" in summaries
