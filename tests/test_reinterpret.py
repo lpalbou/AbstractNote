@@ -707,7 +707,10 @@ def test_a_failed_reinterpretation_is_skipped_with_its_reason_and_its_mark_waits
     llm = ScriptedLLM({"Extraction": ext, "Linking": {"mentions": [ml("m1", "reuse", 0, summary=None)], "claims": [],
                                                       "tasks": [], "revision_summary": "x"},
                        "CommunityLabels": {"communities": []}, "EntitySummaries": {"summaries": []},
-                       "Reflections": {"items": []}})
+                       "Reflections": {"items": []},
+                       # the notes were stored without the quick filing: reading one again files it first (W27)
+                       "QuickFiling": {"title": "LUT", "kind": "fact", "topics": [], "urgency": "normal",
+                                       "language": "en", "one_line": "LUT items."}})
     NoteRunner.with_llm(llm, bind(nb_dir)).run("note-consolidate", {})
     nbk = Notebook.open(nb_dir)
     try:

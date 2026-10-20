@@ -652,7 +652,7 @@ def _stale(nb: Any) -> List[Dict[str, Any]]:
     """Every live entry whose summary is empty, a placeholder, behind an earlier note applied since (retrospective)
     or older than its notes and statements, in the order they are refreshed: empty and placeholders first, then
     the retrospective ones, then the most changed, then the most mentioned."""
-    from ..store.notes import claim_reinterpreted_sql
+    from ..store.notes import LIVE_ENTITY, claim_reinterpreted_sql
 
     s = nb.store
     canon, live = _canon(nb)
@@ -678,7 +678,7 @@ def _stale(nb: Any) -> List[Dict[str, Any]]:
             if x and x in live and q > summaries.get(x, (0, ""))[0]:
                 new_claims[x] = new_claims.get(x, 0) + 1
     rows = {r["entity_id"]: r for r in s.q("SELECT entity_id, name, display_name, summary, created_revision_id,"
-                                           " note_count FROM entities WHERE merged_into IS NULL")}
+                                           f" note_count FROM entities WHERE {LIVE_ENTITY}")}
     created_warnings: Dict[str, List[str]] = {}
     out = []
     for eid, r in rows.items():

@@ -27,8 +27,9 @@ def _params_from_sites(flows):
 def test_every_tool_call_is_fed_by_an_arguments_node():
     flows = load_flows()
     sites = [s for f in flows.values() for s in tool_call_sites(f)]
-    assert len(sites) == 52  # 21 + the inline capture's failure record (inline_fail, R4) + note-consolidate (23, backlog
-    # 0032; + 6 for the reinterpret stage, ADR 0008) + the drain's themes check (ADR 0008 §5)
+    assert len(sites) == 55  # 21 + the inline capture's failure record (inline_fail, R4) + note-consolidate (23, backlog
+    # 0032; + 6 for the reinterpret stage, ADR 0008) + the drain's themes check (ADR 0008 §5) + note-process's
+    # filing check and note-file's filing context and file (W27: a stored note without a kind is filed first)
     for s in sites:
         assert s["arguments"] is not None and len(s["tools"]) == 1, s
         assert s["tools"][0] in NOTE_TOOLS
@@ -49,7 +50,8 @@ def test_checker_goes_red_on_an_argument_the_tool_does_not_declare():
     flows = load_flows()
     params = _params_from_sites(flows)
     del params["note_file"]["one_line"]
-    assert check_tool_wiring(flows, params) == ["note-capture.file: note_file has no parameter 'one_line'"]
+    assert check_tool_wiring(flows, params) == ["note-capture.file: note_file has no parameter 'one_line'",
+                                                "note-file.file: note_file has no parameter 'one_line'"]
 
 
 def test_flows_match_the_core_lane_tool_definitions(tmp_path):

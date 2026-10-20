@@ -33,15 +33,17 @@ from .. import ids
 from .shapes import note_ref
 
 BUNDLE_ID = "abstractnote"
-FLOWS = ("note-drain", "note-process", "note-reflect", "note-recall", "note-mine", "note-capture")
+FLOWS = ("note-drain", "note-process", "note-reflect", "note-recall", "note-mine", "note-capture", "note-file")
 STEPS = ("context", "extract", "resolve", "link", "apply", "filing", "search", "synthesize")
 
 #: Node id (of an effect node: ``llm_call`` / ``tool_calls`` / ``subflow``) -> step, per flow. ``None`` = the
 #: node has no step of its own (bookkeeping); ``CHILD`` = a subflow: the step is the active child's.
 CHILD = "<child>"
 STEP_OF_NODE: Dict[str, Dict[str, Optional[str]]] = {
-    "note-process": {"context": "context", "extract": "extract", "extract_again": "extract",
+    "note-process": {"filing_need": "filing", "filing": CHILD, "context": "context", "extract": "extract", "extract_again": "extract",
                      "resolve": "resolve", "link": "link", "link_again": "link", "apply": "apply"},
+    # the quick filing of a stored note without a kind (the refile --missing repair runs it per note)
+    "note-file": {"filing_context": "filing", "filing": "filing", "file": "filing"},
     "note-capture": {"capture": "filing", "filing": "filing", "file": "filing", "process": CHILD,
                      "inline_ack": None, "inline_fail": None},
     "note-drain": {"lease": None, "process": CHILD, "ack": None, "communities": None},

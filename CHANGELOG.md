@@ -40,6 +40,25 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
   still waiting. A pass that could not refresh everything is marked as having gaps, and the
   Processing page says so in one quiet line ("12 summaries could not be refreshed this time; they
   will be tried again next time.").
+- **Imported notes are filed too**: an imported note now gets the same quick filing as a note you
+  send (its kind and up to four topics) when it is understood, and `abstractnote refile --missing
+  --local` files the notes that were understood before, a batch at a time, saying how many are left.
+- **A note read while the notebook changed is read again**: when a statement a note builds on is
+  withdrawn while the note is being understood, nothing of that reading is kept and the note goes
+  back to the queue once, at its place, with the reason shown in the queue; the next reading is made
+  on what holds now.
+- **Imports leave out what cannot be read**: a file the notebook cannot read (an image without a
+  description model, for example) and a Markdown file that is only its header are no longer stored
+  as notes made of their names; the import report counts them and names each one with the reason.
+- **Web app, developer mock**: the mock server answers a note's date basis, a failed note's recent
+  errors and how each changed note changed, as the server does, so the screens built on it read the
+  same answers.
+- **Withdrawn entries stay out of sight**: an entry that only an earlier reading of a note made,
+  and that the note no longer names once it is understood again, is no longer counted in the
+  numbers, the timeline, the day view or the overview, and is in no theme, cue or description
+  refresh. Its own page says when and why it was withdrawn and what the note now reads it as
+  ("…was understood again and now reads it as Helix calibration plan."); looking at the notebook
+  as it was received before that still shows it.
 
 ## [0.1.1] - 2026-10-19
 

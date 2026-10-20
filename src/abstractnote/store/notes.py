@@ -137,6 +137,10 @@ REINTERPRET_ACTION = REINTERPRET
 REINTERPRETED = "reinterpreted"
 #: A task a re-understanding withdrew (it was the superseded reading's task, the new reading has no such task).
 TASK_RETIRED = "retired"
+#: A live entity: not merged into another and not retired by a re-understanding (``entity.retire``, ADR 0008).
+#: Lists, counts, communities, the timeline and the overview read entities through it (search reaches entities only
+#: through their mentions and index rows, which the retirement removes).
+LIVE_ENTITY = "merged_into IS NULL AND retired_revision_id IS NULL"
 #: User actions whose effects mark the notes after them for re-understanding (ADR 0008 §4, review 3.4). The
 #: canonical-name repair (``entity.merge`` from ``normalize``) and duplicate archiving join copies, not meanings.
 MARKING_ACTIONS = ("note.redate", "note.archive", "claim.retract", "entity.unmerge", "match.confirm")
@@ -971,8 +975,10 @@ class NoteStore:
             touched_rows = self.q(f"SELECT DISTINCT entity_id FROM ({msql}) WHERE at>=? AND at<? ORDER BY entity_id",
                                   (*mp, s, e))
         touched = [self.entity_brief(r[0]) for r in touched_rows]
-        created = [r[0] for r in self.q("SELECT entity_id FROM entities WHERE created_at>=? AND created_at<?" +
-                                        f_created, (s, e, *p_created))]
+        # ADR 0008: an entry retired by a re-understanding is left out (as received before the retirement, kept)
+        created = [r[0] for r in self.q("SELECT entity_id, retired_revision_id FROM entities WHERE created_at>=? AND"
+                                        " created_at<?" + f_created, (s, e, *p_created))
+                   if not (r[1] and (arch is None or arch.has(r[1])))]
         superseded = [self.claim_dict(r) for r in self.q(
             "SELECT * FROM claims WHERE status='superseded' AND valid_until>=? AND valid_until<?" + f_closed,
             (s, e, *p_closed))]
@@ -1018,7 +1024,8 @@ class NoteStore:
         for name, values in (
             ("notes", rng("occurred_at", "notes", "AND archived_at IS NULL")),
             ("revisions", rng("at", "revisions", "AND applied_index=1")),
-            ("entities_created", rng("COALESCE(first_seen, created_at)", "entities")),
+            # ADR 0008: an entry a re-understanding retired is not counted as created
+            ("entities_created", rng("COALESCE(first_seen, created_at)", "entities", "AND retired_revision_id IS NULL")),
             ("claims_superseded", rng("valid_until", "claims", "AND status='superseded'")),
         ):
             for v in values:

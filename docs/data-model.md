@@ -82,7 +82,7 @@ generic thing.
 | `first_seen`, `last_seen` | `occurred_at` of the first and latest note mentioning it |
 | `note_count` | number of notes that mention it |
 | `merged_into` | set when the model decided this entity is the same as another; the record stays so old links still resolve |
-| `retired_revision_id`, `retired_at` | set when only a superseded interpretation created the entity and nothing references it any more (`entity.retire`, ADR 0008): it leaves lists, the graph, search and candidates; the archive as received before shows it; a later mention brings it back |
+| `retired_revision_id`, `retired_at` | set when only a superseded interpretation created the entity and nothing references it any more (`entity.retire`, ADR 0008): it leaves lists, counts (stats, timeline, the day view, the overview, changes), communities, the graph, search, cues and the summary refresh; its own page says what retired it (`retired` on the card: the note, and `into`, the entries the new reading uses for the same words, from the op's `read_as`); the archive as received before shows it; a later mention brings it back |
 | `embedding` | vector of `name + aliases + summary`, refreshed when the summary changes |
 
 Entities are created only by revisions. The id is minted from the canonical name of the name chosen
@@ -196,7 +196,7 @@ Operations:
 | `claim.start_restore` | `{claim_id, observed_at, valid_from, earlier_assertions: [{assertion_id, empty_at}], reason}`: the inverse of `claim.start_earlier`: the superseded reading's earlier evidence moved the belief's start back and the new reading no longer restates it: `observed_at` and `valid_from` return to the start replayed from the claim's own add and the moves that remain; AbstractMemory closes each additive earlier-evidence assertion empty with the kind `reinterpreted`; as received before the re-understanding the moved start is still shown |
 | `task.reopen` | `{task_id, closed_revision_id}`: a task the superseded reading closed that the new one does not close |
 | `task.retire` | `{task_id, reason}`: a task of the superseded reading the new one does not have: status `retired` |
-| `entity.retire` | `{entity_id, reason}`: an entity only the superseded reading created and that nothing references any more (see Entity) |
+| `entity.retire` | `{entity_id, reason, read_as}`: an entity only the superseded reading created and that nothing references any more (see Entity); `read_as`: the entries the new reading uses for a mention whose name or alias has the retired entry's name or alias as its lookup key (empty when it no longer names it) |
 | `note.redate` | `{note_id, from, to, basis, quote?, reason?}`: the note moves in history time (`basis` `content` when its text states its date, `user` when a person sets it); its mentions, its topics' ranges, its queue place, and the statements and tasks it wrote with the old date move with it; `source.redated` keeps `{basis, from, to, revision_id}` |
 
 User actions (`close a task`, `retract a claim`, `undo a merge`, `confirm a match`) produce revisions with

@@ -43,7 +43,7 @@ import math
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .. import ids
-from ..store.notes import REINTERPRET_ACTION, clamp_limit  # a re-understanding since the last computation makes it due
+from ..store.notes import LIVE_ENTITY, REINTERPRET_ACTION, clamp_limit  # a re-understanding since the last computation makes it due
 from . import shapes
 
 DEFAULT_RESOLUTION = 1.0
@@ -120,10 +120,11 @@ _CERTAINTY_RANK = {"stated": 0, "probable": 1, "reported": 2, "possible": 3, "di
 
 
 def _canonical_map(nb: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
-    """``{entity_id: surviving entity id}`` for every entity, and the rows of the live ones."""
-    rows = nb.store.q("SELECT entity_id, merged_into, kind, name, note_count FROM entities")
+    """``{entity_id: surviving entity id}`` for every entity, and the rows of the live ones (neither merged nor
+    retired by a re-understanding, ADR 0008: a retired entry is in no community)."""
+    rows = nb.store.q("SELECT entity_id, merged_into, kind, name, note_count, retired_revision_id FROM entities")
     into = {r["entity_id"]: r["merged_into"] for r in rows}
-    live = {r["entity_id"]: r for r in rows if not r["merged_into"]}
+    live = {r["entity_id"]: r for r in rows if not r["merged_into"] and not r["retired_revision_id"]}
     canon: Dict[str, str] = {}
     for eid in into:
         cur, seen = eid, set()
@@ -243,7 +244,7 @@ def recompute(nb: Any, resolution: Any = None) -> Dict[str, Any]:
     g = found["graph"]
     version = networkx_version()
     note_counts = {r["entity_id"]: int(r["note_count"] or 0) for r in nb.store.q(
-        "SELECT entity_id, note_count FROM entities WHERE merged_into IS NULL")}
+        f"SELECT entity_id, note_count FROM entities WHERE {LIVE_ENTITY}")}
     now = ids.utc_now()
     revisions = _revision_count(nb)
     seq_at = int(nb.store.q1("SELECT COALESCE(MAX(seq), 0) FROM revisions WHERE applied_index=1")[0])
@@ -374,7 +375,7 @@ def due(nb: Any) -> Dict[str, Any]:
                                " ops_json LIKE ?)", (REINTERPRET_ACTION, f'%"{REINTERPRET_ACTION}"%'))
                 if after(r[0], r[1]))
     threshold = max(DUE_REVISIONS, int(math.ceil(at_compute * DUE_REVISIONS_SHARE)))
-    live = int(s.q1("SELECT COUNT(*) FROM entities WHERE merged_into IS NULL")[0])
+    live = int(s.q1(f"SELECT COUNT(*) FROM entities WHERE {LIVE_ENTITY}")[0])
     reasons: List[str] = []
     if not computed and live >= MIN_COMMUNITY_SIZE:
         reasons.append("never_computed")

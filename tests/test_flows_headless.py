@@ -109,6 +109,8 @@ class Doubles:
         tools = {
             "note_capture": capture,
             "note_file": lambda **k: {"note_id": k["note_id"], "priority": 1, "status": "queued"},
+            # the note was filed at capture: note-process's filing step (note-file) goes straight on
+            "note_filing_context": lambda **k: {"needed": False, "note_id": k["note_id"]},
             "note_context": lambda **k: {"note": {"note_id": k["note_id"], "text": "Met Dana"},
                                          "sections": ["Met Dana about the LUT budget."], "similar_notes": [],
                                          "candidate_entities": [], "open_tasks": [], "topics": ["lut"], "vocabulary": []},

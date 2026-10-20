@@ -72,7 +72,10 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    S[on_flow_start note_id, provider?, model?] --> X[tool note_context<br/>text, extracted attachment text,<br/>similar notes, candidate entities,<br/>recent claims about them, topics]
+    S[on_flow_start note_id, provider?, model?] --> FN{tool note_filing_context<br/>no kind yet?}
+    FN -- yes --> NF[subflow note-file<br/>the capture's quick filing]
+    FN -- no --> X
+    NF --> X[tool note_context<br/>text, extracted attachment text,<br/>similar notes, candidate entities,<br/>recent claims about them, topics]
     X --> P1[code: extraction packet<br/>per section]
     P1 --> E[llm_call extract<br/>resp_schema Extraction]
     E --> R[tool note_resolve_candidates<br/>per mention: alias, full-text, vector candidates]
@@ -83,6 +86,19 @@ flowchart TD
     A --> Z[on_flow_end revision summary]
 ```
 
+0. **Filing, when the note has none** (W27). Imports store notes without the quick filing a live capture gets
+   (eval2: 985 of 988 understood imported notes had no kind and no filing topics). `note_filing_context` answers
+   `needed` (no kind, not an insight, not archived, something to read) with what the capture's filing sees (the
+   note's own text, whole, or its files' extracted text when it has none; the nearest notes by its stored vector;
+   its recorded revisits; the topic names); `needed` runs the `note-file` subflow: the capture's own filing
+   packet, prompt, `QuickFiling` schema and settings (one call, thinking off, 400 output tokens), then
+   `note_file` with the kind, up to 4 topics, the title when the note has none, the language and the one line,
+   never the urgency (the note keeps its place in the queue). A filing that fails fails the note (its sentence
+   in `queue_errors`), never a silent skip. A note filed at capture goes straight on. The notes understood
+   before this step existed are filed by `abstractnote refile --missing` (api.md "CLI"): the same `note-file`
+   flow per note, oldest first, within `--max-items` and `--budget-s`, one `refile_runs` row per repair updated
+   after every note (`done`, `filed`, `skipped` with each reason, `kinds`, `not_reached`) and closed
+   `completed`, `completed_with_gaps` or `interrupted`, with one sentence of what is left (ADR 0007).
 1. **Context** (`note_context`): what the notebook already knows that is relevant, **as of the note's
    date** (ADR 0008 §2; `as_of` = the note's `occurred_at`): the nearest notes, entities whose names or
    aliases appear in the text or whose embeddings are close, each as it was known then (its latest summary
@@ -241,6 +257,16 @@ flowchart TD
   no title, no extracted file text: `process.context.note_sections` finds no section; note-process stops with
   "The note has no text to read.") fails at its first failure: `note_queue_ack` checks the stored note, records
   the reason in `queue_errors` and `last_error` and sets it `failed` at once, since no retry can give it text.
+- **The notebook changed while a note was read** (review 4.1, ADR 0008 §5). A reading that would replace a
+  statement closed by a revision recorded after the note's context packet was stored (a person retracted it, a
+  re-understanding closed it) is not applied when a drain holds the note: `note_apply_revision` answers
+  `{revision_id: null, requeue: true, reason, stale_context}`, the drain acknowledges `requeue`, and the note goes
+  back to the queue once, at its priority, available at once, no failure counted, "The notebook changed while
+  this note was being read (a statement it builds on was closed meanwhile); it is read again." in `queue_errors`
+  and `last_error`. The next reading builds a fresh packet; if it is stale again it is applied (its statement kept
+  as new, with the warning): a note is put back at most once (`Queue.requeued_stale`). The drain's answer lists it
+  under `requeued` and says "1 note is read again: the notebook changed while it was being read." An inline
+  understanding (not leased) applies with the warning.
 - An expired lease (the drain stopped, for example on a gateway restart) is not taken over at once:
   the next drain that leases counts it as a failure ("Processing stopped before it finished.") with
   the same backoff, and a drain retakes the note once that backoff has passed. It counts toward the

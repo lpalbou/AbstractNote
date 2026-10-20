@@ -943,10 +943,36 @@ def apply_note_revision(nb: Any, note_id: str, extraction: Any, linking: Any, *,
             break
         attempt += 1
     rev = build_revision(nb, note_id, extraction, linking, attempt=attempt, run_id=run_id)
+    changed = changed_since_read(nb, note_id, rev.get("stale_context"))
+    if changed and nb.queue.leased(note_id) and not nb.queue.requeued_stale(note_id):
+        # review 4.1: a statement this reading builds on was closed while the note was read; nothing is applied and
+        # the drain puts the note back once (``requeue``); the next reading is applied, stale or not
+        from ..store.queue import STALE_REQUEUE_ERROR
+
+        return {"revision_id": None, "requeue": True, "reason": STALE_REQUEUE_ERROR, "stale_context": changed,
+                "summary": STALE_REQUEUE_ERROR, "warnings": [f"stale_context: {len(changed)} statement(s) this note"
+                                                              " named were closed while it was read; read again."]}
     out = _with_stale(with_retro_counts(nb, nb.apply_revision(rev)), rev.get("stale_context"))
     dated = redate_sentence(rev["ops"])  # "Dated 14 March 2019 from the document." for the capture answer
     if dated:
         out["date_sentence"] = dated
+    return out
+
+
+def changed_since_read(nb: Any, note_id: str, claim_ids: Optional[Sequence[str]]) -> List[str]:
+    """Of the statements a reading named that are no longer believed, those closed by a revision recorded after the
+    note's context packet was stored: the notebook changed while the note was read (review 4.1)."""
+    if not claim_ids:
+        return []
+    row = nb.store.q1("SELECT created_at FROM context_packets WHERE note_id=?", (note_id,))
+    if row is None:
+        return []
+    out = []
+    for cid in dict.fromkeys(claim_ids):
+        r = nb.store.q1("SELECT v.recorded_at FROM claims c JOIN revisions v ON v.revision_id=c.closed_revision_id"
+                        " WHERE c.claim_id=?", (cid,))
+        if r is not None and r[0] and r[0] >= row[0]:
+            out.append(cid)
     return out
 
 
@@ -1152,6 +1178,26 @@ def replay_claim_start(nb: Any, claim_id: str, exclude: Sequence[str]) -> Dict[s
 def _claim_fields(row: Any) -> Dict[str, Any]:
     return {k: row[k] for k in ("subject_id", "predicate", "object_id", "object_literal", "certainty", "stance",
                                 "observed_at", "valid_from", "valid_until", "evidence", "note_id")}
+
+
+def _read_as(nb: Any, b: Any, ext: Any, entity_id: str) -> List[str]:
+    """The entries the new reading uses for the words that made a retired entry (the retired entry's page says it
+    was retired into them): a mention of the new reading whose own name or alias has the retired entry's name or
+    one of its aliases as its lookup key (the exact case-folded rule of candidate generation, ADR 0004; the
+    linking decided which entry those words are). Empty when the new reading no longer names it."""
+    s = nb.store
+    row = s.entity_row(entity_id)
+    keys = {ids.name_key(x) for x in (row["name"], row["display_name"], *s.aliases(entity_id)) if x}
+    keys.discard("")
+    out: List[str] = []
+    for m in ext.mentions:
+        eid = b.refmap.get(m.ref)
+        if not eid or not keys & {ids.name_key(x) for x in (m.name, *(m.aliases or [])) if x}:
+            continue
+        eid = s.canonical(eid)
+        if eid != entity_id and eid not in out:
+            out.append(eid)
+    return out
 
 
 def plan_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any, *, run_id: Optional[str] = None,
@@ -1406,7 +1452,8 @@ def plan_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any, 
             f" LIMIT 1", [*members, *members, note_id, REINTERPRETED, CLOSE_MATCH, *referenced, *referenced])
         if elsewhere:
             continue
-        post.append(_op("entity.retire", entity_id=eid, reason=reason or "only an earlier reading of this note made it"))
+        post.append(_op("entity.retire", entity_id=eid, reason=reason or "only an earlier reading of this note made it",
+                        read_as=_read_as(nb, b, ext, eid)))
         diff["entities_retired"].append(eid)
 
     old_mentions = {r[0] for r in s.q("SELECT entity_id FROM entity_notes WHERE note_id=?", (note_id,))}

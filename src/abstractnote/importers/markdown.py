@@ -121,6 +121,16 @@ def _date_from_front_matter(fm: Dict[str, str]) -> Optional[str]:
     return None
 
 
+def _body(text: str) -> str:
+    """The file's text after a ``---`` front matter block (the whole text when it has none)."""
+    if not text.startswith("---"):
+        return text
+    end = text.find("\n---", 3)
+    if end < 0:
+        return text
+    return text[end + 4:].partition("\n")[2]  # what follows the closing ``---`` line
+
+
 def _title(text: str, fm: Dict[str, str], path: Path) -> str:
     if fm.get("title"):
         return fm["title"]
@@ -159,6 +169,10 @@ def drafts(*, report: ImportReport, path: str | Path, glob: str = "**/*.md", sin
             continue
         fm, _ = _front_matter(text)
         rel = file.relative_to(toplevel).as_posix() if toplevel else rel_root
+        if not _body(text).strip():  # front matter and nothing else: nothing to read
+            report.leave_out(f"{repo}:{rel}", "no_readable_text",
+                             f"“{rel}” has only its front matter, no text; it was not imported.")
+            continue
         commit = first.get(rel)
         fields = _fields(text)
         bulk = bool(commit) and per_second[commit[1]] >= BULK_COMMIT_FILES

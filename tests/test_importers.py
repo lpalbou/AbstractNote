@@ -391,10 +391,12 @@ def test_files_store_bytes_with_file_time(tmp_path, notebook):
     assert log.occurred_at == importers.iso_from_epoch(1760000000) and log.attachments[0]["data"] == b"boot ok\n"
     assert report.skipped["hidden_file"] == 1
     r1 = importers.run("files", notebook, paths=[d])
-    assert r1.created == 2 and r1.attachments == 2
+    # W27: a file nothing can be read from (an image without a vision extractor) is left out with its reason
+    assert r1.created == 1 and r1.attachments == 1 and r1.skipped["no_readable_text"] == 1 and r1.errors == []
+    assert [x["why"] for x in r1.left_out] == ["“pixel.png” has no readable text; it was not imported."]
     (d / "copy.txt").write_text("boot ok\n")  # same bytes elsewhere: the same note
     r2 = importers.run("files", notebook, paths=[d])
-    assert (r2.created, r2.duplicates) == (0, 3)
+    assert (r2.created, r2.duplicates, r2.skipped["no_readable_text"]) == (0, 2, 1)
 
 
 def test_cli_dry_run_writes_nothing(tmp_path, capsys, claude_project):
@@ -474,3 +476,30 @@ def test_cli_import_takes_the_notebook_embedder(tmp_path, monkeypatch, capsys):
     capsys.readouterr()
     assert cli.main(["markdown", str(root), "--notebook", str(tmp_path / "nb"), "--embed-model", "m-1"]) == 2
     assert "Give both --embed-base-url and --embed-model." in capsys.readouterr().err
+
+
+def test_a_markdown_file_with_only_front_matter_is_left_out_with_its_reason(tmp_path, notebook):
+    """W27 item 5: nothing to read after the front matter: skipped, named in left_out, nothing stored.
+    MUTATION: drop the body check in markdown.drafts (the note is created from its metadata alone)."""
+    md = tmp_path / "md"
+    md.mkdir()
+    (md / "meta.md").write_text("---\ntitle: Only metadata\ndate: 2026-01-01\n---\n\n")
+    (md / "real.md").write_text("---\ntitle: Real\n---\n# Real\nSome words.\n")
+    report = importers.run("markdown", notebook, path=md)
+    assert report.created == 1 and report.skipped["no_readable_text"] == 1 and report.errors == []
+    [left] = report.left_out
+    assert left["reason"] == "no_readable_text" and left["source_key"].endswith(":meta.md")
+    assert report.as_dict()["left_out"] == report.left_out
+
+
+def test_an_unreadable_file_is_left_out_not_counted_as_an_error(tmp_path, notebook):
+    """The files importer gives its file name as the title; that alone is not text: the capture refuses the row
+    (NoReadableText) and the import names it. MUTATION: drop title_is_text=False from the files draft (the note is
+    stored with only its name) / catch the refusal as an error again."""
+    d = tmp_path / "in"
+    d.mkdir()
+    (d / "blank.png").write_bytes(PNG)
+    (d / "notes.txt").write_text("Castor runs on Qwen.\n")
+    report = importers.run("files", notebook, paths=[d])
+    assert report.created == 1 and report.errors == [] and report.skipped == {"no_readable_text": 1}
+    assert notebook.store.q1("SELECT COUNT(*) FROM notes")[0] == 1

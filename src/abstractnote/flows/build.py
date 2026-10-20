@@ -16,7 +16,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from .graph import Flow
 from .prompts_fallback import FLOW_PROMPT_VARS
@@ -26,7 +26,7 @@ JSON_DIR = Path(__file__).resolve().parent / "json"
 
 BUNDLE_ID = "abstractnote"
 ENTRYPOINTS = ["note-capture", "note-drain", "note-recall", "note-reflect", "note-consolidate"]
-INTERNAL_FLOWS = ["note-process", "note-mine"]
+INTERNAL_FLOWS = ["note-process", "note-mine", "note-file"]
 ALL_FLOWS = ENTRYPOINTS + INTERNAL_FLOWS
 
 INTERFACES = {
@@ -37,6 +37,7 @@ INTERFACES = {
     "note-consolidate": ["abstractnote.consolidate.v1"],
     "note-process": [],
     "note-mine": [],
+    "note-file": [],
 }
 
 #: Tools each flow may call (the automations' `_runtime.allowed_tools` is the union).
@@ -47,7 +48,7 @@ NOTE_TOOLS = [
     "note_resurface", "note_anniversaries", "note_insight_write", "note_communities_recompute",
     "note_communities_pending", "note_communities_label", "note_consolidation_begin", "note_consolidation_progress",
     "note_consolidation_end", "note_entities_normalize", "note_entities_stale_summaries", "note_entities_set_summaries",
-    "note_then_now_refresh", "note_reinterpret_next", "note_mark_reinterpret",
+    "note_then_now_refresh", "note_reinterpret_next", "note_mark_reinterpret", "note_filing_context",
 ]
 
 DRAIN_DEFAULTS = {"max_items": 20, "budget_s": 90}
@@ -530,6 +531,73 @@ return {"extraction": merged, "mentions": names}
 '''
 
 
+def _file_if_needed(f: Flow, schemas: Dict[str, Any], prompts: Dict[str, str], after: Tuple[str, str]
+                    ) -> Tuple[List[Tuple[str, str]], str]:
+    """The quick filing of a stored note that has no kind yet (an imported note: imports skip the filing a live
+    capture gets; eval2: 985 of 988 understood imported notes had none): ``note_filing_context`` -> the capture's own
+    filing packet, prompt, ``QuickFiling`` schema and settings (thinking off, one call) -> ``note_file`` with the
+    kind, up to 4 topics, the title when the note has none, its language and one line (never the urgency: the note
+    keeps its place in the queue). A note that has a kind goes straight on. Returns the exits the flow continues
+    from (filed, not needed) and the context node id. note-file is the one flow that holds these steps."""
+    S = lambda p: ("start", p)  # noqa: E731
+    need = f.tool_step(
+        "filing_context", "Does it need filing?", "note_filing_context", {"note_id": ("string", S("note_id"))},
+        [("needed", "boolean"), ("occurred_at", "string"), ("title", "string"), ("text", "string"),
+         ("similar", "array"), ("revisits", "array"), ("topics", "array")],
+        after=after,
+    )
+    f.if_("needs_filing", "No kind yet?", (need, "needed"))
+    f.then(need, "needs_filing")
+    f.code(
+        "filing_packet", "What filing sees",
+        packet_code(["clip", "note_envelope", "filing_packet"],
+                    "return {\"packet\": filing_packet(note_id, occurred_at, title, text, similar, revisits, topics)}"),
+        inputs={"note_id": ("string", S("note_id")), "occurred_at": ("string", (need, "occurred_at")),
+                "title": ("string", (need, "title")), "text": ("string", (need, "text")),
+                "similar": ("array", (need, "similar")), "revisits": ("array", (need, "revisits")),
+                "topics": ("array", (need, "topics"))},
+        outputs=[("packet", "object")],
+    )
+    f.then("needs_filing", "filing_packet", "true")
+    f.template("filing_prompt", "Filing prompt", prompts["quick_filing"], {"packet": ("filing_packet", "packet")})
+    f.llm("filing", "File it quickly", schema=schemas["QuickFiling"], prompt=("filing_prompt", "result"),
+          provider=S("provider"), model=S("model"), **_step("quick_filing", prompts))
+    f.then("filing_packet", "filing")
+    f.break_object("filing_fields", "Filing", ("filing", "data"), [
+        ("title", "string"), ("kind", "string"), ("topics", "array"), ("language", "string"), ("one_line", "string"),
+    ])
+    filed = f.tool_step(
+        "file", "File the note", "note_file",
+        {"note_id": ("string", S("note_id")), "title": ("string", ("filing_fields", "title")),
+         "kind": ("string", ("filing_fields", "kind")), "topics": ("array", ("filing_fields", "topics")),
+         "language": ("string", ("filing_fields", "language")),
+         "one_line": ("string", ("filing_fields", "one_line"))},
+        [("priority", "number"), ("status", "string"), ("topics_not_assigned", "array")],
+        after=("filing", "exec-out"),
+    )
+    return [(filed, "exec-out"), ("needs_filing", "false")], need
+
+
+def build_file(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, Any]:
+    """note-file: the quick filing of one stored note without a kind (note-process runs it first, as a subflow, so
+    the bundle carries it; the ``refile --missing`` repair runs it per note)."""
+    f = Flow("note-file", "File a stored note", "Give a stored note without a kind its kind and topics.",
+             interfaces=INTERFACES["note-file"])
+    f.start([("note_id", "string"), *_model_pins()], {"note_id": "", "provider": "", "model": ""})
+    exits, need = _file_if_needed(f, schemas, prompts, ("start", "exec-out"))
+    f.end("end", "Filed", {
+        "response": ("string", "Filed."), "note_id": ("string", ("start", "note_id")), "filed": ("boolean", True),
+        "kind": ("string", ("filing_fields", "kind")), "topics": ("array", ("filing_fields", "topics")),
+    })
+    f.then(exits[0][0], "end", exits[0][1])
+    f.end("end_not_needed", "Already filed", {
+        "response": ("string", "It already has a kind."), "note_id": ("string", ("start", "note_id")),
+        "filed": ("boolean", False),
+    })
+    f.then(exits[1][0], "end_not_needed", exits[1][1])
+    return f.finish()
+
+
 def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, Any]:
     f = Flow(
         "note-process", "Understand a note",
@@ -551,14 +619,27 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
     )
     f.then("start", "thinking")
     TH = ("thinking", "value")
+    # a stored note without a kind (an import) gets the quick filing a live capture gets (the note-file subflow), then
+    # is read; a filing that fails fails the note (its sentence in the queue log), never a silent skip
+    need = f.tool_step("filing_need", "Does it need filing?", "note_filing_context",
+                       {"note_id": ("string", S("note_id"))}, [("needed", "boolean")], after=("thinking", "exec-out"))
+    f.if_("unfiled", "No kind yet?", (need, "needed"))
+    f.then(need, "unfiled")
+    f.subflow("filing", "File it", "note-file", {
+        "note_id": ("string", S("note_id")), "provider": ("provider_text", S("provider")),
+        "model": ("model", S("model")),
+    }, [("filed", "boolean")])
+    f.then("unfiled", "filing", "true")
+    f.child_check("filing_checked", "Filed?", "filing")
     ctx = f.tool_step(
         "context", "Look at what is known", "note_context",
         {"note_id": ("string", S("note_id")), "max_chars": ("number", SECTION_CHARS)},
         [("note", "object"), ("sections", "array"), ("similar_notes", "array"),
          ("candidate_entities", "array"), ("open_tasks", "array"), ("topics", "array"),
          ("vocabulary", "array"), ("context", "object")],
-        after=("thinking", "exec-out"),
+        after=("filing_checked", "exec-out"),
     )
+    f.then("unfiled", "context_args", "false")
     f.code(
         "sections", "Sections to read",
         "if not isinstance(sections, list) or not sections:\n"
@@ -743,7 +824,7 @@ def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, A
         "budget = float(budget_s if budget_s is not None else 90)\n"
         "now = time.time()\n"
         "return {\"updates\": {\"drain_deadline\": now + budget, \"drain_left\": left, \"drain_continue\": True,\n"
-        "        \"drain_processed\": 0, \"drain_failed\": 0, \"drain_errors\": [],\n"
+        "        \"drain_processed\": 0, \"drain_failed\": 0, \"drain_errors\": [], \"drain_requeued\": [],\n"
         "        \"drain_worker\": \"drain-\" + str(int(now * 1000))}}",
         inputs={"max_items": ("number", S("max_items")), "budget_s": ("number", S("budget_s"))},
         outputs=[("updates", "object")],
@@ -785,6 +866,10 @@ def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, A
         "for prefix in (\"Runtime error: \", \"Execution error: \"):\n"
         "    if err.startswith(prefix):\n"
         "        err = err[len(prefix):]\n"
+        "rev = o.get(\"revision\") if isinstance(o.get(\"revision\"), dict) else {}\n"
+        "if not err and c.get(\"success\") is not False and rev.get(\"requeue\"):\n"
+        "    # the notebook changed while the note was read: nothing was applied, it goes back once (review 4.1)\n"
+        "    return {\"outcome\": \"requeue\", \"failure\": str(rev.get(\"reason\") or \"\"), \"revision_id\": None}\n"
         "failed = c.get(\"success\") is False or o.get(\"success\") is False or bool(err) or not o.get(\"revision_id\")\n"
         "return {\"outcome\": \"error\" if failed else \"ok\",\n"
         "        \"failure\": (str(err) if err else \"The note could not be processed.\") if failed else None,\n"
@@ -802,25 +887,31 @@ def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, A
     )
     for vid, name, default in (("left", "drain_left", 0), ("deadline", "drain_deadline", 0),
                                ("processed", "drain_processed", 0), ("failed", "drain_failed", 0),
-                               ("errors", "drain_errors", [])):
+                               ("errors", "drain_errors", []), ("requeued", "drain_requeued", [])):
         f.get_var(vid, name, default)
     f.code(
         "budget", "Budget left?",
         "import time\n"
         "ok = outcome == \"ok\"\n"
+        "again = outcome == \"requeue\"\n"
         "errs = list(errors or [])\n"
-        "if not ok:\n"
+        "back = list(requeued or [])\n"
+        "if again:\n"
+        "    back.append({\"note_id\": note_id, \"reason\": failure})\n"
+        "elif not ok:\n"
         "    errs.append({\"note_id\": note_id, \"error\": failure})\n"
         "remaining = int(left or 0) - 1\n"
         "return {\"updates\": {\"drain_left\": remaining,\n"
         "        \"drain_processed\": int(processed or 0) + (1 if ok else 0),\n"
-        "        \"drain_failed\": int(failed or 0) + (0 if ok else 1), \"drain_errors\": errs,\n"
+        "        \"drain_failed\": int(failed or 0) + (0 if ok or again else 1), \"drain_errors\": errs,\n"
+        "        \"drain_requeued\": back,\n"
         "        \"drain_continue\": remaining > 0 and time.time() < float(deadline or 0)}}",
         inputs={
             "outcome": ("string", ("outcome", "outcome")), "failure": ("string", ("outcome", "failure")),
             "note_id": ("string", ("pick", "note_id")), "left": ("number", ("left", "value")),
             "deadline": ("number", ("deadline", "value")), "processed": ("number", ("processed", "value")),
             "failed": ("number", ("failed", "value")), "errors": ("array", ("errors", "value")),
+            "requeued": ("array", ("requeued", "value")),
         },
         outputs=[("updates", "object")],
     )
@@ -828,7 +919,7 @@ def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, A
     f.set_vars("budget_vars", "Remember the budget", ("budget", "updates"))
     f.then("budget", "budget_vars")
     for vid, name, default in (("r_processed", "drain_processed", 0), ("r_failed", "drain_failed", 0),
-                               ("r_errors", "drain_errors", [])):
+                               ("r_errors", "drain_errors", []), ("r_requeued", "drain_requeued", [])):
         f.get_var(vid, name, default)
     # The end of the batch (ADR 0008 §5): the themes are found again when what was applied made them due (notes
     # dated earlier than what was known, notes understood again, many revisions; no model). A failure is reported
@@ -839,12 +930,17 @@ def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, A
         "report", "Report",
         "n = int(processed or 0)\n"
         "k = int(failed or 0)\n"
-        "if n == 0 and k == 0:\n"
+        "back = list(requeued or [])\n"
+        "if n == 0 and k == 0 and not back:\n"
         "    msg = \"Nothing to process.\"\n"
         "else:\n"
         "    msg = \"Processed \" + str(n) + (\" note.\" if n == 1 else \" notes.\")\n"
         "    if k:\n"
         "        msg = msg[:-1] + \"; \" + str(k) + (\" could not be processed.\" if k > 1 else \" could not be processed.\")\n"
+        "    if back:\n"
+        "        b = len(back)\n"
+        "        msg += \" \" + str(b) + (\" note is\" if b == 1 else \" notes are\") + \" read again: the notebook changed while\"\n"
+        "        msg += (\" it was\" if b == 1 else \" they were\") + \" being read.\"\n"
         "c = dict(themes) if isinstance(themes, dict) else {}\n"
         "if themes_failed:\n"
         "    c = {\"recomputed\": False, \"error\": str(themes_failure or \"\")}\n"
@@ -854,18 +950,20 @@ def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, A
         "    w = int(c.get(\"labels_waiting\") or 0)\n"
         "    msg += \" The themes were updated (\" + str(g) + (\" group\" if g == 1 else \" groups\")\n"
         "    msg += ((\", \" + str(w) + \" to name next time).\") if w else \").\")\n"
-        "return {\"message\": msg, \"processed\": n, \"failed\": k, \"errors\": list(errors or []), \"communities\": c}",
+        "return {\"message\": msg, \"processed\": n, \"failed\": k, \"errors\": list(errors or []), \"communities\": c,\n"
+        "        \"requeued\": back}",
         inputs={"processed": ("number", ("r_processed", "value")), "failed": ("number", ("r_failed", "value")),
-                "errors": ("array", ("r_errors", "value")), "themes": ("object", (themes, "tool_output")),
+                "errors": ("array", ("r_errors", "value")), "requeued": ("array", ("r_requeued", "value")),
+                "themes": ("object", (themes, "tool_output")),
                 "themes_failed": ("boolean", (themes, "failed")), "themes_failure": ("string", (themes, "failure"))},
         outputs=[("message", "string"), ("processed", "number"), ("failed", "number"), ("errors", "array"),
-                 ("communities", "object")],
+                 ("communities", "object"), ("requeued", "array")],
     )
     f.then(themes, "report")
     f.end("end", "Done", {
         "response": ("string", ("report", "message")), "processed": ("number", ("report", "processed")),
         "failed": ("number", ("report", "failed")), "errors": ("array", ("report", "errors")),
-        "communities": ("object", ("report", "communities")),
+        "communities": ("object", ("report", "communities")), "requeued": ("array", ("report", "requeued")),
     })
     f.then("report", "end")
     return f.finish(automation_defaults=AUTOMATION_DEFAULTS["note-drain"])
@@ -1876,6 +1974,7 @@ BUILDERS = {
     "note-drain": build_drain,
     "note-recall": build_recall,
     "note-mine": build_mine,
+    "note-file": build_file,
     "note-reflect": build_reflect,
     "note-consolidate": build_consolidate,
 }

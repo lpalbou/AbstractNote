@@ -26,7 +26,7 @@ TOOL_NAMES: List[str] = [
     "note_resurface", "note_anniversaries", "note_insight_write", "note_communities_recompute",
     "note_communities_pending", "note_communities_label", "note_consolidation_begin", "note_consolidation_progress",
     "note_consolidation_end", "note_entities_normalize", "note_entities_stale_summaries", "note_entities_set_summaries",
-    "note_then_now_refresh", "note_reinterpret_next", "note_mark_reinterpret",
+    "note_then_now_refresh", "note_reinterpret_next", "note_mark_reinterpret", "note_filing_context",
 ]
 
 
@@ -99,6 +99,12 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
         """Store the quick filing of a note."""
         return cap.note_file(ctx, note_id, title, kind, topics, urgency, language, one_line)
 
+    @tool(name="note_filing_context", description="What the quick filing sees for a stored note, and whether it"
+                                                   " still needs one (no kind yet).")
+    def note_filing_context(note_id: str) -> Dict[str, Any]:
+        """What the quick filing sees for a stored note without a kind."""
+        return cap.note_filing_context(ctx, note_id)
+
     @tool(name="note_context", description="What the notebook already knows that is relevant to one note.",
           when_to_use="First step of processing a note: sections, similar notes, candidate entities, open tasks.")
     def note_context(note_id: str, max_chars: Optional[int] = None) -> Dict[str, Any]:
@@ -122,7 +128,8 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
         """Take the next notes to process from the queue."""
         return que.note_queue_lease(ctx, worker_id, max_items)
 
-    @tool(name="note_queue_ack", description="Report how processing a leased note went (ok or error).")
+    @tool(name="note_queue_ack", description="Report how processing a leased note went (ok, error, or requeue"
+                                                 " when the notebook changed while it was read).")
     def note_queue_ack(note_id: str, outcome: str, error: Optional[str] = None,
                        revision_id: Optional[str] = None) -> Dict[str, Any]:
         """Report how processing a leased note went."""
@@ -281,6 +288,7 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
         "note_entities_stale_summaries": note_entities_stale_summaries,
         "note_entities_set_summaries": note_entities_set_summaries, "note_then_now_refresh": note_then_now_refresh,
         "note_reinterpret_next": note_reinterpret_next, "note_mark_reinterpret": note_mark_reinterpret,
+        "note_filing_context": note_filing_context,
     }
     assert list(tools) == TOOL_NAMES
     return tools

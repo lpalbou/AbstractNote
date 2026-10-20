@@ -47,6 +47,9 @@ export type Note = NoteRef & {
   /** Set on an insight note (`kind` = its insight_kind), null on every other note. */
   insight?: { kind: string; evidence_note_ids: string[]; entity_ids: string[]; acked_at: string | null } | null;
   error?: string | null;
+  /** Where the note's date came from (`client`, `content`, `pdf_created`, `file_mtime`, ...) and whether it is approximate (ADR 0008 §7). */
+  date_basis?: string;
+  date_approximate?: boolean;
 };
 
 /** Entity card relation (W1 entity_card). */
@@ -65,6 +68,8 @@ export type EntityCard = EntityRef & {
   open_tasks?: Task[];
   /** Ids of the entries merged into this one (W1 expand.entity_card). */
   merged_from?: string[];
+  /** Set when a note understood again withdrew this entry (ADR 0008): `into` = what the note now reads its words as. */
+  retired?: { at: string; revision_id: string; note_id: string | null; note_title: string | null; reason: string | null; into: Array<{ entity_id: string; name: string }>; sentence: string } | null;
   /** Echoed when the card was built from what the archive held on a date (`as_received`). */
   as_received?: string;
   /** The community the entity belongs to (W17); null when it is in none. */
@@ -117,7 +122,8 @@ export type Cue = { cue_id: string; text: string; kind: string; subject: { kind:
 /** Pinned: GET /note/changes. Absent lists mean empty. */
 export type Changes = {
   cursor: string;
-  notes?: NoteRef[];
+  /** `how`: "captured" (received since the cursor) or "understood" (its processing was recorded since; W24 D16). */
+  notes?: Array<NoteRef & { how?: "captured" | "understood" }>;
   entities?: Array<EntityRef & { first_seen: string }>;
   /** `kind` superseded (replaced by `superseded_by`) or retracted (withdrawn; `superseded_by` null); `text` is plain words. */
   superseded_claims?: Array<{ claim_id: string; kind: "superseded" | "retracted"; text: string; superseded_by: string | null; note_id: string }>;
@@ -143,7 +149,8 @@ export type QueueStats = { queued: number; processing: number; failed: number; d
 /** GET /note/queue (W1 Queue.summary + W2 automations). */
 export type QueueInfo = {
   stats: QueueStats;
-  failed: Array<{ note_id: string; title: string; occurred_at?: string; last_error: string | null; failed_at?: string; failures?: number }>;
+  /** `errors`: the note's last 3 logged failures, newest first (the queue_errors log, W24 D15). */
+  failed: Array<{ note_id: string; title: string; occurred_at?: string; last_error: string | null; failed_at?: string; failures?: number; errors?: Array<{ attempt: number; at: string; error: string }> }>;
   waiting: Array<{ note_id: string; title: string; priority: number; state: string; attempts: number }>;
   automations: Automations;
   /** The processor's throughput: up to `max_items` notes every `interval` ("2m"). */

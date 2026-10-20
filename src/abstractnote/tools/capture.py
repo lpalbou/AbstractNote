@@ -1,4 +1,4 @@
-"""``note_capture`` and ``note_file`` (docs/api.md, "Note tools").
+"""``note_capture``, ``note_file`` and ``note_filing_context`` (docs/api.md, "Note tools").
 
 Attachments are ``{"$artifact": id, "run_id"?: ...}`` gateway references,
 resolved through the injected ``artifact_reader(ref) -> (bytes, mime,
@@ -135,3 +135,10 @@ def note_file(ctx: ToolContext, note_id: str, title: Optional[str] = None, kind:
     ctx.nb.queue.heartbeat(note_id)  # an inline capture's claim runs from here into its note-process
     return ctx.nb.file_note(note_id, title=blank(title), kind=blank(kind), topics=topics or [],
                             urgency=blank(urgency), language=blank(language), one_line=blank(one_line))
+
+
+def note_filing_context(ctx: ToolContext, note_id: str) -> Dict[str, Any]:
+    """What the quick filing sees for a stored note without a kind (``ingest.capture.filing_context``)."""
+    from ..ingest.capture import filing_context
+
+    return filing_context(ctx.nb, note_id)

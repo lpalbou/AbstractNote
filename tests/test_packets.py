@@ -154,7 +154,8 @@ def _process_prompt_flows():
 def test_model_nodes_carry_static_system_prompts_thinking_and_caps():
     _, nodes = _process_prompt_flows()
     llm = {k: n for k, n in nodes.items() if n["data"]["nodeType"] == "llm_call"}
-    steps = {("note-capture", "filing"): "quick_filing", ("note-process", "extract"): "extract",
+    steps = {("note-capture", "filing"): "quick_filing", ("note-file", "filing"): "quick_filing",
+             ("note-process", "extract"): "extract",
              ("note-process", "extract_again"): "extract",
              ("note-process", "link"): "link", ("note-process", "link_again"): "link",
              ("note-recall", "synthesize"): "synthesize",

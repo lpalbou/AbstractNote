@@ -11,7 +11,7 @@ from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from .. import ids
-from ..store.notes import clamp_limit, clamp_note, decode_cursor, encode_cursor
+from ..store.notes import LIVE_ENTITY, clamp_limit, clamp_note, decode_cursor, encode_cursor
 from . import shapes
 
 
@@ -84,6 +84,8 @@ def changes(nb: Any, since: Optional[str] = None, limit: int = 50, as_received: 
             {**shapes.note_ref(r), "how": "understood" if understood else "captured"})
     for r in q("SELECT * FROM entities WHERE recorded_at>=?" + f_created + " ORDER BY recorded_at, entity_id LIMIT ?",
                (ts, *p_created, limit + len(seen))):
+        if r["retired_revision_id"] and (arch is None or arch.has(r["retired_revision_id"])):
+            continue  # ADR 0008: retired by a re-understanding (the archive before it still lists it)
         add("entities", "entity", r["entity_id"], r["recorded_at"],
             {"entity_id": r["entity_id"], "name": r["name"], "display_name": r["display_name"] or r["name"],
              "kind": r["kind"], "first_seen": r["first_seen"]})
@@ -145,7 +147,7 @@ def overview(nb: Any, days: int = 30, *, now: Optional[str] = None) -> Dict[str,
         " note_id DESC LIMIT 20")]
     entities = [{"entity_id": r["entity_id"], "name": r["name"], "display_name": r["display_name"] or r["name"],
                  "kind": r["kind"], "note_count": r["note_count"], "last_seen": r["last_seen"]} for r in q(
-        "SELECT * FROM entities WHERE merged_into IS NULL AND last_seen>=? ORDER BY note_count DESC, last_seen DESC,"
+        f"SELECT * FROM entities WHERE {LIVE_ENTITY} AND last_seen>=? ORDER BY note_count DESC, last_seen DESC,"
         " entity_id LIMIT 20", (start,))]
     insights = [shapes.insight(r) for r in q(
         "SELECT * FROM notes WHERE insight_kind IS NOT NULL AND acked_at IS NULL AND archived_at IS NULL"
@@ -188,7 +190,7 @@ def cues(nb: Any, limit: int = 3) -> Dict[str, Any]:
         subject = {"kind": "cue", "id": r["note_id"], "title": ins["title"]}
         for eid in ins["entity_ids"]:
             e = nb.store.entity_row(nb.store.canonical(eid))
-            if e is not None:
+            if e is not None and not e["retired_revision_id"]:  # ADR 0008: a retired entry is no cue subject
                 subject = {"kind": "entity", "id": e["entity_id"], "title": e["name"]}
                 break
         else:

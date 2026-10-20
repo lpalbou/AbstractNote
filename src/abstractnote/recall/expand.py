@@ -102,7 +102,42 @@ def entity_card(nb: Any, entity_id: str, at: Optional[str] = None, as_received: 
         "notes": [shapes.note_ref(r) for r in notes],
         "open_tasks": [shapes.task(r) | {"status": "open", "closed_at": None} for r in tasks],
         "sparkline": [{"month": k, "notes": v} for k, v in months.items()],
+        "retired": retirement(nb, eid) if at_n is None else None,
     }
+
+
+def retirement(nb: Any, entity_id: str) -> Optional[Dict[str, Any]]:
+    """What retired this entry (ADR 0008 ``entity.retire``), or None when it is not retired: ``{at, revision_id,
+    note_id, note_title, reason, into: [{entity_id, name}], sentence}``. ``into`` are the entries the new reading of
+    the note uses for the words that made it; the sentence says it in one line for its page."""
+    from ..ingest.dates import long_day
+
+    s = nb.store
+    row = s.entity_row(entity_id)
+    if row is None or not row["retired_revision_id"]:
+        return None
+    rev = s.q1("SELECT * FROM revisions WHERE revision_id=?", (row["retired_revision_id"],))
+    op = next((o.get("payload") or {} for o in (_uj(rev["ops_json"], []) if rev is not None else []) or []
+               if o.get("op") == "entity.retire" and (o.get("payload") or {}).get("entity_id") == entity_id), {})
+    note = s.note_row(rev["note_id"]) if rev is not None and rev["note_id"] else None
+    title = (note["title"] or shapes.excerpt(note["text"], 80)) if note is not None else None
+    into = []
+    for x in op.get("read_as") or []:
+        b = s.entity_brief(s.canonical(x))
+        if b is not None and not b["retired"] and all(i["entity_id"] != b["entity_id"] for i in into):
+            into.append({"entity_id": b["entity_id"], "name": b["display_name"]})
+    when = rev["recorded_at"] if rev is not None else row["retired_at"]  # when the notebook withdrew it
+    day = long_day(when) if when else None
+    where = f"the note “{title}”" if title else "a note"
+    if into:
+        names = ", ".join(i["name"] for i in into[:-1]) + (" and " if len(into) > 1 else "") + into[-1]["name"]
+        sentence = f"Retired{f' on {day}' if day else ''}: {where} was understood again and now reads it as {names}."
+    else:
+        sentence = (f"Retired{f' on {day}' if day else ''}: only an earlier reading of {where} made it, and nothing"
+                    " refers to it any more.")
+    return {"at": row["retired_at"], "revision_id": row["retired_revision_id"],
+            "note_id": rev["note_id"] if rev is not None else None, "note_title": title,
+            "reason": op.get("reason"), "into": into, "sentence": sentence}
 
 
 def _archive_card(nb: Any, arch: Any, entity_id: str, at_n: Optional[str]) -> Dict[str, Any]:

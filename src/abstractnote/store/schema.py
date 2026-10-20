@@ -21,8 +21,9 @@ SCHEMA_VERSION = 4  # 2: entities.name_key/display_name/key_clash_with, entity_a
 TRUTH_TABLES = ("meta", "notes", "attachments", "note_links", "queue", "revisions", "vectors", "context_packets",
                 "reinterpret_marks", "idea_changes")
 #: Derived tables a rebuild copies (entity ids are stable, and the community labels are the model's work), and the
-#: consolidation bookkeeping (its progress rows and the measured seconds per item the next ETA starts from).
-KEPT_TABLES = ("communities", "entity_communities", "consolidation_runs")
+#: consolidation bookkeeping (its progress rows and the measured seconds per item the next ETA starts from), and the
+#: ``refile --missing`` repairs' progress rows.
+KEPT_TABLES = ("communities", "entity_communities", "consolidation_runs", "refile_runs")
 
 DDL = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -460,6 +461,24 @@ CREATE TABLE IF NOT EXISTS consolidation_runs (
   note TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_consolidation_runs_started ON consolidation_runs(started_ts);
+
+-- one row per ``refile --missing`` repair (abstractnote.ingest.refile): updated after every note, closed with its status
+CREATE TABLE IF NOT EXISTS refile_runs (
+  refile_id TEXT PRIMARY KEY,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  status TEXT NOT NULL DEFAULT 'running',
+  total INTEGER NOT NULL DEFAULT 0,
+  done INTEGER NOT NULL DEFAULT 0,
+  filed_json TEXT NOT NULL DEFAULT '[]',
+  skipped_json TEXT NOT NULL DEFAULT '[]',
+  kinds_json TEXT NOT NULL DEFAULT '{}',
+  not_reached INTEGER NOT NULL DEFAULT 0,
+  max_items INTEGER,
+  budget_s REAL,
+  seconds REAL,
+  model TEXT
+);
 
 CREATE TABLE IF NOT EXISTS then_now_cache (
   key TEXT PRIMARY KEY,

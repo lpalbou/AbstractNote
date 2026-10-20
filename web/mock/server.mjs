@@ -191,6 +191,7 @@ export function createMockGateway(options = {}) {
       open_tasks: [...db.tasks.values()].filter((t) => t.status === "open" && t.entity_ids.includes(id)).map(taskView),
       community: communityRef(e.community_id),
       as_of: at || null, ...(rcv ? { as_received: rcv } : {}), resolved_from: id !== asked ? asked : null, merged_from: [...db.entities.values()].filter((m) => m.merged_into === id).map((m) => m.entity_id), merged_into: null,
+      retired: null,
       sparkline: [...notes.reduce((m, n) => m.set(n.occurred_at.slice(0, 7), (m.get(n.occurred_at.slice(0, 7)) || 0) + 1), new Map())].map(([month, n]) => ({ month, notes: n })),
     };
   }
@@ -891,7 +892,8 @@ export function createMockGateway(options = {}) {
       const rcv = q.get("as_received") || null;
       return send(res, 200, {
         cursor: nowIso(),
-        notes: [...db.notes.values()].filter((n) => fresh(n.received_at) && n.status !== "failed" && heldNote(n, rcv)).sort((a, b) => ms(b.received_at) - ms(a.received_at)).map(noteRef),
+        // W24 D16: each note once; "understood" when its processing was recorded since the cursor, else "captured"
+        notes: [...db.notes.values()].filter((n) => fresh(n.received_at) && n.status !== "failed" && heldNote(n, rcv)).sort((a, b) => ms(b.received_at) - ms(a.received_at)).map((n) => ({ ...noteRef(n), how: n.status === "processed" ? "understood" : "captured" })),
         entities: [...db.entities.values()].filter((e) => e.created_at && fresh(e.created_at) && heldEntity(e.entity_id, rcv)).map((e) => ({ ...entRef(e.entity_id), first_seen: e.first_seen })),
         superseded_claims: [...db.claims.values()].filter((c) => asHeld(c, rcv).status !== "active" && heldClaim(c, rcv) && fresh(c.valid_until || c.retracted_at || c.recorded_at)).map((c) => ({ claim_id: c.claim_id, kind: c.status === "superseded" ? "superseded" : "retracted", text: describe(c), superseded_by: c.status === "superseded" ? c.superseded_by : null, note_id: c.note_id })),
         closed_loops: [...db.tasks.values()].filter((tk) => tk.status !== "open" && tk.closed_at && fresh(tk.closed_at)).map((tk) => ({ task_id: tk.task_id, text: tk.text, closed_at: tk.closed_at })),
@@ -1212,7 +1214,8 @@ export function createMockGateway(options = {}) {
     }
     if (np === "/queue") {
       // W1 Queue.summary + W2 automations.
-      const failed = [...db.notes.values()].filter((n) => n.status === "failed").map((n) => ({ note_id: n.note_id, last_error: n.error, failed_at: n.received_at, failures: 3, title: n.title, occurred_at: n.occurred_at }));
+      // W24 D15: each failed note carries its last 3 logged failures, newest first (the mock logs the same cause 3 times)
+      const failed = [...db.notes.values()].filter((n) => n.status === "failed").map((n) => ({ note_id: n.note_id, last_error: n.error, failed_at: n.received_at, failures: 3, title: n.title, occurred_at: n.occurred_at, errors: [3, 2, 1].map((attempt) => ({ attempt, at: n.received_at, error: n.error || "Processing failed." })) }));
       const waiting = queuedNotes().map(({ q: item, n }) => ({ note_id: n.note_id, priority: item.priority ?? 1, state: "queued", attempts: item.attempts || 0, next_attempt_at: null, title: n.title, occurred_at: n.occurred_at }));
       // W10: the processor's throughput (the processor_schedule setting the automation was created with).
       const ps = db.settings.processor_schedule;

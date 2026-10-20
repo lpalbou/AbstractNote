@@ -100,6 +100,13 @@ Rules shared by all importers:
   skipped by reason), the time range covered, and the `date_basis` histogram with
   `approximate_dates` (how many dates are a session start, a last edit, a commit or a file date), in
   a dry run too, so a user sees how many dates are approximate before writing anything.
+- Leave out a row with nothing to read, by name (ADR 0007): a Markdown file that is only its front matter
+  (at draft time, a dry run too) and a file whose content gives no readable text (the files importer's
+  title is the file name, not text, so the capture refuses it with `NoReadableText`, R4's rule for a live
+  upload; a dry run does not extract and counts it as new) are counted under `skipped.no_readable_text`
+  and listed in `left_out: [{source_key, reason, why}]` ("“pixel.png” has no readable text; it was not
+  imported."), never stored as a note made of its name and never counted as an error. An image without a
+  vision extractor is such a file: import it again with one.
 
 ## Re-imports after the 2026-10-19 date and outcome fixes
 
@@ -116,7 +123,9 @@ notebook pinned to an embedding server is opened with the same `--embed-base-url
 `--embed-model` that `capture` and `process` take
 ([troubleshooting.md](troubleshooting.md#this-notebooks-vectors-were-made-with-the-embedding-model-)).
 
-Processing an import runs through the same `note-process` flow as live notes. Expect roughly two
-model calls per note; with a small local model this is a few seconds per note, so a corpus of a
+Processing an import runs through the same `note-process` flow as live notes. An import skips the
+quick filing a live capture gets, so its processing files it first (one more small call: kind and up
+to 4 topics, thinking off; cognition.md "note-process" step 0); notes understood before that are filed
+with `abstractnote refile --missing --local`. Expect roughly three model calls per note; with a small local model this is a few seconds per note, so a corpus of a
 few thousand notes takes hours. Run `abstractnote process --local` on the machine that holds the
 model, or let the gateway's processor automation drain the queue over time.

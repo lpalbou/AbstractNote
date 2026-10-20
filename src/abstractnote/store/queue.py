@@ -13,6 +13,10 @@ Every failed attempt is also written to ``queue_errors`` (note, attempt, time, e
 the causes of retries stay readable (``errors``; ``summary`` shows the last :data:`ERRORS_SHOWN` per
 failed note).
 
+A note read against statements that were closed while it was being read is put back once (``ack`` outcome
+``requeue``): same priority, no failure counted, available at once, :data:`STALE_REQUEUE_ERROR` in ``queue_errors``;
+:meth:`Queue.requeued_stale` says it was, so the next reading is applied even if it is stale again.
+
 Claims (ADR 0008 §8: nothing is understood twice). A note being understood outside a drain carries a claim on its
 row: ``inline_run_id`` (note-capture with ``process_inline``, set in the enqueue's transaction, before the quick
 filing and the inline note-process) or ``reinterpret_run_id`` (the re-understanding stage), each with its
@@ -44,6 +48,10 @@ CLAIM_STOPPED_ERROR = {
     "reinterpret": "Understanding it again stopped before it finished; it can be taken again.",
 }
 ERRORS_SHOWN = 3  # recent causes per failed note in the queue summary
+#: The recorded reason of a drain's one re-queue of a note read against statements that changed while it was read
+#: (review 4.1, ADR 0008 §5): nothing of that reading was applied; the next lease reads it again on what holds now.
+STALE_REQUEUE_ERROR = ("The notebook changed while this note was being read (a statement it builds on was closed"
+                       " meanwhile); it is read again.")
 
 
 def _plus(ts: str, seconds: int) -> str:
@@ -200,14 +208,26 @@ class Queue:
             now: Optional[str] = None, final: bool = False) -> Dict[str, Any]:
         """The outcome of processing ``note_id``. A failure is retried with backoff up to :data:`MAX_FAILURES`; a
         ``final`` one (a cause no retry can change, such as a note with no text to read) marks it ``failed`` at
-        once, its reason in ``queue_errors`` and ``last_error`` like any other (B item 11, FIX1)."""
-        if outcome not in ("ok", "error"):
-            raise ValueError("The outcome must be ok or error.")
+        once, its reason in ``queue_errors`` and ``last_error`` like any other (B item 11, FIX1). ``requeue``: the
+        reading was not applied because the notebook changed while it was read (:data:`STALE_REQUEUE_ERROR`); the
+        note goes back to the queue at once at its priority, no failure counted, the reason logged."""
+        if outcome not in ("ok", "error", "requeue"):
+            raise ValueError("The outcome must be ok, error or requeue.")
         now = now or ids.utc_now()
         with self.store.tx() as c:
             row = c.execute("SELECT * FROM queue WHERE note_id=?", (note_id,)).fetchone()
             if row is None:
                 raise ValueError("That note is not in the queue.")
+            if outcome == "requeue":
+                if row["state"] != "leased":
+                    raise ValueError("Only a note a drain is reading can be put back in the queue.")
+                reason = str(error or STALE_REQUEUE_ERROR)
+                c.execute("INSERT INTO queue_errors(note_id, attempt, at, error) VALUES (?,?,?,?)",
+                          (note_id, int(row["attempts"] or 0), now, reason))
+                c.execute("UPDATE queue SET state='queued', last_error=?, leased_by=NULL, lease_until=NULL,"
+                          " next_attempt_at=NULL WHERE note_id=?", (reason, note_id))
+                c.execute("UPDATE notes SET status='queued' WHERE note_id=? AND archived_at IS NULL", (note_id,))
+                return {"note_id": note_id, "status": "queued", "requeued": True, "priority": row["priority"]}
             if outcome == "ok":
                 if revision_id is not None and c.execute(
                         "SELECT 1 FROM revisions WHERE revision_id=? AND note_id=? AND applied_index=1",
@@ -223,6 +243,15 @@ class Queue:
                 return {"note_id": note_id, "status": "processed"}
             return self._fail(c, note_id, int(row["failures"]) + 1, str(error or "Processing failed."), now,
                               final=final)
+
+    def requeued_stale(self, note_id: str) -> bool:
+        """The note was already put back once because the notebook changed while it was read."""
+        return self.store.q1("SELECT 1 FROM queue_errors WHERE note_id=? AND error=? LIMIT 1",
+                             (note_id, STALE_REQUEUE_ERROR)) is not None
+
+    def leased(self, note_id: str) -> bool:
+        """A drain holds the note (its reading's outcome is the drain's ``ack``)."""
+        return self.store.q1("SELECT 1 FROM queue WHERE note_id=? AND state='leased'", (note_id,)) is not None
 
     def retry(self, note_id: str, *, now: Optional[str] = None) -> Dict[str, Any]:
         """Re-queue a failed note (user action from the queue panel)."""

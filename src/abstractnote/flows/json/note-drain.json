@@ -106,7 +106,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "import time\nleft = int(max_items if max_items is not None else 20)\nif left < 1:\n    raise ValueError(\"max_items must be at least 1.\")\nbudget = float(budget_s if budget_s is not None else 90)\nnow = time.time()\nreturn {\"updates\": {\"drain_deadline\": now + budget, \"drain_left\": left, \"drain_continue\": True,\n        \"drain_processed\": 0, \"drain_failed\": 0, \"drain_errors\": [],\n        \"drain_worker\": \"drain-\" + str(int(now * 1000))}}\n"
+        "codeBody": "import time\nleft = int(max_items if max_items is not None else 20)\nif left < 1:\n    raise ValueError(\"max_items must be at least 1.\")\nbudget = float(budget_s if budget_s is not None else 90)\nnow = time.time()\nreturn {\"updates\": {\"drain_deadline\": now + budget, \"drain_left\": left, \"drain_continue\": True,\n        \"drain_processed\": 0, \"drain_failed\": 0, \"drain_errors\": [], \"drain_requeued\": [],\n        \"drain_worker\": \"drain-\" + str(int(now * 1000))}}\n"
       }
     },
     {
@@ -764,7 +764,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "o = output if isinstance(output, dict) else {}\nc = child_output if isinstance(child_output, dict) else {}\nerr = str(c.get(\"error\") or o.get(\"error\") or \"\")\nfor prefix in (\"Runtime error: \", \"Execution error: \"):\n    if err.startswith(prefix):\n        err = err[len(prefix):]\nfailed = c.get(\"success\") is False or o.get(\"success\") is False or bool(err) or not o.get(\"revision_id\")\nreturn {\"outcome\": \"error\" if failed else \"ok\",\n        \"failure\": (str(err) if err else \"The note could not be processed.\") if failed else None,\n        \"revision_id\": None if failed else o.get(\"revision_id\")}\n"
+        "codeBody": "o = output if isinstance(output, dict) else {}\nc = child_output if isinstance(child_output, dict) else {}\nerr = str(c.get(\"error\") or o.get(\"error\") or \"\")\nfor prefix in (\"Runtime error: \", \"Execution error: \"):\n    if err.startswith(prefix):\n        err = err[len(prefix):]\nrev = o.get(\"revision\") if isinstance(o.get(\"revision\"), dict) else {}\nif not err and c.get(\"success\") is not False and rev.get(\"requeue\"):\n    # the notebook changed while the note was read: nothing was applied, it goes back once (review 4.1)\n    return {\"outcome\": \"requeue\", \"failure\": str(rev.get(\"reason\") or \"\"), \"revision_id\": None}\nfailed = c.get(\"success\") is False or o.get(\"success\") is False or bool(err) or not o.get(\"revision_id\")\nreturn {\"outcome\": \"error\" if failed else \"ok\",\n        \"failure\": (str(err) if err else \"The note could not be processed.\") if failed else None,\n        \"revision_id\": None if failed else o.get(\"revision_id\")}\n"
       }
     },
     {
@@ -1195,6 +1195,41 @@
       }
     },
     {
+      "id": "requeued",
+      "type": "get_var",
+      "position": {
+        "x": 7200.0,
+        "y": 1920.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get drain_requeued",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "drain_requeued",
+          "default": []
+        }
+      }
+    },
+    {
       "id": "budget",
       "type": "code",
       "position": {
@@ -1251,6 +1286,11 @@
             "type": "array"
           },
           {
+            "id": "requeued",
+            "label": "requeued",
+            "type": "array"
+          },
+          {
             "id": "permissions",
             "label": "permissions",
             "type": "string"
@@ -1272,7 +1312,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "import time\nok = outcome == \"ok\"\nerrs = list(errors or [])\nif not ok:\n    errs.append({\"note_id\": note_id, \"error\": failure})\nremaining = int(left or 0) - 1\nreturn {\"updates\": {\"drain_left\": remaining,\n        \"drain_processed\": int(processed or 0) + (1 if ok else 0),\n        \"drain_failed\": int(failed or 0) + (0 if ok else 1), \"drain_errors\": errs,\n        \"drain_continue\": remaining > 0 and time.time() < float(deadline or 0)}}\n"
+        "codeBody": "import time\nok = outcome == \"ok\"\nagain = outcome == \"requeue\"\nerrs = list(errors or [])\nback = list(requeued or [])\nif again:\n    back.append({\"note_id\": note_id, \"reason\": failure})\nelif not ok:\n    errs.append({\"note_id\": note_id, \"error\": failure})\nremaining = int(left or 0) - 1\nreturn {\"updates\": {\"drain_left\": remaining,\n        \"drain_processed\": int(processed or 0) + (1 if ok else 0),\n        \"drain_failed\": int(failed or 0) + (0 if ok or again else 1), \"drain_errors\": errs,\n        \"drain_requeued\": back,\n        \"drain_continue\": remaining > 0 and time.time() < float(deadline or 0)}}\n"
       }
     },
     {
@@ -1417,6 +1457,41 @@
       }
     },
     {
+      "id": "r_requeued",
+      "type": "get_var",
+      "position": {
+        "x": 2880.0,
+        "y": 1280.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get drain_requeued",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "drain_requeued",
+          "default": []
+        }
+      }
+    },
+    {
       "id": "communities_args",
       "type": "code",
       "position": {
@@ -1524,7 +1599,7 @@
       "type": "code",
       "position": {
         "x": 2880.0,
-        "y": 1280.0
+        "y": 1600.0
       },
       "data": {
         "nodeType": "code",
@@ -1612,6 +1687,11 @@
             "type": "array"
           },
           {
+            "id": "requeued",
+            "label": "requeued",
+            "type": "array"
+          },
+          {
             "id": "themes",
             "label": "themes",
             "type": "object"
@@ -1662,13 +1742,18 @@
             "id": "communities",
             "label": "communities",
             "type": "object"
+          },
+          {
+            "id": "requeued",
+            "label": "requeued",
+            "type": "array"
           }
         ],
         "pinDefaults": {
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "n = int(processed or 0)\nk = int(failed or 0)\nif n == 0 and k == 0:\n    msg = \"Nothing to process.\"\nelse:\n    msg = \"Processed \" + str(n) + (\" note.\" if n == 1 else \" notes.\")\n    if k:\n        msg = msg[:-1] + \"; \" + str(k) + (\" could not be processed.\" if k > 1 else \" could not be processed.\")\nc = dict(themes) if isinstance(themes, dict) else {}\nif themes_failed:\n    c = {\"recomputed\": False, \"error\": str(themes_failure or \"\")}\n    msg += \" The themes could not be updated: \" + str(themes_failure or \"no reason was given.\")\nelif c.get(\"recomputed\"):\n    g = int(c.get(\"communities\") or 0)\n    w = int(c.get(\"labels_waiting\") or 0)\n    msg += \" The themes were updated (\" + str(g) + (\" group\" if g == 1 else \" groups\")\n    msg += ((\", \" + str(w) + \" to name next time).\") if w else \").\")\nreturn {\"message\": msg, \"processed\": n, \"failed\": k, \"errors\": list(errors or []), \"communities\": c}\n"
+        "codeBody": "n = int(processed or 0)\nk = int(failed or 0)\nback = list(requeued or [])\nif n == 0 and k == 0 and not back:\n    msg = \"Nothing to process.\"\nelse:\n    msg = \"Processed \" + str(n) + (\" note.\" if n == 1 else \" notes.\")\n    if k:\n        msg = msg[:-1] + \"; \" + str(k) + (\" could not be processed.\" if k > 1 else \" could not be processed.\")\n    if back:\n        b = len(back)\n        msg += \" \" + str(b) + (\" note is\" if b == 1 else \" notes are\") + \" read again: the notebook changed while\"\n        msg += (\" it was\" if b == 1 else \" they were\") + \" being read.\"\nc = dict(themes) if isinstance(themes, dict) else {}\nif themes_failed:\n    c = {\"recomputed\": False, \"error\": str(themes_failure or \"\")}\n    msg += \" The themes could not be updated: \" + str(themes_failure or \"no reason was given.\")\nelif c.get(\"recomputed\"):\n    g = int(c.get(\"communities\") or 0)\n    w = int(c.get(\"labels_waiting\") or 0)\n    msg += \" The themes were updated (\" + str(g) + (\" group\" if g == 1 else \" groups\")\n    msg += ((\", \" + str(w) + \" to name next time).\") if w else \").\")\nreturn {\"message\": msg, \"processed\": n, \"failed\": k, \"errors\": list(errors or []), \"communities\": c,\n        \"requeued\": back}\n"
       }
     },
     {
@@ -1711,6 +1796,11 @@
             "id": "communities",
             "label": "communities",
             "type": "object"
+          },
+          {
+            "id": "requeued",
+            "label": "requeued",
+            "type": "array"
           }
         ],
         "outputs": []
@@ -2090,6 +2180,13 @@
       "targetHandle": "errors"
     },
     {
+      "id": "e-requeued-value-budget-requeued",
+      "source": "requeued",
+      "sourceHandle": "value",
+      "target": "budget",
+      "targetHandle": "requeued"
+    },
+    {
       "id": "e-ack_failed-false-budget-exec-in",
       "source": "ack_failed",
       "sourceHandle": "false",
@@ -2167,6 +2264,13 @@
       "targetHandle": "errors"
     },
     {
+      "id": "e-r_requeued-value-report-requeued",
+      "source": "r_requeued",
+      "sourceHandle": "value",
+      "target": "report",
+      "targetHandle": "requeued"
+    },
+    {
       "id": "e-communities_out-tool_output-report-themes",
       "source": "communities_out",
       "sourceHandle": "tool_output",
@@ -2230,6 +2334,13 @@
       "targetHandle": "communities"
     },
     {
+      "id": "e-report-requeued-end-requeued",
+      "source": "report",
+      "sourceHandle": "requeued",
+      "target": "end",
+      "targetHandle": "requeued"
+    },
+    {
       "id": "e-report-exec-out-end-exec-in",
       "source": "report",
       "sourceHandle": "exec-out",
@@ -2286,7 +2397,8 @@
           "note_entities_set_summaries",
           "note_then_now_refresh",
           "note_reinterpret_next",
-          "note_mark_reinterpret"
+          "note_mark_reinterpret",
+          "note_filing_context"
         ]
       }
     }

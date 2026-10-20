@@ -8,7 +8,8 @@ import pytest
 from abstractnote.flows import build
 from abstractnote.flows.runner import NoteRunner, ScriptedLLM
 
-STEPS = {("note-capture", "filing"): "quick_filing", ("note-process", "extract"): "extract",
+STEPS = {("note-capture", "filing"): "quick_filing", ("note-file", "filing"): "quick_filing",
+         ("note-process", "extract"): "extract",
          ("note-process", "extract_again"): "extract", ("note-process", "link"): "link",
          ("note-process", "link_again"): "link",
          ("note-recall", "synthesize"): "synthesize", ("note-mine", "plan"): "mine_plan",

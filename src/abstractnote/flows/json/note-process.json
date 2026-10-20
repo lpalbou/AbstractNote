@@ -97,11 +97,316 @@
       }
     },
     {
-      "id": "context_args",
+      "id": "filing_need_args",
       "type": "code",
       "position": {
         "x": 960.0,
         "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Does it need filing?: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif note_id is not None and note_id != \"\":\n    arguments[\"note_id\"] = note_id\nreturn {\"tool_calls\": [{\"name\": \"note_filing_context\", \"call_id\": \"filing_need\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "filing_need",
+      "type": "tool_calls",
+      "position": {
+        "x": 1440.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Does it need filing?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_filing_context"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_filing_context"
+          ]
+        }
+      }
+    },
+    {
+      "id": "filing_need_out",
+      "type": "code",
+      "position": {
+        "x": 1920.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Does it need filing?: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "needed",
+            "label": "needed",
+            "type": "boolean"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_filing_context returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_filing_context failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_filing_context returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "unfiled",
+      "type": "if",
+      "position": {
+        "x": 2400.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "No kind yet?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "filing",
+      "type": "subflow",
+      "position": {
+        "x": 2880.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "subflow",
+        "label": "File it",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "inherit_context",
+            "label": "inherit_context",
+            "type": "boolean"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "output",
+            "label": "output",
+            "type": "object"
+          },
+          {
+            "id": "child_output",
+            "label": "child_output",
+            "type": "object"
+          },
+          {
+            "id": "filed",
+            "label": "filed",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "inherit_context": false
+        },
+        "subflowId": "note-file"
+      }
+    },
+    {
+      "id": "filing_checked",
+      "type": "code",
+      "position": {
+        "x": 3360.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Filed?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "output",
+            "label": "output",
+            "type": "object"
+          },
+          {
+            "id": "child_output",
+            "label": "child_output",
+            "type": "object"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "checked",
+            "label": "checked",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "o = output if isinstance(output, dict) else {}\nc = child_output if isinstance(child_output, dict) else {}\nif c.get(\"success\") is False or o.get(\"success\") is False:\n    err = str(c.get(\"error\") or o.get(\"error\") or \"The step could not finish.\")\n    for prefix in (\"Runtime error: \", \"Execution error: \"):\n        if err.startswith(prefix):\n            err = err[len(prefix):]\n    raise ValueError(err)\nreturn {\"checked\": True}\n"
+      }
+    },
+    {
+      "id": "context_args",
+      "type": "code",
+      "position": {
+        "x": 2880.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "code",
@@ -152,8 +457,8 @@
       "id": "context",
       "type": "tool_calls",
       "position": {
-        "x": 1440.0,
-        "y": 0.0
+        "x": 3360.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "tool_calls",
@@ -208,7 +513,7 @@
       "id": "context_out",
       "type": "code",
       "position": {
-        "x": 1920.0,
+        "x": 3840.0,
         "y": 0.0
       },
       "data": {
@@ -294,7 +599,7 @@
       "id": "sections",
       "type": "code",
       "position": {
-        "x": 2400.0,
+        "x": 4320.0,
         "y": 0.0
       },
       "data": {
@@ -345,7 +650,7 @@
       "id": "each_section",
       "type": "loop",
       "position": {
-        "x": 2880.0,
+        "x": 4800.0,
         "y": 0.0
       },
       "data": {
@@ -391,7 +696,7 @@
       "id": "extract_packet",
       "type": "code",
       "position": {
-        "x": 3360.0,
+        "x": 5280.0,
         "y": 0.0
       },
       "data": {
@@ -467,7 +772,7 @@
       "id": "extract_prompt",
       "type": "string_template",
       "position": {
-        "x": 3360.0,
+        "x": 5280.0,
         "y": 398.0
       },
       "data": {
@@ -501,7 +806,7 @@
       "id": "extract",
       "type": "llm_call",
       "position": {
-        "x": 3840.0,
+        "x": 5760.0,
         "y": 0.0
       },
       "data": {
@@ -843,7 +1148,7 @@
       "id": "nothing_named",
       "type": "code",
       "position": {
-        "x": 4320.0,
+        "x": 6240.0,
         "y": 0.0
       },
       "data": {
@@ -894,7 +1199,7 @@
       "id": "read_again",
       "type": "if",
       "position": {
-        "x": 4800.0,
+        "x": 6720.0,
         "y": 0.0
       },
       "data": {
@@ -930,7 +1235,7 @@
       "id": "keep_extraction",
       "type": "add_to_list",
       "position": {
-        "x": 5280.0,
+        "x": 7200.0,
         "y": 0.0
       },
       "data": {
@@ -979,7 +1284,7 @@
       "id": "extract_again",
       "type": "llm_call",
       "position": {
-        "x": 5280.0,
+        "x": 7200.0,
         "y": 320.0
       },
       "data": {
@@ -1321,7 +1626,7 @@
       "id": "flag_empty",
       "type": "code",
       "position": {
-        "x": 5760.0,
+        "x": 7680.0,
         "y": 0.0
       },
       "data": {
@@ -1382,7 +1687,7 @@
       "id": "reread_corrupt",
       "type": "if",
       "position": {
-        "x": 6240.0,
+        "x": 8160.0,
         "y": 0.0
       },
       "data": {
@@ -1418,7 +1723,7 @@
       "id": "stopped_reading",
       "type": "on_flow_end",
       "position": {
-        "x": 6720.0,
+        "x": 8640.0,
         "y": 0.0
       },
       "data": {
@@ -1456,7 +1761,7 @@
       "id": "keep_retry",
       "type": "add_to_list",
       "position": {
-        "x": 6720.0,
+        "x": 8640.0,
         "y": 320.0
       },
       "data": {
@@ -1505,7 +1810,7 @@
       "id": "extractions",
       "type": "get_var",
       "position": {
-        "x": 2880.0,
+        "x": 4800.0,
         "y": 320.0
       },
       "data": {
@@ -1540,7 +1845,7 @@
       "id": "merge",
       "type": "code",
       "position": {
-        "x": 3360.0,
+        "x": 5280.0,
         "y": 718.0
       },
       "data": {
@@ -1591,7 +1896,7 @@
       "id": "resolve_args",
       "type": "code",
       "position": {
-        "x": 3840.0,
+        "x": 5760.0,
         "y": 424.0
       },
       "data": {
@@ -1642,7 +1947,7 @@
       "id": "resolve",
       "type": "tool_calls",
       "position": {
-        "x": 4320.0,
+        "x": 6240.0,
         "y": 320.0
       },
       "data": {
@@ -1698,7 +2003,7 @@
       "id": "resolve_out",
       "type": "code",
       "position": {
-        "x": 4800.0,
+        "x": 6720.0,
         "y": 320.0
       },
       "data": {
@@ -1749,7 +2054,7 @@
       "id": "link_parts",
       "type": "code",
       "position": {
-        "x": 5280.0,
+        "x": 7200.0,
         "y": 744.0
       },
       "data": {
@@ -1810,7 +2115,7 @@
       "id": "each_link",
       "type": "loop",
       "position": {
-        "x": 5760.0,
+        "x": 7680.0,
         "y": 320.0
       },
       "data": {
@@ -1856,7 +2161,7 @@
       "id": "link_prompt",
       "type": "string_template",
       "position": {
-        "x": 5760.0,
+        "x": 7680.0,
         "y": 640.0
       },
       "data": {
@@ -1890,7 +2195,7 @@
       "id": "link",
       "type": "llm_call",
       "position": {
-        "x": 6240.0,
+        "x": 8160.0,
         "y": 320.0
       },
       "data": {
@@ -2182,7 +2487,7 @@
       "id": "link_valid",
       "type": "code",
       "position": {
-        "x": 6720.0,
+        "x": 8640.0,
         "y": 640.0
       },
       "data": {
@@ -2253,7 +2558,7 @@
       "id": "link_ok",
       "type": "if",
       "position": {
-        "x": 7200.0,
+        "x": 9120.0,
         "y": 0.0
       },
       "data": {
@@ -2289,7 +2594,7 @@
       "id": "keep_linking",
       "type": "add_to_list",
       "position": {
-        "x": 7680.0,
+        "x": 9600.0,
         "y": 0.0
       },
       "data": {
@@ -2338,7 +2643,7 @@
       "id": "link_again",
       "type": "llm_call",
       "position": {
-        "x": 7680.0,
+        "x": 9600.0,
         "y": 320.0
       },
       "data": {
@@ -2630,7 +2935,7 @@
       "id": "link_checked",
       "type": "code",
       "position": {
-        "x": 8160.0,
+        "x": 10080.0,
         "y": 0.0
       },
       "data": {
@@ -2701,7 +3006,7 @@
       "id": "relink_corrupt",
       "type": "if",
       "position": {
-        "x": 8640.0,
+        "x": 10560.0,
         "y": 0.0
       },
       "data": {
@@ -2737,7 +3042,7 @@
       "id": "stopped_linking",
       "type": "on_flow_end",
       "position": {
-        "x": 9120.0,
+        "x": 11040.0,
         "y": 0.0
       },
       "data": {
@@ -2775,7 +3080,7 @@
       "id": "keep_relinking",
       "type": "add_to_list",
       "position": {
-        "x": 9120.0,
+        "x": 11040.0,
         "y": 320.0
       },
       "data": {
@@ -2824,7 +3129,7 @@
       "id": "linkings",
       "type": "get_var",
       "position": {
-        "x": 5760.0,
+        "x": 7680.0,
         "y": 960.0
       },
       "data": {
@@ -2859,7 +3164,7 @@
       "id": "merge_links",
       "type": "code",
       "position": {
-        "x": 6240.0,
+        "x": 8160.0,
         "y": 744.0
       },
       "data": {
@@ -2905,7 +3210,7 @@
       "id": "apply_args",
       "type": "code",
       "position": {
-        "x": 6720.0,
+        "x": 8640.0,
         "y": 986.0
       },
       "data": {
@@ -2961,7 +3266,7 @@
       "id": "apply",
       "type": "tool_calls",
       "position": {
-        "x": 7200.0,
+        "x": 9120.0,
         "y": 320.0
       },
       "data": {
@@ -3017,7 +3322,7 @@
       "id": "apply_out",
       "type": "code",
       "position": {
-        "x": 7680.0,
+        "x": 9600.0,
         "y": 744.0
       },
       "data": {
@@ -3073,7 +3378,7 @@
       "id": "end",
       "type": "on_flow_end",
       "position": {
-        "x": 8160.0,
+        "x": 10080.0,
         "y": 320.0
       },
       "data": {
@@ -3134,6 +3439,111 @@
       "targetHandle": "exec-in"
     },
     {
+      "id": "e-start-note_id-filing_need_args-note_id",
+      "source": "start",
+      "sourceHandle": "note_id",
+      "target": "filing_need_args",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-thinking-exec-out-filing_need_args-exec-in",
+      "source": "thinking",
+      "sourceHandle": "exec-out",
+      "target": "filing_need_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-filing_need_args-tool_calls-filing_need-tool_calls",
+      "source": "filing_need_args",
+      "sourceHandle": "tool_calls",
+      "target": "filing_need",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-filing_need_args-exec-out-filing_need-exec-in",
+      "source": "filing_need_args",
+      "sourceHandle": "exec-out",
+      "target": "filing_need",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-filing_need-results-filing_need_out-results",
+      "source": "filing_need",
+      "sourceHandle": "results",
+      "target": "filing_need_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-filing_need-exec-out-filing_need_out-exec-in",
+      "source": "filing_need",
+      "sourceHandle": "exec-out",
+      "target": "filing_need_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-filing_need_out-needed-unfiled-condition",
+      "source": "filing_need_out",
+      "sourceHandle": "needed",
+      "target": "unfiled",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-filing_need_out-exec-out-unfiled-exec-in",
+      "source": "filing_need_out",
+      "sourceHandle": "exec-out",
+      "target": "unfiled",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-start-note_id-filing-note_id",
+      "source": "start",
+      "sourceHandle": "note_id",
+      "target": "filing",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-start-provider-filing-provider",
+      "source": "start",
+      "sourceHandle": "provider",
+      "target": "filing",
+      "targetHandle": "provider"
+    },
+    {
+      "id": "e-start-model-filing-model",
+      "source": "start",
+      "sourceHandle": "model",
+      "target": "filing",
+      "targetHandle": "model"
+    },
+    {
+      "id": "e-unfiled-true-filing-exec-in",
+      "source": "unfiled",
+      "sourceHandle": "true",
+      "target": "filing",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-filing-output-filing_checked-output",
+      "source": "filing",
+      "sourceHandle": "output",
+      "target": "filing_checked",
+      "targetHandle": "output"
+    },
+    {
+      "id": "e-filing-child_output-filing_checked-child_output",
+      "source": "filing",
+      "sourceHandle": "child_output",
+      "target": "filing_checked",
+      "targetHandle": "child_output"
+    },
+    {
+      "id": "e-filing-exec-out-filing_checked-exec-in",
+      "source": "filing",
+      "sourceHandle": "exec-out",
+      "target": "filing_checked",
+      "targetHandle": "exec-in"
+    },
+    {
       "id": "e-start-note_id-context_args-note_id",
       "source": "start",
       "sourceHandle": "note_id",
@@ -3141,8 +3551,8 @@
       "targetHandle": "note_id"
     },
     {
-      "id": "e-thinking-exec-out-context_args-exec-in",
-      "source": "thinking",
+      "id": "e-filing_checked-exec-out-context_args-exec-in",
+      "source": "filing_checked",
       "sourceHandle": "exec-out",
       "target": "context_args",
       "targetHandle": "exec-in"
@@ -3173,6 +3583,13 @@
       "source": "context",
       "sourceHandle": "exec-out",
       "target": "context_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-unfiled-false-context_args-exec-in",
+      "source": "unfiled",
+      "sourceHandle": "false",
+      "target": "context_args",
       "targetHandle": "exec-in"
     },
     {
