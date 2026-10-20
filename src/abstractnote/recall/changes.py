@@ -35,6 +35,10 @@ def changes(nb: Any, since: Optional[str] = None, limit: int = 50, as_received: 
     (a later note replaced it; ``superseded_by`` names the new claim) or ``retracted`` (withdrawn
     by a note or by the person; ``superseded_by`` is null), with ``text`` in plain words.
 
+    ``notes`` are the notes received after the cursor (``how: "captured"``) and the notes whose latest
+    processing revision was recorded after it (``how: "understood"``: understood since, which after an
+    import is most of what changed); each note appears once, at its latest event.
+
     ``since`` is a cursor from an earlier call or an ISO time. At most ``limit``
     items in total are returned, earliest first; the returned cursor continues
     exactly after them.
@@ -68,9 +72,16 @@ def changes(nb: Any, since: Optional[str] = None, limit: int = 50, as_received: 
             return
         found.append((at, f"{kind}:{key}", bucket, item))
 
-    for r in q("SELECT * FROM notes WHERE insight_kind IS NULL AND received_at>=? AND archived_at IS NULL" + f_note +
-               " ORDER BY received_at, note_id LIMIT ?", (ts, *p_note, limit + len(seen))):
-        add("notes", "note", r["note_id"], r["received_at"], shapes.note_ref(r))
+    f_rev, p_rev = only("revision_id", "revision")
+    for r in q("WITH u AS (SELECT note_id, MAX(recorded_at) AS understood_at FROM revisions WHERE note_id IS NOT NULL"
+               " AND applied_index=1 AND abandoned=0" + f_rev + " GROUP BY note_id)"
+               " SELECT n.*, u.understood_at, MAX(n.received_at, COALESCE(u.understood_at, '')) AS event_at"
+               " FROM notes n LEFT JOIN u ON u.note_id=n.note_id WHERE n.insight_kind IS NULL AND n.archived_at IS NULL"
+               " AND (n.received_at>=? OR u.understood_at>=?)" + f_note.replace(" note_id IN", " n.note_id IN") +
+               " ORDER BY event_at, n.note_id LIMIT ?", (*p_rev, ts, ts, *p_note, limit + len(seen))):
+        understood = bool(r["understood_at"]) and r["understood_at"] >= ts
+        add("notes", "note", r["note_id"], r["event_at"],
+            {**shapes.note_ref(r), "how": "understood" if understood else "captured"})
     for r in q("SELECT * FROM entities WHERE recorded_at>=?" + f_created + " ORDER BY recorded_at, entity_id LIMIT ?",
                (ts, *p_created, limit + len(seen))):
         add("entities", "entity", r["entity_id"], r["recorded_at"],
