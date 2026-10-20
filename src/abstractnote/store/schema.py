@@ -108,6 +108,16 @@ CREATE TABLE IF NOT EXISTS queue (
 );
 CREATE INDEX IF NOT EXISTS idx_queue_order ON queue(state, priority DESC, occurred_at ASC, size ASC);
 
+-- every failed attempt (an ack with an error, an expired lease), kept for good: queue.last_error holds only the
+-- latest and processing clears it; this log is truth (a rebuild copies it) and nothing deletes from it
+CREATE TABLE IF NOT EXISTS queue_errors (
+  note_id TEXT NOT NULL,
+  attempt INTEGER NOT NULL,
+  at TEXT NOT NULL,
+  error TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_queue_errors_note ON queue_errors(note_id, at);
+
 CREATE TABLE IF NOT EXISTS revisions (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   revision_id TEXT NOT NULL UNIQUE,

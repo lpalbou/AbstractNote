@@ -7,6 +7,11 @@ next drain and counts as a failed attempt. A failure schedules a retry after
 (``RETRY_BACKOFF_S[2]``, one hour, is the delay before the attempt that follows
 a third failure when ``MAX_FAILURES`` is raised). Leasing runs in one
 ``BEGIN IMMEDIATE`` transaction, so two drains never lease the same note.
+
+Every failed attempt is also written to ``queue_errors`` (note, attempt, time, error) and never removed:
+``last_error`` holds only the latest cause and a successful processing clears it, so the log is where
+the causes of retries stay readable (``errors``; ``summary`` shows the last :data:`ERRORS_SHOWN` per
+failed note).
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ RETRY_BACKOFF_S = (60, 10 * 60, 60 * 60)
 MAX_FAILURES = 3
 PRIORITY_BULK, PRIORITY_NORMAL, PRIORITY_HIGH, PRIORITY_URGENT = 0, 1, 2, 3
 STOPPED_ERROR = "Processing stopped before it finished."
+ERRORS_SHOWN = 3  # recent causes per failed note in the queue summary
 
 
 def _plus(ts: str, seconds: int) -> str:
@@ -73,6 +79,9 @@ class Queue:
         return {"items": items}
 
     def _fail(self, c: Any, note_id: str, failures: int, error: str, now: str) -> Dict[str, Any]:
+        row = c.execute("SELECT attempts FROM queue WHERE note_id=?", (note_id,)).fetchone()
+        c.execute("INSERT INTO queue_errors(note_id, attempt, at, error) VALUES (?,?,?,?)",
+                  (note_id, int(row["attempts"]) if row else 0, now, error))
         if failures >= MAX_FAILURES:
             c.execute("UPDATE queue SET state='failed', failures=?, last_error=?, failed_at=?, leased_by=NULL,"
                       " lease_until=NULL, next_attempt_at=NULL WHERE note_id=?", (failures, error, now, note_id))
@@ -133,6 +142,12 @@ class Queue:
         row = self.store.q1("SELECT * FROM queue WHERE note_id=?", (note_id,))
         return dict(row) if row else None
 
+    def errors(self, note_id: str, limit: int = ERRORS_SHOWN) -> List[Dict[str, Any]]:
+        """The note's logged failures, newest first: ``[{attempt, at, error}]``."""
+        return [dict(r) for r in self.store.q(
+            "SELECT attempt, at, error FROM queue_errors WHERE note_id=? ORDER BY at DESC, rowid DESC LIMIT ?",
+            (note_id, max(1, int(limit))))]
+
     def stats(self) -> Dict[str, Any]:
         rows = self.store.q("SELECT state, priority, COUNT(*) AS n FROM queue GROUP BY state, priority")
         out: Dict[str, Any] = {"queued": 0, "processing": 0, "failed": 0, "done": 0,
@@ -147,7 +162,8 @@ class Queue:
         return out
 
     def summary(self, limit: int = 50) -> Dict[str, Any]:
-        """Queue state and failed notes with their errors (``GET /note/queue``)."""
+        """Queue state and failed notes with their errors (``GET /note/queue``): each failed item carries
+        ``errors``, its last :data:`ERRORS_SHOWN` logged causes, newest first."""
         failed = self.store.q(
             "SELECT q.note_id, q.last_error, q.failed_at, q.failures, n.title, n.occurred_at FROM queue q"
             " JOIN notes n ON n.note_id=q.note_id WHERE q.state='failed' ORDER BY q.failed_at DESC LIMIT ?",
@@ -156,4 +172,5 @@ class Queue:
             "SELECT q.note_id, q.priority, q.state, q.attempts, q.next_attempt_at, n.title, n.occurred_at FROM queue q"
             " JOIN notes n ON n.note_id=q.note_id WHERE q.state IN ('queued','leased')"
             " ORDER BY q.priority DESC, q.occurred_at ASC, q.size ASC LIMIT ?", (int(limit),))
-        return {"stats": self.stats(), "failed": [dict(r) for r in failed], "waiting": [dict(r) for r in waiting]}
+        return {"stats": self.stats(), "failed": [{**dict(r), "errors": self.errors(r["note_id"])} for r in failed],
+                "waiting": [dict(r) for r in waiting]}
