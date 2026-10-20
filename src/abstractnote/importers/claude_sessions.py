@@ -386,30 +386,61 @@ def memory_date(project: Path, path: Path, fm: Dict[str, str], cache: Dict[str, 
     return iso_from_epoch(path.stat().st_mtime), "file_mtime"
 
 
+MEMORY_INDEX = "MEMORY.md"  # the index of the other memory files, never a note
+
+
+def memory_project(path: "str | Path") -> Optional[Path]:
+    """The Claude Code project folder whose curated memory folder holds ``path`` (``<project>/memory/<file>.md``
+    where the project folder holds session transcripts or sits in ``~/.claude/projects``), else None.
+
+    This importer owns such a file whichever importer meets it: ``abstractnote import markdown`` on a memory
+    folder hands the file here (:func:`memory_draft`), so both give the same importer and source key
+    (``memory:<project>:<file>:<content hash>``) and the second import is a duplicate. The folder layout the
+    harness writes decides, never the file's words."""
+    p = Path(path)
+    if p.suffix != ".md" or p.parent.name != "memory":
+        return None
+    project = p.parent.parent
+    if project.parent.name == "projects" and project.parent.parent.name == ".claude":
+        return project
+    try:
+        return project if any(project.glob("*.jsonl")) else None
+    except OSError:
+        return None
+
+
+def memory_draft(project: Path, path: Path, report: ImportReport, since: Optional[str], until: Optional[str],
+                 cache: Dict[str, Optional[str]]) -> Optional[NoteDraft]:
+    """The note of one curated memory file (None when skipped, with the reason counted in ``report``)."""
+    if path.name == MEMORY_INDEX:
+        report.skip("memory_index")
+        return None
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if not text.strip():
+        report.skip("empty")
+        return None
+    fm, _ = _front_matter(text)
+    ts, basis = memory_date(project, path, fm, cache)
+    if not in_window(ts, since, until):
+        report.skip("outside_window")
+        return None
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    origin = {"project": project.name, "file": str(path), "name": fm.get("name"), "sha256": digest,
+              "origin_session_id": fm.get("originSessionId") or fm.get("metadata.originSessionId"),
+              "date_basis": basis}
+    return NoteDraft(IMPORTER, f"memory:{project.name}:{path.name}:{digest[:16]}", text, ts, "memory",
+                     fm.get("name") or path.stem, _source(origin, "claude-code"))
+
+
 def _memory_drafts(project: Path, report: ImportReport, since: Optional[str], until: Optional[str]) -> Iterator[NoteDraft]:
     mem = project / "memory"
     if not mem.is_dir():
         return
     cache: Dict[str, Optional[str]] = {}
     for path in sorted(mem.glob("*.md")):
-        if path.name == "MEMORY.md":  # the index of the other files
-            report.skip("memory_index")
-            continue
-        text = path.read_text(encoding="utf-8", errors="replace")
-        if not text.strip():
-            report.skip("empty")
-            continue
-        fm, _ = _front_matter(text)
-        ts, basis = memory_date(project, path, fm, cache)
-        if not in_window(ts, since, until):
-            report.skip("outside_window")
-            continue
-        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-        origin = {"project": project.name, "file": str(path), "name": fm.get("name"), "sha256": digest,
-                  "origin_session_id": fm.get("originSessionId") or fm.get("metadata.originSessionId"),
-                  "date_basis": basis}
-        yield NoteDraft(IMPORTER, f"memory:{project.name}:{path.name}:{digest[:16]}", text, ts, "memory",
-                        fm.get("name") or path.stem, _source(origin, "claude-code"))
+        draft = memory_draft(project, path, report, since, until, cache)
+        if draft is not None:
+            yield draft
 
 
 def drafts(*, report: ImportReport, path: str | Path, since: Optional[str] = None, until: Optional[str] = None,

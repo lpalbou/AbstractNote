@@ -1246,6 +1246,19 @@ class _OpContext:
         self.c.execute(f"UPDATE notes SET {', '.join(sets)} WHERE note_id=?", [*params, note_id])
         self.s.refresh_note_fts(self.c, note_id)
 
+    def op_note_archive(self, p: Dict[str, Any]) -> None:
+        """Archive a note (``{note_id, duplicate_of?, reason?}``): it leaves lists, search and the queue (a waiting
+        copy is never processed), keeps its links, and names the note it duplicates (``abstractnote
+        dedupe-sources``)."""
+        note_id = p["note_id"]
+        if self.c.execute("SELECT 1 FROM notes WHERE note_id=?", (note_id,)).fetchone() is None:
+            raise ValueError(f"The note {note_id} is not in this notebook.")
+        self.c.execute("UPDATE notes SET archived_at=COALESCE(archived_at, ?), status='archived',"
+                       " duplicate_of=COALESCE(?, duplicate_of) WHERE note_id=?",
+                       (self.recorded_at, p.get("duplicate_of"), note_id))
+        self.c.execute("UPDATE queue SET state='done', leased_by=NULL, lease_until=NULL, next_attempt_at=NULL"
+                       " WHERE note_id=? AND state IN ('queued','failed')", (note_id,))
+
     # --- end of revision
     def finish(self) -> None:
         if self.dirty_relation_entities:

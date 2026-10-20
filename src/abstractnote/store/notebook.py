@@ -415,6 +415,14 @@ class Notebook:
             self._normalizing = False
         return out
 
+    def dedupe_sources(self, account: Optional[str] = None, *, client: str = "cli", dry_run: bool = False
+                       ) -> Dict[str, Any]:
+        """Archive the later copy of each memory file imported by two importers, in one revision
+        (``abstractnote dedupe-sources``; :mod:`abstractnote.importers.dedupe`)."""
+        from ..importers.dedupe import dedupe_sources
+
+        return dedupe_sources(self, account, client=client, dry_run=dry_run)
+
     # ------------------------------------------------------------------ capture and filing (0002)
 
     def capture(self, text: str = "", **kwargs: Any) -> Any:

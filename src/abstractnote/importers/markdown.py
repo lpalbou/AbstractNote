@@ -14,6 +14,10 @@ without a field line takes the earlier of its modification time and that commit,
 ``{repo, path, blob_sha, commit, added_as}`` when the tree is a git checkout. The source key
 includes the content hash: an edited file imported again is a new note that revisits the earlier
 one; an unchanged file is a duplicate.
+
+A Claude Code curated memory file (``<project>/memory/*.md`` of a ``~/.claude/projects`` folder) belongs to
+the ``claude-sessions`` importer: this importer hands it over (``claude_sessions.memory_draft``), so a memory
+folder imported both ways is one note per file, never two.
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ from pathlib import Path
 from typing import Dict, Iterator, Optional, Tuple
 
 from . import ImportReport, NoteDraft, in_window, iso_from_epoch, iso_utc
-from .claude_sessions import _front_matter
+from .claude_sessions import _front_matter, memory_draft, memory_project
 
 IMPORTER = "markdown"
 DATE_KEYS = ("date", "created", "created_at", "Date", "Created")
@@ -134,8 +138,15 @@ def drafts(*, report: ImportReport, path: str | Path, glob: str = "**/*.md", sin
     toplevel, blobs, first = _git_index(root)
     per_second = Counter(added[1] for added in first.values())
     repo = toplevel.name if toplevel else root.name
+    memory_dates: Dict[str, Optional[str]] = {}
     for file in sorted(root.glob(glob)):
         if not file.is_file():
+            continue
+        project = memory_project(file)
+        if project is not None:  # a Claude Code memory file: the claude-sessions importer owns it
+            draft = memory_draft(project, file, report, since, until, memory_dates)
+            if draft is not None:
+                yield draft
             continue
         rel_root = file.relative_to(root).as_posix()
         if SKIPPED_DIRS.intersection(file.relative_to(root).parts[:-1]):

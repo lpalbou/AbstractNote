@@ -41,6 +41,7 @@ OP_NAMES = (
     "entity.create", "entity.alias", "entity.rename", "entity.summary", "entity.merge", "entity.unmerge",
     "entity.mention", "claim.add", "claim.supersede", "claim.retract", "claim.reinforce", "topic.assign",
     "task.open", "task.close", "task.drop", "note.summary",
+    "note.archive",
 )
 
 
