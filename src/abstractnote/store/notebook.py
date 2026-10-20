@@ -560,12 +560,15 @@ class Notebook:
               now: Optional[str] = None) -> Dict[str, Any]:
         """``{items: [{task_id, note_id, text, status, due, closed_at, age_days, stale}]}`` (``status=None`` for
         all). ``age_days`` counts whole days since the task opened (until it closed); ``stale`` marks an open task
-        older than :data:`abstractnote.recall.reflect.STALE_DAYS`."""
-        from ..recall.reflect import loop_age
+        older than :data:`abstractnote.recall.reflect.STALE_DAYS` whose date is not an approximation (a commit or a
+        file date never makes a task stale)."""
+        from ..recall.reflect import loop_age, note_date_is_approximate
 
         now_n = ids.normalize_time(now) if now else ids.utc_now()
         keys = ("task_id", "note_id", "text", "status", "due", "closed_at")
-        return {"items": [{**{k: t[k] for k in keys}, **loop_age(t["opened_at"], now_n, t["closed_at"])}
+        return {"items": [{**{k: t[k] for k in keys},
+                           **loop_age(t["opened_at"], now_n, t["closed_at"],
+                                      approximate=note_date_is_approximate(self, t["note_id"]))}
                           for t in self.store.tasks(status=status, entity=entity, limit=limit)]}
 
     def insights(self, kind: Optional[str] = None, acked: Optional[bool] = None, limit: int = 50
