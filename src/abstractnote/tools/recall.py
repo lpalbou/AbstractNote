@@ -73,8 +73,11 @@ def note_communities_recompute(ctx: ToolContext, resolution: Optional[float] = N
     return _communities.recompute(ctx.nb, _blank(resolution))
 
 
-def note_communities_pending(ctx: ToolContext, limit: int = _communities.PENDING_LIMIT) -> Dict[str, Any]:
-    return _communities.pending(ctx.nb, int(limit or _communities.PENDING_LIMIT))
+def note_communities_pending(ctx: ToolContext, limit: int = _communities.PENDING_LIMIT,
+                             exclude: Optional[List[str]] = None) -> Dict[str, Any]:
+    if exclude is not None and not isinstance(exclude, (list, tuple)):
+        raise ValueError("exclude must be a list of community ids.")
+    return _communities.pending(ctx.nb, int(limit or _communities.PENDING_LIMIT), exclude or ())
 
 
 def note_communities_label(ctx: ToolContext, items: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:

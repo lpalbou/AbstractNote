@@ -1170,24 +1170,79 @@ SUMMARY_VIEW_CODE = (
     "                 \"summary\": p.get(\"summary\"), \"statements\": p.get(\"claims\") or [], \"notes\": p.get(\"notes\") or []})\n"
     "return {\"view\": view, \"any\": len(view) > 0}"
 )
-SUMMARY_MAP_CODE = (
+
+#: A labelling or summary round asks again once when the answer leaves out an offered item (ADR 0007: an empty or
+#: partial answer never ends a stage). These codes keep the first answer's entries and take the second answer only
+#: for what is still missing; ``again`` is true when the first answer misses an offered item (an entry with an
+#: empty label or summary counts as missing).
+LABEL_FIRST_CODE = (
+    "d = data if isinstance(data, dict) else {}\n"
+    "by_index = {p.get(\"index\"): p for p in (items or []) if isinstance(p, dict)}\n"
+    "out, seen = [], set()\n"
+    "for it in d.get(\"communities\") or []:\n"
+    "    p = by_index.get(it.get(\"index\")) if isinstance(it, dict) else None\n"
+    "    if p is None or p.get(\"community_id\") in seen or not str(it.get(\"label\") or \"\").strip():\n"
+    "        continue\n"
+    "    seen.add(p.get(\"community_id\"))\n"
+    "    out.append({\"community_id\": p.get(\"community_id\"), \"label\": str(it.get(\"label\") or \"\"),\n"
+    "                \"summary\": str(it.get(\"summary\") or \"\"), \"kind\": it.get(\"kind\")})\n"
+    "missing = [p.get(\"community_id\") for p in by_index.values() if p.get(\"community_id\") not in seen]\n"
+    "return {\"items\": out, \"again\": len(missing) > 0}"
+)
+LABEL_RETRY_CODE = (
+    "d = data if isinstance(data, dict) else {}\n"
+    "by_index = {p.get(\"index\"): p for p in (items or []) if isinstance(p, dict)}\n"
+    "out = [x for x in (first or []) if isinstance(x, dict)]\n"
+    "seen = {x.get(\"community_id\") for x in out}\n"
+    "for it in d.get(\"communities\") or []:\n"
+    "    p = by_index.get(it.get(\"index\")) if isinstance(it, dict) else None\n"
+    "    if p is None or p.get(\"community_id\") in seen or not str(it.get(\"label\") or \"\").strip():\n"
+    "        continue\n"
+    "    seen.add(p.get(\"community_id\"))\n"
+    "    out.append({\"community_id\": p.get(\"community_id\"), \"label\": str(it.get(\"label\") or \"\"),\n"
+    "                \"summary\": str(it.get(\"summary\") or \"\"), \"kind\": it.get(\"kind\")})\n"
+    "return {\"updates\": {\"labels_answer\": out}}"
+)
+SUMMARY_FIRST_CODE = (
     "d = data if isinstance(data, dict) else {}\n"
     "by_index = {i: p for i, p in enumerate(items or []) if isinstance(p, dict)}\n"
     "out, seen = [], set()\n"
     "for it in d.get(\"summaries\") or []:\n"
     "    p = by_index.get(it.get(\"index\")) if isinstance(it, dict) else None\n"
-    "    if p is None or p.get(\"entity_id\") in seen:\n"
+    "    if p is None or p.get(\"entity_id\") in seen or not str(it.get(\"summary\") or \"\").strip():\n"
     "        continue\n"
     "    seen.add(p.get(\"entity_id\"))\n"
     "    out.append({\"entity_id\": p.get(\"entity_id\"), \"summary\": str(it.get(\"summary\") or \"\")})\n"
-    "return {\"items\": out}"
+    "missing = [p.get(\"entity_id\") for p in by_index.values() if p.get(\"entity_id\") not in seen]\n"
+    "return {\"items\": out, \"again\": len(missing) > 0}"
 )
+SUMMARY_RETRY_CODE = (
+    "d = data if isinstance(data, dict) else {}\n"
+    "by_index = {i: p for i, p in enumerate(items or []) if isinstance(p, dict)}\n"
+    "out = [x for x in (first or []) if isinstance(x, dict)]\n"
+    "seen = {x.get(\"entity_id\") for x in out}\n"
+    "for it in d.get(\"summaries\") or []:\n"
+    "    p = by_index.get(it.get(\"index\")) if isinstance(it, dict) else None\n"
+    "    if p is None or p.get(\"entity_id\") in seen or not str(it.get(\"summary\") or \"\").strip():\n"
+    "        continue\n"
+    "    seen.add(p.get(\"entity_id\"))\n"
+    "    out.append({\"entity_id\": p.get(\"entity_id\"), \"summary\": str(it.get(\"summary\") or \"\")})\n"
+    "return {\"updates\": {\"sum_answer\": out}}"
+)
+#: Why an offered item is skipped for this run (the stage's ``reasons``, the warning log, ``left_out.reasons``).
+NO_LABEL_REASON = "The model gave no name for these groups, even when asked a second time."
+NO_SUMMARY_REASON = "The model gave no summary for these entries, even when asked a second time."
 
 
 def build_consolidate(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, Any]:
     """note-consolidate (backlog 0032, docs/cognition.md): normalize -> communities -> labels (loop, 5 per call) ->
     summaries (loop, 8 per call, budget-bounded) -> then_now -> reflect (subflow), each stage reporting its
-    progress. After ``begin`` no tool step raises: a failure is remembered (``cons_error``) and routed to one
+    progress. A labelling or summary round whose answer leaves out an offered item asks once more; what is still
+    unanswered is skipped for this run (reported with the round's progress, so it is logged and counted; the labels
+    pending call excludes the skipped groups, the stale-summary call never offers an entry twice in one run) and
+    the loop goes on; a stage ends only when nothing it did not skip is left or the time budget is spent, and the
+    close reports what was left out (``completed_with_gaps``, ADR 0007). After ``begin`` no tool step raises: a
+    failure is remembered (``cons_error``) and routed to one
     failure path that closes the consolidation as failed and ends the run with the tool's sentence (inside a loop
     a raising node would only end the iteration). A node that raises inside a loop round leaves the loop's
     ``*_inflight`` flag set; the check after the loop ends the run the same way. A model call that fails ends the
@@ -1252,10 +1307,13 @@ def build_consolidate(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[
         fail_from(check, "true", (out, "failure"))
         return out, (check, "false")
 
-    def report(step_id: str, stage: str, done: Any, total: Any, after: tuple) -> tuple:
-        _, cont = step(step_id, f"Progress: {stage}", "note_consolidation_progress",
-                       {"stage": ("string", stage), "done": ("number", done), "total": ("number", total)},
-                       [("eta_s", "number")], after)
+    def report(step_id: str, stage: str, done: Any, total: Any, after: tuple, skipped: Any = None,
+               reason: Any = None) -> tuple:
+        args: Dict[str, Any] = {"stage": ("string", stage), "done": ("number", done), "total": ("number", total)}
+        if skipped is not None:
+            args.update({"skipped": ("array", skipped), "reason": ("string", reason or "")})
+        _, cont = step(step_id, f"Progress: {stage}", "note_consolidation_progress", args, [("eta_s", "number")],
+                       after)
         return cont
 
     def flags(node_id: str, label: str, updates: Dict[str, Any], after: tuple) -> str:
@@ -1273,8 +1331,10 @@ def build_consolidate(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[
         "if budget <= 0:\n"
         "    raise ValueError(\"budget_s must be above 0.\")\n"
         "return {\"updates\": {\"cons_deadline\": time.time() + budget, \"cons_error\": \"\",\n"
-        "        \"labels_continue\": True, \"labels_done\": 0, \"labels_inflight\": False,\n"
-        "        \"sum_continue\": True, \"sum_done\": 0, \"sum_inflight\": False}}",
+        "        \"labels_continue\": True, \"labels_done\": 0, \"labels_inflight\": False, \"labels_skipped\": [],\n"
+        "        \"labels_left\": 0, \"labels_budget\": False, \"labels_answer\": [],\n"
+        "        \"sum_continue\": True, \"sum_done\": 0, \"sum_inflight\": False, \"sum_skipped\": 0,\n"
+        "        \"sum_left\": 0, \"sum_budget\": False, \"sum_answer\": []}}",
         inputs={"budget_s": ("number", S("budget_s"))}, outputs=[("updates", "object")],
     )
     f.then(begun, "init")
@@ -1305,9 +1365,10 @@ def build_consolidate(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[
     f.then(cont[0], "labels_loop", cont[1])
     flags("labels_begin", "A naming round", {"labels_inflight": True, "labels_continue": False},
           ("labels_loop", "loop"))
+    f.get_var("labels_skip", "labels_skipped", [])
     waiting, cont = step("communities_pending", "Groups to name", "note_communities_pending",
-                         {"limit": ("number", cons.LABEL_BATCH)}, [("items", "array"), ("count", "number")],
-                         ("labels_begin", "exec-out"))
+                         {"limit": ("number", cons.LABEL_BATCH), "exclude": ("array", ("labels_skip", "value"))},
+                         [("items", "array"), ("count", "number")], ("labels_begin", "exec-out"))
     f.code("communities_view", "What the model sees", LABEL_VIEW_CODE,
            inputs={"items": ("array", (waiting, "items"))}, outputs=[("view", "array"), ("any", "boolean")])
     f.then(cont[0], "communities_view", cont[1])
@@ -1322,28 +1383,70 @@ def build_consolidate(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[
           system=cm.LABEL_SYSTEM_PROMPT, thinking=cfg["thinking"], max_output_tokens=cfg["max_output_tokens"],
           thinking_from=TH)
     f.then("communities_any", "communities_names", "true")
-    f.code("communities_labels", "Names by group", LABEL_MAP_CODE,
+    f.code("communities_labels", "Names by group", LABEL_FIRST_CODE,
            inputs={"data": ("object", ("communities_names", "data")), "items": ("array", (waiting, "items"))},
-           outputs=[("items", "array")])
+           outputs=[("items", "array"), ("again", "boolean")])
     f.then("communities_names", "communities_labels")
+    # an answer that leaves out an offered group is asked once more (the same prompt, a fresh call)
+    f.if_("labels_again", "Some group without a name?", ("communities_labels", "again"))
+    f.then("communities_labels", "labels_again")
+    f.code("labels_first_values", "Keep the first answer",
+           "return {\"updates\": {\"labels_answer\": items or []}}",
+           inputs={"items": ("array", ("communities_labels", "items"))}, outputs=[("updates", "object")])
+    f.then("labels_again", "labels_first_values", "false")
+    f.set_vars("labels_first_vars", "Keep the first answer", ("labels_first_values", "updates"))
+    f.then("labels_first_values", "labels_first_vars")
+    f.llm("communities_names_again", "Name the groups again", schema=schemas["CommunityLabels"],
+          prompt=("communities_prompt", "result"), provider=S("provider"), model=S("model"),
+          system=cm.LABEL_SYSTEM_PROMPT, thinking=cfg["thinking"], max_output_tokens=cfg["max_output_tokens"],
+          thinking_from=TH)
+    f.then("labels_again", "communities_names_again", "true")
+    f.code("labels_retry", "Both answers", LABEL_RETRY_CODE,
+           inputs={"data": ("object", ("communities_names_again", "data")), "items": ("array", (waiting, "items")),
+                   "first": ("array", ("communities_labels", "items"))}, outputs=[("updates", "object")])
+    f.then("communities_names_again", "labels_retry")
+    f.set_vars("labels_retry_vars", "Keep both answers", ("labels_retry", "updates"))
+    f.then("labels_retry", "labels_retry_vars")
+    f.get_var("labels_answer", "labels_answer", [])
     stored, cont = step("communities_label", "Keep the names", "note_communities_label",
-                        {"items": ("array", ("communities_labels", "items"))}, [("labelled", "array")],
-                        ("communities_labels", "exec-out"))
+                        {"items": ("array", ("labels_answer", "value"))}, [("labelled", "array"), ("warnings", "array")],
+                        ("labels_first_vars", "exec-out"))
+    f.then("labels_retry_vars", "communities_label_args")
     f.get_var("labels_so_far", "labels_done", 0)
     f.get_var("labels_deadline", "cons_deadline", 0)
+    f.get_var("labels_skipped_so_far", "labels_skipped", [])
     f.code(
         "labels_count", "Named so far",
         "import time\n"
-        "n = len(labelled or [])\n"
+        "got = set(labelled or [])\n"
+        "answered = {a.get(\"community_id\") for a in (answer or []) if isinstance(a, dict)}\n"
+        "prev = [x for x in (skipped or []) if x]\n"
+        "new = []\n"
+        "for p in items or []:\n"
+        "    c = p.get(\"community_id\") if isinstance(p, dict) else None\n"
+        "    if not c or c in got or c in prev or c in [s[\"id\"] for s in new]:\n"
+        "        continue\n"
+        "    said = [str(w) for w in (warnings or []) if c in str(w)] if c in answered else []\n"
+        "    why = said[0] if said else None\n"
+        f"    new.append({{\"id\": c, \"reason\": why or {NO_LABEL_REASON!r}}})\n"
+        "n = len(got)\n"
         "done = int(so_far or 0) + n\n"
-        "return {\"done\": done, \"updates\": {\"labels_done\": done, \"labels_inflight\": False,\n"
-        "        \"labels_continue\": n > 0 and done < int(total or 0) and time.time() < float(deadline or 0)}}",
-        inputs={"labelled": ("array", (stored, "labelled")), "so_far": ("number", ("labels_so_far", "value")),
+        "all_skipped = prev + [s[\"id\"] for s in new]\n"
+        "left = max(int(total or 0) - done - len(all_skipped), 0)\n"
+        "in_time = time.time() < float(deadline or 0)\n"
+        "return {\"done\": done, \"skipped\": new, \"updates\": {\"labels_done\": done, \"labels_inflight\": False,\n"
+        "        \"labels_skipped\": all_skipped, \"labels_left\": left, \"labels_budget\": left > 0 and not in_time,\n"
+        "        \"labels_continue\": (n + len(new)) > 0 and left > 0 and in_time}}",
+        inputs={"labelled": ("array", (stored, "labelled")), "warnings": ("array", (stored, "warnings")),
+                "items": ("array", (waiting, "items")), "answer": ("array", ("labels_answer", "value")),
+                "skipped": ("array", ("labels_skipped_so_far", "value")),
+                "so_far": ("number", ("labels_so_far", "value")),
                 "total": ("number", ("labels_total", "total")), "deadline": ("number", ("labels_deadline", "value"))},
-        outputs=[("done", "number"), ("updates", "object")],
+        outputs=[("done", "number"), ("skipped", "array"), ("updates", "object")],
     )
     f.then(cont[0], "labels_count", cont[1])
-    cont = report("p_labels", "labels", ("labels_count", "done"), ("labels_total", "total"), ("labels_count", "exec-out"))
+    cont = report("p_labels", "labels", ("labels_count", "done"), ("labels_total", "total"), ("labels_count", "exec-out"),
+                  skipped=("labels_count", "skipped"), reason=NO_LABEL_REASON)
     f.set_vars("labels_vars", "Remember the round", ("labels_count", "updates"))
     f.then(cont[0], "labels_vars", cont[1])
     # after the loop: a round that did not reach its end (a model call failed) ends the run
@@ -1377,31 +1480,64 @@ def build_consolidate(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[
           provider=S("provider"), model=S("model"), system=cons.summary_system_prompt(), thinking=cfg["thinking"],
           max_output_tokens=cfg["max_output_tokens"], thinking_from=TH)
     f.then("summary_any", "summaries", "true")
-    f.code("summary_items", "Summaries by entry", SUMMARY_MAP_CODE,
+    f.code("summary_items", "Summaries by entry", SUMMARY_FIRST_CODE,
            inputs={"data": ("object", ("summaries", "data")), "items": ("array", (batch, "items"))},
-           outputs=[("items", "array")])
+           outputs=[("items", "array"), ("again", "boolean")])
     f.then("summaries", "summary_items")
+    # an empty or partial answer is asked once more (the same prompt, a fresh call); it never ends the stage
+    f.if_("sum_again", "Some entry without a summary?", ("summary_items", "again"))
+    f.then("summary_items", "sum_again")
+    f.code("sum_first_values", "Keep the first answer", "return {\"updates\": {\"sum_answer\": items or []}}",
+           inputs={"items": ("array", ("summary_items", "items"))}, outputs=[("updates", "object")])
+    f.then("sum_again", "sum_first_values", "false")
+    f.set_vars("sum_first_vars", "Keep the first answer", ("sum_first_values", "updates"))
+    f.then("sum_first_values", "sum_first_vars")
+    f.llm("summaries_again", "Summarise the entries again", schema=schemas["EntitySummaries"],
+          prompt=("summary_prompt", "result"), provider=S("provider"), model=S("model"),
+          system=cons.summary_system_prompt(), thinking=cfg["thinking"], max_output_tokens=cfg["max_output_tokens"],
+          thinking_from=TH)
+    f.then("sum_again", "summaries_again", "true")
+    f.code("sum_retry", "Both answers", SUMMARY_RETRY_CODE,
+           inputs={"data": ("object", ("summaries_again", "data")), "items": ("array", (batch, "items")),
+                   "first": ("array", ("summary_items", "items"))}, outputs=[("updates", "object")])
+    f.then("summaries_again", "sum_retry")
+    f.set_vars("sum_retry_vars", "Keep both answers", ("sum_retry", "updates"))
+    f.then("sum_retry", "sum_retry_vars")
+    f.get_var("sum_answer", "sum_answer", [])
     kept, cont = step("set_summaries", "Keep the summaries", "note_entities_set_summaries",
-                      {"items": ("array", ("summary_items", "items"))}, [("stored", "array")],
-                      ("summary_items", "exec-out"))
+                      {"items": ("array", ("sum_answer", "value"))}, [("stored", "array"), ("left_out", "array")],
+                      ("sum_first_vars", "exec-out"))
+    f.then("sum_retry_vars", "set_summaries_args")
     f.get_var("sum_so_far", "sum_done", 0)
     f.get_var("sum_deadline", "cons_deadline", 0)
+    f.get_var("sum_skipped_so_far", "sum_skipped", 0)
     f.code(
         "sum_count", "Refreshed so far",
         "import time\n"
-        "n = len(stored or [])\n"
+        "got = set(stored or [])\n"
+        "why = {x.get(\"entity_id\"): x.get(\"reason\") for x in (left_out or []) if isinstance(x, dict)}\n"
+        "new = []\n"
+        "for p in items or []:\n"
+        "    e = p.get(\"entity_id\") if isinstance(p, dict) else None\n"
+        "    if e and e not in got and e not in [s[\"id\"] for s in new]:\n"
+        f"        new.append({{\"id\": e, \"reason\": why.get(e) or {NO_SUMMARY_REASON!r}}})\n"
+        "n = len(got)\n"
         "done = int(so_far or 0) + n\n"
-        "left = int(count or 0) - len(items or [])\n"
-        "return {\"done\": done, \"total\": max(int(total or 0), done + max(left, 0)),\n"
-        "        \"updates\": {\"sum_done\": done, \"sum_inflight\": False,\n"
-        "        \"sum_continue\": n > 0 and left > 0 and time.time() < float(deadline or 0)}}",
-        inputs={"stored": ("array", (kept, "stored")), "so_far": ("number", ("sum_so_far", "value")),
+        "left = max(int(count or 0) - len(items or []), 0)\n"
+        "in_time = time.time() < float(deadline or 0)\n"
+        "return {\"done\": done, \"skipped\": new, \"total\": max(int(total or 0), done + left),\n"
+        "        \"updates\": {\"sum_done\": done, \"sum_inflight\": False, \"sum_skipped\": int(skipped or 0) + len(new),\n"
+        "        \"sum_left\": left, \"sum_budget\": left > 0 and not in_time,\n"
+        "        \"sum_continue\": (n + len(new)) > 0 and left > 0 and in_time}}",
+        inputs={"stored": ("array", (kept, "stored")), "left_out": ("array", (kept, "left_out")),
+                "so_far": ("number", ("sum_so_far", "value")), "skipped": ("number", ("sum_skipped_so_far", "value")),
                 "count": ("number", (batch, "count")), "items": ("array", (batch, "items")),
                 "total": ("number", (first, "count")), "deadline": ("number", ("sum_deadline", "value"))},
-        outputs=[("done", "number"), ("total", "number"), ("updates", "object")],
+        outputs=[("done", "number"), ("skipped", "array"), ("total", "number"), ("updates", "object")],
     )
     f.then(cont[0], "sum_count", cont[1])
-    cont = report("p_sum", "summaries", ("sum_count", "done"), ("sum_count", "total"), ("sum_count", "exec-out"))
+    cont = report("p_sum", "summaries", ("sum_count", "done"), ("sum_count", "total"), ("sum_count", "exec-out"),
+                  skipped=("sum_count", "skipped"), reason=NO_SUMMARY_REASON)
     f.set_vars("sum_vars", "Remember the round", ("sum_count", "updates"))
     f.then(cont[0], "sum_vars", cont[1])
     f.get_var("sum_unfinished", "sum_inflight", False)
@@ -1444,26 +1580,41 @@ def build_consolidate(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[
     cont = report("p_reflect_done", "reflect", 1, 1, ("reflect_failed", "false"))
 
     # ---- end
+    # what the time budget did not reach (the close adds the skipped items still pending: left_out)
+    for name, var, default in (("end_sum_budget", "sum_budget", False), ("end_sum_left", "sum_left", 0),
+                               ("end_labels_budget", "labels_budget", False), ("end_labels_left", "labels_left", 0)):
+        f.get_var(name, var, default)
     f.code("results", "Results",
-           "return {\"results\": {\"communities\": int(communities or 0), \"insights\": int(insights or 0)}}",
+           "sb, lb = bool(sum_budget), bool(labels_budget)\n"
+           "return {\"results\": {\"communities\": int(communities or 0), \"insights\": int(insights or 0),\n"
+           "        \"budget_spent\": sb or lb, \"not_reached\": {\"summaries\": int(sum_left or 0) if sb else 0,\n"
+           "                                                \"labels\": int(labels_left or 0) if lb else 0}}}",
            inputs={"communities": ("number", (comm, "communities")),
-                   "insights": ("number", ("reflect_outcome", "insights"))},
+                   "insights": ("number", ("reflect_outcome", "insights")),
+                   "sum_budget": ("boolean", ("end_sum_budget", "value")), "sum_left": ("number", ("end_sum_left", "value")),
+                   "labels_budget": ("boolean", ("end_labels_budget", "value")),
+                   "labels_left": ("number", ("end_labels_left", "value"))},
            outputs=[("results", "object")], exec_lane=False)
     ended, cont = step("finish", "Close the consolidation", "note_consolidation_end",
                        {"status": ("string", "completed"), "results": ("object", ("results", "results"))},
                        [("merges", "number"), ("labelled", "number"), ("summaries_refreshed", "number"),
-                        ("insights", "number"), ("communities", "number")], cont)
+                        ("insights", "number"), ("communities", "number"), ("status", "string"),
+                        ("notice", "string")], cont)
     f.code(
         "report", "Report",
         "def n(x, one, many):\n"
         "    x = int(x or 0)\n"
         "    return str(x) + \" \" + (one if x == 1 else many)\n"
-        "msg = (\"Consolidated: \" + n(merges, \"merge\", \"merges\") + \", \" + n(labelled, \"group named\", \"groups named\")\n"
+        "head = \"Consolidated with gaps: \" if status == \"completed_with_gaps\" else \"Consolidated: \"\n"
+        "msg = (head + n(merges, \"merge\", \"merges\") + \", \" + n(labelled, \"group named\", \"groups named\")\n"
         "       + \", \" + n(summaries, \"summary refreshed\", \"summaries refreshed\") + \", \"\n"
         "       + n(insights, \"insight\", \"insights\") + \".\")\n"
+        "if notice:\n"
+        "    msg += \" \" + str(notice)[0].upper() + str(notice)[1:]\n"
         "return {\"message\": msg}",
         inputs={"merges": ("number", (ended, "merges")), "labelled": ("number", (ended, "labelled")),
-                "summaries": ("number", (ended, "summaries_refreshed")), "insights": ("number", (ended, "insights"))},
+                "summaries": ("number", (ended, "summaries_refreshed")), "insights": ("number", (ended, "insights")),
+                "status": ("string", (ended, "status")), "notice": ("string", (ended, "notice"))},
         outputs=[("message", "string")],
     )
     f.then(cont[0], "report", cont[1])

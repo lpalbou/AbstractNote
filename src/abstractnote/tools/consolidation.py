@@ -15,8 +15,9 @@ def note_consolidation_begin(ctx: ToolContext) -> Dict[str, Any]:
 
 
 def note_consolidation_progress(ctx: ToolContext, stage: str, done: int, total: int,
-                                note: Optional[str] = None) -> Dict[str, Any]:
-    return _c.progress(ctx.nb, stage, done, total, note or None)
+                                note: Optional[str] = None, skipped: Optional[List[Any]] = None,
+                                reason: Optional[str] = None) -> Dict[str, Any]:
+    return _c.progress(ctx.nb, stage, done, total, note or None, skipped or None, reason or None)
 
 
 def note_consolidation_end(ctx: ToolContext, status: str, results: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

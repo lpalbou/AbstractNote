@@ -180,7 +180,7 @@ def test_one_consolidation_fills_summaries_names_groups_and_reports_every_stage(
     assert [c["schema"] for c in llm.calls][4:] == ["Reflections"]
 
 
-def test_an_entry_the_model_skips_is_not_asked_again_and_the_loop_ends(tmp_path):
+def test_an_entry_the_model_skips_is_asked_once_more_then_skipped_and_the_loop_goes_on(tmp_path):
     tools, nb_ = _bound(tmp_path)
     world(nb_)
 
@@ -189,18 +189,26 @@ def test_an_entry_the_model_skips_is_not_asked_again_and_the_loop_ends(tmp_path)
         return {"summaries": [{"index": view[0]["index"], "summary": "Only this one."}]}
 
     llm = _llm(EntitySummaries=first_only)
-    NoteRunner.with_llm(llm, tools).run("note-consolidate", {})
-    assert [c["schema"] for c in llm.calls].count("EntitySummaries") == 2  # 8 offered, then the other 3, then done
-    assert cons.last(nb_)["summaries_refreshed"] == 2 and cons.pending(nb_)["stale_summaries"] == 9
+    out = NoteRunner.with_llm(llm, tools).run("note-consolidate", {})
+    # 8 offered (asked twice: 7 missing), then the other 3 (asked twice: 2 missing), then done
+    assert [c["schema"] for c in llm.calls].count("EntitySummaries") == 4
+    last = cons.last(nb_)
+    assert last["summaries_refreshed"] == 2 and cons.pending(nb_)["stale_summaries"] == 9
+    assert last["status"] == "completed_with_gaps" and last["left_out"]["summaries"] == 9
+    assert out["response"].startswith("Consolidated with gaps: ")
+    assert out["response"].endswith("9 summaries could not be refreshed this time; they will be tried again next time.")
 
 
-def test_the_budget_bounds_the_summary_loop(tmp_path):
+def test_the_budget_bounds_the_summary_loop_and_says_what_it_did_not_reach(tmp_path):
     tools, nb_ = _bound(tmp_path)
     world(nb_)
     llm = _llm()
     NoteRunner.with_llm(llm, tools).run("note-consolidate", {"budget_s": 0.001})
     assert [c["schema"] for c in llm.calls].count("EntitySummaries") == 1
-    assert cons.last(nb_)["status"] == "completed" and cons.pending(nb_)["stale_summaries"] == 3
+    last = cons.last(nb_)
+    assert cons.pending(nb_)["stale_summaries"] == 3
+    assert last["status"] == "completed_with_gaps" and last["budget_spent"] is True
+    assert last["left_out"] == {"summaries": 3, "labels": 0, "reasons": [cons.BUDGET_REASON]}
 
 
 def test_a_tool_failure_inside_the_summary_loop_ends_the_run_and_closes_it_as_failed(tmp_path):

@@ -593,7 +593,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "import time\nbudget = float(budget_s if budget_s is not None else 3600)\nif budget <= 0:\n    raise ValueError(\"budget_s must be above 0.\")\nreturn {\"updates\": {\"cons_deadline\": time.time() + budget, \"cons_error\": \"\",\n        \"labels_continue\": True, \"labels_done\": 0, \"labels_inflight\": False,\n        \"sum_continue\": True, \"sum_done\": 0, \"sum_inflight\": False}}\n"
+        "codeBody": "import time\nbudget = float(budget_s if budget_s is not None else 3600)\nif budget <= 0:\n    raise ValueError(\"budget_s must be above 0.\")\nreturn {\"updates\": {\"cons_deadline\": time.time() + budget, \"cons_error\": \"\",\n        \"labels_continue\": True, \"labels_done\": 0, \"labels_inflight\": False, \"labels_skipped\": [],\n        \"labels_left\": 0, \"labels_budget\": False, \"labels_answer\": [],\n        \"sum_continue\": True, \"sum_done\": 0, \"sum_inflight\": False, \"sum_skipped\": 0,\n        \"sum_left\": 0, \"sum_budget\": False, \"sum_answer\": []}}\n"
       }
     },
     {
@@ -2647,6 +2647,41 @@
       }
     },
     {
+      "id": "labels_skip",
+      "type": "get_var",
+      "position": {
+        "x": 17760.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get labels_skipped",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "labels_skipped",
+          "default": []
+        }
+      }
+    },
+    {
       "id": "communities_pending_args",
       "type": "code",
       "position": {
@@ -2666,6 +2701,11 @@
             "id": "limit",
             "label": "limit",
             "type": "number"
+          },
+          {
+            "id": "exclude",
+            "label": "exclude",
+            "type": "array"
           },
           {
             "id": "permissions",
@@ -2690,7 +2730,7 @@
           "limit": 5
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif limit is not None and limit != \"\":\n    arguments[\"limit\"] = limit\nreturn {\"tool_calls\": [{\"name\": \"note_communities_pending\", \"call_id\": \"communities_pending\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif limit is not None and limit != \"\":\n    arguments[\"limit\"] = limit\nif exclude is not None and exclude != \"\":\n    arguments[\"exclude\"] = exclude\nreturn {\"tool_calls\": [{\"name\": \"note_communities_pending\", \"call_id\": \"communities_pending\", \"arguments\": arguments}]}\n"
       }
     },
     {
@@ -3284,21 +3324,419 @@
             "id": "items",
             "label": "items",
             "type": "array"
+          },
+          {
+            "id": "again",
+            "label": "again",
+            "type": "boolean"
           }
         ],
         "pinDefaults": {
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "d = data if isinstance(data, dict) else {}\nby_index = {p.get(\"index\"): p for p in (items or []) if isinstance(p, dict)}\nout, seen = [], set()\nfor it in d.get(\"communities\") or []:\n    p = by_index.get(it.get(\"index\")) if isinstance(it, dict) else None\n    if p is None or p.get(\"community_id\") in seen:\n        continue\n    seen.add(p.get(\"community_id\"))\n    out.append({\"community_id\": p.get(\"community_id\"), \"label\": str(it.get(\"label\") or \"\"),\n                \"summary\": str(it.get(\"summary\") or \"\"), \"kind\": it.get(\"kind\")})\nreturn {\"items\": out}\n"
+        "codeBody": "d = data if isinstance(data, dict) else {}\nby_index = {p.get(\"index\"): p for p in (items or []) if isinstance(p, dict)}\nout, seen = [], set()\nfor it in d.get(\"communities\") or []:\n    p = by_index.get(it.get(\"index\")) if isinstance(it, dict) else None\n    if p is None or p.get(\"community_id\") in seen or not str(it.get(\"label\") or \"\").strip():\n        continue\n    seen.add(p.get(\"community_id\"))\n    out.append({\"community_id\": p.get(\"community_id\"), \"label\": str(it.get(\"label\") or \"\"),\n                \"summary\": str(it.get(\"summary\") or \"\"), \"kind\": it.get(\"kind\")})\nmissing = [p.get(\"community_id\") for p in by_index.values() if p.get(\"community_id\") not in seen]\nreturn {\"items\": out, \"again\": len(missing) > 0}\n"
+      }
+    },
+    {
+      "id": "labels_again",
+      "type": "if",
+      "position": {
+        "x": 22080.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Some group without a name?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "labels_first_values",
+      "type": "code",
+      "position": {
+        "x": 22560.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Keep the first answer",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "return {\"updates\": {\"labels_answer\": items or []}}\n"
+      }
+    },
+    {
+      "id": "labels_first_vars",
+      "type": "set_vars",
+      "position": {
+        "x": 23040.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "set_vars",
+        "label": "Keep the first answer",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ]
+      }
+    },
+    {
+      "id": "communities_names_again",
+      "type": "llm_call",
+      "position": {
+        "x": 22560.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "llm_call",
+        "label": "Name the groups again",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          },
+          {
+            "id": "system",
+            "label": "system",
+            "type": "string"
+          },
+          {
+            "id": "prompt",
+            "label": "prompt",
+            "type": "string"
+          },
+          {
+            "id": "tools",
+            "label": "tools",
+            "type": "tools"
+          },
+          {
+            "id": "temperature",
+            "label": "temperature",
+            "type": "number"
+          },
+          {
+            "id": "thinking",
+            "label": "thinking",
+            "type": "string"
+          },
+          {
+            "id": "max_output_tokens",
+            "label": "max_output_tokens",
+            "type": "number"
+          },
+          {
+            "id": "resp_schema",
+            "label": "resp_schema",
+            "type": "json_schema"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          },
+          {
+            "id": "meta",
+            "label": "meta",
+            "type": "object"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "tools": [],
+          "system": "You name groups of related things found in a person's notebook. Each group in the message has an `index`, its most mentioned entities (name, kind, how many notes mention it, what the notebook knows about it), the strongest statements that link them, and a few representative notes.\n\nFor every group, give:\n- `index`: the group's index in the message;\n- `label`: a name of at most 4 words that a person recognises at a glance (the project, theme, circle of people, tools or process the group is about), never a list of the entity names;\n- `summary`: one sentence saying what holds the group together;\n- `kind`: project, theme, people, tooling, process or other.\n\nA group with a `previous_label` was named before and has changed since; keep that name when it still fits.\n\nRules:\n- Use only what the message says; never invent people, projects or dates.\n- Name every group in the message, once.\n\nOutput JSON only, matching the schema, written compactly on one line (no indentation).\n",
+          "temperature": 0.2,
+          "resp_schema": {
+            "type": "object",
+            "properties": {
+              "communities": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "description": "index of the community in the list"
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "a name of at most 4 words"
+                    },
+                    "summary": {
+                      "type": "string",
+                      "description": "one sentence: what holds this group together"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "project",
+                        "theme",
+                        "people",
+                        "tooling",
+                        "process",
+                        "other"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "index",
+                    "label",
+                    "summary",
+                    "kind"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "communities"
+            ]
+          },
+          "thinking": "off",
+          "max_output_tokens": 2048
+        }
+      }
+    },
+    {
+      "id": "labels_retry",
+      "type": "code",
+      "position": {
+        "x": 23040.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Both answers",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          },
+          {
+            "id": "first",
+            "label": "first",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "d = data if isinstance(data, dict) else {}\nby_index = {p.get(\"index\"): p for p in (items or []) if isinstance(p, dict)}\nout = [x for x in (first or []) if isinstance(x, dict)]\nseen = {x.get(\"community_id\") for x in out}\nfor it in d.get(\"communities\") or []:\n    p = by_index.get(it.get(\"index\")) if isinstance(it, dict) else None\n    if p is None or p.get(\"community_id\") in seen or not str(it.get(\"label\") or \"\").strip():\n        continue\n    seen.add(p.get(\"community_id\"))\n    out.append({\"community_id\": p.get(\"community_id\"), \"label\": str(it.get(\"label\") or \"\"),\n                \"summary\": str(it.get(\"summary\") or \"\"), \"kind\": it.get(\"kind\")})\nreturn {\"updates\": {\"labels_answer\": out}}\n"
+      }
+    },
+    {
+      "id": "labels_retry_vars",
+      "type": "set_vars",
+      "position": {
+        "x": 23520.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "set_vars",
+        "label": "Keep both answers",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ]
+      }
+    },
+    {
+      "id": "labels_answer",
+      "type": "get_var",
+      "position": {
+        "x": 23040.0,
+        "y": 640.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get labels_answer",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "labels_answer",
+          "default": []
+        }
       }
     },
     {
       "id": "communities_label_args",
       "type": "code",
       "position": {
-        "x": 22080.0,
-        "y": 0.0
+        "x": 23520.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "code",
@@ -3343,7 +3781,7 @@
       "id": "communities_label",
       "type": "tool_calls",
       "position": {
-        "x": 22560.0,
+        "x": 24000.0,
         "y": 0.0
       },
       "data": {
@@ -3399,7 +3837,7 @@
       "id": "communities_label_out",
       "type": "code",
       "position": {
-        "x": 23040.0,
+        "x": 24480.0,
         "y": 0.0
       },
       "data": {
@@ -3434,6 +3872,11 @@
             "type": "array"
           },
           {
+            "id": "warnings",
+            "label": "warnings",
+            "type": "array"
+          },
+          {
             "id": "tool_output",
             "label": "tool_output",
             "type": "object"
@@ -3460,7 +3903,7 @@
       "id": "communities_label_failed",
       "type": "if",
       "position": {
-        "x": 23520.0,
+        "x": 24960.0,
         "y": 0.0
       },
       "data": {
@@ -3496,7 +3939,7 @@
       "id": "communities_label_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 24000.0,
+        "x": 25440.0,
         "y": 0.0
       },
       "data": {
@@ -3541,7 +3984,7 @@
       "id": "labels_so_far",
       "type": "get_var",
       "position": {
-        "x": 23520.0,
+        "x": 24960.0,
         "y": 320.0
       },
       "data": {
@@ -3576,7 +4019,7 @@
       "id": "labels_deadline",
       "type": "get_var",
       "position": {
-        "x": 23520.0,
+        "x": 24960.0,
         "y": 640.0
       },
       "data": {
@@ -3608,10 +4051,45 @@
       }
     },
     {
+      "id": "labels_skipped_so_far",
+      "type": "get_var",
+      "position": {
+        "x": 24960.0,
+        "y": 960.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get labels_skipped",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "labels_skipped",
+          "default": []
+        }
+      }
+    },
+    {
       "id": "labels_count",
       "type": "code",
       "position": {
-        "x": 24000.0,
+        "x": 25440.0,
         "y": 320.0
       },
       "data": {
@@ -3626,6 +4104,26 @@
           {
             "id": "labelled",
             "label": "labelled",
+            "type": "array"
+          },
+          {
+            "id": "warnings",
+            "label": "warnings",
+            "type": "array"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          },
+          {
+            "id": "answer",
+            "label": "answer",
+            "type": "array"
+          },
+          {
+            "id": "skipped",
+            "label": "skipped",
             "type": "array"
           },
           {
@@ -3661,6 +4159,11 @@
             "type": "number"
           },
           {
+            "id": "skipped",
+            "label": "skipped",
+            "type": "array"
+          },
+          {
             "id": "updates",
             "label": "updates",
             "type": "object"
@@ -3670,14 +4173,14 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "import time\nn = len(labelled or [])\ndone = int(so_far or 0) + n\nreturn {\"done\": done, \"updates\": {\"labels_done\": done, \"labels_inflight\": False,\n        \"labels_continue\": n > 0 and done < int(total or 0) and time.time() < float(deadline or 0)}}\n"
+        "codeBody": "import time\ngot = set(labelled or [])\nanswered = {a.get(\"community_id\") for a in (answer or []) if isinstance(a, dict)}\nprev = [x for x in (skipped or []) if x]\nnew = []\nfor p in items or []:\n    c = p.get(\"community_id\") if isinstance(p, dict) else None\n    if not c or c in got or c in prev or c in [s[\"id\"] for s in new]:\n        continue\n    said = [str(w) for w in (warnings or []) if c in str(w)] if c in answered else []\n    why = said[0] if said else None\n    new.append({\"id\": c, \"reason\": why or 'The model gave no name for these groups, even when asked a second time.'})\nn = len(got)\ndone = int(so_far or 0) + n\nall_skipped = prev + [s[\"id\"] for s in new]\nleft = max(int(total or 0) - done - len(all_skipped), 0)\nin_time = time.time() < float(deadline or 0)\nreturn {\"done\": done, \"skipped\": new, \"updates\": {\"labels_done\": done, \"labels_inflight\": False,\n        \"labels_skipped\": all_skipped, \"labels_left\": left, \"labels_budget\": left > 0 and not in_time,\n        \"labels_continue\": (n + len(new)) > 0 and left > 0 and in_time}}\n"
       }
     },
     {
       "id": "p_labels_args",
       "type": "code",
       "position": {
-        "x": 24480.0,
+        "x": 25920.0,
         "y": 0.0
       },
       "data": {
@@ -3705,6 +4208,16 @@
             "type": "number"
           },
           {
+            "id": "skipped",
+            "label": "skipped",
+            "type": "array"
+          },
+          {
+            "id": "reason",
+            "label": "reason",
+            "type": "string"
+          },
+          {
             "id": "permissions",
             "label": "permissions",
             "type": "string"
@@ -3724,17 +4237,18 @@
         ],
         "pinDefaults": {
           "permissions": "sandbox",
-          "stage": "labels"
+          "stage": "labels",
+          "reason": "The model gave no name for these groups, even when asked a second time."
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif stage is not None and stage != \"\":\n    arguments[\"stage\"] = stage\nif done is not None and done != \"\":\n    arguments[\"done\"] = done\nif total is not None and total != \"\":\n    arguments[\"total\"] = total\nreturn {\"tool_calls\": [{\"name\": \"note_consolidation_progress\", \"call_id\": \"p_labels\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif stage is not None and stage != \"\":\n    arguments[\"stage\"] = stage\nif done is not None and done != \"\":\n    arguments[\"done\"] = done\nif total is not None and total != \"\":\n    arguments[\"total\"] = total\nif skipped is not None and skipped != \"\":\n    arguments[\"skipped\"] = skipped\nif reason is not None and reason != \"\":\n    arguments[\"reason\"] = reason\nreturn {\"tool_calls\": [{\"name\": \"note_consolidation_progress\", \"call_id\": \"p_labels\", \"arguments\": arguments}]}\n"
       }
     },
     {
       "id": "p_labels",
       "type": "tool_calls",
       "position": {
-        "x": 24960.0,
+        "x": 26400.0,
         "y": 0.0
       },
       "data": {
@@ -3790,7 +4304,7 @@
       "id": "p_labels_out",
       "type": "code",
       "position": {
-        "x": 25440.0,
+        "x": 26880.0,
         "y": 0.0
       },
       "data": {
@@ -3851,7 +4365,7 @@
       "id": "p_labels_failed",
       "type": "if",
       "position": {
-        "x": 25920.0,
+        "x": 27360.0,
         "y": 0.0
       },
       "data": {
@@ -3887,7 +4401,7 @@
       "id": "p_labels_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 26400.0,
+        "x": 27840.0,
         "y": 0.0
       },
       "data": {
@@ -3932,7 +4446,7 @@
       "id": "labels_vars",
       "type": "set_vars",
       "position": {
-        "x": 26400.0,
+        "x": 27840.0,
         "y": 320.0
       },
       "data": {
@@ -4040,7 +4554,7 @@
       "type": "set_var",
       "position": {
         "x": 17760.0,
-        "y": 320.0
+        "y": 640.0
       },
       "data": {
         "nodeType": "set_var",
@@ -4116,7 +4630,7 @@
       "type": "code",
       "position": {
         "x": 17760.0,
-        "y": 640.0
+        "y": 960.0
       },
       "data": {
         "nodeType": "code",
@@ -4739,7 +5253,7 @@
       "type": "set_vars",
       "position": {
         "x": 22560.0,
-        "y": 320.0
+        "y": 744.0
       },
       "data": {
         "nodeType": "set_vars",
@@ -4775,7 +5289,7 @@
       "type": "code",
       "position": {
         "x": 23040.0,
-        "y": 320.0
+        "y": 960.0
       },
       "data": {
         "nodeType": "code",
@@ -4822,7 +5336,7 @@
       "type": "tool_calls",
       "position": {
         "x": 23520.0,
-        "y": 960.0
+        "y": 640.0
       },
       "data": {
         "nodeType": "tool_calls",
@@ -4878,7 +5392,7 @@
       "type": "code",
       "position": {
         "x": 24000.0,
-        "y": 640.0
+        "y": 320.0
       },
       "data": {
         "nodeType": "code",
@@ -4980,7 +5494,7 @@
       "type": "set_var",
       "position": {
         "x": 24960.0,
-        "y": 320.0
+        "y": 1280.0
       },
       "data": {
         "nodeType": "set_var",
@@ -5025,7 +5539,7 @@
       "type": "code",
       "position": {
         "x": 24960.0,
-        "y": 640.0
+        "y": 1600.0
       },
       "data": {
         "nodeType": "code",
@@ -5076,7 +5590,7 @@
       "type": "if",
       "position": {
         "x": 25440.0,
-        "y": 320.0
+        "y": 744.0
       },
       "data": {
         "nodeType": "if",
@@ -5112,7 +5626,7 @@
       "type": "code",
       "position": {
         "x": 25920.0,
-        "y": 320.0
+        "y": 346.0
       },
       "data": {
         "nodeType": "code",
@@ -5153,7 +5667,7 @@
       "type": "set_vars",
       "position": {
         "x": 26400.0,
-        "y": 640.0
+        "y": 320.0
       },
       "data": {
         "nodeType": "set_vars",
@@ -5189,7 +5703,7 @@
       "type": "string_template",
       "position": {
         "x": 25440.0,
-        "y": 640.0
+        "y": 1064.0
       },
       "data": {
         "nodeType": "string_template",
@@ -5223,7 +5737,7 @@
       "type": "llm_call",
       "position": {
         "x": 25920.0,
-        "y": 640.0
+        "y": 666.0
       },
       "data": {
         "nodeType": "llm_call",
@@ -5354,7 +5868,7 @@
       "type": "code",
       "position": {
         "x": 26400.0,
-        "y": 960.0
+        "y": 640.0
       },
       "data": {
         "nodeType": "code",
@@ -5391,21 +5905,402 @@
             "id": "items",
             "label": "items",
             "type": "array"
+          },
+          {
+            "id": "again",
+            "label": "again",
+            "type": "boolean"
           }
         ],
         "pinDefaults": {
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "d = data if isinstance(data, dict) else {}\nby_index = {i: p for i, p in enumerate(items or []) if isinstance(p, dict)}\nout, seen = [], set()\nfor it in d.get(\"summaries\") or []:\n    p = by_index.get(it.get(\"index\")) if isinstance(it, dict) else None\n    if p is None or p.get(\"entity_id\") in seen:\n        continue\n    seen.add(p.get(\"entity_id\"))\n    out.append({\"entity_id\": p.get(\"entity_id\"), \"summary\": str(it.get(\"summary\") or \"\")})\nreturn {\"items\": out}\n"
+        "codeBody": "d = data if isinstance(data, dict) else {}\nby_index = {i: p for i, p in enumerate(items or []) if isinstance(p, dict)}\nout, seen = [], set()\nfor it in d.get(\"summaries\") or []:\n    p = by_index.get(it.get(\"index\")) if isinstance(it, dict) else None\n    if p is None or p.get(\"entity_id\") in seen or not str(it.get(\"summary\") or \"\").strip():\n        continue\n    seen.add(p.get(\"entity_id\"))\n    out.append({\"entity_id\": p.get(\"entity_id\"), \"summary\": str(it.get(\"summary\") or \"\")})\nmissing = [p.get(\"entity_id\") for p in by_index.values() if p.get(\"entity_id\") not in seen]\nreturn {\"items\": out, \"again\": len(missing) > 0}\n"
+      }
+    },
+    {
+      "id": "sum_again",
+      "type": "if",
+      "position": {
+        "x": 26880.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Some entry without a summary?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "sum_first_values",
+      "type": "code",
+      "position": {
+        "x": 27360.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Keep the first answer",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "return {\"updates\": {\"sum_answer\": items or []}}\n"
+      }
+    },
+    {
+      "id": "sum_first_vars",
+      "type": "set_vars",
+      "position": {
+        "x": 27840.0,
+        "y": 640.0
+      },
+      "data": {
+        "nodeType": "set_vars",
+        "label": "Keep the first answer",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ]
+      }
+    },
+    {
+      "id": "summaries_again",
+      "type": "llm_call",
+      "position": {
+        "x": 27360.0,
+        "y": 640.0
+      },
+      "data": {
+        "nodeType": "llm_call",
+        "label": "Summarise the entries again",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          },
+          {
+            "id": "system",
+            "label": "system",
+            "type": "string"
+          },
+          {
+            "id": "prompt",
+            "label": "prompt",
+            "type": "string"
+          },
+          {
+            "id": "tools",
+            "label": "tools",
+            "type": "tools"
+          },
+          {
+            "id": "temperature",
+            "label": "temperature",
+            "type": "number"
+          },
+          {
+            "id": "thinking",
+            "label": "thinking",
+            "type": "string"
+          },
+          {
+            "id": "max_output_tokens",
+            "label": "max_output_tokens",
+            "type": "number"
+          },
+          {
+            "id": "resp_schema",
+            "label": "resp_schema",
+            "type": "json_schema"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          },
+          {
+            "id": "meta",
+            "label": "meta",
+            "type": "object"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "tools": [],
+          "system": "You write the summary of entries in a person's notebook: the people, projects, places, tools and ideas their notes are about. Each entry in the message has an `index`, its `name`, `kind`, other names (`aliases`), its current `summary` (which may be empty, a placeholder or out of date), the statements the notebook holds about it (`statements`) and a few notes that mention it (`notes`, newest first).\n\nFor every entry, give:\n- `index`: the entry's index in the message;\n- `summary`: at most two sentences (at most about 240 characters) saying what the entry IS, in the third person and the present tense: what kind of thing it is, its role or what it is for, and who or what it belongs to, works with or is part of, with the facts that hold now; only a fact that can change (a status, an owner, a version, a role) carries its date (\"since 2026-10\"), never the description itself.\n\nRules:\n- Use only the statements and notes in the message; never speculate, and never invent people, projects, dates or numbers.\n- Keep what the current summary says when the statements and notes still support it.\n- Write about the entry itself, never about the notes or one event (\"Dana is a colleague at Acme who leads the LUT budget\", not \"The notes mention Dana\" or \"Dana confirmed the schedule\").\n- Summarise every entry in the message, once.\n\nOutput JSON only, matching the schema, written compactly on one line (no indentation).\n",
+          "temperature": 0.2,
+          "resp_schema": {
+            "type": "object",
+            "properties": {
+              "summaries": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "description": "index of the entry in the list"
+                    },
+                    "summary": {
+                      "type": "string",
+                      "description": "at most two sentences, third person, present tense"
+                    }
+                  },
+                  "required": [
+                    "index",
+                    "summary"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "summaries"
+            ]
+          },
+          "thinking": "off",
+          "max_output_tokens": 3000
+        }
+      }
+    },
+    {
+      "id": "sum_retry",
+      "type": "code",
+      "position": {
+        "x": 27840.0,
+        "y": 960.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Both answers",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          },
+          {
+            "id": "first",
+            "label": "first",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "d = data if isinstance(data, dict) else {}\nby_index = {i: p for i, p in enumerate(items or []) if isinstance(p, dict)}\nout = [x for x in (first or []) if isinstance(x, dict)]\nseen = {x.get(\"entity_id\") for x in out}\nfor it in d.get(\"summaries\") or []:\n    p = by_index.get(it.get(\"index\")) if isinstance(it, dict) else None\n    if p is None or p.get(\"entity_id\") in seen or not str(it.get(\"summary\") or \"\").strip():\n        continue\n    seen.add(p.get(\"entity_id\"))\n    out.append({\"entity_id\": p.get(\"entity_id\"), \"summary\": str(it.get(\"summary\") or \"\")})\nreturn {\"updates\": {\"sum_answer\": out}}\n"
+      }
+    },
+    {
+      "id": "sum_retry_vars",
+      "type": "set_vars",
+      "position": {
+        "x": 28320.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "set_vars",
+        "label": "Keep both answers",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ]
+      }
+    },
+    {
+      "id": "sum_answer",
+      "type": "get_var",
+      "position": {
+        "x": 27840.0,
+        "y": 1280.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get sum_answer",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "sum_answer",
+          "default": []
+        }
       }
     },
     {
       "id": "set_summaries_args",
       "type": "code",
       "position": {
-        "x": 26880.0,
-        "y": 0.0
+        "x": 28320.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "code",
@@ -5450,7 +6345,7 @@
       "id": "set_summaries",
       "type": "tool_calls",
       "position": {
-        "x": 27360.0,
+        "x": 28800.0,
         "y": 0.0
       },
       "data": {
@@ -5506,7 +6401,7 @@
       "id": "set_summaries_out",
       "type": "code",
       "position": {
-        "x": 27840.0,
+        "x": 29280.0,
         "y": 0.0
       },
       "data": {
@@ -5541,6 +6436,11 @@
             "type": "array"
           },
           {
+            "id": "left_out",
+            "label": "left_out",
+            "type": "array"
+          },
+          {
             "id": "tool_output",
             "label": "tool_output",
             "type": "object"
@@ -5567,7 +6467,7 @@
       "id": "set_summaries_failed",
       "type": "if",
       "position": {
-        "x": 28320.0,
+        "x": 29760.0,
         "y": 0.0
       },
       "data": {
@@ -5603,7 +6503,7 @@
       "id": "set_summaries_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 28800.0,
+        "x": 30240.0,
         "y": 0.0
       },
       "data": {
@@ -5648,7 +6548,7 @@
       "id": "sum_so_far",
       "type": "get_var",
       "position": {
-        "x": 28320.0,
+        "x": 29760.0,
         "y": 320.0
       },
       "data": {
@@ -5683,7 +6583,7 @@
       "id": "sum_deadline",
       "type": "get_var",
       "position": {
-        "x": 28320.0,
+        "x": 29760.0,
         "y": 640.0
       },
       "data": {
@@ -5715,10 +6615,45 @@
       }
     },
     {
+      "id": "sum_skipped_so_far",
+      "type": "get_var",
+      "position": {
+        "x": 29760.0,
+        "y": 960.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get sum_skipped",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "sum_skipped",
+          "default": 0
+        }
+      }
+    },
+    {
       "id": "sum_count",
       "type": "code",
       "position": {
-        "x": 28800.0,
+        "x": 30240.0,
         "y": 320.0
       },
       "data": {
@@ -5736,8 +6671,18 @@
             "type": "array"
           },
           {
+            "id": "left_out",
+            "label": "left_out",
+            "type": "array"
+          },
+          {
             "id": "so_far",
             "label": "so_far",
+            "type": "number"
+          },
+          {
+            "id": "skipped",
+            "label": "skipped",
             "type": "number"
           },
           {
@@ -5778,6 +6723,11 @@
             "type": "number"
           },
           {
+            "id": "skipped",
+            "label": "skipped",
+            "type": "array"
+          },
+          {
             "id": "total",
             "label": "total",
             "type": "number"
@@ -5792,14 +6742,14 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "import time\nn = len(stored or [])\ndone = int(so_far or 0) + n\nleft = int(count or 0) - len(items or [])\nreturn {\"done\": done, \"total\": max(int(total or 0), done + max(left, 0)),\n        \"updates\": {\"sum_done\": done, \"sum_inflight\": False,\n        \"sum_continue\": n > 0 and left > 0 and time.time() < float(deadline or 0)}}\n"
+        "codeBody": "import time\ngot = set(stored or [])\nwhy = {x.get(\"entity_id\"): x.get(\"reason\") for x in (left_out or []) if isinstance(x, dict)}\nnew = []\nfor p in items or []:\n    e = p.get(\"entity_id\") if isinstance(p, dict) else None\n    if e and e not in got and e not in [s[\"id\"] for s in new]:\n        new.append({\"id\": e, \"reason\": why.get(e) or 'The model gave no summary for these entries, even when asked a second time.'})\nn = len(got)\ndone = int(so_far or 0) + n\nleft = max(int(count or 0) - len(items or []), 0)\nin_time = time.time() < float(deadline or 0)\nreturn {\"done\": done, \"skipped\": new, \"total\": max(int(total or 0), done + left),\n        \"updates\": {\"sum_done\": done, \"sum_inflight\": False, \"sum_skipped\": int(skipped or 0) + len(new),\n        \"sum_left\": left, \"sum_budget\": left > 0 and not in_time,\n        \"sum_continue\": (n + len(new)) > 0 and left > 0 and in_time}}\n"
       }
     },
     {
       "id": "p_sum_args",
       "type": "code",
       "position": {
-        "x": 29280.0,
+        "x": 30720.0,
         "y": 0.0
       },
       "data": {
@@ -5827,6 +6777,16 @@
             "type": "number"
           },
           {
+            "id": "skipped",
+            "label": "skipped",
+            "type": "array"
+          },
+          {
+            "id": "reason",
+            "label": "reason",
+            "type": "string"
+          },
+          {
             "id": "permissions",
             "label": "permissions",
             "type": "string"
@@ -5846,17 +6806,18 @@
         ],
         "pinDefaults": {
           "permissions": "sandbox",
-          "stage": "summaries"
+          "stage": "summaries",
+          "reason": "The model gave no summary for these entries, even when asked a second time."
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif stage is not None and stage != \"\":\n    arguments[\"stage\"] = stage\nif done is not None and done != \"\":\n    arguments[\"done\"] = done\nif total is not None and total != \"\":\n    arguments[\"total\"] = total\nreturn {\"tool_calls\": [{\"name\": \"note_consolidation_progress\", \"call_id\": \"p_sum\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif stage is not None and stage != \"\":\n    arguments[\"stage\"] = stage\nif done is not None and done != \"\":\n    arguments[\"done\"] = done\nif total is not None and total != \"\":\n    arguments[\"total\"] = total\nif skipped is not None and skipped != \"\":\n    arguments[\"skipped\"] = skipped\nif reason is not None and reason != \"\":\n    arguments[\"reason\"] = reason\nreturn {\"tool_calls\": [{\"name\": \"note_consolidation_progress\", \"call_id\": \"p_sum\", \"arguments\": arguments}]}\n"
       }
     },
     {
       "id": "p_sum",
       "type": "tool_calls",
       "position": {
-        "x": 29760.0,
+        "x": 31200.0,
         "y": 0.0
       },
       "data": {
@@ -5912,7 +6873,7 @@
       "id": "p_sum_out",
       "type": "code",
       "position": {
-        "x": 30240.0,
+        "x": 31680.0,
         "y": 0.0
       },
       "data": {
@@ -5973,7 +6934,7 @@
       "id": "p_sum_failed",
       "type": "if",
       "position": {
-        "x": 30720.0,
+        "x": 32160.0,
         "y": 0.0
       },
       "data": {
@@ -6009,7 +6970,7 @@
       "id": "p_sum_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 31200.0,
+        "x": 32640.0,
         "y": 0.0
       },
       "data": {
@@ -6054,7 +7015,7 @@
       "id": "sum_vars",
       "type": "set_vars",
       "position": {
-        "x": 31200.0,
+        "x": 32640.0,
         "y": 320.0
       },
       "data": {
@@ -6193,7 +7154,7 @@
       "type": "set_var",
       "position": {
         "x": 22560.0,
-        "y": 640.0
+        "y": 1064.0
       },
       "data": {
         "nodeType": "set_var",
@@ -6238,7 +7199,7 @@
       "type": "code",
       "position": {
         "x": 22560.0,
-        "y": 960.0
+        "y": 1384.0
       },
       "data": {
         "nodeType": "code",
@@ -6297,7 +7258,7 @@
       "type": "tool_calls",
       "position": {
         "x": 23040.0,
-        "y": 640.0
+        "y": 1280.0
       },
       "data": {
         "nodeType": "tool_calls",
@@ -6353,7 +7314,7 @@
       "type": "code",
       "position": {
         "x": 23520.0,
-        "y": 1280.0
+        "y": 960.0
       },
       "data": {
         "nodeType": "code",
@@ -6414,7 +7375,7 @@
       "type": "if",
       "position": {
         "x": 24000.0,
-        "y": 960.0
+        "y": 640.0
       },
       "data": {
         "nodeType": "if",
@@ -6536,7 +7497,7 @@
       "type": "tool_calls",
       "position": {
         "x": 24960.0,
-        "y": 960.0
+        "y": 1920.0
       },
       "data": {
         "nodeType": "tool_calls",
@@ -6592,7 +7553,7 @@
       "type": "code",
       "position": {
         "x": 25440.0,
-        "y": 960.0
+        "y": 1384.0
       },
       "data": {
         "nodeType": "code",
@@ -6653,7 +7614,7 @@
       "type": "if",
       "position": {
         "x": 25920.0,
-        "y": 1064.0
+        "y": 1090.0
       },
       "data": {
         "nodeType": "if",
@@ -6689,7 +7650,7 @@
       "type": "set_var",
       "position": {
         "x": 26400.0,
-        "y": 1280.0
+        "y": 960.0
       },
       "data": {
         "nodeType": "set_var",
@@ -6734,7 +7695,7 @@
       "type": "code",
       "position": {
         "x": 26400.0,
-        "y": 1600.0
+        "y": 1280.0
       },
       "data": {
         "nodeType": "code",
@@ -6791,7 +7752,7 @@
       "type": "tool_calls",
       "position": {
         "x": 26880.0,
-        "y": 320.0
+        "y": 640.0
       },
       "data": {
         "nodeType": "tool_calls",
@@ -6847,7 +7808,7 @@
       "type": "code",
       "position": {
         "x": 27360.0,
-        "y": 320.0
+        "y": 1064.0
       },
       "data": {
         "nodeType": "code",
@@ -6908,7 +7869,7 @@
       "type": "if",
       "position": {
         "x": 27840.0,
-        "y": 320.0
+        "y": 1600.0
       },
       "data": {
         "nodeType": "if",
@@ -6944,7 +7905,7 @@
       "type": "set_var",
       "position": {
         "x": 28320.0,
-        "y": 960.0
+        "y": 640.0
       },
       "data": {
         "nodeType": "set_var",
@@ -6989,7 +7950,7 @@
       "type": "code",
       "position": {
         "x": 28320.0,
-        "y": 1280.0
+        "y": 960.0
       },
       "data": {
         "nodeType": "code",
@@ -7048,7 +8009,7 @@
       "type": "tool_calls",
       "position": {
         "x": 28800.0,
-        "y": 692.0
+        "y": 320.0
       },
       "data": {
         "nodeType": "tool_calls",
@@ -7165,7 +8126,7 @@
       "type": "if",
       "position": {
         "x": 29760.0,
-        "y": 320.0
+        "y": 1280.0
       },
       "data": {
         "nodeType": "if",
@@ -7201,7 +8162,7 @@
       "type": "set_var",
       "position": {
         "x": 30240.0,
-        "y": 320.0
+        "y": 744.0
       },
       "data": {
         "nodeType": "set_var",
@@ -7246,7 +8207,7 @@
       "type": "subflow",
       "position": {
         "x": 30240.0,
-        "y": 640.0
+        "y": 1064.0
       },
       "data": {
         "nodeType": "subflow",
@@ -7311,7 +8272,7 @@
       "type": "code",
       "position": {
         "x": 30720.0,
-        "y": 320.0
+        "y": 346.0
       },
       "data": {
         "nodeType": "code",
@@ -7372,7 +8333,7 @@
       "type": "if",
       "position": {
         "x": 31200.0,
-        "y": 640.0
+        "y": 320.0
       },
       "data": {
         "nodeType": "if",
@@ -7408,7 +8369,7 @@
       "type": "set_var",
       "position": {
         "x": 31680.0,
-        "y": 0.0
+        "y": 320.0
       },
       "data": {
         "nodeType": "set_var",
@@ -7453,7 +8414,7 @@
       "type": "code",
       "position": {
         "x": 31680.0,
-        "y": 320.0
+        "y": 640.0
       },
       "data": {
         "nodeType": "code",
@@ -7512,7 +8473,7 @@
       "type": "tool_calls",
       "position": {
         "x": 32160.0,
-        "y": 0.0
+        "y": 320.0
       },
       "data": {
         "nodeType": "tool_calls",
@@ -7568,7 +8529,7 @@
       "type": "code",
       "position": {
         "x": 32640.0,
-        "y": 0.0
+        "y": 640.0
       },
       "data": {
         "nodeType": "code",
@@ -7706,6 +8667,146 @@
       }
     },
     {
+      "id": "end_sum_budget",
+      "type": "get_var",
+      "position": {
+        "x": 32640.0,
+        "y": 960.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get sum_budget",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "sum_budget",
+          "default": false
+        }
+      }
+    },
+    {
+      "id": "end_sum_left",
+      "type": "get_var",
+      "position": {
+        "x": 32640.0,
+        "y": 1280.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get sum_left",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "sum_left",
+          "default": 0
+        }
+      }
+    },
+    {
+      "id": "end_labels_budget",
+      "type": "get_var",
+      "position": {
+        "x": 32640.0,
+        "y": 1600.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get labels_budget",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "labels_budget",
+          "default": false
+        }
+      }
+    },
+    {
+      "id": "end_labels_left",
+      "type": "get_var",
+      "position": {
+        "x": 32640.0,
+        "y": 1920.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get labels_left",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "labels_left",
+          "default": 0
+        }
+      }
+    },
+    {
       "id": "results",
       "type": "code",
       "position": {
@@ -7727,6 +8828,26 @@
             "type": "number"
           },
           {
+            "id": "sum_budget",
+            "label": "sum_budget",
+            "type": "boolean"
+          },
+          {
+            "id": "sum_left",
+            "label": "sum_left",
+            "type": "number"
+          },
+          {
+            "id": "labels_budget",
+            "label": "labels_budget",
+            "type": "boolean"
+          },
+          {
+            "id": "labels_left",
+            "label": "labels_left",
+            "type": "number"
+          },
+          {
             "id": "permissions",
             "label": "permissions",
             "type": "string"
@@ -7743,7 +8864,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "return {\"results\": {\"communities\": int(communities or 0), \"insights\": int(insights or 0)}}\n"
+        "codeBody": "sb, lb = bool(sum_budget), bool(labels_budget)\nreturn {\"results\": {\"communities\": int(communities or 0), \"insights\": int(insights or 0),\n        \"budget_spent\": sb or lb, \"not_reached\": {\"summaries\": int(sum_left or 0) if sb else 0,\n                                                \"labels\": int(labels_left or 0) if lb else 0}}}\n"
       }
     },
     {
@@ -7913,6 +9034,16 @@
             "type": "number"
           },
           {
+            "id": "status",
+            "label": "status",
+            "type": "string"
+          },
+          {
+            "id": "notice",
+            "label": "notice",
+            "type": "string"
+          },
+          {
             "id": "tool_output",
             "label": "tool_output",
             "type": "object"
@@ -8053,6 +9184,16 @@
             "type": "number"
           },
           {
+            "id": "status",
+            "label": "status",
+            "type": "string"
+          },
+          {
+            "id": "notice",
+            "label": "notice",
+            "type": "string"
+          },
+          {
             "id": "permissions",
             "label": "permissions",
             "type": "string"
@@ -8074,7 +9215,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "def n(x, one, many):\n    x = int(x or 0)\n    return str(x) + \" \" + (one if x == 1 else many)\nmsg = (\"Consolidated: \" + n(merges, \"merge\", \"merges\") + \", \" + n(labelled, \"group named\", \"groups named\")\n       + \", \" + n(summaries, \"summary refreshed\", \"summaries refreshed\") + \", \"\n       + n(insights, \"insight\", \"insights\") + \".\")\nreturn {\"message\": msg}\n"
+        "codeBody": "def n(x, one, many):\n    x = int(x or 0)\n    return str(x) + \" \" + (one if x == 1 else many)\nhead = \"Consolidated with gaps: \" if status == \"completed_with_gaps\" else \"Consolidated: \"\nmsg = (head + n(merges, \"merge\", \"merges\") + \", \" + n(labelled, \"group named\", \"groups named\")\n       + \", \" + n(summaries, \"summary refreshed\", \"summaries refreshed\") + \", \"\n       + n(insights, \"insight\", \"insights\") + \".\")\nif notice:\n    msg += \" \" + str(notice)[0].upper() + str(notice)[1:]\nreturn {\"message\": msg}\n"
       }
     },
     {
@@ -8848,6 +9989,13 @@
       "targetHandle": "exec-in"
     },
     {
+      "id": "e-labels_skip-value-communities_pending_args-exclude",
+      "source": "labels_skip",
+      "sourceHandle": "value",
+      "target": "communities_pending_args",
+      "targetHandle": "exclude"
+    },
+    {
       "id": "e-labels_begin-exec-out-communities_pending_args-exec-in",
       "source": "labels_begin",
       "sourceHandle": "exec-out",
@@ -9030,15 +10178,134 @@
       "targetHandle": "exec-in"
     },
     {
-      "id": "e-communities_labels-items-communities_label_args-items",
+      "id": "e-communities_labels-again-labels_again-condition",
+      "source": "communities_labels",
+      "sourceHandle": "again",
+      "target": "labels_again",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-communities_labels-exec-out-labels_again-exec-in",
+      "source": "communities_labels",
+      "sourceHandle": "exec-out",
+      "target": "labels_again",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-communities_labels-items-labels_first_values-items",
       "source": "communities_labels",
       "sourceHandle": "items",
+      "target": "labels_first_values",
+      "targetHandle": "items"
+    },
+    {
+      "id": "e-labels_again-false-labels_first_values-exec-in",
+      "source": "labels_again",
+      "sourceHandle": "false",
+      "target": "labels_first_values",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-labels_first_values-updates-labels_first_vars-updates",
+      "source": "labels_first_values",
+      "sourceHandle": "updates",
+      "target": "labels_first_vars",
+      "targetHandle": "updates"
+    },
+    {
+      "id": "e-labels_first_values-exec-out-labels_first_vars-exec-in",
+      "source": "labels_first_values",
+      "sourceHandle": "exec-out",
+      "target": "labels_first_vars",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-communities_prompt-result-communities_names_again-prompt",
+      "source": "communities_prompt",
+      "sourceHandle": "result",
+      "target": "communities_names_again",
+      "targetHandle": "prompt"
+    },
+    {
+      "id": "e-start-provider-communities_names_again-provider",
+      "source": "start",
+      "sourceHandle": "provider",
+      "target": "communities_names_again",
+      "targetHandle": "provider"
+    },
+    {
+      "id": "e-start-model-communities_names_again-model",
+      "source": "start",
+      "sourceHandle": "model",
+      "target": "communities_names_again",
+      "targetHandle": "model"
+    },
+    {
+      "id": "e-thinking-value-communities_names_again-thinking",
+      "source": "thinking",
+      "sourceHandle": "value",
+      "target": "communities_names_again",
+      "targetHandle": "thinking"
+    },
+    {
+      "id": "e-labels_again-true-communities_names_again-exec-in",
+      "source": "labels_again",
+      "sourceHandle": "true",
+      "target": "communities_names_again",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-communities_names_again-data-labels_retry-data",
+      "source": "communities_names_again",
+      "sourceHandle": "data",
+      "target": "labels_retry",
+      "targetHandle": "data"
+    },
+    {
+      "id": "e-communities_pending_out-items-labels_retry-items",
+      "source": "communities_pending_out",
+      "sourceHandle": "items",
+      "target": "labels_retry",
+      "targetHandle": "items"
+    },
+    {
+      "id": "e-communities_labels-items-labels_retry-first",
+      "source": "communities_labels",
+      "sourceHandle": "items",
+      "target": "labels_retry",
+      "targetHandle": "first"
+    },
+    {
+      "id": "e-communities_names_again-exec-out-labels_retry-exec-in",
+      "source": "communities_names_again",
+      "sourceHandle": "exec-out",
+      "target": "labels_retry",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-labels_retry-updates-labels_retry_vars-updates",
+      "source": "labels_retry",
+      "sourceHandle": "updates",
+      "target": "labels_retry_vars",
+      "targetHandle": "updates"
+    },
+    {
+      "id": "e-labels_retry-exec-out-labels_retry_vars-exec-in",
+      "source": "labels_retry",
+      "sourceHandle": "exec-out",
+      "target": "labels_retry_vars",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-labels_answer-value-communities_label_args-items",
+      "source": "labels_answer",
+      "sourceHandle": "value",
       "target": "communities_label_args",
       "targetHandle": "items"
     },
     {
-      "id": "e-communities_labels-exec-out-communities_label_args-exec-in",
-      "source": "communities_labels",
+      "id": "e-labels_first_vars-exec-out-communities_label_args-exec-in",
+      "source": "labels_first_vars",
       "sourceHandle": "exec-out",
       "target": "communities_label_args",
       "targetHandle": "exec-in"
@@ -9107,11 +10374,46 @@
       "targetHandle": "exec-in"
     },
     {
+      "id": "e-labels_retry_vars-exec-out-communities_label_args-exec-in",
+      "source": "labels_retry_vars",
+      "sourceHandle": "exec-out",
+      "target": "communities_label_args",
+      "targetHandle": "exec-in"
+    },
+    {
       "id": "e-communities_label_out-labelled-labels_count-labelled",
       "source": "communities_label_out",
       "sourceHandle": "labelled",
       "target": "labels_count",
       "targetHandle": "labelled"
+    },
+    {
+      "id": "e-communities_label_out-warnings-labels_count-warnings",
+      "source": "communities_label_out",
+      "sourceHandle": "warnings",
+      "target": "labels_count",
+      "targetHandle": "warnings"
+    },
+    {
+      "id": "e-communities_pending_out-items-labels_count-items",
+      "source": "communities_pending_out",
+      "sourceHandle": "items",
+      "target": "labels_count",
+      "targetHandle": "items"
+    },
+    {
+      "id": "e-labels_answer-value-labels_count-answer",
+      "source": "labels_answer",
+      "sourceHandle": "value",
+      "target": "labels_count",
+      "targetHandle": "answer"
+    },
+    {
+      "id": "e-labels_skipped_so_far-value-labels_count-skipped",
+      "source": "labels_skipped_so_far",
+      "sourceHandle": "value",
+      "target": "labels_count",
+      "targetHandle": "skipped"
     },
     {
       "id": "e-labels_so_far-value-labels_count-so_far",
@@ -9154,6 +10456,13 @@
       "sourceHandle": "total",
       "target": "p_labels_args",
       "targetHandle": "total"
+    },
+    {
+      "id": "e-labels_count-skipped-p_labels_args-skipped",
+      "source": "labels_count",
+      "sourceHandle": "skipped",
+      "target": "p_labels_args",
+      "targetHandle": "skipped"
     },
     {
       "id": "e-labels_count-exec-out-p_labels_args-exec-in",
@@ -9639,15 +10948,134 @@
       "targetHandle": "exec-in"
     },
     {
-      "id": "e-summary_items-items-set_summaries_args-items",
+      "id": "e-summary_items-again-sum_again-condition",
+      "source": "summary_items",
+      "sourceHandle": "again",
+      "target": "sum_again",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-summary_items-exec-out-sum_again-exec-in",
+      "source": "summary_items",
+      "sourceHandle": "exec-out",
+      "target": "sum_again",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-summary_items-items-sum_first_values-items",
       "source": "summary_items",
       "sourceHandle": "items",
+      "target": "sum_first_values",
+      "targetHandle": "items"
+    },
+    {
+      "id": "e-sum_again-false-sum_first_values-exec-in",
+      "source": "sum_again",
+      "sourceHandle": "false",
+      "target": "sum_first_values",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-sum_first_values-updates-sum_first_vars-updates",
+      "source": "sum_first_values",
+      "sourceHandle": "updates",
+      "target": "sum_first_vars",
+      "targetHandle": "updates"
+    },
+    {
+      "id": "e-sum_first_values-exec-out-sum_first_vars-exec-in",
+      "source": "sum_first_values",
+      "sourceHandle": "exec-out",
+      "target": "sum_first_vars",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-summary_prompt-result-summaries_again-prompt",
+      "source": "summary_prompt",
+      "sourceHandle": "result",
+      "target": "summaries_again",
+      "targetHandle": "prompt"
+    },
+    {
+      "id": "e-start-provider-summaries_again-provider",
+      "source": "start",
+      "sourceHandle": "provider",
+      "target": "summaries_again",
+      "targetHandle": "provider"
+    },
+    {
+      "id": "e-start-model-summaries_again-model",
+      "source": "start",
+      "sourceHandle": "model",
+      "target": "summaries_again",
+      "targetHandle": "model"
+    },
+    {
+      "id": "e-thinking-value-summaries_again-thinking",
+      "source": "thinking",
+      "sourceHandle": "value",
+      "target": "summaries_again",
+      "targetHandle": "thinking"
+    },
+    {
+      "id": "e-sum_again-true-summaries_again-exec-in",
+      "source": "sum_again",
+      "sourceHandle": "true",
+      "target": "summaries_again",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-summaries_again-data-sum_retry-data",
+      "source": "summaries_again",
+      "sourceHandle": "data",
+      "target": "sum_retry",
+      "targetHandle": "data"
+    },
+    {
+      "id": "e-stale_out-items-sum_retry-items",
+      "source": "stale_out",
+      "sourceHandle": "items",
+      "target": "sum_retry",
+      "targetHandle": "items"
+    },
+    {
+      "id": "e-summary_items-items-sum_retry-first",
+      "source": "summary_items",
+      "sourceHandle": "items",
+      "target": "sum_retry",
+      "targetHandle": "first"
+    },
+    {
+      "id": "e-summaries_again-exec-out-sum_retry-exec-in",
+      "source": "summaries_again",
+      "sourceHandle": "exec-out",
+      "target": "sum_retry",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-sum_retry-updates-sum_retry_vars-updates",
+      "source": "sum_retry",
+      "sourceHandle": "updates",
+      "target": "sum_retry_vars",
+      "targetHandle": "updates"
+    },
+    {
+      "id": "e-sum_retry-exec-out-sum_retry_vars-exec-in",
+      "source": "sum_retry",
+      "sourceHandle": "exec-out",
+      "target": "sum_retry_vars",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-sum_answer-value-set_summaries_args-items",
+      "source": "sum_answer",
+      "sourceHandle": "value",
       "target": "set_summaries_args",
       "targetHandle": "items"
     },
     {
-      "id": "e-summary_items-exec-out-set_summaries_args-exec-in",
-      "source": "summary_items",
+      "id": "e-sum_first_vars-exec-out-set_summaries_args-exec-in",
+      "source": "sum_first_vars",
       "sourceHandle": "exec-out",
       "target": "set_summaries_args",
       "targetHandle": "exec-in"
@@ -9716,6 +11144,13 @@
       "targetHandle": "exec-in"
     },
     {
+      "id": "e-sum_retry_vars-exec-out-set_summaries_args-exec-in",
+      "source": "sum_retry_vars",
+      "sourceHandle": "exec-out",
+      "target": "set_summaries_args",
+      "targetHandle": "exec-in"
+    },
+    {
       "id": "e-set_summaries_out-stored-sum_count-stored",
       "source": "set_summaries_out",
       "sourceHandle": "stored",
@@ -9723,11 +11158,25 @@
       "targetHandle": "stored"
     },
     {
+      "id": "e-set_summaries_out-left_out-sum_count-left_out",
+      "source": "set_summaries_out",
+      "sourceHandle": "left_out",
+      "target": "sum_count",
+      "targetHandle": "left_out"
+    },
+    {
       "id": "e-sum_so_far-value-sum_count-so_far",
       "source": "sum_so_far",
       "sourceHandle": "value",
       "target": "sum_count",
       "targetHandle": "so_far"
+    },
+    {
+      "id": "e-sum_skipped_so_far-value-sum_count-skipped",
+      "source": "sum_skipped_so_far",
+      "sourceHandle": "value",
+      "target": "sum_count",
+      "targetHandle": "skipped"
     },
     {
       "id": "e-stale_out-count-sum_count-count",
@@ -9777,6 +11226,13 @@
       "sourceHandle": "total",
       "target": "p_sum_args",
       "targetHandle": "total"
+    },
+    {
+      "id": "e-sum_count-skipped-p_sum_args-skipped",
+      "source": "sum_count",
+      "sourceHandle": "skipped",
+      "target": "p_sum_args",
+      "targetHandle": "skipped"
     },
     {
       "id": "e-sum_count-exec-out-p_sum_args-exec-in",
@@ -10360,6 +11816,34 @@
       "targetHandle": "insights"
     },
     {
+      "id": "e-end_sum_budget-value-results-sum_budget",
+      "source": "end_sum_budget",
+      "sourceHandle": "value",
+      "target": "results",
+      "targetHandle": "sum_budget"
+    },
+    {
+      "id": "e-end_sum_left-value-results-sum_left",
+      "source": "end_sum_left",
+      "sourceHandle": "value",
+      "target": "results",
+      "targetHandle": "sum_left"
+    },
+    {
+      "id": "e-end_labels_budget-value-results-labels_budget",
+      "source": "end_labels_budget",
+      "sourceHandle": "value",
+      "target": "results",
+      "targetHandle": "labels_budget"
+    },
+    {
+      "id": "e-end_labels_left-value-results-labels_left",
+      "source": "end_labels_left",
+      "sourceHandle": "value",
+      "target": "results",
+      "targetHandle": "labels_left"
+    },
+    {
       "id": "e-results-results-finish_args-results",
       "source": "results",
       "sourceHandle": "results",
@@ -10463,6 +11947,20 @@
       "sourceHandle": "insights",
       "target": "report",
       "targetHandle": "insights"
+    },
+    {
+      "id": "e-finish_out-status-report-status",
+      "source": "finish_out",
+      "sourceHandle": "status",
+      "target": "report",
+      "targetHandle": "status"
+    },
+    {
+      "id": "e-finish_out-notice-report-notice",
+      "source": "finish_out",
+      "sourceHandle": "notice",
+      "target": "report",
+      "targetHandle": "notice"
     },
     {
       "id": "e-finish_failed-false-report-exec-in",

@@ -23,11 +23,21 @@ Which summaries are stale is decided structurally, never from their wording (ADR
 A refreshed summary is an ``entity.summary`` op in a revision of its own (action ``entity.summary``, ``run_id`` =
 the consolidation id, source client ``consolidation``), so the summary history keeps every version and a rebuild
 replays it.
+
+Nothing stops or is left out silently (ADR 0007, root ADR-0026). An entry or a group the model does not answer
+for, even when asked a second time, is *skipped for this run*: :func:`progress` records it on its stage
+(``stages_json[stage]``: ``skipped``, ``reason``, ``reasons``, ``skipped_ids``) and logs a warning on the
+``abstractnote.consolidation`` logger. :func:`end` closes a run that left something out (a skip still pending at
+the close, or what the time budget did not reach, ``results.not_reached``) as ``completed_with_gaps`` with
+``left_out = {summaries, labels, reasons}``, ``budget_spent`` and a one-sentence ``notice`` for end users; the
+next consolidation tries those again. A summary longer than :data:`SUMMARY_MAX_CHARS` is kept whole with an
+``over_length`` warning.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import math
 import time
 import uuid
@@ -38,15 +48,20 @@ from .. import ids
 
 STAGES = ("normalize", "communities", "labels", "summaries", "then_now", "reflect")
 DONE = "done"
-STATUSES = ("completed", "failed")
+STATUSES = ("completed", "completed_with_gaps", "failed")
+#: Closing statuses of a run that finished its stages (``end`` picks the one that tells the truth).
+FINISHED = ("completed", "completed_with_gaps")
 
 SUMMARY_BATCH = 8            # entries per summary model call
 LABEL_BATCH = 5              # communities per labelling call (recall.communities.PENDING_LIMIT)
 PACKET_CLAIMS = 8            # statements shown per entry
 PACKET_NOTES = 3             # note excerpts shown per entry
-SUMMARY_MAX_CHARS = 600      # a longer answer is left out (two sentences never need more)
+SUMMARY_MAX_CHARS = 600      # a longer answer is kept whole with an over_length warning (the prompt asks for two sentences)
 LAST_RUNS = 20               # finished rows kept per notebook (older ones are deleted)
 INTERRUPTED = "It stopped before finishing."
+BUDGET_REASON = "The time set aside for the consolidation ran out before it got to them."
+
+_log = logging.getLogger("abstractnote.consolidation")
 
 #: The revision builder's warning for a created entry without a summary (abstractnote.process.revise).
 PLACEHOLDER_WARNING = "No summary was written for {name}; it was described from this note."
@@ -147,20 +162,44 @@ def begin(nb: Any) -> Dict[str, Any]:
 
 
 def _previous_rate(nb: Any, stage: str, cid: str) -> Optional[float]:
-    for r in nb.store.q("SELECT stages_json FROM consolidation_runs WHERE consolidation_id!=? AND status='completed'"
-                        " ORDER BY started_ts DESC LIMIT 5", (cid,)):
+    for r in nb.store.q("SELECT stages_json FROM consolidation_runs WHERE consolidation_id!=? AND status IN"
+                        " ('completed', 'completed_with_gaps') ORDER BY started_ts DESC LIMIT 5", (cid,)):
         s = (json.loads(r[0] or "{}") or {}).get(stage) or {}
         if isinstance(s.get("seconds_per_item"), (int, float)):
             return float(s["seconds_per_item"])
     return None
 
 
-def progress(nb: Any, stage: str, done: Any, total: Any, note: Optional[str] = None) -> Dict[str, Any]:
+def _skips(skipped: Any, reason: Optional[str]) -> List[Dict[str, str]]:
+    """``skipped`` = ``[id]`` or ``[{id, reason}]`` -> ``[{id, reason}]`` (``reason`` is the default sentence)."""
+    if skipped in (None, ""):
+        return []
+    if not isinstance(skipped, (list, tuple)):
+        raise ValueError("skipped must be a list of ids or of {id, reason}.")
+    default = " ".join(str(reason or "").split()) or "No reason was given."
+    out: List[Dict[str, str]] = []
+    for x in skipped:
+        if isinstance(x, dict):
+            xid, why = str(x.get("id") or "").strip(), " ".join(str(x.get("reason") or "").split()) or default
+        else:
+            xid, why = str(x or "").strip(), default
+        if not xid:
+            raise ValueError("A skipped item has no id.")
+        out.append({"id": xid, "reason": why})
+    return out
+
+
+def progress(nb: Any, stage: str, done: Any, total: Any, note: Optional[str] = None, skipped: Any = None,
+             reason: Optional[str] = None) -> Dict[str, Any]:
     """Record the current stage's progress on the open consolidation. The first call of a stage starts its clock;
-    ``seconds_per_item`` = the stage's elapsed time / ``done`` once ``done`` > 0. Returns the row's progress
-    ``{consolidation_id, stage, stage_done, stage_total, seconds_per_item, eta_s, elapsed_s}``."""
+    ``seconds_per_item`` = the stage's elapsed time / ``done`` once ``done`` > 0. ``skipped`` (``[id]`` or
+    ``[{id, reason}]``, ``reason`` the default sentence) are the items this stage leaves out for this run: they are
+    added to the stage's ``skipped_ids`` (``skipped`` = their number, ``reason`` the latest sentence, ``reasons`` the
+    distinct ones) and logged as a warning. Returns the row's progress ``{consolidation_id, stage, stage_done,
+    stage_total, seconds_per_item, eta_s, elapsed_s, skipped}``."""
     if stage not in STAGES:
         raise ValueError(f"The stage must be one of {', '.join(STAGES)}.")
+    new_skips = _skips(skipped, reason)
     try:
         d, t = int(done or 0), int(total or 0)
     except (TypeError, ValueError):
@@ -177,15 +216,31 @@ def progress(nb: Any, stage: str, done: Any, total: Any, note: Optional[str] = N
     s.update({"done": d, "total": t, "updated_ts": ts})
     if d > 0:
         s["seconds_per_item"] = round((ts - float(s["started_ts"])) / d, 3)
+    if new_skips:
+        have = list(s.get("skipped_ids") or [])
+        known = {x["id"] for x in have}
+        added = [x for x in new_skips if x["id"] not in known and not known.add(x["id"])]
+        have.extend(added)
+        reasons = list(s.get("reasons") or [])
+        for x in added:
+            if x["reason"] not in reasons:
+                reasons.append(x["reason"])
+        s.update({"skipped_ids": have, "skipped": len(have), "reasons": reasons})
+        if added:
+            s["reason"] = added[-1]["reason"]
+            for why in dict.fromkeys(x["reason"] for x in added):
+                _log.warning("consolidation %s, stage %s: skipped for this run (%d): %s. Reason: %s",
+                             row["consolidation_id"], stage, len(added),
+                             ", ".join(x["id"] for x in added if x["reason"] == why), why)
     stages[stage] = s
     cols: Dict[str, Any] = {"stage": stage, "stage_done": d, "stage_total": t, "updated_ts": ts,
                             "stages_json": json.dumps(stages)}
     if note is not None:
-        cols["note"] = str(note)[:500] or None
+        cols["note"] = " ".join(str(note).split()) or None
     _update(nb, row["consolidation_id"], **cols)
     return {"consolidation_id": row["consolidation_id"], "stage": stage, "stage_done": d, "stage_total": t,
             "seconds_per_item": s.get("seconds_per_item"), "eta_s": _eta(nb, row["consolidation_id"], stage, s),
-            "elapsed_s": int(ts - float(row["started_ts"]))}
+            "elapsed_s": int(ts - float(row["started_ts"])), "skipped": int(s.get("skipped") or 0)}
 
 
 def _eta(nb: Any, cid: str, stage: str, s: Dict[str, Any]) -> Optional[int]:
@@ -198,12 +253,61 @@ def _eta(nb: Any, cid: str, stage: str, s: Dict[str, Any]) -> Optional[int]:
     return None if rate is None else int(math.ceil(left * float(rate)))
 
 
+def _count(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    return max(0, int(value))
+
+
+def _left_out(nb: Any, stages: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any]:
+    """What the run leaves for the next one, checked at the close: the skipped entries still stale and groups still
+    waiting for a name (the reflect stage may have named a skipped group), plus what the time budget did not reach
+    (``extra.not_reached``), never more than :func:`pending` shows."""
+    from .communities import pending_ids
+
+    reached = extra.get("not_reached") if isinstance(extra.get("not_reached"), dict) else {}
+    budget = bool(extra.get("budget_spent"))
+    stale = {x["entity_id"] for x in _stale(nb)}
+    waiting = set(pending_ids(nb))
+    def still_stale(eid: str) -> bool:
+        return eid in stale or (nb.store.entity_row(eid) is not None and nb.store.canonical(eid) in stale)
+
+    out: Dict[str, Any] = {"summaries": 0, "labels": 0, "reasons": []}
+    for kind, now_pending, still in (("summaries", stale, still_stale), ("labels", waiting, waiting.__contains__)):
+        skipped = [x for x in (stages.get(kind) or {}).get("skipped_ids") or [] if isinstance(x, dict)]
+        left = [x for x in skipped if still(x["id"])]
+        unreached = _count(reached.get(kind)) if budget else 0
+        out[kind] = min(len(left) + unreached, len(now_pending))
+        for why in dict.fromkeys(x["reason"] for x in left):
+            if why not in out["reasons"]:
+                out["reasons"].append(why)
+        if unreached and BUDGET_REASON not in out["reasons"]:
+            out["reasons"].append(BUDGET_REASON)
+    return out
+
+
+def notice(left_out: Optional[Dict[str, Any]]) -> Optional[str]:
+    """The end-user sentence of a run that left something out ("12 summaries could not be refreshed this time; they
+    will be tried again next time."), None when nothing was."""
+    lo = left_out if isinstance(left_out, dict) else {}
+    s, g = _count(lo.get("summaries")), _count(lo.get("labels"))
+    parts = ([f"{s} {'summary' if s == 1 else 'summaries'}"] if s else []) + \
+        ([f"{g} theme {'name' if g == 1 else 'names'}"] if g else [])
+    if not parts:
+        return None
+    return (f"{' and '.join(parts)} could not be refreshed this time; {'it' if s + g == 1 else 'they'} will be tried"
+            " again next time.")
+
+
 def end(nb: Any, status: str, results: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Close the open consolidation: ``status`` completed or failed; ``results`` adds to the counts read from the
-    stages (``merges`` = normalize done, ``labelled`` = labels done, ``summaries_refreshed`` = summaries done).
-    A failed run's ``results.error`` is its sentence. Returns the finished row's ``last`` view."""
+    """Close the open consolidation: ``status`` completed (or completed_with_gaps) or failed; ``results`` adds to the
+    counts read from the stages (``merges`` = normalize done, ``labelled`` = labels done, ``summaries_refreshed`` =
+    summaries done). A failed run's ``results.error`` is its sentence. A finished run also reports ``left_out =
+    {summaries, labels, reasons}`` (:func:`_left_out`; ``results.budget_spent`` and ``results.not_reached:
+    {summaries, labels}`` say what the time budget stopped) and is closed as ``completed_with_gaps`` when anything
+    was left out, ``completed`` otherwise, whatever the caller asked. Returns the finished row's ``last`` view."""
     if status not in STATUSES:
-        raise ValueError("The status must be completed or failed.")
+        raise ValueError("The status must be completed, completed_with_gaps or failed.")
     row = _require_open(nb)
     extra = dict(results or {}) if isinstance(results, dict) else {}
     stages = _stages(row)
@@ -219,10 +323,19 @@ def end(nb: Any, status: str, results: Optional[Dict[str, Any]] = None) -> Dict[
     error = str(extra.get("error") or "").strip() or None if status == "failed" else None
     if status == "failed" and error is None:
         error = "The consolidation could not finish."
+    if status in FINISHED:
+        lo = _left_out(nb, stages, extra)
+        out["left_out"] = lo
+        out["budget_spent"] = bool(extra.get("budget_spent"))
+        status = "completed_with_gaps" if lo["summaries"] or lo["labels"] else "completed"
+        if status == "completed_with_gaps":
+            _log.warning("consolidation %s completed with gaps: %d summaries and %d group names left for the next run"
+                         "%s. Reasons: %s", row["consolidation_id"], lo["summaries"], lo["labels"],
+                         " (the time budget was spent)" if out["budget_spent"] else "", " | ".join(lo["reasons"]))
     ts = _now_ts()
     cols: Dict[str, Any] = {"finished_at": _iso(ts), "updated_ts": ts, "status": status,
                             "results_json": json.dumps(out), "error": error}
-    if status == "completed":
+    if status in FINISHED:
         cols.update({"stage": DONE, "stage_done": 0, "stage_total": 0})
     _update(nb, row["consolidation_id"], **cols)
     return last(nb) or {}
@@ -233,15 +346,20 @@ def end(nb: Any, status: str, results: Optional[Dict[str, Any]] = None) -> Dict[
 
 def _last_view(r: Dict[str, Any]) -> Dict[str, Any]:
     res = json.loads(r.get("results_json") or "{}") or {}
+    lo = res.get("left_out") if isinstance(res.get("left_out"), dict) else None
     return {"consolidation_id": r["consolidation_id"], "started_at": r["started_at"], "finished_at": r["finished_at"],
             "status": r["status"], "error": r.get("error"), "merges": res.get("merges"),
             "communities": res.get("communities"), "labelled": res.get("labelled"),
-            "summaries_refreshed": res.get("summaries_refreshed"), "insights": res.get("insights")}
+            "summaries_refreshed": res.get("summaries_refreshed"), "insights": res.get("insights"),
+            "left_out": lo, "budget_spent": bool(res.get("budget_spent")),
+            "notice": notice(lo) if r["status"] == "completed_with_gaps" else None}
 
 
 def last(nb: Any) -> Optional[Dict[str, Any]]:
     """The latest finished consolidation: ``{consolidation_id, started_at, finished_at, status, error, merges,
-    communities, labelled, summaries_refreshed, insights}`` or None."""
+    communities, labelled, summaries_refreshed, insights, left_out: {summaries, labels, reasons} | null,
+    budget_spent, notice}`` or None (``left_out`` is null for a failed or interrupted run and for rows written
+    before ADR 0007; ``notice`` is the end-user sentence of a ``completed_with_gaps`` run)."""
     r = nb.store.q1("SELECT * FROM consolidation_runs WHERE finished_at IS NOT NULL ORDER BY started_ts DESC LIMIT 1")
     return _last_view(_row_dict(r)) if r is not None else None
 
@@ -396,39 +514,53 @@ def stale_summaries(nb: Any, limit: Any = SUMMARY_BATCH) -> Dict[str, Any]:
 
 def set_summaries(nb: Any, items: Sequence[Dict[str, Any]], *, account: Optional[str] = None) -> Dict[str, Any]:
     """Store ``[{entity_id, summary}]`` as one ``entity.summary`` revision (run_id = the open consolidation, when
-    there is one). An unknown or merged entry, an empty summary or one over :data:`SUMMARY_MAX_CHARS` is left out
-    with a warning. Returns ``{stored: [entity_id], revision_id, warnings}``."""
+    there is one). An unknown or merged entry or an empty summary is left out (``left_out: [{entity_id, reason}]``);
+    a summary over :data:`SUMMARY_MAX_CHARS` is kept whole and named in ``over_length`` (and in the revision's
+    warnings); every warning is also logged on ``abstractnote.consolidation``. Returns ``{stored: [entity_id],
+    revision_id, warnings, left_out, over_length}``."""
     nb.require_embedder()
     if not isinstance(items, (list, tuple)):
         raise ValueError("The summaries must be a list of {entity_id, summary}.")
     warnings: List[str] = []
+    left_out: List[Dict[str, str]] = []
+    over_length: List[str] = []
     ops: List[Dict[str, Any]] = []
     stored: List[str] = []
+
+    def leave(eid: str, why: str) -> None:
+        warnings.append(why)
+        left_out.append({"entity_id": eid, "reason": why})
+
     for it in items:
         if not isinstance(it, dict):
-            warnings.append("A summary that is not an object was left out.")
+            leave("", "A summary that is not an object was left out.")
             continue
         eid = str(it.get("entity_id") or "")
         row = nb.store.entity_row(eid) if eid else None
         if row is None:
-            warnings.append(f"The entry {eid or '(none)'} is not in this notebook; its summary was left out.")
+            leave(eid, f"The entry {eid or '(none)'} is not in this notebook; its summary was left out.")
             continue
         if row["merged_into"]:
-            warnings.append(f"The entry {eid} was merged into another; its summary was left out.")
+            leave(eid, f"The entry {eid} was merged into another; its summary was left out.")
             continue
         text = " ".join(str(it.get("summary") or "").split())
         if not text:
-            warnings.append(f"The summary of {eid} was empty; it was left out.")
-            continue
-        if len(text) > SUMMARY_MAX_CHARS:
-            warnings.append(f"The summary of {eid} was longer than {SUMMARY_MAX_CHARS} characters; it was left out.")
+            leave(eid, f"The summary of {eid} was empty; it was left out.")
             continue
         if eid in stored:
             continue
+        if len(text) > SUMMARY_MAX_CHARS:
+            # kept whole (ADR 0007: never dropped for its length); the prompt asks for two sentences
+            warnings.append(f"over_length: the summary of {eid} has {len(text)} characters (more than"
+                            f" {SUMMARY_MAX_CHARS}); it was kept whole.")
+            over_length.append(eid)
         ops.append({"op": "entity.summary", "payload": {"entity_id": eid, "summary": text}})
         stored.append(eid)
+    for w in warnings:
+        _log.warning("set_summaries: %s", w)
     if not ops:
-        return {"stored": [], "revision_id": None, "warnings": warnings}
+        return {"stored": [], "revision_id": None, "warnings": warnings, "left_out": left_out,
+                "over_length": over_length}
     open_ = open_row(nb)
     cid = open_["consolidation_id"] if open_ else None
     batch = int(nb.store.q1("SELECT COUNT(*) FROM revisions WHERE action='entity.summary' AND run_id IS ?",
@@ -436,14 +568,16 @@ def set_summaries(nb: Any, items: Sequence[Dict[str, Any]], *, account: Optional
     at = ids.utc_now()
     target = f"{cid or 'manual'}|{batch}|{','.join(stored)}"
     rev = {"revision_id": ids.revision_id_for_action("entity.summary", target, at), "note_id": None,
-           "action": "entity.summary", "target": target[:500], "at": at, "run_id": cid, "ops": ops,
+           "action": "entity.summary", "target": target, "at": at, "run_id": cid, "ops": ops,
            "summary": f"Refreshed the summary of {len(stored)} " + ("entry." if len(stored) == 1 else "entries."),
-           "source": {"client": "consolidation", "account": account, "consolidation_id": cid}}
+           "source": {"client": "consolidation", "account": account, "consolidation_id": cid},
+           "warnings": [w for w in warnings if w.startswith("over_length:")]}
     nb.recover_pending()
     res = nb.apply_revision(rev)
     if cid:
         _add_ids(nb, cid, "touched_json", stored)
-    return {"stored": stored, "revision_id": res["revision_id"], "warnings": warnings}
+    return {"stored": stored, "revision_id": res["revision_id"], "warnings": warnings, "left_out": left_out,
+            "over_length": over_length}
 
 
 # --------------------------------------------------------------------------- the other stages

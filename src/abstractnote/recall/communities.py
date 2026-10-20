@@ -377,16 +377,29 @@ def community_ids(nb: Any) -> Dict[str, str]:
     return {r[0]: r[1] for r in nb.store.q("SELECT entity_id, community_id FROM entity_communities")}
 
 
-def pending(nb: Any, limit: int = PENDING_LIMIT) -> Dict[str, Any]:
+def pending_ids(nb: Any) -> List[str]:
+    """Every community that waits for a name (no label, or a stale one), in :func:`pending` order."""
+    return [r[0] for r in nb.store.q("SELECT community_id FROM communities WHERE label IS NULL OR stale_label=1"
+                                     " ORDER BY stale_label DESC, size DESC, community_id")]
+
+
+def pending(nb: Any, limit: int = PENDING_LIMIT, exclude: Optional[Iterable[str]] = None) -> Dict[str, Any]:
     """Communities with a stale label, then those without one, largest first within each (a stale label is named
     again at every reflect however many new groups wait, eval2 D14), with what the model needs to name them:
     ``{count, items: [{index, community_id, size, stale_label, previous_label, previous_summary, top_entities:
-    [{entity_id, name, kind, note_count, summary}], claims: [{claim_id, text}], excerpts: [NoteRef]}]}``."""
+    [{entity_id, name, kind, note_count, summary}], claims: [{claim_id, text}], excerpts: [NoteRef]}], waiting,
+    limit_applied}``. ``exclude``: community ids not to offer (a consolidation's groups skipped for this run, ADR
+    0007). ``waiting`` = every group still waiting outside ``exclude``; ``limit_applied`` = the limit used after the
+    1..20 clamp (ADR 0007: a clamped request is answered, never silent)."""
     from .changes import claim_text
 
-    limit = clamp_limit(limit, PENDING_LIMIT, 20)
-    rows = nb.store.q("SELECT * FROM communities WHERE label IS NULL OR stale_label=1 ORDER BY stale_label DESC, size DESC,"
-                      " community_id LIMIT ?", (limit,))
+    limit_applied = clamp_limit(limit, PENDING_LIMIT, 20)
+    skip = {str(x) for x in exclude or () if x}
+    waiting = [cid for cid in pending_ids(nb) if cid not in skip]
+    chosen = waiting[:limit_applied]  # a selection (largest first), the rest stays waiting: ``waiting`` says how many
+    by_id = {r["community_id"]: r for r in nb.store.q(
+        f"SELECT * FROM communities WHERE community_id IN ({','.join('?' for _ in chosen)})", chosen)} if chosen else {}
+    rows = [by_id[cid] for cid in chosen if cid in by_id]
     canon, _ = _canonical_map(nb)
     active = nb.store.q("SELECT * FROM claims WHERE status='active'") if rows else []
     mentions = nb.store.q("SELECT en.note_id, en.entity_id FROM entity_notes en JOIN notes n ON n.note_id=en.note_id"
@@ -424,13 +437,14 @@ def pending(nb: Any, limit: int = PENDING_LIMIT) -> Dict[str, Any]:
             "claims": [{"claim_id": cr["claim_id"], "text": claim_text(nb, cr)} for cr in claims[:PENDING_CLAIMS]],
             "excerpts": [shapes.note_ref(n) for n in notes[:PENDING_EXCERPTS]],
         })
-    return {"count": len(items), "items": items}
+    return {"count": len(items), "items": items, "waiting": len(waiting), "limit_applied": limit_applied}
 
 
 def label(nb: Any, items: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     """Store the model's names: ``items = [{community_id, label, summary, kind}]`` -> ``{labelled, warnings}``.
-    A label of more than :data:`LABEL_MAX_WORDS` words keeps its first words; an unknown kind becomes ``other``;
-    an unknown community or an empty label is left out; each with a warning."""
+    A label of more than :data:`LABEL_MAX_WORDS` words is kept whole with an ``over_length`` warning (ADR 0007: never
+    cut); an unknown kind becomes ``other``; an unknown community or an empty label is left out; each with a warning
+    (also logged)."""
     nb.require_embedder()
     if not isinstance(items, (list, tuple)):
         raise ValueError("The labels must be a list of {community_id, label, summary, kind}.")
@@ -451,8 +465,8 @@ def label(nb: Any, items: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
                 warnings.append(f"The label of {cid} was empty; it was left out.")
                 continue
             if len(words) > LABEL_MAX_WORDS:
-                warnings.append(f"The label of {cid} had {len(words)} words; the first {LABEL_MAX_WORDS} were kept.")
-                words = words[:LABEL_MAX_WORDS]
+                warnings.append(f"over_length: the label of {cid} has {len(words)} words (more than {LABEL_MAX_WORDS});"
+                                " it was kept whole.")
             kind = str(it.get("kind") or "other")
             if kind not in COMMUNITY_KINDS:
                 warnings.append(f"The kind {kind!r} of {cid} is not one of {', '.join(COMMUNITY_KINDS)}; it is other.")
@@ -464,4 +478,6 @@ def label(nb: Any, items: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
                       " stale_label=0 WHERE community_id=?", (" ".join(words), summary, kind, now, json.dumps(current), cid))
             if cid not in labelled:
                 labelled.append(cid)
+    for w in warnings:
+        _log.warning("communities label: %s", w)
     return {"labelled": labelled, "warnings": warnings}

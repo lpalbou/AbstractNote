@@ -287,7 +287,7 @@ def test_pending_hands_the_model_the_top_entities_the_strongest_statements_and_n
     assert cm.pending(nb)["items"] == []  # every community is named
 
 
-def test_label_keeps_four_words_and_refuses_what_is_not_there(nb):
+def test_label_keeps_a_long_label_whole_with_a_warning_and_refuses_what_is_not_there(nb):
     world(nb)
     nb.recompute_communities()
     cid = nb.communities()["items"][0]["community_id"]
@@ -299,8 +299,11 @@ def test_label_keeps_four_words_and_refuses_what_is_not_there(nb):
         "nonsense",
     ])
     assert res["labelled"] == [cid] and len(res["warnings"]) == 5
+    assert "over_length: the label of " + cid + " has 6 words" in res["warnings"][0]
     item = {c["community_id"]: c for c in nb.communities()["items"]}[cid]
-    assert (item["label"], item["summary"], item["kind"]) == ("The framework software and", "Tools of it.", "other")
+    # ADR 0007: a long label is kept whole with a warning, never cut
+    assert (item["label"], item["summary"], item["kind"]) == ("The framework software and its people", "Tools of it.",
+                                                              "other")
     assert item["labelled_at"]
     with pytest.raises(ValueError):
         cm.label(nb, "not a list")

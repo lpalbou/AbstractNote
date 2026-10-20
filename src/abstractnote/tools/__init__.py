@@ -197,9 +197,10 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
         return rec.note_communities_recompute(ctx, resolution)
 
     @tool(name="note_communities_pending", description="Groups of entities that still need a name, with evidence.")
-    def note_communities_pending(limit: int = 5) -> Dict[str, Any]:
-        """Unnamed or stale communities: top entities, strongest statements, representative notes."""
-        return rec.note_communities_pending(ctx, limit)
+    def note_communities_pending(limit: int = 5, exclude: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Unnamed or stale communities: top entities, strongest statements, representative notes (exclude: ids
+        skipped for this run)."""
+        return rec.note_communities_pending(ctx, limit, exclude)
 
     @tool(name="note_communities_label", description="Store the names of groups of entities.")
     def note_communities_label(items: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -212,13 +213,17 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
         return cons.note_consolidation_begin(ctx)
 
     @tool(name="note_consolidation_progress", description="Record the progress of the running consolidation.")
-    def note_consolidation_progress(stage: str, done: int, total: int, note: Optional[str] = None) -> Dict[str, Any]:
-        """stage: normalize, communities, labels, summaries, then_now or reflect; done of total items."""
-        return cons.note_consolidation_progress(ctx, stage, done, total, note)
+    def note_consolidation_progress(stage: str, done: int, total: int, note: Optional[str] = None,
+                                    skipped: Optional[List[Any]] = None, reason: Optional[str] = None
+                                    ) -> Dict[str, Any]:
+        """stage: normalize, communities, labels, summaries, then_now or reflect; done of total items; skipped: the
+        ids (or {id, reason}) this stage leaves out for this run, reason: why."""
+        return cons.note_consolidation_progress(ctx, stage, done, total, note, skipped, reason)
 
     @tool(name="note_consolidation_end", description="Finish the running consolidation (completed or failed).")
     def note_consolidation_end(status: str, results: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """status completed or failed; results: {communities, insights, error}."""
+        """status completed or failed (a completed run that left something out closes as completed_with_gaps);
+        results: {communities, insights, error, budget_spent, not_reached: {summaries, labels}}."""
         return cons.note_consolidation_end(ctx, status, results)
 
     @tool(name="note_entities_normalize", description="Merge the entries that share a canonical name (no model).")
