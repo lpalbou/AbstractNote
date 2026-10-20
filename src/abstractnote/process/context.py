@@ -73,10 +73,19 @@ def active_claim_rows(nb: Any, entity_id: str, limit: int = MAX_CLAIMS_PER_ENTIT
         f" ({q})) ORDER BY observed_at DESC, claim_id LIMIT ?", [*members, *members, int(limit)])
 
 
+def summary_at(nb: Any, entity_id: str) -> Optional[str]:
+    """History date (``at``) of the entity's CURRENT summary, the one ``entities.summary`` shows (the latest in
+    history time, as ``op_entity_summary`` picks it); None when it has none recorded. The linking packet marks
+    a summary dated after the note's own date as LATER (eval2 D4: an earlier note must not use later knowledge)."""
+    row = nb.store.q1("SELECT at FROM entity_summaries WHERE entity_id=? ORDER BY at DESC, rowid DESC LIMIT 1",
+                      (entity_id,))
+    return row[0] if row else None
+
+
 def entity_view(nb: Any, entity_id: str) -> Dict[str, Any]:
     e = nb.store.entity_row(entity_id)
     return {"entity_id": e["entity_id"], "name": e["name"], "kind": e["kind"], "aliases": nb.store.aliases(entity_id),
-            "summary": e["summary"], "last_seen": e["last_seen"]}
+            "summary": e["summary"], "summary_at": summary_at(nb, entity_id), "last_seen": e["last_seen"]}
 
 
 def attach_claims(nb: Any, packet: Dict[str, Any], entity_id: str, views: List[Dict[str, Any]],

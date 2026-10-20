@@ -131,24 +131,32 @@ def extraction_packet(note: Dict[str, Any], section: Dict[str, Any], parts: int,
     }
 
 
-def claim_line(c: Dict[str, Any]) -> str:
-    """An existing claim as one line: ``#index subject predicate object (since date)``."""
+def claim_line(c: Dict[str, Any], now: Any = "") -> str:
+    """An existing claim as one line: ``#index subject predicate object (since date)``; a claim first seen on a
+    later day than the note's own date (``now``) says ``LATER than this note`` (eval2 D4)."""
     obj = c.get("object")
     obj = ("“" + clip(obj, 80) + "”") if c.get("object_is_literal") else clip(obj, 80)
     text = str(c.get("line") or "").strip() or (clip(c.get("subject"), 60) + " " + str(c.get("predicate") or "") + " " + obj)
     when = str(c.get("observed_at") or "")[:10]
-    return "#" + str(c.get("index")) + " " + text + (" (since " + when + ")" if when else "")
+    day = str(now or "")[:10]
+    suffix = ""
+    if when:
+        suffix = " (since " + when + (", LATER than this note" if day and when > day else "") + ")"
+    return "#" + str(c.get("index")) + " " + text + suffix
 
 
-def candidate_card(c: Dict[str, Any], prefer: Any = ()) -> List[str]:
+def candidate_card(c: Dict[str, Any], prefer: Any = (), now: Any = "") -> List[str]:
     """An existing entity as at most 1 + CLAIMS_PER_CANDIDATE lines: its current statements with a
     predicate the note also uses first (the ones a supersession or contradiction can be about),
-    then the most recent."""
+    then the most recent. A summary written on a later day than the note's own date (``now``) is
+    marked ``[LATER]``, and so are such statements (eval2 D4: an earlier note never uses later knowledge)."""
     aliases = [clip(a, 40) for a in (c.get("aliases") or []) if str(a).strip()][:5]
     head = "[" + str(c.get("index")) + "] " + clip(c.get("name"), 80) + " — " + str(c.get("kind") or "thing")
     head += ("; also " + ", ".join(aliases)) if aliases else ""
+    day = str(now or "")[:10]
     if str(c.get("summary") or "").strip():
-        head += " — " + clip(c.get("summary"), SUMMARY_CHARS)
+        written = str(c.get("summary_at") or "")[:10]
+        head += " — " + ("[LATER] " if written and day and written > day else "") + clip(c.get("summary"), SUMMARY_CHARS)
     if c.get("last_seen"):
         head += " Last seen " + str(c.get("last_seen"))[:10] + "."
     out = [head]
@@ -156,7 +164,7 @@ def candidate_card(c: Dict[str, Any], prefer: Any = ()) -> List[str]:
     wanted = set(prefer or ())
     ranked = [cl for cl in claims if cl.get("predicate") in wanted] + [cl for cl in claims if cl.get("predicate") not in wanted]
     for cl in ranked[:CLAIMS_PER_CANDIDATE]:
-        out.append("    " + claim_line(cl))
+        out.append("    " + claim_line(cl, now))
     return out
 
 
@@ -211,7 +219,7 @@ def link_batches(note: Dict[str, Any], extraction: Dict[str, Any], resolved: Lis
             if not found:
                 mlines.append("    no existing entity matched")
             for c in found[:CANDIDATES_PER_MENTION]:
-                mlines.extend("    " + x for x in candidate_card(c, used.get(ref) or ()))
+                mlines.extend("    " + x for x in candidate_card(c, used.get(ref) or (), n.get("occurred_at")))
         clines = []
         for i, c in by_group[gi]:
             subj = str(c.get("subject"))

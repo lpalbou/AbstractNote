@@ -114,9 +114,10 @@ LINKING: Dict[str, Any] = _o({
         "kind": _e(ENTITY_KINDS),
         "aliases": _a(_s()),
         "summary": {"type": ["string", "null"], "minLength": 1,
-                    "description": "one sentence about the entity: required for create and unsure, and for a "
-                                   "reused or merged entity this note tells something new about; null only for a "
-                                   "reused entity the note adds nothing to"},
+                    "description": "what the entity is on the note's date (its kind, role or purpose, and "
+                                   "what it belongs to or works with), one or two sentences, never an event or "
+                                   "the note: required for create and unsure, and for a reused or merged entity "
+                                   "whose description this note changes; null otherwise"},
         "reason": _s("short"),
     }, {"candidate": None, "merge_candidates": [], "name": "", "kind": None, "aliases": [], "reason": ""})),
     "claims": _a(_o({

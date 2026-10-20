@@ -100,8 +100,8 @@ flowchart TD
    indexes and enumerations rather than free-form ids so that small models cannot invent
    identifiers; `note_apply_revision` rejects any reference outside the packet and downgrades it
    to `create` or `new` with a warning. The model also writes the revision summary and a
-   one-sentence summary for each entity it creates and for each reused entity the note tells
-   something new about. A missing summary is never a failed note: a created entity gets one
+   summary for each entity it creates and for each reused entity whose description the note
+   changes: what the entity is on the note's date (see "Prompts and bounds"), never an event. A missing summary is never a failed note: a created entity gets one
    built from its role in the note (or where it was seen) and a reused entity keeps its current
    summary, each with a warning in the revision.
 5. **Apply** (`note_apply_revision`): checks the decisions structurally, then writes the revision ops to the
@@ -362,7 +362,7 @@ Schema enums)
 ```json
 {"mentions": [{"ref": "m1", "decision": "reuse|create|merge|unsure", "candidate": 0,
                "merge_candidates": [0, 1], "name": "preferred name", "kind": "person|org|project|concept|place|event|artifact|software|thing",
-               "aliases": ["..."], "summary": "one sentence for create and unsure, and for a reused entity this note tells something new about; otherwise null (a missing one is a warning, never a failed note)", "reason": "short"}],
+               "aliases": ["..."], "summary": "what the entity is on the note's date, one or two sentences: for create and unsure, and for a reused entity whose description this note changes; otherwise null (a missing one is a warning, never a failed note)", "reason": "short"}],
  "claims": [{"index": 0, "relation_to_existing": "new|restates|refines|supersedes|contradicts",
              "existing": 0, "reason": "short"}],
  "tasks": [{"index": 0, "closes_open_task": 0, "evidence": "the note's words that say it is done"}],
@@ -437,7 +437,7 @@ sections, each read whole).
 |---|---|
 | Extraction orientation | names and kinds of at most 15 known entities (no claims), at most 50 topics (the note's own first, then the most used), 5 similar notes by title and date, 8 open tasks, one line each |
 | Candidates per mention | 3 (`note_resolve_candidates`) |
-| Candidate card | name, kind, up to 5 aliases, summary (at most 240 characters), last seen, and at most 3 active claims as one line each, those with a predicate the note also uses first |
+| Candidate card | name, kind, up to 5 aliases, summary (at most 240 characters; `[LATER]` when it was written on a later day than the note), last seen, and at most 3 active claims as one line each, those with a predicate the note also uses first (`LATER than this note` when first seen on a later day) |
 | Mentions per linking call | 15; the rest go to further calls for the same note, merged back |
 | Statement lines | subject, predicate, object, certainty, stance, evidence (at most 200 characters) |
 | Open tasks in linking | only when the note has tasks, at most 8 |
@@ -455,6 +455,19 @@ names that very thing (a part, version, file or tool of X is a new entity relate
 three topics; no statement whose only content is that the text mentions something, and
 `dcterms:hasPart` only when stated; proposals and plans are `possible`; a superseded statement
 is written with `stance: retract` and its end date, the replacing one with `stance: revise`.
+
+**Entity summaries (eval2 D4).** A summary says what the entity IS on the note's date: its kind,
+its role or what it is for, and who or what it belongs to, works with or is part of, a fact that
+can change carrying its date ("since 2026-10"); one or two sentences, at most about 240 characters
+(the card's clip, so a summary is always shown whole; the consolidation leaves out one over 600). It
+is never a sentence about the note or one event ("Dana confirmed the schedule"): the linking
+rewrites a reused entity's summary only when the note changes what it is, folding the new fact into
+the current description, and answers null when the entity only did something (that is a statement).
+The candidate card marks a summary written on a later day than the note `[LATER]` and such statements
+`LATER than this note` (`context.summary_at`, the history date of the current summary); the prompt
+says to use them only to recognise the entity, so an earlier note describes the entity from itself
+and the earlier statements (its summary is stored at its own date; the latest stays current). The
+consolidation's summary prompt asks for the same description in the present tense.
 
 ## Prompt cache, thinking and output caps
 
