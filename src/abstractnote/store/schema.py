@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 3  # 2: entities.name_key/display_name/key_clash_with, entity_aliases.alias_key;
+SCHEMA_VERSION = 4  # 2: entities.name_key/display_name/key_clash_with, entity_aliases.alias_key;
 #                    3: ADR 0008 (revisions.context_json, reinterpret_marks, note_dependencies, soft-removed mentions,
-#                    topics and tasks of a superseded interpretation, retired entities)
+#                    topics and tasks of a superseded interpretation, retired entities);
+#                    4: ADR 0008 §4a (idea_changes, the propagated fields of reinterpret_marks)
 
 TRUTH_TABLES = ("meta", "notes", "attachments", "note_links", "queue", "revisions", "vectors", "context_packets",
-                "reinterpret_marks")
+                "reinterpret_marks", "idea_changes")
 #: Derived tables a rebuild copies (entity ids are stable, and the community labels are the model's work), and the
 #: consolidation bookkeeping (its progress rows and the measured seconds per item the next ETA starts from).
 KEPT_TABLES = ("communities", "entity_communities", "consolidation_runs")
@@ -173,6 +174,37 @@ CREATE TABLE IF NOT EXISTS reinterpret_marks (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_reinterpret_marks_untaken ON reinterpret_marks(note_id)
   WHERE consumed_at IS NULL AND pass_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_reinterpret_marks_note ON reinterpret_marks(note_id, consumed_at);
+
+-- ADR 0008 §4a: how deeply one re-understanding (``revision_id``, a ``note.reinterpret``) changed each entity it
+-- touched, measured by comparing the note's old and new reading (recall/propagation.py), and where a deep change
+-- spread (``spread_json``). Truth: written once when the re-understanding is applied, copied by a rebuild, never
+-- recomputed by a replay (the embedder or the graph may have moved since). ``pass_id`` = the consolidation pass
+-- whose mark the re-understanding consumed (each entity spreads at most once per pass).
+CREATE TABLE IF NOT EXISTS idea_changes (
+  revision_id TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  note_id TEXT NOT NULL,
+  as_of TEXT NOT NULL,
+  pass_id TEXT,
+  kind_change REAL NOT NULL DEFAULT 0,
+  summary_distance REAL,
+  summary_basis TEXT NOT NULL DEFAULT 'none',
+  claim_share REAL NOT NULL DEFAULT 0,
+  relation_share REAL NOT NULL DEFAULT 0,
+  support_claims INTEGER NOT NULL DEFAULT 0,
+  support_relations INTEGER NOT NULL DEFAULT 0,
+  magnitude REAL NOT NULL DEFAULT 0,
+  deep INTEGER NOT NULL DEFAULT 0,
+  summary_only INTEGER NOT NULL DEFAULT 0,
+  carried REAL NOT NULL DEFAULT 1.0,
+  hops INTEGER NOT NULL DEFAULT 0,
+  embedder_model TEXT,
+  spread INTEGER NOT NULL DEFAULT 0,
+  spread_json TEXT,
+  recorded_at TEXT NOT NULL,
+  PRIMARY KEY (revision_id, entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_idea_changes_pass ON idea_changes(pass_id, entity_id);
 
 CREATE TABLE IF NOT EXISTS vectors (
   vector_key TEXT PRIMARY KEY,
@@ -470,6 +502,11 @@ _ADDED_COLUMNS = {
     "tasks": [("removed_revision_id", "TEXT")],
     "entity_aliases": [("alias_key", "TEXT")],
     "revisions": [("context_json", "TEXT")],
+    # schema 4 (ADR 0008 §4a): a mark raised because an idea the note relies on was understood differently
+    # (``reason_code`` direct | propagated, its source entity and re-understanding, the impact carried, the hops)
+    "reinterpret_marks": [("reason_code", "TEXT NOT NULL DEFAULT 'direct'"), ("source_entity_id", "TEXT"),
+                          ("source_revision_id", "TEXT"), ("impact", "REAL NOT NULL DEFAULT 1.0"),
+                          ("hops", "INTEGER NOT NULL DEFAULT 0")],
     # the claims of an understanding outside a drain (store/queue.py, ADR 0008 §8; R4)
     "queue": [("inline_run_id", "TEXT"), ("inline_until", "TEXT"), ("reinterpret_run_id", "TEXT"),
               ("reinterpret_until", "TEXT")],
@@ -494,6 +531,10 @@ NAME_KEY_REPAIR_META = "name_key_repair"
 #: note is always re-understood with the model (no stored digest to compare), and invalidation reaches it through
 #: its mentions (``entity_notes``) and the name and alias match only.
 DEPENDENCY_RECORD_META = "dependency_record"
+
+#: Meta entry (ADR 0008 §4a migration flag): ``{schema, since_seq, upgraded_at}``. Re-understandings with ``seq <=
+#: since_seq`` were applied before change records existed: they have no ``idea_changes`` rows and spread nothing.
+PROPAGATION_RECORD_META = "propagation_record"
 
 
 def _backfill_name_keys(conn: sqlite3.Connection) -> None:
@@ -544,6 +585,20 @@ def _flag_dependency_record(conn: sqlite3.Connection, *, fresh: bool) -> None:
                  (DEPENDENCY_RECORD_META, json.dumps(value, sort_keys=True, separators=(",", ":"))))
 
 
+def _flag_propagation_record(conn: sqlite3.Connection, *, fresh: bool) -> None:
+    """Schema 3 -> 4 (ADR 0008 §4a): record from which revision on re-understandings carry change records
+    (:data:`PROPAGATION_RECORD_META`). Written once."""
+    import json
+    import time
+
+    if conn.execute("SELECT 1 FROM meta WHERE key=?", (PROPAGATION_RECORD_META,)).fetchone() is not None:
+        return
+    since = 0 if fresh else int(conn.execute("SELECT COALESCE(MAX(seq), 0) FROM revisions").fetchone()[0])
+    value = {"schema": 4, "since_seq": since, "upgraded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                 (PROPAGATION_RECORD_META, json.dumps(value, sort_keys=True, separators=(",", ":"))))
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(DDL)
     for table, cols in _ADDED_COLUMNS.items():
@@ -566,6 +621,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
     if row is None or int(row[0]) < 3:
         _flag_dependency_record(conn, fresh=row is None)
+    if row is None or int(row[0]) < 4:
+        _flag_propagation_record(conn, fresh=row is None)
     if row is None:
         conn.execute("INSERT INTO meta(key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
     elif int(row[0]) > SCHEMA_VERSION:

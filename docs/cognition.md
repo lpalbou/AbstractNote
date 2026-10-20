@@ -388,7 +388,7 @@ keeps the notebook's derived memory fresh, in stages, each reporting its progres
 | Stage | What runs | Model |
 |---|---|---|
 | `normalize` | `note_entities_normalize`: the entries that share a canonical name are merged (`Notebook.normalize_entities`, one reversible revision per merge) | none |
-| `reinterpret` | loop (ADR 0008): `note_reinterpret_next` (1) -> the `note-process` flow as a subflow for that note -> the next, until no marked note is left for this pass or the budget is spent (below) | as note-process, per note read again (0 for a note settled unchanged) |
+| `reinterpret` | loop (ADR 0008): `note_reinterpret_next` (1) -> the `note-process` flow as a subflow for that note -> the next, until no marked note is left for this pass or the budget is spent (below). Two tiers, each in history order: the notes marked directly (they used what changed) and those marked because an idea they rely on changed deeply with an impact of at least 0.25 first, then the weaker ones (§4a, data-model.md "Deep changes reach the ideas that relied on them"); a re-reading that changes an idea deeply marks, one hop further, the later notes of the ideas that rely on it, and they are read in the same pass | as note-process, per note read again (0 for a note settled unchanged) |
 | `communities` | `note_communities_recompute` (as in note-reflect) | none |
 | `labels` | loop: `note_communities_pending` (5, `exclude` = the groups skipped this run) -> the reflect naming step (`CommunityLabels`, by index; asked once more when a group is left out) -> `note_communities_label`, until none waits that was not skipped, or the budget is spent | 1 call per 5 groups (2 when the first answer leaves one out) |
 | `summaries` | loop: `note_entities_stale_summaries` (8) -> `llm_call summaries` (`EntitySummaries`: `[{index, summary}]`; `summaries_again` when an entry is left out or empty) -> `note_entities_set_summaries`, until none is stale that was not offered this run, or the budget is spent | 1 call per 8 entries (2 when the first answer leaves one out) |
@@ -467,6 +467,19 @@ budget did not reach; a run that left notes is `completed_with_gaps` and its not
 understood again this time; they will be read again next time." The progress line reads "Re-understanding 12
 notes" (web: "Re-understanding 3 of 12 notes"); `GET /note/consolidation` `pending.reinterpret` gives the count
 before the run, and `consolidation.state(nb)["reinterpret"]` the count by entity and the reasons.
+
+Deep changes spread (ADR 0008 §4a). Each applied re-understanding is measured against the reading it replaced (per
+entity: retired or joined, the summary's embedding distance, the share of its statements and of its relations
+replaced) and, when an idea changed deeply, the later notes of the ideas that rely on it through statements are
+marked `propagated` with the impact the change carries (decay 0.5 per hop, nothing under 0.1, never more than the
+re-reading was given), so a wave dies within three hops and cycles end. Those notes are read in the same pass, after
+the direct ones when their impact is low, with the "Understood differently since this note was read" block in
+their linking packet (what changed about the idea, as known on their date; never a number). The model decides: a
+re-reading that comes out the same writes nothing and the spread stops there. Before the run,
+`reinterpret.propagated` gives the notes waiting for that reason by source idea and `may_follow`, an upper bound of
+how many more may follow; during it the progress line says "Re-understanding 12 notes (5 because Zorn changed)"
+(`run.propagated`); a budget stop reports `left_out.propagated` and its sources, and the notice adds "of which 5
+follow from ideas understood differently".
 
 The start pins are `budget_s` (default 3600: the loops stop starting rounds after it), `limit` (the reflect
 stage's insight limit, default 10), `thinking` (`on` or `off`, default `off`, wired to both model steps) and

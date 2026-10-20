@@ -99,6 +99,9 @@ def context_digest(store: NoteStore, note_row: Any, packet: Optional[Dict[str, A
     return {"as_of": r1.get("as_of") or as_of, "entities": entities, "claims": claims, "summaries": summaries,
             "notes": list(dict.fromkeys(notes)), "mention_queries": list(packet.get("mention_queries") or []),
             "later_claims": list(r1.get("later_claims") or []), "omitted": dict(r1.get("omitted") or {}),
+            # ADR 0008 §4a: the ideas this note relies on that were understood differently, as known at its date when
+            # it was read again through a propagated mark (the no-call check compares them)
+            "related": dict(r1.get("related") or {}),
             "looked_up": True}
 
 
@@ -329,6 +332,8 @@ class Notebook:
                                         (_j(result), rev["revision_id"]))
         if _fail_after_index:
             raise RuntimeError("Simulated stop between the index and the AbstractMemory commits.")
+        if rev.get("action") == REINTERPRET_ACTION and self.store.marking:
+            self._propagate(rev["revision_id"])
         row = self.store.revision_row(rev["revision_id"])
         if not row["applied_kg"]:
             with self.store.lock:
@@ -336,6 +341,24 @@ class Notebook:
             self.kg.project(rev, kinds)
             self.store.set_applied_kg(rev["revision_id"])
         return self._result(self.store.revision_row(rev["revision_id"]))
+
+    def _propagate(self, revision_id: str) -> None:
+        """ADR 0008 §4a: measure how deeply an applied re-understanding changed each idea it touched and spread its
+        deep changes to the later notes that relied on them (``recall.propagation.propagate``: the change records and
+        the marks in one transaction). Done once per re-understanding (``result.propagation``), redone by
+        :meth:`recover` when a stop came between the apply and the spread, never during a rebuild (the records are
+        truth, copied). Never without the notebook's embedder: it fails loudly."""
+        self.require_embedder()
+        row = self.store.revision_row(revision_id)
+        result = dict(_uj(row["result_json"], {}) or {})
+        if "propagation" in result:
+            return
+        from ..recall.propagation import propagate
+
+        result["propagation"] = propagate(self, revision_id)
+        with self.store.lock:
+            self.store.conn.execute("UPDATE revisions SET result_json=? WHERE revision_id=?",
+                                    (_j(result), revision_id))
 
     def _result(self, row: sqlite3.Row, *, already_applied: bool = False) -> Dict[str, Any]:
         result = dict(_uj(row["result_json"], {}) or {})
@@ -358,7 +381,8 @@ class Notebook:
         }
         for k in ("claims_reinterpreted", "claims_revised", "claims_reopened", "claims_start_restored",
                   "reinforcements_dropped",
-                  "tasks_reopened", "tasks_retired", "entities_retired", "stale_context", "reinterpreted"):
+                  "tasks_reopened", "tasks_retired", "entities_retired", "stale_context", "reinterpreted",
+                  "propagation"):
             if result.get(k):
                 out[k] = result[k]
         if already_applied:
@@ -472,8 +496,22 @@ class Notebook:
 
     def reinterpret_state(self) -> Dict[str, Any]:
         """What waits to be understood again and why (``NoteStore.reinterpret_state``), readable before the
-        consolidation's ``reinterpret`` stage runs."""
-        return self.store.reinterpret_state()
+        consolidation's ``reinterpret`` stage runs; ``propagated`` adds ``may_follow`` and ``may_follow_from``: the
+        upper bound of the notes ideas understood differently may add (``recall.propagation.may_follow``, ADR 0008
+        §4a)."""
+        from ..recall.propagation import may_follow
+
+        out = self.store.reinterpret_state()
+        bound = may_follow(self)
+        out["propagated"].update({"may_follow": bound["may_follow"], "may_follow_from": bound["by_source"]})
+        return out
+
+    def idea_changes(self, revision_id: str) -> List[Dict[str, Any]]:
+        """How deeply a re-understanding changed each idea it touched, and where a deep change spread
+        (``idea_changes``, ADR 0008 §4a)."""
+        from ..recall.propagation import changes_of
+
+        return changes_of(self.store, revision_id)
 
     def mark_reinterpret(self, note_ids: Sequence[str], reason: str = "") -> Dict[str, Any]:
         """Mark notes for re-understanding by hand (``note_mark_reinterpret``): each must have been understood
@@ -525,7 +563,14 @@ class Notebook:
                         "action": r["action"], "summary": r["summary"],
                         "context": ({k: ctx.get(k) for k in ("as_of", "entities", "claims", "summaries")}
                                     if isinstance(ctx, dict) else None),
-                        "context_unknown": ctx is None, "superseded_by": sup.get(r["revision_id"])})
+                        "context_unknown": ctx is None, "superseded_by": sup.get(r["revision_id"]),
+                        # ADR 0008 §4a: how deeply this re-understanding changed each idea, and how far it spread
+                        "changes": [{"entity_id": x["entity_id"], "name": self.store._name(x["entity_id"]),
+                                     "magnitude": x["magnitude"], "deep": x["deep"],
+                                     "notes_marked": sum(len(f.get("notes") or [])
+                                                         for f in (x["spread_json"] or {}).get("reached") or [])}
+                                    for x in self.idea_changes(r["revision_id"])]
+                        if r["action"] == REINTERPRET_ACTION else []})
         return out
 
     def retract_claim(self, claim_id: str, account: Optional[str], reason: str, *, client: str = "web",
@@ -1130,7 +1175,7 @@ class Notebook:
                 c.execute("DELETE FROM meta")
                 c.execute("INSERT INTO meta SELECT * FROM old.meta" + (" WHERE key!='embedding_pin'" if reembed else ""))
                 tables = ["notes", "attachments", "note_links", "queue", "queue_errors", "context_packets", "revisions",
-                          "reinterpret_marks", *KEPT_TABLES]
+                          "reinterpret_marks", "idea_changes", *KEPT_TABLES]
                 if not reembed:
                     tables.append("vectors")
                 for table in tables:

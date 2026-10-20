@@ -415,6 +415,14 @@ def note_context(nb: Any, note_id: str, max_chars: Optional[int] = None) -> Dict
         packet["open_tasks"].append(t["task_id"])
         open_tasks.append({"index": len(open_tasks), "task_id": t["task_id"], "text": t["text"],
                            "opened_at": t["opened_at"], "due": t["due"], "note_id": t["note_id"]})
+    # ADR 0008 §4a: a note read again because an idea it relies on was understood differently is shown what changed
+    # about that idea (as known on its date), and its digest records that idea's state for the no-call check
+    from ..recall.propagation import understood_differently
+
+    changed, related = understood_differently(nb, note_id)
+    if changed:
+        note["understood_differently"] = changed
+        packet["digest"]["related"] = related
     save_packet(nb, note_id, packet)
     return {"note": note, "sections": secs, "similar_notes": similar, "candidate_entities": candidates,
             "existing_claims": claim_views, "open_tasks": open_tasks, "topics": nb.store.topic_names(),

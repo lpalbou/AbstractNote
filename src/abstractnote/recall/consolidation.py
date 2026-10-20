@@ -296,8 +296,10 @@ def _left_out(nb: Any, stages: Dict[str, Any], extra: Dict[str, Any]) -> Dict[st
     def still_stale(eid: str) -> bool:
         return eid in stale or (nb.store.entity_row(eid) is not None and nb.store.canonical(eid) in stale)
 
-    marked = {m["note_id"] for m in nb.store.pending_marks()}  # ADR 0008: notes still waiting to be read again
-    out: Dict[str, Any] = {"summaries": 0, "labels": 0, "reinterpret": 0, "reasons": []}
+    pend = nb.store.pending_marks()
+    marked = {m["note_id"] for m in pend}  # ADR 0008: notes still waiting to be read again
+    out: Dict[str, Any] = {"summaries": 0, "labels": 0, "reinterpret": 0, "propagated": 0, "propagated_from": [],
+                           "reasons": []}
     for kind, now_pending, still in (("summaries", stale, still_stale), ("labels", waiting, waiting.__contains__),
                                      ("reinterpret", marked, marked.__contains__)):
         skipped = [x for x in (stages.get(kind) or {}).get("skipped_ids") or [] if isinstance(x, dict)]
@@ -309,6 +311,18 @@ def _left_out(nb: Any, stages: Dict[str, Any], extra: Dict[str, Any]) -> Dict[st
                 out["reasons"].append(why)
         if unreached and BUDGET_REASON not in out["reasons"]:
             out["reasons"].append(BUDGET_REASON)
+    # ADR 0008 §4a: of the notes left, those waiting only because an idea they rely on was understood differently
+    prop = [m for m in pend if m["reason_code"] == "propagated"]
+    if out["reinterpret"] and prop:
+        out["propagated"] = min(len(prop), out["reinterpret"])
+        counts: Dict[str, int] = {}
+        for m in prop:
+            for e in m["sources"]:
+                counts[e] = counts.get(e, 0) + 1
+        from .propagation import display_name
+
+        out["propagated_from"] = [{"entity_id": e, "name": display_name(nb.store, e), "notes": n}
+                                  for e, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:3]]
     return out
 
 
@@ -325,8 +339,11 @@ def notice(left_out: Optional[Dict[str, Any]]) -> Optional[str]:
                 " tried again next time.")
     if r:  # ADR 0008: notes an earlier note changed, still waiting to be understood again
         one = r == 1
-        again = (f"{r} {'note' if one else 'notes'} could not be understood again this time; {'it' if one else 'they'}"
-                 " will be read again next time.")
+        p = min(_count(lo.get("propagated")), r)
+        which = (f", of which {p} {'follows' if p == 1 else 'follow'} from ideas understood differently" if p and not one
+                 else (" because an idea it relies on is understood differently" if p else ""))
+        again = (f"{r} {'note' if one else 'notes'} could not be understood again this time{which};"
+                 f" {'it' if one else 'they'} will be read again next time.")
         told = f"{told} {again[0].upper()}{again[1:]}" if told else again
     return told
 
@@ -411,7 +428,34 @@ def run_view(nb: Any, row: Optional[Dict[str, Any]] = None) -> Optional[Dict[str
     return {"consolidation_id": row["consolidation_id"], "started_at": row["started_at"], "stage": stage,
             "stage_done": int(row["stage_done"] or 0), "stage_total": int(row["stage_total"] or 0),
             "eta_s": _eta(nb, row["consolidation_id"], stage, s),
-            "elapsed_s": max(0, int(_now_ts() - float(row["started_ts"]))), "note": row.get("note")}
+            "elapsed_s": max(0, int(_now_ts() - float(row["started_ts"]))), "note": row.get("note"),
+            "propagated": _propagated_in_pass(nb, row["consolidation_id"]) if stage == "reinterpret" else None}
+
+
+def _propagated_in_pass(nb: Any, pass_id: str) -> Dict[str, Any]:
+    """``{notes, names, sources}`` of the reinterpret stage in progress (ADR 0008 §4a): of the notes this pass reads
+    again (taken or still waiting), those it reads only because an idea they rely on was understood differently,
+    and the names of those ideas (the most frequent first, at most three; ``sources`` counts them all)."""
+    per: Dict[str, Dict[str, Any]] = {}
+    for r in nb.store.q("SELECT note_id, reason_code, source_entity_id FROM reinterpret_marks WHERE pass_id=? OR"
+                        " (pass_id IS NULL AND consumed_at IS NULL)", (pass_id,)):
+        d = per.setdefault(r["note_id"], {"direct": False, "sources": []})
+        if (r["reason_code"] or "direct") == "direct":
+            d["direct"] = True
+        elif r["source_entity_id"] and r["source_entity_id"] not in d["sources"]:
+            d["sources"].append(r["source_entity_id"])
+    counts: Dict[str, int] = {}
+    n = 0
+    for d in per.values():
+        if d["direct"]:
+            continue
+        n += 1
+        for e in d["sources"]:
+            counts[e] = counts.get(e, 0) + 1
+    top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    from .propagation import display_name
+
+    return {"notes": n, "names": [display_name(nb.store, e) for e, _ in top[:3]], "sources": len(top)}
 
 
 def history(nb: Any, limit: int = 10) -> List[Dict[str, Any]]:
@@ -446,7 +490,7 @@ def pending(nb: Any) -> Dict[str, int]:
 def state(nb: Any) -> Dict[str, Any]:
     """``{run, last, pending, reinterpret}`` of a notebook (headless part of ``GET /note/consolidation``):
     ``reinterpret`` = what waits to be understood again and why, before the stage runs (ADR 0008, review 3.2)."""
-    return {"run": run_view(nb), "last": last(nb), "pending": pending(nb), "reinterpret": nb.store.reinterpret_state()}
+    return {"run": run_view(nb), "last": last(nb), "pending": pending(nb), "reinterpret": nb.reinterpret_state()}
 
 
 # --------------------------------------------------------------------------- the reinterpret stage (ADR 0008)
@@ -476,7 +520,7 @@ def digest_unchanged(nb: Any, note_id: str) -> bool:
     statements and summaries), and what was recorded after the note's date (a later statement or note is no
     foundation). True: the foundation did not change for this note, nothing to understand again. A
     revision without a record (written before schema 3, ``context_unknown``) is never unchanged."""
-    from ..process.context import load_packet, note_context
+    from ..process.context import load_packet, note_context, save_packet
     from ..process.resolve import resolve_candidates
     from ..process.revise import reinterpret_view
     from ..store.notebook import context_digest
@@ -488,7 +532,25 @@ def digest_unchanged(nb: Any, note_id: str) -> bool:
     stored = json.loads(s.revision_row(cur)["context_json"] or "null")
     if not isinstance(stored, dict) or not stored.get("looked_up"):
         return False
-    reinterpret_view(nb, note_id, note_context(nb, note_id))
+    # ADR 0008 §4a: a note waiting because an idea it relies on was understood differently never saw that idea's
+    # card, so the digest below cannot see the change: it is settled without a call only when each source idea, as
+    # known at the note's date, is what its current reading recorded (``related``); never recorded: it is read
+    from .propagation import related_sources, related_state
+
+    note_at = s.note_row(note_id)["occurred_at"]
+    recorded = stored.get("related") or {}
+    for eid, _rid in related_sources(s, note_id):
+        if recorded.get(eid) is None or recorded[eid] != related_state(s, eid, note_at):
+            return False
+    seen = note_context(nb, note_id)
+    # the similar notes it would be shown now, kept with the packet as the tools' note_context keeps them (R6: without
+    # them the digest of now had no similar notes, so a note with an earlier similar note was never settled)
+    packet = load_packet(nb, note_id)
+    if packet is not None:
+        packet["similar_notes"] = [x.get("note_id") for x in seen.get("similar_notes") or []
+                                   if isinstance(x, dict) and x.get("note_id")]
+        save_packet(nb, note_id, packet)
+    reinterpret_view(nb, note_id, seen)
     if stored.get("mention_queries"):
         resolve_candidates(nb, note_id, stored["mention_queries"])
     now = context_digest(s, s.note_row(note_id), load_packet(nb, note_id))

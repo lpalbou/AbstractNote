@@ -508,7 +508,7 @@ def test_a_notebook_from_schema_2_is_flagged_and_its_revisions_have_no_record(tm
     nbk = Notebook.open(tmp_path / "old")
     try:
         flag = nbk.store.meta_get(DEPENDENCY_RECORD_META)
-        assert flag["schema"] == 3 and flag["since_seq"] >= 1 and nbk.store.meta_get("schema_version") == 3
+        assert flag["schema"] == 3 and flag["since_seq"] >= 1 and nbk.store.meta_get("schema_version") == 4
         assert nbk.note(a["note_id"])["interpretations"][0]["context_unknown"] is True
         assert cons.digest_unchanged(nbk, a["note_id"]) is False
     finally:

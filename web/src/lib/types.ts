@@ -266,15 +266,22 @@ export type Processing = {
 export type ConsolidationStage = "normalize" | "reinterpret" | "communities" | "labels" | "summaries" | "then_now" | "reflect" | "done";
 export type Consolidation = {
   automation: ProcessingAutomation & { schedule?: { every: string } | null };
-  run: { run_id: string; started_at: string; stage: ConsolidationStage | string; stage_done: number; stage_total: number; eta_s: number | null; elapsed_s: number } | null;
+  /** `propagated` (reinterpret stage only): of the notes this pass reads again, those read because an idea they rely on was understood differently, with those ideas' names (ADR 0008 §4a). */
+  run: { run_id: string; started_at: string; stage: ConsolidationStage | string; stage_done: number; stage_total: number; eta_s: number | null; elapsed_s: number; propagated?: ConsolidationPropagated | null } | null;
   /**
    * An interrupted run has no finish time and null counts (W20). `status` completed_with_gaps: the run left
    * `left_out` for the next one and `notice` is its one-sentence end-user line (ADR 0007). `reinterpreted` /
    * `unchanged`: the notes the reinterpret stage understood again, or found unchanged (ADR 0008).
    */
-  last: { finished_at: string | null; status: string; merges: number | null; communities: number | null; labelled: number | null; summaries_refreshed: number | null; insights: number | null; left_out?: { summaries: number; labels: number; reinterpret?: number; reasons: string[] } | null; budget_spent?: boolean; notice?: string | null; reinterpreted?: number | null; unchanged?: number | null } | null;
+  last: { finished_at: string | null; status: string; merges: number | null; communities: number | null; labelled: number | null; summaries_refreshed: number | null; insights: number | null; left_out?: { summaries: number; labels: number; reinterpret?: number; propagated?: number; propagated_from?: { entity_id: string; name: string; notes: number }[]; reasons: string[] } | null; budget_spent?: boolean; notice?: string | null; reinterpreted?: number | null; unchanged?: number | null } | null;
   /** `reinterpret`: notes an earlier note changed, waiting to be understood again (ADR 0008). */
   pending: { stale_labels: number; unlabelled: number; stale_summaries: number; reinterpret?: number };
   /** What waits to be understood again and why, before the stage runs (ADR 0008 §5; `GET /note/consolidation`). */
-  reinterpret?: { pending: number; by_entity: { entity_id: string; name: string; notes: number }[]; reasons: string[]; context_unknown: number; consumed_today: number; last_marked_at: string | null };
+  reinterpret?: {
+    pending: number; by_entity: { entity_id: string; name: string; notes: number }[]; reasons: string[]; context_unknown: number; consumed_today: number; last_marked_at: string | null;
+    /** The notes waiting because an idea they rely on was understood differently, and the upper bound of how many more may follow (ADR 0008 §4a). */
+    propagated?: { pending: number; by_source: { entity_id: string; name: string; notes: number }[]; may_follow?: number; may_follow_from?: { entity_id: string; name: string; notes: number }[] };
+  };
 };
+/** The notes of a re-understanding pass read because an idea they rely on was understood differently (ADR 0008 §4a). */
+export type ConsolidationPropagated = { notes: number; names: string[]; sources: number };

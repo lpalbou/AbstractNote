@@ -6,6 +6,14 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 
 ## [Unreleased]
 
+### Added
+- **Ideas understood differently reach what relies on them** (ADR 0008 §4a): when an earlier note changes what
+  an idea is (its statements, its relations, what it is, or deeply its description), the later notes about the
+  ideas that rest on it are understood again too, strongest first and in the order things happened, and each
+  one is shown what changed. The Processing page says why: "Re-understanding 12 notes (5 because Zorn changed)",
+  and before a consolidation runs it says how many more may follow. A wave of changes always ends; a second
+  consolidation with nothing new changes nothing.
+
 ### Changed
 - **What a thing is**: the description of a person, project or tool now says what it is (its kind,
   its role or purpose, and what it belongs to or works with), instead of the latest thing

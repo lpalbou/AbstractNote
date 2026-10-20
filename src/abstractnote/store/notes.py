@@ -143,6 +143,18 @@ MARKING_ACTIONS = ("note.redate", "note.archive", "claim.retract", "entity.unmer
 _IS_REINTERPRET = f"(r2.action='{REINTERPRET}' OR r2.ops_json LIKE '%\"{REINTERPRET}\"%')"
 
 
+#: ADR 0008 §4a: the reason codes of a re-understanding mark.
+DIRECT = "direct"
+PROPAGATED = "propagated"
+
+
+def claim_live_sql(alias: str = "c") -> str:
+    """SQL true for a claim (table alias ``alias``) that still says something: neither withdrawn by a person
+    (``retracted``) nor by its own note's re-understanding (``reinterpreted``). The relation graph of propagation
+    (ADR 0008 §4a) uses it; ``status!='retracted'`` alone would still count withdrawn readings."""
+    return f"({alias}.status NOT IN ('retracted', '{REINTERPRETED}'))"
+
+
 def claim_reinterpreted_sql(alias: str = "c") -> str:
     """SQL true for a claim (table alias ``alias``) closed because its own note was understood again (ADR 0008 §1:
     the stored closure kind :data:`REINTERPRETED`, in ``claims.status``): a system event, not a change in what was
@@ -448,6 +460,13 @@ class NoteStore:
             return None
         r = self.q1("SELECT name FROM entities WHERE entity_id=?", (entity_id,))
         return r[0] if r else None
+
+    def _display(self, entity_id: Optional[str]) -> Optional[str]:
+        """The surface name a person reads (``display_name``, else the canonical name)."""
+        if not entity_id:
+            return None
+        r = self.q1("SELECT display_name, name FROM entities WHERE entity_id=?", (entity_id,))
+        return (r[0] or r[1]) if r else entity_id
 
     @staticmethod
     def claim_text(subject_name: str, predicate: str, object_text: str, evidence: Optional[str]) -> str:
@@ -1175,20 +1194,42 @@ class NoteStore:
                 out["entity"].append(eid)
         return out
 
-    def mark_reinterpret(self, c: sqlite3.Connection, marks: Sequence[Dict[str, Any]], marked_at: str) -> List[str]:
-        """Insert re-understanding marks ``[{note_id, reason, by_note_id?, by_revision_id?, entities?, from_at?}]`` in
-        the caller's transaction. Idempotent: a note that already has an untaken mark is not marked twice (the unique
-        index); a note whose mark a pass has taken gets a new row, for the next pass (review 3.5). Returns the notes
-        newly marked."""
+    def mark_reinterpret(self, c: sqlite3.Connection, marks: Sequence[Dict[str, Any]], marked_at: str,
+                         upgraded: Optional[List[str]] = None) -> List[str]:
+        """Insert re-understanding marks ``[{note_id, reason, by_note_id?, by_revision_id?, entities?, from_at?,
+        reason_code?, source_entity_id?, source_revision_id?, impact?, hops?}]`` in the caller's transaction.
+        ``reason_code`` is ``direct`` (the default: the note used what changed, ADR 0008 §4) or ``propagated`` (an idea
+        it relies on was understood differently, §4a: with its source entity, the re-understanding that changed it,
+        the ``impact`` carried and the ``hops`` from the first change). Idempotent: a note that already has an untaken
+        mark is not marked twice (the unique index); a note whose mark a pass has taken gets a new row, for the next
+        pass (review 3.5). An untaken propagated mark gives way to a direct one, and to a stronger propagated one
+        (max, never a sum); ``upgraded`` collects those notes. Returns the notes newly marked."""
         out: List[str] = []
         for m in marks:
+            code = m.get("reason_code") or DIRECT
+            if code not in (DIRECT, PROPAGATED):
+                raise ValueError(f"A re-understanding mark is direct or propagated, not {code!r}.")
+            impact = 1.0 if code == DIRECT else float(m["impact"])
+            vals = (m["reason"], m.get("by_note_id"), m.get("by_revision_id"), _j(sorted(set(m.get("entities") or []))),
+                    m.get("from_at"), marked_at, code, m.get("source_entity_id"), m.get("source_revision_id"), impact,
+                    int(m.get("hops") or 0))
             cur = c.execute(
                 "INSERT OR IGNORE INTO reinterpret_marks(note_id, reason, by_note_id, by_revision_id, entities_json,"
-                " from_at, marked_at) VALUES (?,?,?,?,?,?,?)",
-                (m["note_id"], m["reason"], m.get("by_note_id"), m.get("by_revision_id"),
-                 _j(sorted(set(m.get("entities") or []))), m.get("from_at"), marked_at))
+                " from_at, marked_at, reason_code, source_entity_id, source_revision_id, impact, hops)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (m["note_id"], *vals))
             if cur.rowcount:
                 out.append(m["note_id"])
+                continue
+            have = c.execute("SELECT mark_id, reason_code, impact FROM reinterpret_marks WHERE note_id=? AND"
+                             " consumed_at IS NULL AND pass_id IS NULL", (m["note_id"],)).fetchone()
+            if have is None or have["reason_code"] == DIRECT:
+                continue  # direct dominates (and a direct mark is never doubled)
+            if code == DIRECT or impact > float(have["impact"]):
+                c.execute("UPDATE reinterpret_marks SET reason=?, by_note_id=?, by_revision_id=?, entities_json=?,"
+                          " from_at=?, marked_at=?, reason_code=?, source_entity_id=?, source_revision_id=?, impact=?,"
+                          " hops=? WHERE mark_id=?", (*vals, have["mark_id"]))
+                if upgraded is not None:
+                    upgraded.append(m["note_id"])
         return out
 
     def take_mark(self, note_id: str, pass_id: str) -> int:
@@ -1235,6 +1276,8 @@ class NoteStore:
         id), one row per note: ``{note_id, occurred_at, received_at, reasons, by_note_ids, entities, marked_at,
         taken_by}``. With ``pass_id``, the notes that pass has not taken yet (a note it took is left for the next
         pass, review §6)."""
+        from ..recall.propagation import TUNING
+
         sql = ("SELECT m.*, n.occurred_at, n.received_at, n.archived_at FROM reinterpret_marks m JOIN notes n ON"
                " n.note_id=m.note_id WHERE m.consumed_at IS NULL AND n.archived_at IS NULL")
         params: List[Any] = []
@@ -1249,7 +1292,8 @@ class NoteStore:
                 d = by_note[r["note_id"]] = {"note_id": r["note_id"], "occurred_at": r["occurred_at"],
                                              "received_at": r["received_at"], "reasons": [], "by_note_ids": [],
                                              "entities": [], "marked_at": r["marked_at"], "taken_by": r["pass_id"],
-                                             "error": r["error"]}
+                                             "error": r["error"], "reason_code": PROPAGATED, "impact": 0.0,
+                                             "hops": None, "sources": [], "tier": "B"}
             if r["reason"] not in d["reasons"]:
                 d["reasons"].append(r["reason"])
             if r["by_note_id"] and r["by_note_id"] not in d["by_note_ids"]:
@@ -1257,7 +1301,20 @@ class NoteStore:
             for e in _uj(r["entities_json"], []) or []:
                 if e not in d["entities"]:
                     d["entities"].append(e)
-        out = list(by_note.values())
+            # ADR 0008 §4a: a direct mark dominates; otherwise the strongest propagated one decides the tier
+            code = r["reason_code"] or DIRECT
+            if code == DIRECT:
+                d["reason_code"] = DIRECT
+            if r["source_entity_id"] and r["source_entity_id"] not in d["sources"]:
+                d["sources"].append(r["source_entity_id"])
+            d["impact"] = max(d["impact"], float(r["impact"] if r["impact"] is not None else 1.0))
+            h = int(r["hops"] or 0)
+            d["hops"] = h if d["hops"] is None else min(d["hops"], h)
+            if code == DIRECT or d["impact"] >= TUNING.TIER_A_IMPACT:
+                d["tier"] = "A"
+        # two tiers (direct and strong propagated marks first), each one forward sweep in history order: a single
+        # queue by impact would read a note before its own earlier foundation was read again
+        out = sorted(by_note.values(), key=lambda d: d["tier"] != "A")
         return out if limit is None else out[: max(0, int(limit))]
 
     def reinterpret_marks(self) -> List[Dict[str, Any]]:
@@ -1267,7 +1324,9 @@ class NoteStore:
                       " n.note_id=m.note_id WHERE m.consumed_at IS NULL AND m.pass_id IS NULL AND n.archived_at IS NULL"
                       " ORDER BY n.occurred_at, n.received_at, n.note_id, m.mark_id")
         return [{"mark_id": r["mark_id"], "note_id": r["note_id"], "reason": r["reason"], "by_note_id": r["by_note_id"],
-                 "marked_at": r["marked_at"], "from_at": r["from_at"], "entities": _uj(r["entities_json"], [])}
+                 "marked_at": r["marked_at"], "from_at": r["from_at"], "entities": _uj(r["entities_json"], []),
+                 "reason_code": r["reason_code"] or DIRECT, "source_entity_id": r["source_entity_id"],
+                 "source_revision_id": r["source_revision_id"], "impact": r["impact"], "hops": r["hops"]}
                 for r in rows]
 
     def consume_reinterpret_mark(self, note_id: str, pass_id: str = "direct") -> Optional[Dict[str, Any]]:
@@ -1284,8 +1343,17 @@ class NoteStore:
 
     def reinterpret_state(self) -> Dict[str, Any]:
         """``{pending, by_entity: [{entity_id, name, notes}], reasons: [sentence], context_unknown, consumed_today,
-        last_marked_at}``: what is waiting to be re-understood and why, readable before the stage runs (review 3.2)."""
+        last_marked_at, propagated: {pending, by_source: [{entity_id, name, notes}]}}``: what is waiting to be
+        re-understood and why, readable before the stage runs (review 3.2). ``propagated`` = the notes waiting only
+        because an idea they rely on was understood differently (ADR 0008 §4a), by source idea;
+        ``Notebook.reinterpret_state`` adds the upper bound of what may follow."""
         pend = self.pending_marks()
+        sources: Dict[str, int] = {}
+        prop = [p for p in pend if p["reason_code"] == PROPAGATED]
+        for p in prop:
+            for e in p["sources"]:
+                sources[e] = sources.get(e, 0) + 1
+        top_sources = sorted(sources.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
         counts: Dict[str, int] = {}
         reasons: List[str] = []
         for p in pend:
@@ -1306,7 +1374,9 @@ class NoteStore:
         consumed = int(self.q1("SELECT COUNT(*) FROM reinterpret_marks WHERE consumed_at>=?", (day,))[0] or 0)
         last = self.q1("SELECT MAX(marked_at) FROM reinterpret_marks")[0]
         return {"pending": len(pend), "by_entity": [{"entity_id": e, "name": self._name(e), "notes": n} for e, n in top],
-                "reasons": reasons[:10], "context_unknown": unknown, "consumed_today": consumed, "last_marked_at": last}
+                "reasons": reasons[:10], "context_unknown": unknown, "consumed_today": consumed, "last_marked_at": last,
+                "propagated": {"pending": len(prop), "by_source": [{"entity_id": e, "name": self._display(e), "notes": n}
+                                                                   for e, n in top_sources]}}
 
     def later_dependents(self, c: sqlite3.Connection, entity_ids: Iterable[str], *, after: Optional[Tuple[str, str, str]]
                          = None, from_at: Optional[str] = None, exclude: Sequence[str] = (),

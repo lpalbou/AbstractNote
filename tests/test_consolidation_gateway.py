@@ -97,11 +97,13 @@ def test_the_consolidation_view_on_the_page_and_its_own_route(gw):
     assert view["run"] is None and view["last"] is None
     assert view["pending"] == {"stale_labels": 0, "unlabelled": 0, "stale_summaries": 0, "reinterpret": 0}
     assert view["reinterpret"]["pending"] == 0 and view["reinterpret"]["reasons"] == []
+    assert view["reinterpret"]["propagated"] == {"pending": 0, "by_source": [], "may_follow": 0, "may_follow_from": []}
     cons.begin(nb)
     cons.progress(nb, "labels", 1, 4)
     page = c.get("/api/gateway/note/processing", headers=h).json()
     run = page["consolidation"]["run"]
-    assert set(run) == {"run_id", "started_at", "stage", "stage_done", "stage_total", "eta_s", "elapsed_s"}
+    assert set(run) == {"run_id", "started_at", "stage", "stage_done", "stage_total", "eta_s", "elapsed_s", "propagated"}
+    assert run["propagated"] is None  # ADR 0008 §4a: only the reinterpret stage says how many follow from an idea
     assert (run["stage"], run["stage_done"], run["stage_total"], run["run_id"]) == ("labels", 1, 4, None)
     assert isinstance(run["eta_s"], int)
     cons.end(nb, "completed", {"communities": 2, "insights": 1})
@@ -109,7 +111,7 @@ def test_the_consolidation_view_on_the_page_and_its_own_route(gw):
     assert last["status"] == "completed" and (last["labelled"], last["communities"], last["insights"]) == (1, 2, 1)
     assert {"finished_at", "status", "merges", "communities", "labelled", "summaries_refreshed",
             "insights", "left_out", "budget_spent", "notice"} <= set(last)
-    assert last["notice"] is None and last["left_out"] == {"summaries": 0, "labels": 0, "reinterpret": 0, "reasons": []}
+    assert last["notice"] is None and last["left_out"] == {"summaries": 0, "labels": 0, "reinterpret": 0, "propagated": 0, "propagated_from": [], "reasons": []}
 
 
 def test_a_run_with_gaps_says_so_and_agrees_with_pending(gw):

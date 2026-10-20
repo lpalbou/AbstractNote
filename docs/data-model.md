@@ -480,6 +480,94 @@ them all, and the as-received axis shows what the notebook believed before.
   have no record (`context_unknown`): they are reached through their mentions and the name match, and a mark on such
   a note is always read again with the model.
 
+#### Deep changes reach the ideas that relied on them (ADR 0008 §4a)
+
+A re-understanding is the one place where two readings of the same note can be compared, so it is where a change of
+meaning is measured and from where it spreads (`recall/propagation.py`).
+
+- **Change records** (`idea_changes`, truth: written once when the re-understanding is applied, copied by a
+  rebuild, never recomputed by a replay; key `(revision_id, entity_id)`): for every entity the old or the new
+  reading touched (canonical; the entities of its ops, the subjects and objects of the statements it changed, the
+  mentions it soft-removed), four signals in [0, 1] comparing the note's OLD reading with its NEW one:
+  - `kind_change` (K): 1 when the re-understanding retired, created, joined or separated the entity (a change of
+    kind shows as a retire plus a create);
+  - `summary_distance` (d): the cosine distance between the summary of the entity the old reading wrote and the one
+    the new reading wrote, both embedded now with the notebook's pinned embedder (`embedder_model`); null with
+    `summary_basis` `none` when either reading wrote none (the signal is 0); normalised `s = (d - SUMMARY_NOISE) /
+    (SUMMARY_DIFFERENT - SUMMARY_NOISE)` clamped to [0, 1];
+  - `claim_share` (C): the statements on the entity (as subject or object, merged members included) the
+    re-understanding added, closed, re-opened, repointed, restored or changed in certainty or stance (the key
+    `(subject, predicate, object, certainty, stance)`; a change of evidence or window alone does not count), over
+    `support_claims` = its active statements known at the note's date before plus those added;
+  - `relation_share` (R): the Jaccard distance between its relations `(predicate, other entity, direction)` over
+    active statements known at the note's date, before and after (`support_relations` = their union).
+
+  `magnitude = max(K, s, C, R)`; `deep` when K = 1, d >= `DEEP_SUMMARY_DISTANCE`, C >= `DEEP_CLAIM_SHARE` or R >=
+  `DEEP_RELATION_SHARE`; `summary_only` when only d crossed its threshold. Every record is kept, deep or not, so the
+  thresholds can be tuned offline from real records without a model call. `carried`, `hops`, `pass_id`: the mark
+  that took the note (below); `spread`, `spread_json` `{m0, capped_by, reached: [{entity_id, impact, reliance,
+  notes}], below_floor, hop_cut, invisible}` or `{skipped}`: where it spread.
+- **The relation graph**: live entities (not merged away, not retired), tied by statements between two entities;
+  an open statement weighs 1, an ended or superseded one `ENDED_CLAIM_WEIGHT`, a retracted or `reinterpreted` one
+  nothing (`store.notes.claim_live_sql`). A co-mention is no reliance (a note that mentions both used both, so §4
+  marks it directly).
+- **Reliance**: `r(E -> F) = a(E, F) * recency / A(F)`, where `a(E, F)` is the weight of the statements between
+  them and `A(F)` F's whole relation weight: normalised by the TARGET, so a leaf that is only about E relies on it
+  fully and a hub with hundreds of relations barely relies on one neighbour. `recency` = 1 when the relation was
+  stated (or reinforced) on or after the change date, else `1 / (1 + days / RECENCY_DAYS)`.
+- **The hop** (one per re-understanding, in the same transaction as its change records): for each deep record of
+  entity E not yet spread in this pass, `m0 = min(magnitude, carried)` (`carried` = the impact of the mark that
+  took the note: 1 for a direct mark or a person's request, the impact for a propagated one: a re-reading never
+  passes on more than it was given); for every neighbour F the re-reading did not touch itself (its users have
+  direct marks), `impact = m0 * PROPAGATION_DECAY * r(E -> F)`; under `PROPAGATION_FLOOR` nothing is marked
+  (`below_floor`), beyond `MAX_PROPAGATION_HOPS` neither (`hop_cut`, a guard: the floor binds first); otherwise the
+  notes after the re-read note in history order whose current reading used F (the §4 rule: `note_dependencies`,
+  mentions, the exact name and alias keys) are marked when the change is visible at their date.
+- **Visibility**: a change of statements, relations or identity is dated at the re-read note's date, so every later
+  note sees it; a summary-only change is seen only by the notes whose known-then summary of E (the latest at or
+  before their date) is the one this re-understanding wrote: the notes between it and the next note that described
+  E (`invisible` counts the others).
+- **Propagated marks** (`reinterpret_marks` columns since schema 4): `reason_code` `direct` (the default: §4) or
+  `propagated`, `source_entity_id` (E), `source_revision_id` (the re-understanding), `impact`, `hops` (from the
+  first change). The reason names no number: "Zorn is understood differently since a note of 2026-03-20 was read
+  again, and the budget board relies on it.". An untaken mark gives way to a direct one and to a stronger
+  propagated one (max, never a sum); a direct mark is never replaced.
+- **Order**: the waiting notes are read in two tiers, each one forward sweep in history order: tier A = notes with
+  a direct mark or a propagated one of impact >= `TIER_A_IMPACT`, tier B = the rest (a single queue by impact would
+  read a note before its own earlier foundation was read again).
+- **What the model sees and decides**: a note taken through a propagated mark gets, in its linking packet, the block
+  "Understood differently since this note was read": per source idea (at most 3, the rest counted) its name and
+  kind, what it is now as known on the note's date, what it was taken to be before, and the statements the
+  re-understanding no longer reads and now reads (at most 6, the rest counted); never an impact. Its dependency
+  record keeps `related: {entity_id: {summary, claims}}` (the known-then summary revision and a hash of the live
+  statements known then); the no-call check settles a later propagated mark from the same idea without a call
+  when that state did not change, and reads the note when the reading never recorded it. A re-reading the model
+  answers the same writes no revision: nothing is measured, the spread stops there.
+- **Termination**: each entity spreads at most once per pass (a later deep change of it in the same pass records
+  `skipped`), every propagated mark is strictly after the note that raised it, and the carried impact shrinks by at
+  least `PROPAGATION_DECAY` per hop, so a wave dies within `floor(log(FLOOR) / log(DECAY))` = 3 hops whatever the
+  cycles and the number of passes; a second pass without new earlier notes finds no mark and makes no call.
+- **Before the run**: `reinterpret.propagated.may_follow` is an upper bound of the notes propagated marks may add
+  (a numeric dry run: every idea a waiting note uses changes with magnitude 1, recency taken as 1, strongest path
+  to the fixed point; the later users of a reached idea after that note, not waiting already), with the ideas it
+  comes from: a bound over the ideas the waiting notes use now, never a promise.
+- **Constants** (`recall.propagation.PropagationTuning`, one frozen object; a value outside its band is refused):
+
+| Constant | Value | What it decides (measured basis: untracked/reports/R6.md) |
+|---|---|---|
+| `DEEP_SUMMARY_DISTANCE` | 0.56 | d at or above is deep: the H0 rule (noise p95 + 0.05) on the closest noise proxy, summary rewrites that came with no new statement about the entity (p95 0.511 on notebook-1000); the design's first value was 0.40 |
+| `SUMMARY_NOISE` / `SUMMARY_DIFFERENT` | 0.10 / 0.61 | the paraphrase end (noise-proxy p25 0.111) and where another idea begins (different entities of one kind: median 0.609) |
+| `DEEP_CLAIM_SHARE` / `DEEP_RELATION_SHARE` | 0.5 / 0.5 | half of the entity's statements or relations replaced |
+| `PROPAGATION_DECAY` | 0.5 | impact kept per hop |
+| `PROPAGATION_FLOOR` | 0.1 | under it nothing is marked (without it two hops reach the whole notebook) |
+| `TIER_A_IMPACT` | 0.25 | propagated marks read with the direct ones |
+| `MAX_PROPAGATION_HOPS` | 3 | a guard (0.5^3 = 0.125, 0.5^4 < 0.1) |
+| `RECENCY_DAYS` | 180 | the hyperbolic recency scale of a relation |
+| `ENDED_CLAIM_WEIGHT` | 0.5 | an ended statement's weight in the reliance |
+
+- **Upgrade** (schema 4): `meta.propagation_record = {schema: 4, since_seq, upgraded_at}`; re-understandings up to
+  `since_seq` have no change record and spread nothing; marks written before are `direct` with impact 1.
+
 ### Document dates
 
 Dates come with their basis (ADR 0008 §7). A live capture is dated by `ingest.dates.capture_date`:

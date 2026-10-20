@@ -206,8 +206,11 @@ def consolidation_view(nb: Any, svc: Any, principal: Any) -> Dict[str, Any]:
     stage_done, stage_total, eta_s, elapsed_s} | null, last: {finished_at, status, merges, communities, labelled,
     summaries_refreshed, insights, left_out, budget_spent, notice, ...} | null, pending: {stale_labels, unlabelled,
     stale_summaries, reinterpret}, reinterpret: {pending, by_entity, reasons, context_unknown, consumed_today,
-    last_marked_at}}`` (``reinterpret``: what waits to be understood again and why, readable before the stage runs,
-    ADR 0008 §5; the headless :func:`abstractnote.recall.consolidation.state` shape). ``last.status`` ``completed_with_gaps`` = the run left something for the next one
+    last_marked_at, propagated: {pending, by_source, may_follow, may_follow_from}}}`` (``reinterpret``: what waits to
+    be understood again and why, readable before the stage runs, ADR 0008 §5; ``propagated``: the notes waiting
+    because an idea they rely on was understood differently and the upper bound of what may follow, §4a; the
+    headless :func:`abstractnote.recall.consolidation.state` shape). During the reinterpret stage ``run.propagated``
+    is ``{notes, names, sources}`` of the pass (null in the other stages). ``last.status`` ``completed_with_gaps`` = the run left something for the next one
     (``left_out``; ``notice`` is its end-user sentence), so ``last`` and ``pending`` agree (ADR 0007).
 
     An open consolidation whose automation run has already ended (it stopped before closing its row) is reported
@@ -235,9 +238,9 @@ def consolidation_view(nb: Any, svc: Any, principal: Any) -> Dict[str, Any]:
             run["run_id"] = None  # started outside the automation (a headless or manual run)
     if run is not None:
         run = {k: run.get(k) for k in ("run_id", "started_at", "stage", "stage_done", "stage_total", "eta_s",
-                                       "elapsed_s")}
+                                       "elapsed_s", "propagated")}
     return {"automation": automation, "run": run, "last": last, "pending": cons.pending(nb),
-            "reinterpret": nb.store.reinterpret_state()}
+            "reinterpret": nb.reinterpret_state()}
 
 
 @router.get("/consolidation")

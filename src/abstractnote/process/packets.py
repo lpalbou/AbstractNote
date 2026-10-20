@@ -40,6 +40,10 @@ LATER_SUMMARIES_PER_CANDIDATE = 2
 #: The LATER block's label (ADR 0008 §2): what the model may do with what was recorded after the note.
 LATER_LABEL = ("LATER (recorded after this note's date — do not restate; say if a statement is an earlier state of"
                " one of these):")
+#: The block of a note read again because an idea it relies on was understood differently (ADR 0008 §4a): what
+#: changed about that idea since the note was read, as known on the note's date (no impact number is ever shown).
+CHANGED_LABEL = ("Understood differently since this note was read (ideas this note relies on, as known on its date;"
+                 " read the note again in their light, and answer as before where its meaning does not change):")
 #: Characters kept of a summary, an evidence excerpt or a role in a packet line.
 SUMMARY_CHARS = 240
 EVIDENCE_CHARS = 200
@@ -320,6 +324,24 @@ def link_batches(note: Dict[str, Any], extraction: Dict[str, Any], resolved: Lis
         by_group[owner.get(str(c.get("subject")), 0)].append((i, c))
     envelope = note_envelope()
     summary = clip(ext.get("summary"), 600)
+    changed_lines = []
+    for b in [x for x in (n.get("understood_differently") or []) if isinstance(x, dict)]:
+        if b.get("more_sources"):
+            changed_lines.append("  (" + str(b.get("more_sources")) + " more ideas not shown)")
+            continue
+        head = "- " + clip(b.get("name"), 80) + " — " + str(b.get("kind") or "thing")
+        if str(b.get("summary_now") or "").strip():
+            head += ": now “" + clip(b.get("summary_now"), SUMMARY_CHARS) + "”"
+        changed_lines.append(head)
+        if str(b.get("summary_before") or "").strip():
+            changed_lines.append("    before: “" + clip(b.get("summary_before"), SUMMARY_CHARS) + "”")
+        for x in b.get("no_longer") or []:
+            changed_lines.append("    no longer read as: " + clip(x, 160))
+        for x in b.get("now") or []:
+            changed_lines.append("    now read as: " + clip(x, 160))
+        if int(b.get("omitted") or 0):
+            changed_lines.append("    (" + str(int(b.get("omitted"))) + " more changed statements not shown)")
+    changed = (CHANGED_LABEL + "\n" + "\n".join(changed_lines)) if changed_lines else ""
     out = []
     for gi, group in enumerate(groups):
         mlines = []
@@ -374,6 +396,7 @@ def link_batches(note: Dict[str, Any], extraction: Dict[str, Any], resolved: Lis
             "claims": "\n".join(clines) if clines else "(none in this part)",
             "tasks": "\n".join(tlines) if tlines else "(none)",
             "open_tasks": "\n".join(olines) if olines else "(none)",
+            "changed": changed,
             "as_of": ("Write every summary as of " + day + ", this note's date: what the entity was then, from this"
                       " note and what was known then; never use what was recorded later.") if day else
                      "Write every summary from this note and what was known when it was written.",

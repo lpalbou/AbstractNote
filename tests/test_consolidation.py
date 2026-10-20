@@ -208,7 +208,7 @@ def test_the_budget_bounds_the_summary_loop_and_says_what_it_did_not_reach(tmp_p
     last = cons.last(nb_)
     assert cons.pending(nb_)["stale_summaries"] == 3
     assert last["status"] == "completed_with_gaps" and last["budget_spent"] is True
-    assert last["left_out"] == {"summaries": 3, "labels": 0, "reinterpret": 0, "reasons": [cons.BUDGET_REASON]}
+    assert last["left_out"] == {"summaries": 3, "labels": 0, "reinterpret": 0, "propagated": 0, "propagated_from": [], "reasons": [cons.BUDGET_REASON]}
 
 
 def test_a_tool_failure_inside_the_summary_loop_ends_the_run_and_closes_it_as_failed(tmp_path):
