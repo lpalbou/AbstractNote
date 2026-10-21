@@ -338,9 +338,20 @@ class Notebook:
             self._gate(rev["revision_id"])
         row = self.store.revision_row(rev["revision_id"])
         if not row["applied_kg"]:
+            # W31: an op the index refused (a supersession invariant) is not written to AbstractMemory either, so
+            # the two stores agree; AbstractMemory checks the same invariants on its own state (``kg_refused``)
+            result = dict(_uj(row["result_json"], {}) or {})
+            refused = {int(x["index"]) for x in result.get("ops_refused") or [] if isinstance(x, dict)}
+            kg_rev = {**rev, "ops": [op for i, op in enumerate(rev.get("ops") or []) if i not in refused]} \
+                if refused else rev
             with self.store.lock:
-                kinds = kinds_from_index(self.store.conn, rev)
-            self.kg.project(rev, kinds)
+                kinds = kinds_from_index(self.store.conn, kg_rev)
+            projected = self.kg.project(kg_rev, kinds)
+            if projected.get("refused"):
+                result["kg_refused"] = projected["refused"]
+                with self.store.lock:
+                    self.store.conn.execute("UPDATE revisions SET result_json=? WHERE revision_id=?",
+                                            (_j(result), rev["revision_id"]))
             self.store.set_applied_kg(rev["revision_id"])
         return self._result(self.store.revision_row(rev["revision_id"]))
 
@@ -405,7 +416,7 @@ class Notebook:
             "reinterpret_marked": result.get("reinterpret_marked") or {"count": 0, "notes": [], "by_entity": []},
         }
         for k in ("claims_reinterpreted", "claims_revised", "claims_reopened", "claims_start_restored",
-                  "reinforcements_dropped",
+                  "reinforcements_dropped", "ops_refused", "kg_refused",
                   "tasks_reopened", "tasks_retired", "entities_retired", "stale_context", "reinterpreted",
                   "propagation", "gate"):
             if result.get(k):
@@ -752,6 +763,9 @@ class Notebook:
             "interpretations": self.interpretations(note_id),
             # ADR 0008: why the note waits to be understood again (the reasons of its pending marks), [] when it does not
             "reinterpret_pending": next((m["reasons"] for m in self.store.pending_marks() if m["note_id"] == note_id), []),
+            # W31 (F6): why the last pass could not read it again (held for the day, held by another reading, the
+            # error of a failed reading), the sentence its pending mark keeps; null when none
+            "reinterpret_error": next((m["error"] for m in self.store.pending_marks() if m["note_id"] == note_id), None),
         }
 
     def note_links(self, note_id: str) -> Dict[str, Any]:

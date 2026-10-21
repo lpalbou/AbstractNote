@@ -59,6 +59,10 @@ def decode_cursor(cursor: Optional[str]) -> Optional[List[Any]]:
 
 
 _limits_log = logging.getLogger("abstractnote.limits")
+#: W31 (retro-C blocker 1b): the supersession invariants refused at apply time are logged here.
+_invariants_log = logging.getLogger("abstractnote.invariants")
+#: The revision warning's prefix of an op the supersession invariants refused (docs/data-model.md "Invariants").
+INVARIANT_WARNING = "invariant_refused"
 
 
 def clamp_note(limit: Any, default: int = 50, maximum: int = 500) -> Tuple[int, Optional[str]]:
@@ -537,7 +541,8 @@ class NoteStore:
             if row[0]:
                 return stats
             ctx = _OpContext(self, c, rev, stats, keys)
-            for op in rev.get("ops") or []:
+            for i, op in enumerate(rev.get("ops") or []):
+                ctx.op_index = i
                 ctx.apply(op["op"], dict(op.get("payload") or {}))
             ctx.finish()
             c.execute("UPDATE revisions SET applied_index=1 WHERE revision_id=?", (rev["revision_id"],))
@@ -1384,6 +1389,8 @@ class NoteStore:
                                              "entities": [], "marked_at": r["marked_at"], "taken_by": r["pass_id"],
                                              "error": r["error"], "reason_code": PROPAGATED, "impact": 0.0,
                                              "hops": None, "sources": [], "tier": "B"}
+            if r["error"] and not d["error"]:  # any of its marks a pass left an error on (W31)
+                d["error"] = r["error"]
             if r["reason"] not in d["reasons"]:
                 d["reasons"].append(r["reason"])
             if r["by_note_id"] and r["by_note_id"] not in d["by_note_ids"]:
@@ -1435,7 +1442,7 @@ class NoteStore:
 
     def reinterpret_state(self) -> Dict[str, Any]:
         """``{pending, by_entity: [{entity_id, name, notes}], reasons: [sentence], context_unknown, consumed_today,
-        last_marked_at, propagated: {pending, by_source: [{entity_id, name, notes}]}}``: what is waiting to be
+        last_marked_at, errors: [{error, notes}], propagated: {pending, by_source: [{entity_id, name, notes}]}}``: what is waiting to be
         re-understood and why, readable before the stage runs (review 3.2). ``propagated`` = the notes waiting only
         because an idea they rely on was understood differently (ADR 0008 §4a), by source idea;
         ``Notebook.reinterpret_state`` adds the upper bound of what may follow."""
@@ -1448,7 +1455,10 @@ class NoteStore:
         top_sources = sorted(sources.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
         counts: Dict[str, int] = {}
         reasons: List[str] = []
+        errors: Dict[str, int] = {}
         for p in pend:
+            if p.get("error"):  # W31 (F6): the sentence a pass left on the mark (held, failed), readable before a run
+                errors[p["error"]] = errors.get(p["error"], 0) + 1
             for e in p["entities"]:
                 counts[e] = counts.get(e, 0) + 1
             for why in p["reasons"]:
@@ -1467,6 +1477,7 @@ class NoteStore:
         last = self.q1("SELECT MAX(marked_at) FROM reinterpret_marks")[0]
         return {"pending": len(pend), "by_entity": [{"entity_id": e, "name": self._name(e), "notes": n} for e, n in top],
                 "reasons": reasons[:10], "context_unknown": unknown, "consumed_today": consumed, "last_marked_at": last,
+                "errors": [{"error": k, "notes": n} for k, n in sorted(errors.items(), key=lambda kv: (-kv[1], kv[0]))],
                 "propagated": {"pending": len(prop), "by_source": [{"entity_id": e, "name": self._display(e), "notes": n}
                                                                    for e, n in top_sources]}}
 
@@ -1629,6 +1640,8 @@ class _OpContext:
         # ADR 0008: what this revision did that marks later notes for re-understanding, and the entities it retired
         self.adr8: Dict[str, Any] = {"redated": [], "archived": [], "retracted": [], "paired": [], "retired": set(),
                                      "stale": []}
+        self.op_index = -1
+        self.refused: List[Dict[str, Any]] = []  # W31: ops the supersession invariants refused (index, op, why)
 
     def apply(self, op: str, p: Dict[str, Any]) -> None:
         fn = getattr(self, "op_" + op.replace(".", "_"), None)
@@ -1840,6 +1853,88 @@ class _OpContext:
             self.dirty_entities.add(row["object_id"])
             self.dirty_relations.add((row["subject_id"], row["object_id"], row["predicate"]))
 
+    # --- W31 (retro-C blocker 1b): the supersession invariants, checked at apply time (docs/data-model.md)
+    def _row(self, cid: Optional[str]) -> Optional[sqlite3.Row]:
+        return self.c.execute("SELECT * FROM claims WHERE claim_id=?", (cid,)).fetchone() if cid else None
+
+    @staticmethod
+    def _start(row: Any) -> Optional[str]:
+        return row["valid_from"] or row["observed_at"]
+
+    def lineage_violation(self, claim_id: str, successor_id: Optional[str], new_until: Optional[str]
+                          ) -> Optional[Tuple[str, str]]:
+        """Why closing (or re-pointing) ``claim_id`` as superseded by ``successor_id``, its window then ending at
+        ``new_until``, would corrupt the belief history; None when it would not. ``(code, sentence)``:
+
+        - ``self``: a statement replaced by itself;
+        - ``successor_missing``: the statement that would replace it does not exist: the belief would end with no
+          successor;
+        - ``cycle``: the successor is already replaced by this statement, directly or through later ones (R5's set 3:
+          25k superseded by 40k and 40k superseded by 25k): ``superseded_by`` stays acyclic;
+        - ``erases_later_belief``: the statement's window would become empty (it ends where it starts) while the one
+          said to replace it is an EARLIER statement (recorded before it) that also starts before it: a later belief
+          erased by an earlier one (set 3: 40k's window [2025-02-05, 2025-02-05), no budget belief in 2026; an older
+          note never closes a later belief). A replacement that starts at the same moment (the same-day correction,
+          B P1d, warned by the builder) is allowed, and so is a later note cancelling a plan dated after it (a
+          statement valid from 2027 closed empty by a 2026 note: it never held).
+
+        A close with no successor named (a person's ``claim.supersede`` without one) is none of these."""
+        if not successor_id:
+            return None
+        if successor_id == claim_id:
+            return "self", "a statement cannot replace itself"
+        row = self._row(claim_id)
+        succ = self._row(successor_id)
+        if row is None:
+            return None  # the op raises for a missing claim itself
+        if succ is None:
+            return "successor_missing", f"the statement that would replace it, {successor_id}, does not exist"
+        seen = {successor_id}
+        cur = succ
+        while cur is not None and cur["superseded_by"]:
+            nxt = cur["superseded_by"]
+            if nxt == claim_id:
+                return "cycle", (f"{successor_id} is already replaced by it (directly or through later statements);"
+                                 " the two would replace each other")
+            if nxt in seen:
+                break  # a cycle among other statements (written before this check): not this op's
+            seen.add(nxt)
+            cur = self._row(nxt)
+        start, s_start = row["valid_from"], self._start(succ)
+        was_empty = row["valid_until"] is not None and start is not None and row["valid_until"] <= start
+        if (start and new_until is not None and new_until <= start and not was_empty and s_start
+                and s_start < start and succ["observed_at"] < row["observed_at"]):
+            return "erases_later_belief", (f"it would end the later statement (from {start[:10]}) where it begins, in"
+                                           f" favour of {successor_id}, an earlier statement that starts earlier"
+                                           f" ({s_start[:10]})")
+        return None
+
+    def refuse(self, op: str, claim_id: str, successor_id: Optional[str], why: Tuple[str, str]) -> None:
+        """Record a refused op (W31): the rest of the revision applies; the op is named in the revision's warnings
+        (``invariant_refused: ...``), in the result (``ops_refused``, read by the AbstractMemory projection, which
+        skips it too) and logged on ``abstractnote.invariants``. Never silent."""
+        code, sentence = why
+        self.refused.append({"index": self.op_index, "op": op, "claim_id": claim_id, "successor_id": successor_id,
+                             "code": code, "why": sentence})
+        _invariants_log.warning("revision %s: %s on %s refused (%s): %s", self.rid, op, claim_id, code, sentence)
+
+    def _record_refused(self) -> None:
+        if not self.refused:
+            return
+        self.stats["ops_refused"] = list(self.refused)
+        row = self.c.execute("SELECT warnings_json FROM revisions WHERE revision_id=?", (self.rid,)).fetchone()
+        if row is None:
+            return
+        warnings = list(_uj(row["warnings_json"], []) or [])
+        changed = False
+        for x in self.refused:
+            w = f"{INVARIANT_WARNING}: {x['op']} on statement {x['claim_id']} was not applied: {x['why']}."
+            if w not in warnings:  # a rebuild replays the same ops and finds the warning there
+                warnings.append(w)
+                changed = True
+        if changed:
+            self.c.execute("UPDATE revisions SET warnings_json=? WHERE revision_id=?", (_j(warnings), self.rid))
+
     @staticmethod
     def window_end(row: Any, until: Optional[str]) -> Optional[str]:
         """``until`` never before the claim's ``valid_from`` (none: no known start, nothing to clamp): a window
@@ -1849,6 +1944,13 @@ class _OpContext:
 
     def op_claim_supersede(self, p: Dict[str, Any]) -> None:
         row = self._claim(p["claim_id"])
+        if row["status"] == "active":
+            why = self.lineage_violation(p["claim_id"], p.get("by_claim_id"),
+                                         row["valid_until"] or self.window_end(row, p["valid_until"]))
+            if why:
+                self.refuse("claim.supersede", p["claim_id"], p.get("by_claim_id"), why)
+                self._dirty_claim_relation(row)
+                return
         cur = self.c.execute(
             "UPDATE claims SET status='superseded', superseded_by=?, valid_until=COALESCE(valid_until, ?),"
             " closed_reason=?, closed_revision_id=? WHERE claim_id=? AND status='active'",
@@ -1866,6 +1968,20 @@ class _OpContext:
         row = self._claim(p["claim_id"])
         self._claim(p["before_claim_id"])
         end = self.window_end(row, p["valid_until"])
+        why = None
+        if row["status"] == "active":
+            why = self.lineage_violation(p["claim_id"], p["before_claim_id"],
+                                         end if row["valid_until"] is None or row["valid_until"] > end else
+                                         row["valid_until"])
+        if why is None and p.get("after_claim_id"):
+            prev0 = self._claim(p["after_claim_id"])
+            if prev0["status"] not in ("retracted", REINTERPRETED):
+                why = self.lineage_violation(p["after_claim_id"], p["claim_id"], self.window_end(
+                    prev0, p.get("after_valid_until") or row["valid_from"] or row["observed_at"]))
+        if why:  # the whole placement is refused: the statement stays as added, beside the later one (visible)
+            self.refuse("claim.insert_before", p["claim_id"], p["before_claim_id"], why)
+            self._dirty_claim_relation(row)
+            return
         cur = self.c.execute(
             "UPDATE claims SET status='superseded', superseded_by=?, valid_until=CASE WHEN valid_until IS NULL OR"
             " valid_until>? THEN ? ELSE valid_until END, closed_reason=?, closed_revision_id=? WHERE claim_id=? AND"
@@ -1894,6 +2010,16 @@ class _OpContext:
         The relation's ``first_seen`` follows (``refresh_relation``: the earliest ``observed_at``)."""
         row = self._claim(p["claim_id"])
         at = p["observed_at"]
+        if p.get("after_claim_id") and p.get("after_valid_until"):
+            prev0 = self._claim(p["after_claim_id"])
+            if prev0["status"] != "retracted":
+                why = self.lineage_violation(p["after_claim_id"], prev0["superseded_by"] or p["claim_id"],
+                                             self.window_end(prev0, p["after_valid_until"]))
+                if why:
+                    self.refuse("claim.start_earlier", p["after_claim_id"], prev0["superseded_by"] or p["claim_id"],
+                                why)
+                    self._dirty_claim_relation(row)
+                    return
         cur = self.c.execute(
             "UPDATE claims SET observed_at=CASE WHEN observed_at>? THEN ? ELSE observed_at END, valid_from=CASE WHEN"
             " valid_from IS NOT NULL AND valid_from>? THEN ? ELSE valid_from END WHERE claim_id=? AND"
@@ -2221,6 +2347,7 @@ class _OpContext:
             self.s.refresh_entity_fts(self.c, eid)
         self.stats["touched_entities"] = sorted(stat_targets)
         self._record_topics_not_assigned()
+        self._record_refused()
         if self.retro:
             retro = sorted({self.s.canonical(e, self.c) for e in self.retro})
             self.stats["retro_entities"] = retro
@@ -2311,6 +2438,12 @@ class _OpContext:
         ``valid_until``, ``superseded_by``, ``closed_reason``, ``closed_revision_id``). ``assertion_id`` names its
         re-opened AbstractMemory copy (a window cannot widen there)."""
         row = self._claim(p["claim_id"])
+        if p.get("status") == "superseded":
+            why = self.lineage_violation(p["claim_id"], p.get("superseded_by"), p.get("valid_until"))
+            if why:
+                self.refuse("claim.reopen", p["claim_id"], p.get("superseded_by"), why)
+                self._dirty_claim_relation(row)
+                return
         self.c.execute("UPDATE claims SET status=?, valid_until=?, superseded_by=?, closed_reason=?,"
                        " closed_revision_id=?, assertion_id=? WHERE claim_id=?",
                        (p["status"], p.get("valid_until"), p.get("superseded_by"), p.get("closed_reason"),
@@ -2322,6 +2455,11 @@ class _OpContext:
         """A statement the superseded reading closed and the new reading closes on the same slot: it stays closed,
         now superseded by the new reading's statement."""
         row = self._claim(p["claim_id"])
+        why = self.lineage_violation(p["claim_id"], p.get("superseded_by"), row["valid_until"])
+        if why:
+            self.refuse("claim.repoint", p["claim_id"], p.get("superseded_by"), why)
+            self._dirty_claim_relation(row)
+            return
         self.c.execute("UPDATE claims SET superseded_by=? WHERE claim_id=?", (p["superseded_by"], p["claim_id"]))
         self._dirty_claim_relation(row)
 

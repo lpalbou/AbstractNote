@@ -15,6 +15,7 @@ once (``VectorCache``) and the triple store reads them through
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import warnings
 from pathlib import Path
@@ -26,6 +27,8 @@ from abstractmemory.canonical_text import canonical_text
 from .. import ids
 from ..model import CERTAINTY_CONFIDENCE
 from .embeddings import VectorCache, vector_key
+
+_log = logging.getLogger("abstractnote.invariants")
 
 OWNER_ID = "abstractnote"
 SCOPE = "global"
@@ -284,11 +287,19 @@ class ClaimStore:
                 warnings.filterwarnings("error", message=r"#FALLBACK: embedder failed", category=RuntimeWarning)
                 self.store.add(adds)
         closed = 0
+        refused: List[Dict[str, Any]] = []
         if any(c["kind"] == REINTERPRETED_KIND for c in closes):
             require_reinterpreted()
         for c in closes:
             if c["kind"] == "supersede" and not c["replacement_ids"]:
                 c = dict(c, kind="retract")
+            why = self.lineage_violation(c) if c["kind"] == "supersede" else None
+            if why:  # W31: never write a cycle or erase a later belief in AbstractMemory either (refused, said)
+                refused.append({"assertion_id": c["assertion_id"], "replacement_ids": list(c["replacement_ids"]),
+                                "code": why[0], "why": why[1]})
+                _log.warning("revision %s: the AbstractMemory closure of %s was refused (%s): %s", rev["revision_id"],
+                             c["assertion_id"], why[0], why[1])
+                continue
             if self.store.close_assertion(c["assertion_id"], c["valid_until"]):
                 closed += 1
             elif c.get("narrow") and self.narrow_assertion(c["assertion_id"], c["valid_until"]):
@@ -301,7 +312,48 @@ class ClaimStore:
                             "valid_until": c["valid_until"]},
                 closure_id=ids.closure_id(rev["revision_id"], c["assertion_id"], c["kind"]),
             ))
-        return {"added": len(adds), "closed": closed}
+        return {"added": len(adds), "closed": closed, "refused": refused}
+
+    def _assertion(self, assertion_id: str) -> Optional[TripleAssertion]:
+        rows = self.query(assertion_ids=(assertion_id,))
+        return rows[0] if rows else None
+
+    def lineage_violation(self, close: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+        """The supersession invariants on AbstractMemory's own state (W31, the note index's twin check,
+        ``_OpContext.lineage_violation``): a ``supersede`` closure of ``assertion_id`` naming ``replacement_ids``
+        is refused when a replacement is already replaced by it in the journal (a cycle, followed through the
+        journal's supersede closures), or when it would close an open, later assertion where it starts in favour
+        of a replacement observed before it that also starts earlier (a later belief erased). ``(code, sentence)``
+        or None."""
+        aid = close["assertion_id"]
+        for rep in close.get("replacement_ids") or ():
+            if rep == aid:
+                return "self", "an assertion cannot replace itself"
+            seen, todo = {rep}, [rep]
+            while todo:
+                cur = todo.pop()
+                for rec in self.journal.closures(assertion_id=cur, limit=0):
+                    if rec.kind != "supersede":
+                        continue
+                    for nxt in rec.replacement_ids or ():
+                        if nxt == aid:
+                            return "cycle", f"{rep} is already replaced by {aid} in AbstractMemory"
+                        if nxt not in seen:
+                            seen.add(nxt)
+                            todo.append(nxt)
+        a = self._assertion(aid)
+        if a is None or a.valid_until is not None or not a.valid_from:
+            return None
+        until = close.get("valid_until")
+        if until is None or until > a.valid_from:
+            return None
+        for rep in close.get("replacement_ids") or ():
+            r = self._assertion(rep)
+            r_start = (r.valid_from or r.observed_at) if r is not None else None
+            if r_start and r_start < a.valid_from and r.observed_at < a.observed_at:
+                return "erases_later_belief", (f"closing the open assertion {aid} where it starts would erase it in"
+                                               f" favour of {rep}, which starts earlier")
+        return None
 
     def narrow_assertion(self, assertion_id: str, valid_until: str) -> bool:
         """Move an already-closed window EARLIER (a retrospective note placed between two beliefs). The only

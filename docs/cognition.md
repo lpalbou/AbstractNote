@@ -262,9 +262,11 @@ flowchart TD
   `*_until` time. `note_queue_lease` never leases a claimed note; a note leased by a drain, or claimed one way,
   cannot be claimed the other way (`Queue.claim` answers false). A claim ends with the outcome (`ack`) or
   `Queue.release`; `Queue.heartbeat` (called by `note_file`) moves its end on. The reinterpret stage claims each
-  note it hands to the model (`note_reinterpret_next`; a note a drain or an inline understanding holds is held
-  with "It is being understood right now; it is read again next time." and its mark waits for the next pass)
-  and the apply of the re-reading releases it (a failure the next round reports releases it too). A claim
+  note BEFORE anything reads it again (`note_reinterpret_next`; the no-call check writes the note's context
+  packet, so it runs only under the claim). A note a drain or an inline understanding holds is held alone with
+  "Being understood at this moment by another reading; read again next time." (code `held_by_inline`,
+  `held_by_drain` or `held_by_reinterpret`) and its mark waits for the next pass; the stage goes on with the next
+  note. The apply of the re-reading releases the claim (a failure the next round reports releases it too). A claim
   whose run died is leasable once `CLAIM_S` (15 minutes, as a drain's lease) has passed since its last heartbeat:
   the next lease clears it and logs "Understanding it right away stopped before it finished; it is understood from
   the queue instead." in `queue_errors`, not counted as a failure.
@@ -517,14 +519,20 @@ included, is appended to `reading_confirmations` for the current reading, never 
 next wave from the same unchanged idea needs no call). A re-understanding marks only
 notes after it in history order, so a pass is one forward sweep and ends; a second pass with no new earlier note
 has no mark to read and calls no model. A note read again three times in one UTC day waits for the next day
-(`REINTERPRET_PER_DAY`, skipped with that reason). A note that cannot be read again (the model fails) is skipped
-for this run with its reason (the W26 shape: `stages_json.reinterpret.skipped_ids`, a warning on the
-`abstractnote.consolidation` logger), its mark waits (with the error) and its previous interpretation stays
-current; the stage goes on with the next note. The time budget stops the stage before it takes the next note:
-what is left is `results.not_reached.reinterpret`. The close reports `reinterpreted`, `unchanged` and
-`reinterpret_failed` (read from the marks), and `left_out.reinterpret` = the skipped notes still marked plus what the
-budget did not reach; a run that left notes is `completed_with_gaps` and its notice says "3 notes could not be
-understood again this time; they will be read again next time." The progress line reads "Re-understanding 12
+(`REINTERPRET_PER_DAY`, held with "Already understood again three times today; read again tomorrow.", code
+`held_today`). A note that cannot be read again (the model fails), or whose preparation raises (code `error`, its
+claim released), is skipped for this run with its reason (the W26 shape: `stages_json.reinterpret.skipped_ids`,
+each with its `code`, a warning on the `abstractnote.consolidation` logger), its mark waits (with the sentence as
+its `error`, readable as GET note `reinterpret_error` and `reinterpret.errors`) and its previous interpretation
+stays current; the stage goes on with the next note: one note never fails the batch. The time budget stops the
+stage before it takes the next note: what is left is `results.not_reached.reinterpret`. The close reports
+`reinterpreted`, `unchanged` and `reinterpret_failed` (read from the marks), and `left_out.reinterpret` = the notes
+this pass took and left (held, failed: read from the marks, the truth, besides the stage's skip list) still marked
+plus what the budget did not reach, with `left_out.reinterpret_reasons` (`[{reason, notes}]`); a run that left notes
+is `completed_with_gaps`, its row keeps the causes (`last.why`) and its notice says why: "35 notes could not be
+understood again this time; they will be read again next time. Why: Already understood again three times today;
+read again tomorrow (35 notes)." (F6, W31: before, the per-day holds never reached the skip list and such a run
+closed `completed` with `reinterpret_failed 35` and no notice.) The progress line reads "Re-understanding 12
 notes" (web: "Re-understanding 3 of 12 notes"); `GET /note/consolidation` `pending.reinterpret` gives the count
 before the run, and `consolidation.state(nb)["reinterpret"]` the count by entity, the reasons, and the gate's
 record (`candidates`, `marked`, `top_sources`, `would_mark_at`); the pending line reads "12 notes to understand again
@@ -545,6 +553,21 @@ sources, and `GET /note/consolidation` shows the candidates, the notes marked, t
 it conducts a quarter less if nothing changed and a quarter more if something did (never under 0.25). On the
 operator's 1,000-note notebook the two Mnemosyne archive notes that marked 790 notes directly mark 1 through the gate
 (untracked/reports/R7.md).
+
+A statement the PERSON retracted (`Notebook.retract_claim`) is no previous statement to keep (W31, INT3): it is
+listed apart under "withdrawn by you — do not restate (you said these are wrong):", with no P number (so
+`same_statement_as_previous` cannot name it), the prompts say never to give it again, and a re-reading that leaves
+it out keeps the person's retraction (it is never closed `reinterpreted`). In the linking message of a note read
+again every known-then and LATER statement also says when it was written (`#1 lut ex:budget_status
+“placeholder…” (stated 2026-03-05; since 2026-03-05)`), and both prompts
+carry the time rule (W31, F1; lead's ruling: a statement cannot be resolved by an event dated after it): a statement
+of this note is never the resolution of a condition a statement known on its date sets for a later date (the
+day-5 "placeholder until the board meets on 2026-04-02" against the day-20 "40k as decided"): no `supersedes`,
+both kept, and the extraction gives the statement the certainty the note's date allows; the other way round, the
+earlier note that sets the condition is told that a LATER statement stated before that date is not its outcome
+(no `earlier_state_of` naming it, which placed the placeholder before "decided" and closed it). LATER statements
+say when they were stated in every packet (a first reading's known-then lines are unchanged). The model decides the
+certainty; nothing reads the text.
 
 Deep changes spread (ADR 0008 §4a). Each applied re-understanding is measured against the reading it replaced (per
 entity: retired or joined, the summary's embedding distance, the share of its statements and of its relations

@@ -1480,7 +1480,7 @@ def plan_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any, 
                                                   "tasks_reopened", "tasks_retired", "entities_retired")}
     diff["claims_revised"] = list(revised)
     for r in own_rows:
-        if r["claim_id"] not in kept:
+        if r["claim_id"] not in kept and not person_withdrawn(s, r):  # W31: the person's retraction stays as it is
             pre.append(_op("claim.reinterpret", claim_id=r["claim_id"], valid_until=r["valid_from"] or r["observed_at"],
                            assertion_id=r["assertion_id"] or r["claim_id"], reason=reason or "understood again"))
             diff["claims_closed"].append(r["claim_id"])
@@ -1666,6 +1666,16 @@ def _keep_related(c: Any, store: Any, revision_id: Optional[str], packet: Option
                                      pass_id, ids.utc_now()))
 
 
+def person_withdrawn(store: Any, row: Any) -> bool:
+    """Whether a statement was retracted by the person (``Notebook.retract_claim``: a user revision ``claim.retract``,
+    no note), as opposed to a note's own retraction or a re-understanding. W31: such a statement is shown to a
+    re-reading as "withdrawn by you — do not restate" and keeps its retraction (never closed ``reinterpreted``)."""
+    if row["status"] != "retracted" or not row["closed_revision_id"]:
+        return False
+    rv = store.revision_row(row["closed_revision_id"])
+    return rv is not None and rv["note_id"] is None and rv["action"] == "claim.retract"
+
+
 def reinterpret_view(nb: Any, note_id: str, out: Dict[str, Any]) -> Dict[str, Any]:
     """The context of a note understood again (ADR 0008): its own previous reading is not shown (its statements and
     tasks), and the statements and tasks of other notes that the previous reading closed are shown again as they
@@ -1698,6 +1708,10 @@ def reinterpret_view(nb: Any, note_id: str, out: Dict[str, Any]) -> Dict[str, An
     # as:"), its statements numbered P0, P1, ... (``packet.previous_claims``), so a statement read again is named the
     # same as its previous one (``same_statement_as_previous``) and keeps its claim id and predicate
     rows = s.q("SELECT * FROM claims WHERE note_id=? AND status!=? ORDER BY seq, claim_id", (note_id, REINTERPRETED))
+    # W31 (INT3's product call): a statement the PERSON retracted is no previous statement to keep: it is listed apart,
+    # "withdrawn by you — do not restate", without a P number (the linking cannot name it the same as its previous one)
+    withdrawn = [r for r in rows if person_withdrawn(s, r)]
+    rows = [r for r in rows if not person_withdrawn(s, r)]
     packet["previous_claims"] = [r["claim_id"] for r in rows]
     named = []
     for (eid,) in s.q("SELECT entity_id FROM entity_notes WHERE note_id=? ORDER BY entity_id", (note_id,)):
@@ -1711,7 +1725,14 @@ def reinterpret_view(nb: Any, note_id: str, out: Dict[str, Any]) -> Dict[str, An
         if r["object_id"]:
             v["object"] = s._display(r["object_id"]) or v["object"]
         views.append(v)
-    out["note"] = {**out["note"], "previous_reading": {"claims": views, "entities": named}}
+    gone = []
+    for r in withdrawn:
+        v = claim_view(nb, r, -1)
+        v["subject"] = s._display(r["subject_id"]) or v["subject"]
+        if r["object_id"]:
+            v["object"] = s._display(r["object_id"]) or v["object"]
+        gone.append(v)
+    out["note"] = {**out["note"], "previous_reading": {"claims": views, "entities": named, "withdrawn": gone}}
     cq = ",".join("?" for _ in chain)
     by_entity = {c["entity_id"]: c for c in cands}
     for r in s.q(f"SELECT * FROM claims WHERE closed_revision_id IN ({cq}) AND (note_id IS NULL OR note_id!=?) AND"

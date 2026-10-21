@@ -80,10 +80,14 @@ REINTERPRET_BATCH = 1
 #: A note understood again this many times in one UTC day waits for the next day (review §6: a stated bound on
 #: oscillation; the hold is a skip with its reason, counted in ``left_out``, never silent).
 REINTERPRET_PER_DAY = 3
-HELD_REASON = "It was understood again three times today; it waits for tomorrow."
+HELD_REASON = "Already understood again three times today; read again tomorrow."
 FAILED_REASON = "It could not be understood again this time."
 #: A note a drain or an inline understanding holds (its queue claim or lease, R4) waits for the next pass.
-BUSY_REASON = "It is being understood right now; it is read again next time."
+BUSY_REASON = "Being understood at this moment by another reading; read again next time."
+#: W31 (F6): why a note of the reinterpret stage was left for the next pass, as a code beside the sentence (the
+#: ``held`` entries of ``note_reinterpret_next`` and the stage's ``skipped_ids``): the per-day bound, a note an inline
+#: understanding holds (``held_by_inline``), a drain's lease, another pass's claim, an error on that one note.
+HELD_CODES = ("held_today", "held_by_inline", "held_by_drain", "held_by_reinterpret", "error")
 
 _log = logging.getLogger("abstractnote.consolidation")
 
@@ -203,14 +207,52 @@ def _skips(skipped: Any, reason: Optional[str]) -> List[Dict[str, str]]:
     default = " ".join(str(reason or "").split()) or "No reason was given."
     out: List[Dict[str, str]] = []
     for x in skipped:
+        code = None
         if isinstance(x, dict):
             xid, why = str(x.get("id") or "").strip(), " ".join(str(x.get("reason") or "").split()) or default
+            code = str(x.get("code") or "").strip() or None
         else:
             xid, why = str(x or "").strip(), default
         if not xid:
             raise ValueError("A skipped item has no id.")
-        out.append({"id": xid, "reason": why})
+        out.append({"id": xid, "reason": why, **({"code": code} if code else {})})
     return out
+
+
+def _merge_skips(cid: str, stage: str, s: Dict[str, Any], new_skips: List[Dict[str, str]]) -> None:
+    """Add ``new_skips`` to the stage record ``s`` (``skipped_ids``, ``skipped``, ``reason``, ``reasons``), each id
+    once, and log every newly skipped group as a warning naming the stage and the reason (ADR 0007)."""
+    have = list(s.get("skipped_ids") or [])
+    known = {x["id"] for x in have}
+    added = [x for x in new_skips if x["id"] not in known and not known.add(x["id"])]
+    have.extend(added)
+    reasons = list(s.get("reasons") or [])
+    for x in added:
+        if x["reason"] not in reasons:
+            reasons.append(x["reason"])
+    s.update({"skipped_ids": have, "skipped": len(have), "reasons": reasons})
+    if added:
+        s["reason"] = added[-1]["reason"]
+        for why in dict.fromkeys(x["reason"] for x in added):
+            _log.warning("consolidation %s, stage %s: skipped for this run (%d): %s. Reason: %s", cid, stage,
+                         len([x for x in added if x["reason"] == why]),
+                         ", ".join(x["id"] for x in added if x["reason"] == why), why)
+
+
+def _record_skips(nb: Any, stage: str, skips: List[Dict[str, str]]) -> None:
+    """W31 (F6): the items a tool itself leaves out of the open run's ``stage`` (the reinterpret stage's held notes)
+    join the stage's skip list, as the flow's own skips do, so the close counts them in ``left_out``."""
+    if not skips:
+        return
+    row = _require_open(nb)
+    stages = _stages(row)
+    s = dict(stages.get(stage) or {})
+    if not s:
+        ts = _now_ts()
+        s = {"started_ts": ts, "started_at": _iso(ts), "done": 0, "total": 0}
+    _merge_skips(row["consolidation_id"], stage, s, skips)
+    stages[stage] = s
+    _update(nb, row["consolidation_id"], stages_json=json.dumps(stages))
 
 
 def progress(nb: Any, stage: str, done: Any, total: Any, note: Optional[str] = None, skipped: Any = None,
@@ -241,21 +283,7 @@ def progress(nb: Any, stage: str, done: Any, total: Any, note: Optional[str] = N
     if d > 0:
         s["seconds_per_item"] = round((ts - float(s["started_ts"])) / d, 3)
     if new_skips:
-        have = list(s.get("skipped_ids") or [])
-        known = {x["id"] for x in have}
-        added = [x for x in new_skips if x["id"] not in known and not known.add(x["id"])]
-        have.extend(added)
-        reasons = list(s.get("reasons") or [])
-        for x in added:
-            if x["reason"] not in reasons:
-                reasons.append(x["reason"])
-        s.update({"skipped_ids": have, "skipped": len(have), "reasons": reasons})
-        if added:
-            s["reason"] = added[-1]["reason"]
-            for why in dict.fromkeys(x["reason"] for x in added):
-                _log.warning("consolidation %s, stage %s: skipped for this run (%d): %s. Reason: %s",
-                             row["consolidation_id"], stage, len(added),
-                             ", ".join(x["id"] for x in added if x["reason"] == why), why)
+        _merge_skips(row["consolidation_id"], stage, s, new_skips)
     stages[stage] = s
     cols: Dict[str, Any] = {"stage": stage, "stage_done": d, "stage_total": t, "updated_ts": ts,
                             "stages_json": json.dumps(stages)}
@@ -283,10 +311,25 @@ def _count(value: Any) -> int:
     return max(0, int(value))
 
 
-def _left_out(nb: Any, stages: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any]:
+def _failed_in_pass(nb: Any, pass_id: Optional[str]) -> List[Dict[str, str]]:
+    """W31 (F6): the notes this pass took and did not consume (failed, held for the day, held by another reading),
+    each with the error its mark keeps, read from the marks (truth), never from what the flow reported."""
+    if not pass_id:
+        return []
+    out: Dict[str, str] = {}
+    for r in nb.store.q("SELECT note_id, error FROM reinterpret_marks WHERE pass_id=? AND consumed_at IS NULL AND"
+                        " error IS NOT NULL ORDER BY mark_id", (pass_id,)):
+        out.setdefault(r["note_id"], r["error"])
+    return [{"id": k, "reason": v} for k, v in out.items()]
+
+
+def _left_out(nb: Any, stages: Dict[str, Any], extra: Dict[str, Any], pass_id: Optional[str] = None
+              ) -> Dict[str, Any]:
     """What the run leaves for the next one, checked at the close: the skipped entries still stale and groups still
-    waiting for a name (the reflect stage may have named a skipped group), plus what the time budget did not reach
-    (``extra.not_reached``), never more than :func:`pending` shows."""
+    waiting for a name (the reflect stage may have named a skipped group), the notes the reinterpret stage took and
+    could not read again (their marks keep the error: failed, held for the day, held by another reading; W31), plus
+    what the time budget did not reach (``extra.not_reached``), never more than :func:`pending` shows.
+    ``reinterpret_reasons`` = ``[{reason, notes}]``: how many of those notes wait for each reason."""
     from .communities import pending_ids
 
     reached = extra.get("not_reached") if isinstance(extra.get("not_reached"), dict) else {}
@@ -300,10 +343,19 @@ def _left_out(nb: Any, stages: Dict[str, Any], extra: Dict[str, Any]) -> Dict[st
     marked = {m["note_id"] for m in pend}  # ADR 0008: notes still waiting to be read again
     out: Dict[str, Any] = {"summaries": 0, "labels": 0, "reinterpret": 0, "propagated": 0, "propagated_from": [],
                            "reasons": []}
+    out["reinterpret_reasons"] = []
     for kind, now_pending, still in (("summaries", stale, still_stale), ("labels", waiting, waiting.__contains__),
                                      ("reinterpret", marked, marked.__contains__)):
         skipped = [x for x in (stages.get(kind) or {}).get("skipped_ids") or [] if isinstance(x, dict)]
+        if kind == "reinterpret":  # the marks are the truth: a note the pass took and could not read again counts
+            known = {x["id"] for x in skipped}
+            skipped = skipped + [x for x in _failed_in_pass(nb, pass_id) if x["id"] not in known]
         left = [x for x in skipped if still(x["id"])]
+        if kind == "reinterpret":
+            per: Dict[str, int] = {}
+            for x in left:
+                per[x["reason"]] = per.get(x["reason"], 0) + 1
+            out["reinterpret_reasons"] = [{"reason": k, "notes": n} for k, n in per.items()]
         unreached = _count(reached.get(kind)) if budget else 0
         out[kind] = min(len(left) + unreached, len(now_pending))
         for why in dict.fromkeys(x["reason"] for x in left):
@@ -344,6 +396,16 @@ def notice(left_out: Optional[Dict[str, Any]]) -> Optional[str]:
                  else (" because an idea it relies on is understood differently" if p else ""))
         again = (f"{r} {'note' if one else 'notes'} could not be understood again this time{which};"
                  f" {'it' if one else 'they'} will be read again next time.")
+        # W31 (F6): the reasons the marks keep, so the line says WHY (held for the day, held by another reading, the
+        # error of a failed reading), at most three, the most frequent first
+        why = sorted((x for x in lo.get("reinterpret_reasons") or [] if isinstance(x, dict) and x.get("reason")),
+                     key=lambda x: -_count(x.get("notes")))
+        if why:
+            parts_why = [f"{str(x['reason']).rstrip('.')} ({_count(x.get('notes'))} {'note' if _count(x.get('notes')) == 1 else 'notes'})"
+                         for x in why[:3]]
+            more = len(why) - 3
+            again += " Why: " + "; ".join(parts_why) + (f"; and {more} other {'reason' if more == 1 else 'reasons'}"
+                                                          if more > 0 else "") + "."
         told = f"{told} {again[0].upper()}{again[1:]}" if told else again
     return told
 
@@ -374,11 +436,13 @@ def end(nb: Any, status: str, results: Optional[Dict[str, Any]] = None) -> Dict[
     if status == "failed" and error is None:
         error = "The consolidation could not finish."
     if status in FINISHED:
-        lo = _left_out(nb, stages, extra)
+        lo = _left_out(nb, stages, extra, row["consolidation_id"])
         out["left_out"] = lo
         out["budget_spent"] = bool(extra.get("budget_spent"))
         status = "completed_with_gaps" if lo["summaries"] or lo["labels"] or lo["reinterpret"] else "completed"
         if status == "completed_with_gaps":
+            # W31 (F6): the run row carries the causes as its error text (the sentences the marks and skips keep)
+            error = " ".join(lo["reasons"]) or None
             _log.warning("consolidation %s completed with gaps: %d summaries, %d group names and %d notes to understand"
                          " again left for the next run%s. Reasons: %s", row["consolidation_id"], lo["summaries"],
                          lo["labels"], lo["reinterpret"], " (the time budget was spent)" if out["budget_spent"] else "",
@@ -399,7 +463,10 @@ def _last_view(r: Dict[str, Any]) -> Dict[str, Any]:
     res = json.loads(r.get("results_json") or "{}") or {}
     lo = res.get("left_out") if isinstance(res.get("left_out"), dict) else None
     return {"consolidation_id": r["consolidation_id"], "started_at": r["started_at"], "finished_at": r["finished_at"],
-            "status": r["status"], "error": r.get("error"), "merges": res.get("merges"),
+            # a finished run's row keeps the causes of its gaps in ``error`` (W31, F6), shown as ``why``: ``error`` stays
+            # the failure sentence of a run that did not finish (a tool output with an error reads as a failure)
+            "status": r["status"], "error": None if r["status"] in FINISHED else r.get("error"),
+            "why": r.get("error") if r["status"] == "completed_with_gaps" else None, "merges": res.get("merges"),
             "communities": res.get("communities"), "labelled": res.get("labelled"),
             "summaries_refreshed": res.get("summaries_refreshed"), "insights": res.get("insights"),
             "left_out": lo, "budget_spent": bool(res.get("budget_spent")),
@@ -584,6 +651,13 @@ def digest_unchanged(nb: Any, note_id: str) -> bool:
     return all(s1.get(e) == s2.get(e) for e in e2 if s2.get(e) not in chain)
 
 
+def plain_reason(exc: BaseException) -> str:
+    """One sentence for an error on one note of the stage (its message, else its type)."""
+    text = " ".join(str(exc).split())
+    text = text or type(exc).__name__
+    return text if text.endswith((".", "!", "?")) else text + "."
+
+
 def reinterpret_next(nb: Any, limit: Any = REINTERPRET_BATCH, failed: Any = None) -> Dict[str, Any]:
     """The next notes of the open consolidation's ``reinterpret`` stage (``note_reinterpret_next``): the pass takes
     pending marks in history order (date, received time, id), never a note it took already; a note whose context did
@@ -591,8 +665,10 @@ def reinterpret_next(nb: Any, limit: Any = REINTERPRET_BATCH, failed: Any = None
     :data:`REINTERPRET_PER_DAY` times today is held (skipped with its reason); the rest are returned for the model
     (``note-process``, whose apply reads them again). ``failed`` (``[id]`` or ``[{id, reason}]``) records the notes
     the last round could not understand again (their marks stay pending for the next pass). ``limit`` 0 only counts.
-    Returns ``{items: [{note_id, occurred_at, reasons}], unchanged: [note_id], held: [{id, reason}], done, total,
-    pending, pass_id}`` (``done`` = understood again, unchanged, failed or held in this pass)."""
+    A note held or failing here waits alone (W31, F6: never the whole batch): ``held: [{id, reason, code}]``, ``code``
+    in :data:`HELD_CODES`; its mark keeps the sentence as its ``error`` and the stage's ``skipped_ids`` get it, so the
+    close counts it in ``left_out``. Returns ``{items: [{note_id, occurred_at, reasons}], unchanged: [note_id], held,
+    done, total, pending, pass_id}`` (``done`` = understood again, unchanged, failed or held in this pass)."""
     row = _require_open(nb)
     pid = row["consolidation_id"]
     for f in _skips(failed, FAILED_REASON):
@@ -608,6 +684,12 @@ def reinterpret_next(nb: Any, limit: Any = REINTERPRET_BATCH, failed: Any = None
     items: List[Dict[str, Any]] = []
     unchanged: List[str] = []
     held: List[Dict[str, str]] = []
+
+    def hold(nid: str, reason: str, code: str) -> None:
+        nb.store.fail_mark(nid, pid, reason)  # the mark waits for the next pass and keeps the sentence (readable)
+        held.append({"id": nid, "reason": reason, "code": code})
+        _log.warning("consolidation %s, stage reinterpret: %s held (%s): %s", pid, nid, code, reason)
+
     while len(items) < n:
         pend = nb.store.pending_marks(pass_id=pid, limit=1)
         if not pend:
@@ -615,23 +697,34 @@ def reinterpret_next(nb: Any, limit: Any = REINTERPRET_BATCH, failed: Any = None
         m = pend[0]
         nid = m["note_id"]
         nb.store.take_mark(nid, pid)
-        if _reinterpreted_today(nb, nid) >= REINTERPRET_PER_DAY:
-            nb.store.fail_mark(nid, pid, HELD_REASON)
-            held.append({"id": nid, "reason": HELD_REASON})
-            _log.warning("consolidation %s, stage reinterpret: %s held: %s", pid, nid, HELD_REASON)
-            continue
-        if digest_unchanged(nb, nid):
-            nb.store.consume_marks(nid, pid, "unchanged", None, calls=0)
-            unchanged.append(nid)
-            continue
-        # the note is read again outside a drain: claimed on its queue row (R4, ADR 0008 §8) until the apply (or the
-        # failure the next round reports) releases it; a drain's lease or an inline claim on it holds it for now
-        if not nb.queue.claim(nid, "reinterpret", pid):
-            nb.store.fail_mark(nid, pid, BUSY_REASON)
-            held.append({"id": nid, "reason": BUSY_REASON})
-            _log.warning("consolidation %s, stage reinterpret: %s held: %s", pid, nid, BUSY_REASON)
+        claimed = False
+        try:
+            if _reinterpreted_today(nb, nid) >= REINTERPRET_PER_DAY:
+                hold(nid, HELD_REASON, "held_today")
+                continue
+            # W31 (F6): the note is claimed on its queue row (R4, ADR 0008 §8) BEFORE anything reads it again (the
+            # no-call check writes its context packet): a drain's lease or an inline understanding holds it for now;
+            # that note alone waits (held_by_inline / held_by_drain), the stage goes on with the next one
+            if not nb.queue.claim(nid, "reinterpret", pid):
+                other = nb.queue.claimed(nid) or {}
+                hold(nid, BUSY_REASON, {"inline": "held_by_inline", "reinterpret": "held_by_reinterpret"}.get(
+                    str(other.get("kind")), "held_by_drain"))
+                continue
+            claimed = True
+            if digest_unchanged(nb, nid):
+                nb.store.consume_marks(nid, pid, "unchanged", None, calls=0)
+                nb.queue.release(nid, "reinterpret", pid)
+                unchanged.append(nid)
+                continue
+        except Exception as exc:  # ADR 0007: one note that cannot be prepared never ends the stage, and says why
+            _log.warning("consolidation %s, stage reinterpret: %s could not be prepared: %s", pid, nid, exc,
+                         exc_info=True)
+            if claimed:
+                nb.queue.release(nid, "reinterpret", pid)
+            hold(nid, f"{FAILED_REASON} {plain_reason(exc)}", "error")
             continue
         items.append({"note_id": nid, "occurred_at": m["occurred_at"], "reasons": m["reasons"]})
+    _record_skips(nb, "reinterpret", held)
     counts = pass_counts(nb, pid)
     left = len(nb.store.pending_marks(pass_id=pid))
     done = counts["reinterpreted"] + counts["unchanged"] + counts["reinterpret_failed"]

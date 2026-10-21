@@ -750,7 +750,8 @@ def test_the_stage_claims_the_note_and_leaves_one_another_run_holds(nb):
     assert nb.queue.claim(a["note_id"], "inline", "inline@test")
     cons.begin(nb)
     got = cons.reinterpret_next(nb, 1)
-    assert got["items"] == [] and got["held"] == [{"id": a["note_id"], "reason": cons.BUSY_REASON}]
+    assert got["items"] == [] and got["held"] == [{"id": a["note_id"], "reason": cons.BUSY_REASON,
+                                                   "code": "held_by_inline"}]
     assert [m["note_id"] for m in nb.store.pending_marks()] == [a["note_id"]]  # the mark waits for the next pass
     cons.end(nb, "completed")
     nb.queue.release(a["note_id"], "inline")

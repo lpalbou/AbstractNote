@@ -111,7 +111,7 @@ def test_the_consolidation_view_on_the_page_and_its_own_route(gw):
     assert last["status"] == "completed" and (last["labelled"], last["communities"], last["insights"]) == (1, 2, 1)
     assert {"finished_at", "status", "merges", "communities", "labelled", "summaries_refreshed",
             "insights", "left_out", "budget_spent", "notice"} <= set(last)
-    assert last["notice"] is None and last["left_out"] == {"summaries": 0, "labels": 0, "reinterpret": 0, "propagated": 0, "propagated_from": [], "reasons": []}
+    assert last["notice"] is None and last["left_out"] == {"summaries": 0, "labels": 0, "reinterpret": 0, "propagated": 0, "propagated_from": [], "reasons": [], "reinterpret_reasons": []}
 
 
 def test_a_run_with_gaps_says_so_and_agrees_with_pending(gw):

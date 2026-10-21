@@ -52,6 +52,8 @@ PREVIOUS_LABEL = ("This note was previously understood as (its own earlier readi
 #: The extraction's version of that block: the spelling to keep.
 PREVIOUS_EXTRACT_LABEL = ("This note was previously understood as (its own earlier reading; a statement this text"
                           " makes again keeps the same subject and the same predicate as written here):")
+#: W31 (INT3): the head of the statements of the note's previous reading that the person retracted.
+WITHDRAWN_LABEL = "  withdrawn by you — do not restate (you said these are wrong):"
 #: Characters kept of a summary, an evidence excerpt or a role in a packet line.
 SUMMARY_CHARS = 240
 EVIDENCE_CHARS = 200
@@ -116,16 +118,19 @@ def previous_block(reading: Any, label: str, numbered: bool) -> str:
     r = reading if isinstance(reading, dict) else {}
     claims = [c for c in (r.get("claims") or []) if isinstance(c, dict)]
     ents = [e for e in (r.get("entities") or []) if isinstance(e, dict)]
-    if not claims and not ents:
+    gone = [c for c in (r.get("withdrawn") or []) if isinstance(c, dict)]
+    if not claims and not ents and not gone:
         return ""
     lines = [label]
     if ents:
         lines.append("  named: " + "; ".join(clip(e.get("name"), 80) + " — " + str(e.get("kind") or "thing")
                                              for e in ents) + ".")
-    for c in claims:
+    def text(c):  # no annotations: the flows copy this function into a sandbox without typing
         obj = c.get("object")
         obj = ("“" + clip(obj, 80) + "”") if c.get("object_is_literal") else clip(obj, 80)
-        text = clip(c.get("subject"), 60) + " " + str(c.get("predicate") or "") + " " + obj
+        return clip(c.get("subject"), 60) + " " + str(c.get("predicate") or "") + " " + obj
+
+    for c in claims:
         start = str(c.get("valid_from") or "")[:10]
         until = str(c.get("valid_until") or "")[:10]
         if start and until:
@@ -137,7 +142,10 @@ def previous_block(reading: Any, label: str, numbered: bool) -> str:
         else:
             when = ""
         tail = " · " + str(c.get("certainty") or "stated") if numbered else ""
-        lines.append(("  P" + str(c.get("index")) + " " if numbered else "- ") + text + tail + when)
+        lines.append(("  P" + str(c.get("index")) + " " if numbered else "- ") + text(c) + tail + when)
+    if gone:  # W31: never a P number, never a previous statement to keep
+        lines.append(WITHDRAWN_LABEL)
+        lines.extend("  - " + text(c) for c in gone)
     return "\n".join(lines)
 
 
@@ -275,10 +283,12 @@ def extraction_packet(note: Dict[str, Any], section: Dict[str, Any], parts: int,
     }
 
 
-def claim_line(c: Dict[str, Any], now: Any = "") -> str:
+def claim_line(c: Dict[str, Any], now: Any = "", stated: bool = False) -> str:
     """An existing claim as one line: ``#index subject predicate object (since date)``, or ``(from date to date)``
     for a closed window. A claim first seen on a later day than the note's own date (``now``) that is shown
-    outside the LATER block says ``LATER than this note``."""
+    outside the LATER block says ``LATER than this note``. ``stated`` (a note read again, W31 F1): the line also
+    says when the statement was written (``stated date; ...``), so the model can tell which statement came first
+    and that a note cannot be the outcome of something a statement known then sets for a later date."""
     obj = c.get("object")
     obj = ("“" + clip(obj, 80) + "”") if c.get("object_is_literal") else clip(obj, 80)
     text = str(c.get("line") or "").strip() or (clip(c.get("subject"), 60) + " " + str(c.get("predicate") or "") + " " + obj)
@@ -294,10 +304,12 @@ def claim_line(c: Dict[str, Any], now: Any = "") -> str:
         suffix = " (stated later, said to hold since " + start + ")"  # known then by what a later note says
     elif when:
         suffix = " (since " + start + (", LATER than this note" if later_than(when, now) else "") + ")"
+    if stated and when:
+        suffix = " (stated " + when + ("; " + suffix[2:] if suffix else ")")
     return "#" + str(c.get("index")) + " " + text + suffix
 
 
-def candidate_card(c: Dict[str, Any], prefer: Any = (), now: Any = "") -> List[str]:
+def candidate_card(c: Dict[str, Any], prefer: Any = (), now: Any = "", stated: bool = False) -> List[str]:
     """An existing entity as the linking sees it on the note's date (``now``, ADR 0008 §2): its name, kind and
     aliases, its summary as known then, at most CLAIMS_PER_CANDIDATE statements believed then (those with a
     predicate the note also uses first), then a labelled LATER block with what was recorded after the note's
@@ -320,15 +332,15 @@ def candidate_card(c: Dict[str, Any], prefer: Any = (), now: Any = "") -> List[s
     claims = [cl for cl in (c.get("active_claims") or []) if isinstance(cl, dict)]
     shown = slot_first(claims, prefer, CLAIMS_PER_CANDIDATE)
     for cl in shown:
-        out.append("    " + claim_line(cl, now))
+        out.append("    " + claim_line(cl, now, stated))
     left = int(c.get("known_claims_omitted") or 0) + len(claims) - len(shown)
     if left:
         out.append("    (+" + str(left) + " more not shown)")
     if later_claims or later_summaries:
         out.append("    " + LATER_LABEL)
         shown_later = slot_first(later_claims, prefer, LATER_CLAIMS_PER_CANDIDATE)
-        for cl in [x for x in later_claims if x in shown_later]:  # in date order
-            out.append("      " + claim_line(cl))
+        for cl in [x for x in later_claims if x in shown_later]:  # in date order; when each was stated (W31, F1)
+            out.append("      " + claim_line(cl, "", True))
         for x in later_summaries[-LATER_SUMMARIES_PER_CANDIDATE:]:
             out.append("      summary as of " + str(x.get("at") or "")[:10] + ": " + clip(x.get("summary"), SUMMARY_CHARS))
         left_c = int(c.get("later_claims_omitted") or 0) + len(later_claims) - len(shown_later)
@@ -393,6 +405,9 @@ def link_batches(note: Dict[str, Any], extraction: Dict[str, Any], resolved: Lis
             changed_lines.append("    (" + str(int(b.get("omitted"))) + " more changed statements not shown)")
     changed = (CHANGED_LABEL + "\n" + "\n".join(changed_lines)) if changed_lines else ""
     previous = previous_block(n.get("previous_reading"), PREVIOUS_LABEL, True)
+    # W31 (F1): a note read again sees when each known-then statement was written (LATER statements always say
+    # it; a first reading's known-then lines stay byte for byte what they were)
+    dated = bool(previous)
     out = []
     for gi, group in enumerate(groups):
         mlines = []
@@ -408,7 +423,7 @@ def link_batches(note: Dict[str, Any], extraction: Dict[str, Any], resolved: Lis
             if not found:
                 mlines.append("    no existing entity matched")
             for c in found[:CANDIDATES_PER_MENTION]:
-                mlines.extend("    " + x for x in candidate_card(c, used.get(ref) or (), n.get("occurred_at")))
+                mlines.extend("    " + x for x in candidate_card(c, used.get(ref) or (), n.get("occurred_at"), dated))
         clines = []
         for i, c in by_group[gi]:
             subj = str(c.get("subject"))

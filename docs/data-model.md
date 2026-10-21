@@ -139,6 +139,31 @@ graph.
 | `note_id`, `revision_id` | provenance |
 | `assertion_id` | the id of the same claim in the AbstractMemory store (equals `claim_id`; a statement a re-understanding revised in place or re-opened has a new copy there, named here, whose `attributes.claim_id` is the claim) |
 
+### Invariants (W31, retro-C blocker 1b)
+
+Two properties of a belief history hold after every revision; both are checked at apply time, op by op, in the
+note index (`_OpContext.lineage_violation`) and again by the AbstractMemory projection on its own journal and
+windows (`ClaimStore.lineage_violation`):
+
+1. **`superseded_by` is acyclic.** A statement is never closed (or re-pointed, or re-opened as superseded) in
+   favour of a statement that is already replaced by it, directly or through later statements. R5's set 3 is
+   the case this prevents: `25k [2023-02-07, 2025-02-05) superseded_by 40k` and `40k superseded_by 25k`.
+2. **A later belief is never erased by an earlier one.** A statement's window never becomes empty (it ends where
+   it starts) in favour of a statement recorded before it that also starts before it: in set 3 the 40k's window
+   became `[2025-02-05, 2025-02-05)` and the organisation had no budget belief in 2026. Two empty windows stay
+   legitimate: a statement replaced by one that starts at the same moment (a same-day correction, warned by the
+   builder), and a plan dated after the note that cancels it (the cancelling note is recorded later: it never held).
+
+The ops checked are `claim.supersede`, `claim.insert_before` (the new statement's placement and the narrowing of
+the belief before it), `claim.start_earlier` (the narrowing of the belief before it), `claim.reopen` (a restored
+`superseded` state) and `claim.repoint`; a successor that does not exist is refused too. A violation refuses that
+op only: the rest of the revision applies (a refused placement leaves its statement as added, beside the later one:
+visible, never an erasure), the revision's warnings say `invariant_refused: <op> on statement <id> was not applied:
+<why>.` (once: a rebuild replays the same refusal and finds the warning there), its result lists `ops_refused:
+[{index, op, claim_id, successor_id, code, why}]` (`code`: `self`, `successor_missing`, `cycle`,
+`erases_later_belief`), the AbstractMemory projection skips the refused ops, and each refusal is logged on
+`abstractnote.invariants`. A closure AbstractMemory itself refuses is listed in the result as `kg_refused`.
+
 ### Relation
 
 A relation is a derived, fast-to-read summary of all claims between two entities:

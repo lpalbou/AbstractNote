@@ -73,6 +73,22 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
   a request for more than a read allows is answered and logged.
 
 ### Fixed
+- **Reading a note again never corrupts what it re-reads**: two statements can no longer replace each other (a
+  25k budget replaced by 40k and the 40k by the 25k), and a later belief is never erased by an earlier statement
+  (the 40k ending where it starts, leaving no budget in 2026). Such a change is refused, said in what processing did
+  (the rest of the reading applies), and checked again in AbstractMemory.
+- **A consolidation says when it could not understand notes again**: notes held for the day (read again three
+  times already), held because they were being understood at the same moment, or that failed now count in what
+  the consolidation left, it closes "with gaps", and its line says why ("Why: Already understood again three times
+  today; read again tomorrow (35 notes)."); each such note shows why it waits. One note held by an inline reading
+  no longer touches the stage's other notes, and is read again next time.
+- **A later note is not taken as an outcome decided after it**: a note read again sees when each known statement
+  was written, and is asked never to treat itself as the resolution of something set for a later date (a figure
+  that is a placeholder until a board meeting after it), and the earlier note no longer takes a later statement
+  written before that date as the outcome, so both readings stay visible until a note on or after that date
+  settles it.
+- **What you withdrew stays withdrawn**: a statement you retracted is shown to a note read again as "withdrawn by
+  you — do not restate", never as something the note said before, and your retraction is kept.
 - **Consolidation no longer stops silently**: when the model gives an empty or partial answer, the
   consolidation asks once more, sets aside what is still unanswered for the next pass and goes on,
   instead of ending the summaries stage and calling the pass complete with hundreds of summaries
