@@ -740,16 +740,134 @@ class Notebook:
         data = BlobStore(self.root / "blobs").read(row["sha256"])
         return {"data": data, "mime": row["mime"], "filename": row["filename"], "size": row["size"]}
 
-    def archive_note(self, note_id: str) -> Dict[str, Any]:
-        """Archive a note (never deleted); it leaves lists and search but keeps its links."""
-        if self.store.note_row(note_id) is None:
+    def archive_note(self, note_id: str, account: Optional[str] = None, reason: str = "", *, client: str = "web"
+                     ) -> Dict[str, Any]:
+        """Archive a note (never deleted; ``POST /note/notes/{id}/archive``): it leaves lists and search, and its
+        reading is withdrawn with it (W28, :mod:`abstractnote.process.withdraw`): its statements close as a
+        retraction ("note archived"), what it had closed re-opens, entities and tasks only it made retire, its
+        mentions, topics and summaries leave the views, and the later notes that built on it are marked for
+        re-understanding. One user revision ``note.archive``; :meth:`unarchive_note` undoes it. A note archived before
+        its reading was withdrawn with it (an older archive) is withdrawn now; archiving it again otherwise changes
+        nothing. Returns ``{note_id, status, archived_at, revision_id, withdrawn: {...}, marked}``."""
+        from ..process.withdraw import is_withdrawn
+
+        row = self.store.note_row(note_id)
+        if row is None:
             raise ValueError("That note is not in this notebook.")
+        if row["archived_at"] and is_withdrawn(self.store, note_id):
+            return {"note_id": note_id, "status": "archived", "archived_at": row["archived_at"], "revision_id": None,
+                    "withdrawn": None, "marked": 0, "already_archived": True}
+        title = row["title"] or " ".join(str(row["text"] or "").split())[:60] or "a note"
+        out = self.archive_notes([note_id], account, reason, client=client, target=note_id,
+                                 summary=f"Archived the note “{title}”." + (f" {reason}" if reason else ""))
+        out.update(note_id=note_id, status="archived", archived_at=self.store.note_row(note_id)["archived_at"])
+        return out
+
+    def archive_notes(self, note_ids: Sequence[str], account: Optional[str], reason: str = "", *,
+                      client: str = "web", target: Optional[str] = None, summary: Optional[str] = None,
+                      action: str = "note.archive", duplicate_of: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        """Archive several notes in ONE user revision, each reading withdrawn (:meth:`archive_note`). ``target`` names
+        the revision (default: the notes); ``action`` is ``note.archive`` (``note.dedupe`` for duplicate copies,
+        ``duplicate_of`` naming the copy kept). Returns the apply result plus ``withdrawn`` (counts per kind)."""
+        from ..process.withdraw import plan_archive
+
+        nids = list(dict.fromkeys(str(n) for n in note_ids))
+        if not nids:
+            raise ValueError("Say which notes to archive.")
+        self.require_embedder()
         self.recover_pending()
-        now = ids.utc_now()
-        with self.store.tx() as c:
-            c.execute("UPDATE notes SET archived_at=COALESCE(archived_at, ?), status='archived' WHERE note_id=?",
-                      (now, note_id))
-        return {"note_id": note_id, "status": "archived", "archived_at": self.store.note_row(note_id)["archived_at"]}
+        tgt = target or ("notes:" + ids.sha256_text("|".join(sorted(nids)))[:16])
+        at, rid = self._free_action_id(action, tgt)
+        plan = plan_archive(self, nids, rid, reason=reason, duplicate_of=duplicate_of)
+        n = len(nids)
+        res = self._user_revision(action, tgt, plan["ops"], account,
+                                  summary or f"Archived {n} note{'s' if n != 1 else ''}.", client=client,
+                                  occurred_at=at)
+        if res["revision_id"] != rid:  # the plan's copies are named after this revision
+            raise RuntimeError("The archive's revision id changed while it was planned.")
+        res["withdrawn"] = plan["diff"]
+        return res
+
+    def _free_action_id(self, action: str, target: str) -> "tuple[str, str]":
+        """``(at, revision_id)`` of a new user action on ``target``: the id is deterministic from (action, target,
+        time), so an archive, an unarchive and an archive again within one second take the next free second."""
+        from datetime import timedelta
+
+        t = ids.parse_time(ids.utc_now())
+        while True:
+            at = t.strftime("%Y-%m-%dT%H:%M:%SZ")
+            rid = ids.revision_id_for_action(action, target, at)
+            if self.store.revision_row(rid) is None:
+                return at, rid
+            t += timedelta(seconds=1)
+
+    def unarchive_note(self, note_id: str, account: Optional[str] = None, *, client: str = "web") -> Dict[str, Any]:
+        """Bring an archived note back (``POST /note/notes/{id}/unarchive``, W28): the inverse of its archive, op by
+        op (its statements re-open as they were, what it had closed closes again, its tasks, entities, mentions,
+        topics and summaries come back), while what the archive set still stands; the later notes that build on it
+        are marked again. Returns ``{note_id, status, archived_at: null, revision_id, restored: {...}, warnings,
+        marked}``."""
+        row = self.store.note_row(note_id)
+        if row is None:
+            raise ValueError("That note is not in this notebook.")
+        title = row["title"] or " ".join(str(row["text"] or "").split())[:60] or "a note"
+        out = self.unarchive_notes([note_id], account, client=client, target=note_id,
+                                   summary=f"Brought the note “{title}” back from the archive.")
+        out.update(note_id=note_id, status=self.store.note_row(note_id)["status"], archived_at=None)
+        return out
+
+    def unarchive_notes(self, note_ids: Sequence[str], account: Optional[str], *, client: str = "web",
+                        target: Optional[str] = None, summary: Optional[str] = None) -> Dict[str, Any]:
+        """Bring several archived notes back in ONE user revision ``note.unarchive`` (:meth:`unarchive_note`)."""
+        from ..process.withdraw import UNARCHIVE_ACTION, plan_unarchive
+
+        nids = list(dict.fromkeys(str(n) for n in note_ids))
+        if not nids:
+            raise ValueError("Say which notes to bring back.")
+        self.require_embedder()
+        self.recover_pending()
+        tgt = target or ("notes:" + ids.sha256_text("|".join(sorted(nids)))[:16])
+        at, rid = self._free_action_id(UNARCHIVE_ACTION, tgt)
+        plan = plan_unarchive(self, nids, rid)
+        n = len(nids)
+        res = self._user_revision(UNARCHIVE_ACTION, tgt, plan["ops"], account,
+                                  summary or f"Brought {n} note{'s' if n != 1 else ''} back from the archive.",
+                                  client=client, occurred_at=at)
+        if res["revision_id"] != rid:
+            raise RuntimeError("The revision id changed while it was planned.")
+        res["restored"] = plan["diff"]
+        res["warnings"] = list(res.get("warnings") or []) + plan["warnings"]
+        return res
+
+    def unarchive_revision(self, revision_id: str, account: Optional[str] = None, *, client: str = "cli"
+                           ) -> Dict[str, Any]:
+        """Bring back, in one revision, every note an archive revision archived that is still archived (the undo of
+        ``archive-insights --repeated`` or of any batch archive). ``400`` (ValueError) when it archived none."""
+        row = self.store.revision_row(revision_id)
+        if row is None or row["action"] not in ("note.archive", "note.dedupe"):
+            raise ValueError("That is not an archive of notes in this notebook.")
+        nids = [o["payload"]["note_id"] for o in _uj(row["ops_json"], []) or [] if o.get("op") == "note.archive"]
+        live = [n for n in nids if (r := self.store.note_row(n)) is not None and r["archived_at"] is not None]
+        if not live:
+            raise ValueError("Every note that archive put away is back already.")
+        out = self.unarchive_notes(live, account, client=client, target=f"undo:{revision_id}",
+                                   summary=f"Brought back {len(live)} archived note{'s' if len(live) != 1 else ''}.")
+        out["notes"] = live
+        return out
+
+    def archive_repeated_insights(self, *, dry_run: bool = False, account: Optional[str] = None,
+                                  client: str = "cli") -> Dict[str, Any]:
+        """Archive repeated insights, keeping the oldest unacknowledged one of each (``abstractnote archive-insights
+        --repeated``, ``POST /note/insights/archive-repeated``; :mod:`abstractnote.recall.repeated_insights`)."""
+        from ..recall.repeated_insights import archive_repeated
+
+        return archive_repeated(self, dry_run=dry_run, account=account, client=client)
+
+    def repeated_insights_cleanup(self) -> Optional[Dict[str, Any]]:
+        """The latest repeated-insights cleanup row (``GET /note/insights/archive-repeated``), or None."""
+        from ..recall.repeated_insights import latest
+
+        return latest(self)
 
     def ack_insight(self, note_id: str) -> Dict[str, Any]:
         row = self.store.note_row(note_id)
@@ -1072,12 +1190,11 @@ class Notebook:
         self.store.meta_set(key, value)
 
     def status(self) -> Dict[str, Any]:
-        from importlib.metadata import PackageNotFoundError, version
+        from ..versions import module_version
 
-        try:
-            am_version: Optional[str] = version("abstractmemory")
-        except PackageNotFoundError:  # pragma: no cover
-            am_version = None
+        # W28: the version of the AbstractMemory that is imported (a checkout on the path can run 0.3.2 while the
+        # installed metadata still says 0.3.1)
+        am_version = module_version("abstractmemory")
         pending = len(self.store.pending_revisions())
         return {
             "notebook": str(self.root),

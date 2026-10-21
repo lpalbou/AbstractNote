@@ -118,6 +118,8 @@ def earlier_evidence_id(payload: Dict[str, Any], rev_note_id: Optional[str]) -> 
     start, before = payload.get("valid_from"), payload.get("previous_valid_from")
     if not start or not before or start >= before:
         return None
+    if payload.get("evidence_assertion_id"):  # W28: an unarchive writes the earlier evidence again as a new copy
+        return str(payload["evidence_assertion_id"])
     return ids.claim_id(payload.get("note_id") or rev_note_id or "", payload["claim_id"], "claim.start_earlier", start)
 
 
@@ -243,8 +245,12 @@ class ClaimStore:
                                    "kind": REINTERPRETED_KIND, "narrow": True, "replacement_ids": (),
                                    "reason": p.get("reason") or "the earlier evidence was understood again"})
             elif name == "claim.retract":
-                closes.append({"assertion_id": p["claim_id"], "valid_until": p.get("valid_until") or rev["at"],
-                               "kind": "retract", "reason": p.get("reason") or "retracted", "replacement_ids": ()})
+                # W28: an archive's withdrawal closes the statement's current copy (a re-understanding may have
+                # written one) empty, even when it was closed later already (narrowed): a retraction in the journal
+                closes.append({"assertion_id": p.get("assertion_id") or p["claim_id"],
+                               "valid_until": p.get("valid_until") or rev["at"], "kind": "retract",
+                               "reason": p.get("reason") or "retracted", "replacement_ids": (),
+                               **({"narrow": True} if p.get("withdrawn") else {})})
             elif name == "claim.reinterpret":
                 # ADR 0008: the withdrawn reading's copy closes empty (at its own start), whatever closed it before
                 closes.append({"assertion_id": p.get("assertion_id") or p["claim_id"], "valid_until": p["valid_until"],
@@ -255,6 +261,8 @@ class ClaimStore:
                 # copy it replaces closes empty with the kind reinterpreted, naming the new one
                 a = dict(p["assertion"])
                 adds.append(claim_assertion(a, rev, kinds.get(a["subject_id"]), kinds.get(a.get("object_id") or "")))
+                if not p.get("previous_assertion_id"):
+                    continue  # W28: an unarchive re-opens a statement whose copy the archive already closed empty
                 closes.append({"assertion_id": p["previous_assertion_id"], "valid_until": p["empty_at"],
                                "kind": REINTERPRETED_KIND, "narrow": True, "replacement_ids": (a["claim_id"],),
                                "reason": p.get("reason") or ("read again" if name == "claim.revise" else

@@ -45,6 +45,8 @@ OP_NAMES = (
     # ADR 0008: a re-understanding (``note.reinterpret``) and the inverse of every op (data-model.md "Re-understanding")
     "note.reinterpret", "claim.reinterpret", "claim.revise", "claim.reopen", "claim.repoint", "reinforcement.drop",
     "task.reopen", "task.retire", "entity.retire", "claim.start_restore",
+    # W28: a person's unarchive restores what the archive withdrew
+    "note.unarchive", "task.restore", "entity.restore",
 )
 
 

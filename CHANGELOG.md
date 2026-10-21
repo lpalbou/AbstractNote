@@ -7,6 +7,12 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 ## [Unreleased]
 
 ### Added
+- **Bring an archived note back**: `POST /note/notes/{id}/unarchive` and `abstractnote unarchive NOTE_ID ...` (or
+  `--revision` for everything one archive put away) restore the note and what it said, as it was before the archive.
+- **Repeated insights archived in one go**: `abstractnote archive-insights --repeated [--dry-run]` and `POST
+  /note/insights/archive-repeated` keep the oldest unacknowledged insight of each kind, title and subject and archive
+  the others in one step, with a notice of what was archived; it can be undone. On the evaluation notebook: 135 of
+  196 insights (32 kept).
 - **Ideas understood differently reach what relies on them** (ADR 0008 §4a): when an earlier note changes what
   an idea is (its statements, its relations, what it is, or deeply its description), the later notes about the
   ideas that rest on it are understood again too, strongest first and in the order things happened, and each
@@ -15,6 +21,14 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
   consolidation with nothing new changes nothing.
 
 ### Changed
+- **Archiving a note takes back what it said**: an archived note no longer shapes what the notebook believes. Its
+  statements are withdrawn (recorded as a retraction, "note archived"), what it had replaced is believed again, the
+  things and tasks only it mentioned are put away, and it no longer counts in the notes, topics and descriptions of
+  what it mentioned; the later notes that built on it are understood again. The notebook as it stood before the
+  archive still shows it. A note archived earlier is withdrawn when it is archived again. Duplicate copies put away
+  by `dedupe-sources` no longer count twice either.
+- **Status says which AbstractMemory runs**: `GET /note/status` reports the version of the AbstractMemory that is
+  loaded, not the one an older installation recorded.
 - **What a thing is**: the description of a person, project or tool now says what it is (its kind,
   its role or purpose, and what it belongs to or works with), instead of the latest thing
   that happened to it. It is rewritten only when a note changes

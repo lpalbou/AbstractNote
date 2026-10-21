@@ -108,6 +108,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="only list the pairs")
     p.add_argument("--account", help="who asked, recorded in the revision's source")
 
+    p = sub.add_parser("archive-insights", help="archive repeated insights, keeping the oldest of each (one revision)")
+    _common(p)
+    p.add_argument("--repeated", action="store_true", help="insights with the same kind, title and subject (required)")
+    p.add_argument("--dry-run", action="store_true", help="only list the groups")
+    p.add_argument("--account", help="who asked, recorded in the revision's source")
+
+    p = sub.add_parser("unarchive", help="bring archived notes back (their reading is restored)")
+    _common(p)
+    p.add_argument("note_ids", nargs="*", help="the notes to bring back")
+    p.add_argument("--revision", help="bring back every note this archive revision put away")
+    p.add_argument("--account", help="who asked, recorded in the revision's source")
+
     p = sub.add_parser("process", help="process queued notes now")
     _common(p)
     p.add_argument("--local", action="store_true", help="run the flows here (headless)")
@@ -288,6 +300,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         elif args.command == "dedupe-sources":
             with _open(args) as nb:
                 out = nb.dedupe_sources(args.account, client="cli", dry_run=args.dry_run)
+        elif args.command == "archive-insights":
+            if not args.repeated:
+                raise ValueError("Say which insights to archive: --repeated (the same kind, title and subject).")
+            with _open(args) as nb:
+                out = nb.archive_repeated_insights(dry_run=args.dry_run, account=args.account, client="cli")
+        elif args.command == "unarchive":
+            if bool(args.revision) == bool(args.note_ids):
+                raise ValueError("Give the notes to bring back, or --revision with the archive that put them away.")
+            with _open(args) as nb:
+                out = (nb.unarchive_revision(args.revision, args.account, client="cli") if args.revision else
+                       nb.unarchive_notes(args.note_ids, args.account, client="cli"))
         elif args.command == "process":
             out = _cmd_process(args)
         elif args.command == "refile":

@@ -440,7 +440,7 @@ def _propagated_in_pass(nb: Any, pass_id: str) -> Dict[str, Any]:
     for r in nb.store.q("SELECT note_id, reason_code, source_entity_id FROM reinterpret_marks WHERE pass_id=? OR"
                         " (pass_id IS NULL AND consumed_at IS NULL)", (pass_id,)):
         d = per.setdefault(r["note_id"], {"direct": False, "sources": []})
-        if (r["reason_code"] or "direct") == "direct":
+        if (r["reason_code"] or "direct") != "propagated":  # direct, or an archived / restored foundation (W28)
             d["direct"] = True
         elif r["source_entity_id"] and r["source_entity_id"] not in d["sources"]:
             d["sources"].append(r["source_entity_id"])

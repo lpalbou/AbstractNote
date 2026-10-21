@@ -31,6 +31,10 @@ REVISIONS_SQL = ("SELECT r.revision_id FROM revisions r LEFT JOIN notes n ON n.n
                  " ELSE COALESCE(n.received_at, r.recorded_at) END<=?")
 #: Ops of a re-understanding that change a statement written by another revision.
 REINTERPRET_CLAIM_OPS = ("claim.reinterpret", "claim.revise", "claim.reopen", "claim.repoint")
+#: W28: a person's archive withdraws a note's reading and an unarchive restores it; the statements they changed are
+#: replayed too (an archive's re-opened statement no longer names the revision that closed it).
+WITHDRAW_ACTIONS = ("note.archive", "note.unarchive")
+WITHDRAW_CLAIM_OPS = ("claim.retract", "claim.reopen")
 
 
 class Archive:
@@ -152,12 +156,13 @@ class Archive:
         statement they changed is replayed, never read as it stands now)."""
         if self._later_reinterpret is None:
             out: Dict[str, List[Dict[str, Any]]] = {}
-            for r in self.store.q("SELECT revision_id, ops_json FROM revisions WHERE applied_index=1 AND"
-                                  " action='note.reinterpret' ORDER BY seq"):
+            for r in self.store.q("SELECT revision_id, action, ops_json FROM revisions WHERE applied_index=1 AND"
+                                  " action IN ('note.reinterpret', 'note.archive', 'note.unarchive') ORDER BY seq"):
                 if r["revision_id"] in self.revisions:
                     continue
+                kinds = WITHDRAW_CLAIM_OPS if r["action"] in WITHDRAW_ACTIONS else REINTERPRET_CLAIM_OPS
                 for op in json.loads(r["ops_json"]):
-                    if op.get("op") in REINTERPRET_CLAIM_OPS:
+                    if op.get("op") in kinds:
                         p = op.get("payload") or {}
                         out.setdefault(p.get("claim_id"), []).append({**p, "op": op["op"],
                                                                       "revision_id": r["revision_id"]})
@@ -218,10 +223,11 @@ class Archive:
                 if op.get("op") == "claim.supersede" and state["status"] == "active":
                     state = {"status": "superseded", "valid_until": state["valid_until"] or p.get("valid_until"),
                              "superseded_by": p.get("by_claim_id")}
-                elif op.get("op") == "claim.retract" and state["status"] != "retracted":
-                    state = {"status": "retracted",
-                             "valid_until": state["valid_until"] or p.get("valid_until") or r["at"],
-                             "superseded_by": state["superseded_by"]}
+                elif op.get("op") == "claim.retract" and state["status"] not in ("retracted", "reinterpreted"):
+                    until = state["valid_until"] or p.get("valid_until") or r["at"]
+                    if p.get("withdrawn") and p.get("valid_until") and until > p["valid_until"]:
+                        until = p["valid_until"]  # W28: an archived note's statement, emptied at its start
+                    state = {"status": "retracted", "valid_until": until, "superseded_by": state["superseded_by"]}
         self._claim_states[cid] = state
         return state
 

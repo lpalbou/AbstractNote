@@ -1133,8 +1133,10 @@ def replay_claim_state(nb: Any, claim_id: str, exclude: Sequence[str]) -> Dict[s
                 st = {**st, "status": "superseded", "valid_until": p.get("valid_until"),
                       "superseded_by": p.get("before_claim_id"), **close}
             elif name == "claim.retract" and st["status"] != "retracted":
-                st = {**st, "status": "retracted", "valid_until": st["valid_until"] or p.get("valid_until") or r["at"],
-                      **close}
+                until = st["valid_until"] or p.get("valid_until") or r["at"]
+                if p.get("withdrawn") and p.get("valid_until") and until > p["valid_until"]:
+                    until = p["valid_until"]  # W28: its note was archived: emptied at its start
+                st = {**st, "status": "retracted", "valid_until": until, **close}
             elif name == "claim.reinterpret":
                 st = {**st, "status": REINTERPRETED, "valid_until": p.get("valid_until"), **close}
             elif name == "claim.reopen":

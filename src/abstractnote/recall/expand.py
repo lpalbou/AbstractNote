@@ -119,7 +119,10 @@ def retirement(nb: Any, entity_id: str) -> Optional[Dict[str, Any]]:
     rev = s.q1("SELECT * FROM revisions WHERE revision_id=?", (row["retired_revision_id"],))
     op = next((o.get("payload") or {} for o in (_uj(rev["ops_json"], []) if rev is not None else []) or []
                if o.get("op") == "entity.retire" and (o.get("payload") or {}).get("entity_id") == entity_id), {})
-    note = s.note_row(rev["note_id"]) if rev is not None and rev["note_id"] else None
+    # W28: an archive is a person's action (no note on the revision): the op names the archived note
+    archived = rev is not None and rev["action"] == "note.archive"
+    nid = (rev["note_id"] or (op.get("note_id") if archived else None)) if rev is not None else None
+    note = s.note_row(nid) if nid else None
     title = (note["title"] or shapes.excerpt(note["text"], 80)) if note is not None else None
     into = []
     for x in op.get("read_as") or []:
@@ -129,14 +132,17 @@ def retirement(nb: Any, entity_id: str) -> Optional[Dict[str, Any]]:
     when = rev["recorded_at"] if rev is not None else row["retired_at"]  # when the notebook withdrew it
     day = long_day(when) if when else None
     where = f"the note “{title}”" if title else "a note"
-    if into:
+    if archived:
+        sentence = (f"Retired{f' on {day}' if day else ''}: only {where} made it, and that note was archived; bringing"
+                    " the note back brings it back.")
+    elif into:
         names = ", ".join(i["name"] for i in into[:-1]) + (" and " if len(into) > 1 else "") + into[-1]["name"]
         sentence = f"Retired{f' on {day}' if day else ''}: {where} was understood again and now reads it as {names}."
     else:
         sentence = (f"Retired{f' on {day}' if day else ''}: only an earlier reading of {where} made it, and nothing"
                     " refers to it any more.")
     return {"at": row["retired_at"], "revision_id": row["retired_revision_id"],
-            "note_id": rev["note_id"] if rev is not None else None, "note_title": title,
+            "note_id": nid, "note_title": title,
             "reason": op.get("reason"), "into": into, "sentence": sentence}
 
 

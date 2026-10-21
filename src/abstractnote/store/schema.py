@@ -23,7 +23,7 @@ TRUTH_TABLES = ("meta", "notes", "attachments", "note_links", "queue", "revision
 #: Derived tables a rebuild copies (entity ids are stable, and the community labels are the model's work), and the
 #: consolidation bookkeeping (its progress rows and the measured seconds per item the next ETA starts from), and the
 #: ``refile --missing`` repairs' progress rows.
-KEPT_TABLES = ("communities", "entity_communities", "consolidation_runs", "refile_runs")
+KEPT_TABLES = ("communities", "entity_communities", "consolidation_runs", "refile_runs", "cleanup_runs")
 
 DDL = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -493,6 +493,24 @@ CREATE TABLE IF NOT EXISTS refile_runs (
   budget_s REAL,
   seconds REAL,
   model TEXT
+);
+
+-- one row per cleanup a person asked for (W28: ``archive-insights --repeated``): what it archived and kept, the revision
+-- that did it (reversible: ``abstractnote unarchive --revision``), the end-user notice
+CREATE TABLE IF NOT EXISTS cleanup_runs (
+  cleanup_id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  status TEXT NOT NULL DEFAULT 'running',
+  total INTEGER NOT NULL DEFAULT 0,
+  done INTEGER NOT NULL DEFAULT 0,
+  groups INTEGER NOT NULL DEFAULT 0,
+  archived_json TEXT NOT NULL DEFAULT '[]',
+  kept_json TEXT NOT NULL DEFAULT '[]',
+  revision_id TEXT,
+  notice TEXT,
+  error TEXT
 );
 
 CREATE TABLE IF NOT EXISTS then_now_cache (

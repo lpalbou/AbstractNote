@@ -233,9 +233,21 @@ async def note_attachment(request: Request, note_id: str, attachment_id: str) ->
 
 @router.post("/notes/{note_id}/archive")
 async def note_archive(request: Request, note_id: str) -> Dict[str, Any]:
+    """Archive a note and withdraw its reading (W28; a user revision ``note.archive`` of the signed-in account)."""
     def work(nb, svc, p):
         _require(nb, "note", note_id, "note")
-        return _call(nb, "archive_note", note_id)
+        return _call(nb, "archive_note", note_id, _account(p), client=action_client(request))
+
+    return await _run(request, work)
+
+
+@router.post("/notes/{note_id}/unarchive")
+async def note_unarchive(request: Request, note_id: str) -> Dict[str, Any]:
+    """Bring an archived note back and restore its reading (W28; a user revision ``note.unarchive``). ``400`` when the
+    note is not archived."""
+    def work(nb, svc, p):
+        _require(nb, "note", note_id, "note")
+        return _call(nb, "unarchive_note", note_id, _account(p), client=action_client(request))
 
     return await _run(request, work)
 
@@ -526,6 +538,29 @@ async def note_topics(request: Request) -> Dict[str, Any]:
 async def note_insights(request: Request, kind: Optional[str] = None, acked: Optional[bool] = None,
                         limit: int = Query(50, ge=1, le=500)) -> Dict[str, Any]:
     return await _run(request, lambda nb, svc, p: _items(_call(nb, "insights", kind=kind, acked=acked, limit=limit)))
+
+
+class ArchiveRepeatedBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dry_run: bool = False
+
+
+@router.post("/insights/archive-repeated")
+async def note_insights_archive_repeated(request: Request, body: ArchiveRepeatedBody) -> Dict[str, Any]:
+    """Archive repeated insights (W28): the same kind, title and subject; the oldest unacknowledged one of each is kept,
+    the rest archived in one revision of the signed-in account. ``dry_run`` only lists the groups."""
+    def work(nb, svc, p):
+        return _call(nb, "archive_repeated_insights", dry_run=body.dry_run, account=_account(p),
+                     client=action_client(request))
+
+    return await _run(request, work)
+
+
+@router.get("/insights/archive-repeated")
+async def note_insights_archive_repeated_last(request: Request) -> Dict[str, Any]:
+    """``{cleanup: Cleanup | null}``: the latest repeated-insights cleanup."""
+    return await _run(request, lambda nb, svc, p: {"cleanup": _call(nb, "repeated_insights_cleanup")})
 
 
 @router.post("/insights/{note_id}/ack")

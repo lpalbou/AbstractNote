@@ -381,9 +381,10 @@ def carried_of(c: Any, note_id: str) -> Tuple[float, int, Optional[str]]:
     if not use:
         return 1.0, 0, None
     pass_id = taken[0]["pass_id"] if taken else None
-    best = max(use, key=lambda r: (1.0 if r["reason_code"] == "direct" else float(r["impact"]),
+    # a direct mark (W28: or an archived / restored foundation, read like direct) carries 1.0 at hop 0
+    best = max(use, key=lambda r: (1.0 if r["reason_code"] != "propagated" else float(r["impact"]),
                                    -int(r["hops"] or 0)))
-    if best["reason_code"] == "direct":
+    if best["reason_code"] != "propagated":
         return 1.0, 0, pass_id
     return float(best["impact"]), int(best["hops"] or 0), pass_id
 

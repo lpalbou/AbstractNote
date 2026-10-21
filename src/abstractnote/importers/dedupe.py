@@ -5,7 +5,8 @@ A Claude Code curated memory file imported by both the ``markdown`` and the ``cl
 the same content. :func:`plan` finds such pairs exactly: a ``claude-sessions`` memory note and a ``markdown``
 note with the same file name and the same content hash (``source.origin.sha256``); :func:`dedupe_sources`
 archives the later copy of each (by when it was received) in ONE user revision of ``note.archive`` ops that
-name the copy kept (``duplicate_of``). Hashes and names decide, never the words (ADR 0004).
+name the copy kept (``duplicate_of``), each copy's reading withdrawn with it (W28, ``Notebook.archive_notes``).
+Hashes and names decide, never the words (ADR 0004).
 """
 
 from __future__ import annotations
@@ -59,11 +60,12 @@ def dedupe_sources(nb: Any, account: Optional[str] = None, *, client: str = "cli
     out: Dict[str, Any] = {"dry_run": dry_run, "pairs": pairs, "archived": 0, "revision_id": None}
     if dry_run or not pairs:
         return out
-    ops = [{"op": "note.archive", "payload": {"note_id": p["archive"], "duplicate_of": p["keep"],
-                                              "reason": f"the same memory file {p['file']} imported twice"}}
-           for p in pairs]
     n = len(pairs)
     summary = f"Archived {n} duplicate cop{'y' if n == 1 else 'ies'} of memory files imported twice."
-    res = nb._user_revision(ACTION, "sources", ops, account, summary, client=client)
+    # W28: each copy's reading is withdrawn with it (its mentions no longer count twice); the kept copy is marked for
+    # re-understanding only when it repeated a statement the copy withdraws
+    res = nb.archive_notes([p["archive"] for p in pairs], account, "the same memory file imported twice",
+                           client=client, target="sources", summary=summary, action=ACTION,
+                           duplicate_of={p["archive"]: p["keep"] for p in pairs})
     out.update(archived=n, revision_id=res["revision_id"])
     return out

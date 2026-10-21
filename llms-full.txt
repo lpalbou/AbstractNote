@@ -687,7 +687,7 @@ signed-in principal for their own notebook. The few write actions are bookkeepin
 
 | Method and path | Purpose | Main parameters |
 |---|---|---|
-| `GET /note/status` | notebook health: counts, queue state, the processor, reflect and consolidate automations (ids and health, see the shapes below), model settings, store versions, embedding pin | |
+| `GET /note/status` | notebook health: counts, queue state, the processor, reflect and consolidate automations (ids and health, see the shapes below), model settings, store versions (`versions: {abstractnote, schema, abstractmemory}`; `abstractmemory` is the version of the copy the server imports: its `__version__`, else the installed distribution that holds the imported file, else the `pyproject.toml` of the checkout it was imported from; null when none says), embedding pin | |
 | `GET /note/changes` | since you last looked: new notes, new entities, superseded claims, closed loops, failed notes, insights since a cursor; the default screen for humans and the first call for agents | `since (cursor or ISO), limit, as_received` |
 | `GET /note/overview` | the landing data: recent notes, active entities, unacknowledged insights, today's resurfacing, activity sparkline | `days` |
 | `GET /note/notes` | list notes | `q, since, until, kind, topic, entity, status, cursor, limit` |
@@ -738,12 +738,14 @@ bodies cannot set it (an unknown field such as `client` is refused with 422).
 | `GET /note/tasks` | open loops | `status, entity, limit` |
 | `GET /note/insights` | insights | `kind, acked, limit` |
 | `POST /note/insights/{id}/ack` | acknowledge an insight | |
+| `POST /note/insights/archive-repeated` and `GET /note/insights/archive-repeated` | archive repeated insights: those with the same kind, title (case and spacing ignored) and subject (the same evidence notes and entities) keep their oldest unacknowledged one, the others are archived (each through the note archive below) in ONE revision of the signed-in account; acknowledged insights are left alone; `dry_run` only lists the groups. `POST` answers `{dry_run, insights, groups: [{kind, title, keep, archive: [note_id], count}], archived, kept, revision_id, cleanup, notice}`; `GET` answers `{cleanup: Cleanup \| null}`, the latest one. `Cleanup` = `{cleanup_id, kind, started_at, finished_at, status (running, completed, failed), total, done, groups, archived: [note_id], kept: [note_id], revision_id, notice, error}`. Reversible: `abstractnote unarchive --revision <revision_id>`, or `POST /note/notes/{id}/unarchive` per note | `POST`: `{dry_run?: bool}` (other fields 422) |
 | `GET /note/queue` | queue summary, failed notes with errors, and the processor's throughput (`processor: {max_items, interval}`) | `limit` |
 | `POST /note/queue/{note_id}/retry` | re-queue a failed note | |
 | `POST /note/queue/{note_id}/priority` | move a waiting note in the line: `{"priority": 0..3}` (3 = front of the line); only a note waiting in the queue (not one being processed); records no revision | `priority` (body) |
 | `GET /note/processing` | the processing page: the processor and reflect automations with their last run, the queue with an ETA, the pace over the last two hours, the runs active now with their step, the last 20 revisions, the failed notes, the model, the consolidation (every number read from the store or the plane's runs; carries an `ETag`, `If-None-Match` answers `304`) | |
 | `GET /note/consolidation` | the memory consolidation (backlog 0032): its automation and schedule, the stage running now with n of m, elapsed time and ETA, the last result, what is pending (the `consolidation` object of `GET /note/processing`) | |
-| `POST /note/notes/{note_id}/archive` | archive a note (never delete) | |
+| `POST /note/notes/{note_id}/archive` | archive a note (never delete): it leaves the lists and search, and its reading is withdrawn with it (data-model.md "Archive"): its statements close as a retraction ("note archived"), what it had closed re-opens, the entries and tasks only it made retire, its mentions, topics and summaries leave the views, and the later notes that build on it are marked to be understood again. One user revision `note.archive` of the signed-in account. Answers `{note_id, status: "archived", archived_at, revision_id, withdrawn: {claims_retracted, claims_reopened, reinforcements_dropped, starts_restored, tasks_reopened, tasks_retired, entities_retired, mentions}, marked, ...}` (the apply result's keys too); a note archived again changes nothing (`already_archived: true`, `revision_id: null`), except one archived before its reading was withdrawn with it, which is withdrawn now | |
+| `POST /note/notes/{note_id}/unarchive` | bring an archived note back: the inverse of its archive, op by op (its statements, what it had closed, its tasks, entries, mentions, topics and summaries are as they were; something another note or person changed since is left as it is, with a warning); a note that was waiting in the queue waits again; the later notes that build on it are marked again. One user revision `note.unarchive`. Answers `{note_id, status, archived_at: null, revision_id, restored: {claims_reopened, claims_closed_again, reinforcements_restored, starts_moved_back, tasks_restored, entities_restored}, warnings, marked, ...}`; `400` "That note is not archived." | |
 | `GET /note/settings` and `PUT /note/settings` | per-notebook settings: filing model, answering model, reflect schedule, processor schedule (`{every, max_items}`, default `2m` and 20; `max_items` 1 to 200), consolidation schedule (`consolidate_schedule`: `{every}`, a number of hours or days such as `12h`, `1d` (default) or `7d`, or `off`), inline processing default; the automations take them when `processor/ensure` creates them; a `consolidate_schedule` change re-creates the consolidation automation at once (paused for `off`, resumed when only `off` had paused it) | |
 | `POST /note/processor/ensure` | create the processor, reflect and consolidate automations if missing, repair them when unhealthy (another workflow version or tool list after an upgrade, failed, archived, gone), keep them otherwise; says what it did for each (shape below) | |
 | `POST /note/refile` and `GET /note/refile` | `refile --missing` through the gateway: file the understood notes that have no kind (imports skipped the quick filing), oldest first, one `note-file` run each on your own runtime (the served workflow version, the filing model setting, the processor's tool list); `POST` answers `202` with the repair as soon as it is open and files in the background, one at a time per notebook (`409` "Notes are being filed already; wait for that to end."), `400` unless `missing` is true, `503` when the note workflows are not served; a repair left running by a stopped server is closed `interrupted` by the next `POST`; `GET` reads the newest repair | `POST`: `{missing: true, max_items? (1..500, default 50), budget_s? (default 600)}` |
@@ -933,6 +935,9 @@ abstractnote rebuild --notebook DIR [--reembed]                  # replay revisi
 abstractnote normalize --notebook DIR [--dry-run] [--account NAME]  # merge entities that share a canonical name
 abstractnote normalize-topics --notebook DIR [--dry-run] [--account NAME]  # one spelling per topic, one revision
 abstractnote dedupe-sources --notebook DIR [--dry-run] [--account NAME]    # archive memory files imported twice
+abstractnote archive-insights --repeated --notebook DIR [--dry-run] [--account NAME]  # keep the oldest of each repeated insight
+abstractnote unarchive NOTE_ID ... --notebook DIR [--account NAME]       # bring archived notes back (one revision)
+abstractnote unarchive --revision RID --notebook DIR [--account NAME]    # bring back every note that archive put away
 abstractnote bundle [--out DIR]                                  # pack abstractnote@<version>.flow
 
 abstractnote import claude-sessions DIR --notebook DIR [--exclude-session ID ...] [--author NAME]
@@ -1350,7 +1355,7 @@ revision points back to the note(s) that caused it.
 | `status` | enum | `received`, `queued`, `processing`, `processed`, `failed`, `duplicate`, `archived`. |
 | `duplicate_of` | note id or null | Set only when the same idempotency key or import source key arrives again (a retry), never for the same words on another occasion. |
 | `session_id`, `run_id` | text | The gateway session and the run that captured it, when applicable. |
-| `archived_at` | ISO or null | Notes are archived, never deleted. |
+| `archived_at` | ISO or null | Notes are archived, never deleted. Archiving withdraws the note's reading with it and bringing it back restores it (see "Archive"). |
 
 ### Attachment
 
@@ -1480,7 +1485,8 @@ Operations:
 | `entity.merge` | `{from_id, into_id, reason}` |
 | `claim.add` | the claim |
 | `claim.supersede` | `{claim_id, by_claim_id, reason, valid_until}` |
-| `claim.retract` | `{claim_id, reason, valid_until?}` (without `valid_until`, the window closes at the revision's time) |
+| `claim.retract` | `{claim_id, reason, valid_until?, withdrawn?, assertion_id?, previous?}` (without `valid_until`, the window closes at the revision's time); `withdrawn` (an archive): the window empties at `valid_until` (the statement's start) even when another revision had closed it later, `assertion_id` names the AbstractMemory copy to close, `previous` keeps `{status, valid_until, superseded_by, closed_reason, closed_revision_id}` for `note.unarchive` |
+| `claim.reinforce` (restored) | an unarchive's `claim.reinforce` carries `at`, the dropped reinforcement's own date |
 | `claim.reinforce` | `{claim_id, note_id}` (the same statement seen again) |
 | `claim.insert_before` | `{claim_id, before_claim_id, valid_until, reason, after_claim_id?, after_valid_until?}`: the claim just added by this revision comes from a note older than `before_claim_id`, the belief it gives way to; it is closed at `valid_until` (that belief's start) and superseded by it, which stays untouched; `after_claim_id`, the belief before it, now ends at `after_valid_until` (this claim's start) and is superseded by it (see Time) |
 | `claim.start_earlier` | `{claim_id, note_id, observed_at, valid_from, previous_observed_at, previous_valid_from, subject_id, predicate, object_id, object_literal, certainty, stance, evidence, reason, after_claim_id?, after_valid_until?}`: an earlier note shows the belief already held on its date: `observed_at` and `valid_from` move back to it (`min`, never later; a claim without a start keeps none), the relation's `first_seen` follows; `after_claim_id`, the belief before it whose window covered that date, now ends there; the statement's content rides along for AbstractMemory (see "AbstractMemory projection"); emitted after the `claim.reinforce` |
@@ -1490,7 +1496,10 @@ Operations:
 | `entity.unmerge` | `{entity_id, from_id, reason}` (a user action; re-points the claims that came from `from_id`) |
 | `entity.mention` | `{entity_id, note_id}` (the note talks about the entity; drives `note_count`, `first_seen`, `last_seen`) |
 | `note.summary` | `{note_id, summary, kind, language}` |
-| `note.archive` | `{note_id, duplicate_of?, reason?}`: the note is archived (it leaves lists, search and the queue, keeps its links) and names the copy it duplicates (`abstractnote dedupe-sources`) |
+| `note.archive` | `{note_id, duplicate_of?, reason?, withdrawn?, previous?: {status, duplicate_of, queue_state}}`: the note is archived (it leaves lists, search and the queue, keeps its links) and names the copy it duplicates (`abstractnote dedupe-sources`); `withdrawn` (every archive since W28): its reading is withdrawn with it, its mentions and topics soft-removed (`entity_notes_removed`, `note_topics_removed`), its summaries out of the dated history, and the same revision's ops undo the rest (see "Archive"); an archive without `withdrawn` (written before) replays as it did |
+| `note.unarchive` | `{note_id, archive_revision_id, status, duplicate_of, requeue}`: the note is back with its earlier status; the mentions and topics archive `archive_revision_id` soft-removed come back (new rows of this revision), its summaries return to the history, `requeue` puts a note that was waiting back in the queue; the same revision's ops restore the rest (see "Archive") |
+| `task.restore` | `{task_id, status, closed_at, closed_by_note_id, closed_revision_id, recorded_closed_at}`: a task an archive retired or re-opened, back as it was |
+| `entity.restore` | `{entity_id, retired_revision_id}`: an entry an archive retired, back while that retirement stands |
 | `note.reinterpret` | `{note_id, supersedes, reason, by_note_ids}`: the first op of a re-understanding (see "Re-understanding"): the interpretation `supersedes` is superseded, its mentions and topics are soft-removed (`entity_notes_removed`, `note_topics_removed`) for the new reading's ops to add them again |
 | `claim.reinterpret` | `{claim_id, valid_until, assertion_id, reason}`: a statement of the superseded reading the new one does not make: status `reinterpreted`, window emptied at its own start; AbstractMemory closes its copy with the closure kind `reinterpreted` |
 | `claim.revise` | `{claim_id, certainty, stance, valid_from, valid_until, evidence, assertion_id, previous, previous_assertion_id, empty_at, assertion}`: the same statement (subject, predicate, object) read again with another certainty, stance, window or evidence: updated in place (`previous` keeps the earlier values; a window another revision closed stays closed); AbstractMemory gets the new copy `assertion` and closes the previous one empty (kind `reinterpreted`) |
@@ -1740,7 +1749,8 @@ them all, and the as-received axis shows what the notebook believed before.
   the first time marks only notes on or after its date (the same date included); a re-understanding marks only
   notes after it in history order (date, then received time, then id), so marks never go back in history and a
   pass terminates. A person's re-date marks forward from the earlier of the two dates over the moved note's used
-  entities, and the moved note itself; an archive (not of a duplicate) from the note's date; a retraction from the
+  entities, and the moved note itself; an archive (not of a duplicate) from the note's date, `reason_code`
+  `source_archived`, and an unarchive the same way (`source_unarchived`, see "Archive"); a retraction from the
   statement's date; a join or separation a person confirmed from the earlier first mention. The canonical-name
   repair and duplicate archiving mark nothing (they join copies, not meanings). A note has at most one untaken mark
   (idempotent); once a pass took it the note is in flight, and a new mark is a new row for the next pass. The apply
@@ -1875,6 +1885,56 @@ meaning is measured and from where it spreads (`recall/propagation.py`).
 
 - **Upgrade** (schema 4): `meta.propagation_record = {schema: 4, since_seq, upgraded_at}`; re-understandings up to
   `since_seq` have no change record and spread nothing; marks written before are `direct` with impact 1.
+
+### Archive (W28)
+
+Archiving a note is a person's statement about it: "this should not shape what my notebook believes". Before W28 an
+archive only hid the note from the lists: its entities, statements, mentions and summaries stayed in the graph, so
+an archived test note kept shaping beliefs (13 notes on an entity after archiving 12 of them). Now the archive
+withdraws the note's reading the way a withdrawn interpretation does (the inverse table above), in the same user
+revision `note.archive` (`Notebook.archive_note` / `archive_notes`, `POST /note/notes/{id}/archive`; planned by
+`abstractnote.process.withdraw.plan_archive`, nothing written until the revision is applied):
+
+| effect of the archived note's current reading | in the archive |
+|---|---|
+| its own statements (`claim.add`, not already retracted or reinterpreted) | `claim.retract` with `withdrawn`: status `retracted`, `closed_reason` "note archived", the window emptied at the statement's start (never a belief at any date: an empty retraction is left out of `beliefs_at` and of the graph's edges, `claim_withdrawn_sql`); AbstractMemory closes the current copy empty with a journal `ClosureRecord(kind="retract", reason="note archived")` |
+| statements of other notes it closed (`claim.supersede`, `claim.retract`, `claim.insert_before`), or that one of its own statements replaced while another revision closed them last | `claim.reopen` to the state the other revisions give them (a new AbstractMemory copy, the closed one emptied); nothing when that state is the one they have, and never a statement a person or another archive retracted |
+| `claim.reinforce` | `reinforcement.drop` (with the reinforcement's note and date) |
+| `claim.start_earlier` | `claim.start_restore` (with the moves, for the unarchive) |
+| `task.close` of another note's task | `task.reopen` |
+| its own tasks | `task.retire` |
+| `entity.create` of an entry nothing else refers to (no mention by another note, no statement of another note or person but a close-match review) | `entity.retire` (`note_id`, reason "only an archived note made it"; its page says the note was archived) |
+| `entity.mention`, `topic.assign` | soft-removed (`entity_notes_removed`, `note_topics_removed`, by the `note.archive` op): note counts, first/last seen and topic counts drop |
+| `entity.summary` | out of the dated history while the note is archived (`summary_superseded_sql`; as received, once the archive belongs); each entity's current summary is selected again and marked stale, so the consolidation writes a fresh one |
+| `entity.alias`, `entity.rename`, `entity.merge`, `note.redate`, `note.summary` | kept (names seen, merges a person can undo) |
+
+Notes archived together (`archive_notes`, one revision) are planned as one: an entry only they refer to retires, a
+statement one of them closed re-opens to the state the remaining revisions give it. A note never understood (or an
+insight) has nothing to withdraw: it only leaves the lists and the queue.
+
+- **Marks**: the later notes whose reading used what the archived note used (from its date) are marked for
+  re-understanding with `reason_code` `source_archived` ("A note it builds on (2026-03-05) was archived."), and so
+  are the notes, whatever their date, that repeated (reinforced) a statement the archive withdrew. Such marks are
+  read like direct ones (first tier, impact 1). A duplicate's archive (`dedupe-sources`) marks only those repeaters.
+  An archived note is never marked or re-read.
+- **As received**: the archive belongs to the archive-as-received at R when it was recorded by R: before it, the
+  views show the note's statements, mentions, topics, summaries and entries as they were (`store.archive` replays
+  the archive's `claim.retract` / `claim.reopen`).
+- **Unarchive** (`note.unarchive`, `Notebook.unarchive_note` / `unarchive_notes` / `unarchive_revision`, `POST
+  /note/notes/{id}/unarchive`, `abstractnote unarchive`): the inverse of the archive in force, op by op, from the
+  `previous` values each op kept: its retracted statements `claim.reopen` to their earlier state (a new AbstractMemory
+  copy), what the archive re-opened closes again (`claim.reopen` to the closed state), reinforcements come back
+  (`claim.reinforce` with their date), moved starts move back (`claim.start_earlier`), tasks and entries come back
+  (`task.restore`, `entity.restore`), mentions and topics come back as new rows of the unarchive. Only while what the
+  archive set still stands: a statement or task changed since is left as it is, with a warning. The dependents and
+  repeaters are marked again (`source_unarchived`; a note with an untaken mark is not marked twice).
+- **Older archives**: a note archived before W28 (no revision, or an archive without `withdrawn`) kept its reading;
+  archiving it again withdraws it now. A second archive of a withdrawn note changes nothing.
+- **Repeated insights** (`abstractnote archive-insights --repeated`, `POST /note/insights/archive-repeated`,
+  `recall/repeated_insights.py`): insights with the same kind, the same title (case-folded, whitespace collapsed) and
+  the same subject (evidence notes and entities) keep their oldest unacknowledged one; the other unacknowledged ones
+  are archived in ONE `note.archive` revision; a `cleanup_runs` row (a kept table) records what was archived and kept,
+  the revision and the notice; `unarchive --revision` brings them all back.
 
 ### Document dates
 
@@ -3407,6 +3467,12 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 ## [Unreleased]
 
 ### Added
+- **Bring an archived note back**: `POST /note/notes/{id}/unarchive` and `abstractnote unarchive NOTE_ID ...` (or
+  `--revision` for everything one archive put away) restore the note and what it said, as it was before the archive.
+- **Repeated insights archived in one go**: `abstractnote archive-insights --repeated [--dry-run]` and `POST
+  /note/insights/archive-repeated` keep the oldest unacknowledged insight of each kind, title and subject and archive
+  the others in one step, with a notice of what was archived; it can be undone. On the evaluation notebook: 135 of
+  196 insights (32 kept).
 - **Ideas understood differently reach what relies on them** (ADR 0008 §4a): when an earlier note changes what
   an idea is (its statements, its relations, what it is, or deeply its description), the later notes about the
   ideas that rest on it are understood again too, strongest first and in the order things happened, and each
@@ -3415,6 +3481,14 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
   consolidation with nothing new changes nothing.
 
 ### Changed
+- **Archiving a note takes back what it said**: an archived note no longer shapes what the notebook believes. Its
+  statements are withdrawn (recorded as a retraction, "note archived"), what it had replaced is believed again, the
+  things and tasks only it mentioned are put away, and it no longer counts in the notes, topics and descriptions of
+  what it mentioned; the later notes that built on it are understood again. The notebook as it stood before the
+  archive still shows it. A note archived earlier is withdrawn when it is archived again. Duplicate copies put away
+  by `dedupe-sources` no longer count twice either.
+- **Status says which AbstractMemory runs**: `GET /note/status` reports the version of the AbstractMemory that is
+  loaded, not the one an older installation recorded.
 - **What a thing is**: the description of a person, project or tool now says what it is (its kind,
   its role or purpose, and what it belongs to or works with), instead of the latest thing
   that happened to it. It is rewritten only when a note changes
