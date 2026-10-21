@@ -54,6 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--title")
     p.add_argument("--priority", type=int, choices=[0, 1, 2, 3])
     p.add_argument("--key", help="idempotency key (a retry with the same key saves nothing new)")
+    p.add_argument("--no-split", action="store_true",
+                   help="keep a document of dated entries (a diary) in one note instead of one note per entry")
 
     p = sub.add_parser("search", help="search the notes")
     _common(p)
@@ -181,8 +183,11 @@ def _cmd_capture(args: argparse.Namespace) -> Any:
             raise ValueError(f"There is no file at {path}.")
         files.append({"data": path.read_bytes(), "filename": path.name})
     with _open(args) as nb:
+        source: Dict[str, Any] = {"client": "cli"}
+        if args.no_split:
+            source["origin"] = {"no_split": True}
         return nb.capture(args.text, title=args.title, occurred_at=args.at, priority=args.priority,
-                          idempotency_key=args.key, attachments=files, source={"client": "cli"}).model_dump()
+                          idempotency_key=args.key, attachments=files, source=source).model_dump()
 
 
 def _runner(args: argparse.Namespace) -> Any:

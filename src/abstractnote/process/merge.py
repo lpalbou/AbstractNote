@@ -3,7 +3,8 @@
 Mentions are unioned by exact case-folded name and kind (refs renumbered m1,
 m2, ...; aliases unioned); claims, tasks and time references are concatenated
 with their refs remapped; topics are unioned; summaries are joined; the flow's warnings about a
-part (a part that names nothing) are kept. This is
+part (a part that names nothing) are kept; the dated entries (``moments``, W30) of every section are
+concatenated in order, each with its section index. This is
 the same rule as the flow's merge step.
 """
 
@@ -63,6 +64,10 @@ def merge_extractions(parts: Sequence[Dict[str, Any]]) -> Tuple[Dict[str, Any], 
         dated = [p.get("document_date") for p in parts if isinstance(p.get("document_date"), dict)]
         if dated:
             merged["document_date"] = dated[0]  # the first section that states the note's own date
+        moments = [dict(mo, section=i) for i, p in enumerate(parts) for mo in (p.get("moments") or [])
+                   if isinstance(mo, dict)]
+        if moments:
+            merged["moments"] = moments  # W30: the dated entries of every section, in the text's order
         if warnings:
             merged["warnings"] = warnings
     # Each mention carries the predicates of the note's statements about it: the slots the linking packet shows

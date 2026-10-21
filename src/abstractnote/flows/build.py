@@ -149,6 +149,28 @@ def validate_code(tail: str) -> str:
     return "\n".join(body)
 
 
+def split_code(tail: str) -> str:
+    """A code-node body that defines :mod:`abstractnote.process.split`'s flow functions (its constants first), then
+    ``tail``: the flow's "dated parts?" branch locates a document's dated entries with the very same source as the
+    apply step (W30)."""
+    import ast
+    import inspect
+
+    from ..process import split
+
+    body = [f"{k} = {getattr(split, k)!r}" for k in sorted(vars(split)) if k.isupper()]
+    for name in split.FLOW_FUNCTIONS:
+        tree = ast.parse(inspect.getsource(getattr(split, name)))
+        fn = tree.body[0]
+        fn.returns = None
+        for a in [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs, fn.args.vararg, fn.args.kwarg]:
+            if a is not None:
+                a.annotation = None
+        body.append(ast.unparse(fn))
+    body.append(tail.strip())
+    return "\n".join(body)
+
+
 #: note-process: the candidates each mention was offered (``note_resolve_candidates``), by ref.
 _CANDIDATE_COUNTS = (
     "cands = {}\n"
@@ -387,18 +409,20 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
         "dates = [d for d in dates if d]\n"
         "if dates:\n"
         "    parts.append(\"You noted this on \" + dates[0] + \".\")\n"
+        "undated = list(parts)\n"
         "if str(dated or \"\").strip():\n"
         "    parts.append(str(dated).strip())\n"
         "for w in warnings or []:\n"
         "    if isinstance(w, str) and w.strip():\n"
         "        parts.append(w.strip())\n"
-        "return {\"message\": \" \".join(parts)}",
+        "        undated.append(w.strip())\n"
+        "return {\"message\": \" \".join(parts), \"undated\": \" \".join(undated)}",
         inputs={
             "kind": ("string", ("filing_fields", "kind")), "title": ("string", ("filing_fields", "title")),
             "similar": ("array", (cap, "similar")), "revisits": ("array", (cap, "revisits")),
             "warnings": ("array", (cap, "warnings")), "dated": ("string", (cap, "date_sentence")),
         },
-        outputs=[("message", "string")],
+        outputs=[("message", "string"), ("undated", "string")],
     )
     f.then(filed, "saved_msg")
     f.answer_user("saved_answer", "Say where it was filed", ("saved_msg", "message"))
@@ -460,9 +484,11 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
         "extra = str(summary or \"\").strip()\n"
         "rev = revision if isinstance(revision, dict) else {}\n"
         "dated = str(rev.get(\"date_sentence\") or \"\").strip()\n"
-        "return {\"message\": \" \".join(x for x in (str(message or \"\").strip(), dated, extra) if x)}",
-        inputs={"message": ("string", ("saved_msg", "message")), "summary": ("string", ("process", "response")),
-                "revision": ("object", ("process", "revision"))},
+        "# W30: the understanding's date (the document's own) replaces the capture's (the file's), never both\n"
+        "head = str((undated if dated else message) or \"\").strip()\n"
+        "return {\"message\": \" \".join(x for x in (head, dated, extra) if x)}",
+        inputs={"message": ("string", ("saved_msg", "message")), "undated": ("string", ("saved_msg", "undated")),
+                "summary": ("string", ("process", "response")), "revision": ("object", ("process", "revision"))},
         outputs=[("message", "string")],
     )
     f.then(ack, "processed_msg")
@@ -518,6 +544,10 @@ else:
     dated = [part.get("document_date") for part in parts if isinstance(part.get("document_date"), dict)]
     if dated:
         merged["document_date"] = dated[0]
+    moments = [dict(mo, section=i) for i, part in enumerate(parts) for mo in (part.get("moments") or [])
+               if isinstance(mo, dict)]
+    if moments:
+        merged["moments"] = moments
     if warnings:
         merged["warnings"] = warnings
 slots = {}
@@ -718,11 +748,42 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
            inputs={"extractions": ("array", ("extractions", "value"))},
            outputs=[("extraction", "object"), ("mentions", "array")])
     f.then("each_section", "merge", "done")
+    # W30: a document the extraction read as a sequence of dated entries (``moments``) is split by the apply step
+    # into a container and one note per entry; its linking is not needed (each part is read as a note of its own).
+    f.code(
+        "dated_parts", "Dated parts?",
+        split_code(
+            "n = note if isinstance(note, dict) else {}\n"
+            "e = extraction if isinstance(extraction, dict) else {}\n"
+            "texts = [str(s.get('text') or '') for s in (sections or []) if isinstance(s, dict)]\n"
+            "plan = split_plan(texts, e.get('moments') or [], bool(n.get('can_split')))\n"
+            "return {'split': bool(plan['split']), 'linking': {'mentions': [], 'claims': [], 'tasks': [],"
+            " 'revision_summary': None}}"),
+        inputs={"note": ("object", (ctx, "note")), "extraction": ("object", ("merge", "extraction")),
+                "sections": ("array", ("sections", "items"))},
+        outputs=[("split", "boolean"), ("linking", "object")],
+    )
+    f.then("merge", "dated_parts")
+    f.if_("split_branch", "A document of dated parts?", ("dated_parts", "split"))
+    f.then("dated_parts", "split_branch")
+    split_rev = f.tool_step(
+        "apply_split", "Split it into dated notes", "note_apply_revision",
+        {"note_id": ("string", S("note_id")), "extraction": ("object", ("merge", "extraction")),
+         "linking": ("object", ("dated_parts", "linking"))},
+        [("revision_id", "string"), ("summary", "string")],
+        after=("split_branch", "true"),
+    )
+    f.end("end_split", "Done (split into dated notes)", {
+        "response": ("string", (split_rev, "summary")), "note_id": ("string", S("note_id")),
+        "revision_id": ("string", (split_rev, "revision_id")), "revision": ("object", (split_rev, "tool_output")),
+        "status": ("string", "processed"),
+    })
+    f.then(split_rev, "end_split")
     res = f.tool_step(
         "resolve", "Find candidate entities", "note_resolve_candidates",
         {"note_id": ("string", S("note_id")), "mentions": ("array", ("merge", "mentions"))},
         [("mentions", "array")],
-        after=("merge", "exec-out"),
+        after=("split_branch", "false"),
     )
     f.code(
         "link_parts", "What linking sees",

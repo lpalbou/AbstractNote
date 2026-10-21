@@ -95,7 +95,11 @@ a drain is understood twice, and the structured-output lane corrupts one link an
 7. **Dates come with their basis.** An upload without metadata takes the date the model reads in the
    document (`document_date`, basis `content`, approximate when only a month or year), else the file's
    date, else the moment of capture, and the capture answer says which. A person's re-date crossing a
-   belief boundary re-places the note's claims, never leaving overlapping beliefs.
+   belief boundary re-places the note's claims, never leaving overlapping beliefs. Amended 2026-10-21 (W30):
+   the date the document states beats the file's metadata too (EXIF, PDF and Office creation dates, the
+   modification time), which beats the client's time, and the answer says which won and what lost (one
+   precedence table, data-model.md "Document dates"); a document of separately dated entries becomes a
+   container and one note per entry, each at its stated date (data-model.md "Dated parts").
 8. **Nothing is understood twice or silently.** A note being understood inline is not leased by a
    drain; a model answer that is structurally corrupt (JSON fragments inside a string field, a decision
    that names no candidate) is an invalid answer: it is retried once and then recorded as a failed

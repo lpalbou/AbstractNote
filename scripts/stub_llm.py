@@ -39,7 +39,7 @@ ANSWERS: Dict[str, Dict[str, Any]] = {
                     "certainty": "stated", "stance": "assert", "evidence": "Met Dana about the LUT budget",
                     "valid_from": None, "valid_until": None}],
         "tasks": [{"text": "Send Dana the Pareto by Friday", "status": "open", "due": None}],
-        "time_refs": [], "topics": ["lut"], "document_date": None,
+        "time_refs": [], "topics": ["lut"], "document_date": None, "moments": None,
     },
     "Linking": {
         "mentions": [{"ref": "m1", "decision": "create", "candidate": None, "merge_candidates": [], "name": "Dana",
@@ -64,7 +64,7 @@ ANSWERS: Dict[str, Dict[str, Any]] = {
 # Schema recognition: the top-level property names of the schema the request carries, compared exactly.
 SIGNATURES = [
     ("Linking", {"mentions", "claims", "tasks", "revision_summary"}),
-    ("Extraction", {"summary", "mentions", "claims", "tasks", "time_refs", "topics", "document_date"}),
+    ("Extraction", {"summary", "mentions", "claims", "tasks", "time_refs", "topics", "document_date", "moments"}),
     ("QuickFiling", {"title", "kind", "topics", "urgency", "language", "one_line"}),
     ("MiningPlan", {"steps", "contradictions_to_test", "rounds"}),
     ("SliceFindings", {"facts", "changes", "gaps"}),

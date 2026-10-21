@@ -88,6 +88,11 @@ EXTRACTION = _obj({
     "document_date": {**_obj({"iso": _str("ISO date"), "basis": {"type": "string", "enum": ["stated in the text"]},
                               "quote": _str("the exact words that state the date")}),
                       "type": ["object", "null"]},
+    "moments": {**_arr(_obj({"heading": _str("the entry's title or heading as written"),
+                             "date": _str("the date the entry states for itself"),
+                             "basis": {"type": "string", "enum": ["stated in the text"]},
+                             "text_span": _str("the exact words the entry begins with")})),
+                "type": ["array", "null"]},
 }, ["summary", "mentions", "claims", "tasks", "time_refs", "topics"])
 
 LINKING = _obj({

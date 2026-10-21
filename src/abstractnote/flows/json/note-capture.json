@@ -1258,13 +1258,18 @@
             "id": "message",
             "label": "message",
             "type": "string"
+          },
+          {
+            "id": "undated",
+            "label": "undated",
+            "type": "string"
           }
         ],
         "pinDefaults": {
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "titles = []\nfor s in similar or []:\n    t = s.get(\"title\") if isinstance(s, dict) else None\n    if t and t not in titles:\n        titles.append(t)\nparts = [\"Saved as \" + str(kind or \"note\") + \" \\u201c\" + str(title or \"\") + \"\\u201d.\"]\nif titles:\n    parts.append(\"Related: \" + \", \".join(titles[:3]) + \".\")\ndates = [str(r.get(\"occurred_at\") or \"\")[:10] for r in (revisits or []) if isinstance(r, dict)]\ndates = [d for d in dates if d]\nif dates:\n    parts.append(\"You noted this on \" + dates[0] + \".\")\nif str(dated or \"\").strip():\n    parts.append(str(dated).strip())\nfor w in warnings or []:\n    if isinstance(w, str) and w.strip():\n        parts.append(w.strip())\nreturn {\"message\": \" \".join(parts)}\n"
+        "codeBody": "titles = []\nfor s in similar or []:\n    t = s.get(\"title\") if isinstance(s, dict) else None\n    if t and t not in titles:\n        titles.append(t)\nparts = [\"Saved as \" + str(kind or \"note\") + \" \\u201c\" + str(title or \"\") + \"\\u201d.\"]\nif titles:\n    parts.append(\"Related: \" + \", \".join(titles[:3]) + \".\")\ndates = [str(r.get(\"occurred_at\") or \"\")[:10] for r in (revisits or []) if isinstance(r, dict)]\ndates = [d for d in dates if d]\nif dates:\n    parts.append(\"You noted this on \" + dates[0] + \".\")\nundated = list(parts)\nif str(dated or \"\").strip():\n    parts.append(str(dated).strip())\nfor w in warnings or []:\n    if isinstance(w, str) and w.strip():\n        parts.append(w.strip())\n        undated.append(w.strip())\nreturn {\"message\": \" \".join(parts), \"undated\": \" \".join(undated)}\n"
       }
     },
     {
@@ -1948,6 +1953,11 @@
             "type": "string"
           },
           {
+            "id": "undated",
+            "label": "undated",
+            "type": "string"
+          },
+          {
             "id": "summary",
             "label": "summary",
             "type": "string"
@@ -1979,7 +1989,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "extra = str(summary or \"\").strip()\nrev = revision if isinstance(revision, dict) else {}\ndated = str(rev.get(\"date_sentence\") or \"\").strip()\nreturn {\"message\": \" \".join(x for x in (str(message or \"\").strip(), dated, extra) if x)}\n"
+        "codeBody": "extra = str(summary or \"\").strip()\nrev = revision if isinstance(revision, dict) else {}\ndated = str(rev.get(\"date_sentence\") or \"\").strip()\n# W30: the understanding's date (the document's own) replaces the capture's (the file's), never both\nhead = str((undated if dated else message) or \"\").strip()\nreturn {\"message\": \" \".join(x for x in (head, dated, extra) if x)}\n"
       }
     },
     {
@@ -2710,6 +2720,13 @@
       "sourceHandle": "message",
       "target": "processed_msg",
       "targetHandle": "message"
+    },
+    {
+      "id": "e-saved_msg-undated-processed_msg-undated",
+      "source": "saved_msg",
+      "sourceHandle": "undated",
+      "target": "processed_msg",
+      "targetHandle": "undated"
     },
     {
       "id": "e-process-response-processed_msg-summary",

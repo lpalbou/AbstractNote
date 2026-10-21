@@ -11,7 +11,7 @@ ids derive from the source key.
 | Claude Code sessions | `abstractnote import claude-sessions DIR` | human-typed prompt (the operator's words; the final assistant text of that turn is its outcome); one note per session summary (title, compaction and away summaries); one note per subagent run (its brief and its last report); one note per curated memory file | the record timestamp; a memory file: see [Dates](#dates) | `{session_id, uuid, prompt_id, cwd, git_branch, model, file, line, outcome, outcome_author}` |
 | Agora hub | `abstractnote import agora DB` | recorded decision (`store decision:*`), claim and work entry, resolved or answered thread (root plus replies), operator message | `created_at` (a store entry without a message: its `updated_at`) | `{message_id, channel, seq, sender, reply_to, status, hash, retracted_at?}` |
 | Markdown tree | `abstractnote import markdown DIR` | file (ADRs, backlog items, notes), with front-matter and headings kept | see [Dates](#dates) | `{repo, path, blob_sha, commit, added_as?, completed?}` |
-| Files | `abstractnote import files PATH...` | file (documents, images, audio, video, logs) | the file's own metadata date (EXIF, XMP, PDF `CreationDate`, Office `core.xml` created), else the file date | `{path, sha256}` |
+| Files | `abstractnote import files PATH... [--no-split]` | file (documents, images, audio, video, logs); a document of dated entries becomes a container and one note per entry when it is understood (see [Dated documents](#dated-documents)) | the file's own metadata date (EXIF, XMP, PDF `CreationDate`, Office `core.xml` created), else the file date; a date the document states beats both | `{path, sha256, no_split?}` |
 
 Every `source.origin` also carries `date_basis`: how `occurred_at` was found.
 
@@ -38,6 +38,7 @@ Every `source.origin` also carries `date_basis`: how `occurred_at` was found.
 | `upload`, `pasted_text`, `capture_time` | a live capture: the moment of an upload, of a paste, or of a capture that sent no date (data-model.md "Document dates") | yes |
 | `client` | a live note typed now: the client's time | no |
 | `content` / `stated_month`, `stated_year` | written after import: the date the text states itself (`note.redate` at processing) / only its month or year | no / yes |
+| `stated` | a dated part of a document (W30): the date its heading states; a container's, from its earliest part | no |
 | `user` | written after import: a person set the date | no |
 
 Files and captures share one detector, `abstractnote.ingest.dates.detect_file_date(path or bytes, mime)`: images
@@ -46,8 +47,31 @@ An import that gives no `occurred_at` takes the first attachment's metadata date
 capture is dated by `ingest.dates.capture_date` (data-model.md "Document dates": typed now `client`; an upload or a
 paste is a stand-in; without a client time the file's metadata date, then the `last_modified` the client sent,
 then the moment of the capture). Bases written after import: `content` (or `stated_month` / `stated_year`) when
-processing found the date the text states itself on a note whose date was approximate (`note.redate`), and `user`
-when a person set the date; an import from before date bases were recorded reads as `unrecorded` (approximate).
+processing found the date the text states itself and that date beats the note's (`note.redate`), `stated` for a
+dated part, and `user` when a person set the date; an import from before date bases were recorded reads as
+`unrecorded` (approximate).
+
+Which date wins (`ingest.dates.PRECEDENCE`, data-model.md "Document dates"): a person's date; then the moment the
+words were written (`record`, `first_record`, `message`, a live `client`), never moved by what the text says; then a
+date the document states about itself (`content`, `stated`, `front_matter`, `created_line`, `date_line`; a stated
+month or year is refined by a full date); then the file's own metadata (`exif`, `xmp`, `pdf_created`,
+`office_created`, `file_mtime`); then the stand-ins (`upload`, `pasted_text`, `capture_time`, `git_added`,
+`bulk_commit`, `origin_session`, `front_matter_modified`, `store_updated`, `last_record`, `unrecorded`). So a scanned
+letter's PDF creation date or a diary's modification time gives way to the date the document states, and the
+processing answer says so: "Dated 5 March 2025 from the document; the file itself is from 20 March 2026."
+
+## Dated documents
+
+A document that is a sequence of separately dated entries (a diary, a journal, a log of dated moments) cannot sit
+at one date. When processing reads it as such (the model names the entries: `moments`), it becomes a container (kind
+`archive`, the file attached, dated by its earliest entry, not read for statements itself) and one note per entry
+(its own text, dated by the date the entry states, basis `stated`, `part_of` the container, the file's provenance),
+each queued and understood as a note of its own, oldest first (data-model.md "Dated parts"). The same file
+imported again is a duplicate; the same document in another notebook gives the same entries. `abstractnote import
+files --no-split` (and `abstractnote capture --no-split`) keeps such a document in one note. A Markdown or memory
+file is a document too and is split the same way; a dated front matter or field line keeps dating the container
+(it ranks as a stated date), while each entry takes its own. A transcript prompt, an agora message or a note typed
+now is never split (its date is the moment its words were written).
 
 The order for a memory file is `origin_session`, `front_matter_modified`, `git_added`,
 `file_mtime`; for a Markdown file `front_matter`, `created_line` (or `git_added` when the first commit is

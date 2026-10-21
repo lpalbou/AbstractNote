@@ -342,8 +342,8 @@ def test_a_stated_document_date_redates_an_approximate_import(nb):
     out = note_apply_revision(ctx, nid, _letter_ext(), _letter_link(packet, cands))
     rev = nb.revision(out["revision_id"])
     assert rev["ops"][0] == {"op": "note.redate", "payload": {
-        "note_id": nid, "from": "2026-10-01T10:00:00Z", "to": "2021-03-03T00:00:00Z", "basis": "content",
-        "quote": "written on 3 March 2021"}}
+        "note_id": nid, "from": "2026-10-01T10:00:00Z", "from_basis": "file_mtime", "to": "2021-03-03T00:00:00Z",
+        "basis": "content", "quote": "written on 3 March 2021"}}  # W30: what lost is kept for the answer
     assert rev["at"] == "2021-03-03T00:00:00Z"
     note = nb.note(nid)
     assert (note["occurred_at"], note["date_basis"], note["date_approximate"]) == ("2021-03-03T00:00:00Z", "content",

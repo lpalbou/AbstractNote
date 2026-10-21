@@ -84,12 +84,17 @@ def test_capture_dates_an_undated_note_from_its_attachment(nb):
     assert note["occurred_at"] == "2019-04-05T08:30:00Z"
     assert (note["date_basis"], note["date_approximate"]) == ("pdf_created", False)
     assert r.date_sentence == "Dated 5 April 2019 from the document."
-    # a date the client gives always wins; on an upload it is the moment of the upload (ADR 0008 §7): a stand-in
-    # the document's own stated date may correct
+    # W30 (dates.PRECEDENCE): the file's own metadata beats the client's time on an upload, and the answer says what
+    # lost; the moment of the upload is the stand-in only for a file without a date of its own
     r2 = nb.capture("see attached", occurred_at="2026-10-20T10:00:00Z",
                     attachments=[{"data": _docx(), "filename": "report.docx"}])
     n2 = nb.note(r2.note_id)
-    assert (n2["occurred_at"], n2["date_basis"], n2["date_approximate"]) == ("2026-10-20T10:00:00Z", "upload", True)
+    assert (n2["occurred_at"], n2["date_basis"], n2["date_approximate"]) == ("2016-11-12T13:14:15Z", "office_created",
+                                                                             False)
+    assert r2.date_sentence == "Dated 12 November 2016 from the document; it was sent on 20 October 2026."
+    r3 = nb.capture("see attached", occurred_at="2026-10-20T10:00:00Z",
+                    attachments=[{"data": b"Plain words, no date of its own.", "filename": "plain.txt"}])
+    assert (r3.occurred_at, r3.date_basis) == ("2026-10-20T10:00:00Z", "upload")
 
 
 def test_date_basis_of_stored_notes():

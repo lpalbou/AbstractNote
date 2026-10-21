@@ -200,7 +200,16 @@ EXTRACTION: Dict[str, Any] = _o({
                       "properties": {"iso": _s("ISO date"), "basis": _e(["stated in the text"]),
                                      "quote": _s("the exact words of the text that state the date")},
                       "required": ["iso", "basis", "quote"]},
-}, {"document_date": None})
+    # Appended (W30): a text that is a sequence of separately dated entries (a diary, a log of dated moments); the
+    # model decides. Each entry becomes a note of its own at its stated date (process/split.py).
+    "moments": {"type": ["array", "null"], "description": "only when the text is a sequence of separately dated "
+                "entries: one per entry, in the order of the text; else null",
+                "items": _o({"heading": _s("the entry's title or heading as written"),
+                             "date": _s("the date the entry states for itself: ISO YYYY-MM-DD, or YYYY-MM or YYYY"),
+                             "basis": _e(["stated in the text"]),
+                             "text_span": _s("the exact words the entry begins with, copied from the text (its "
+                                             "heading line when it has one)")})},
+}, {"document_date": None, "moments": None})
 
 LINKING: Dict[str, Any] = _o({
     "mentions": _a(_o({
@@ -374,6 +383,16 @@ class DocumentDate(_M):
     quote: str = ""
 
 
+class Moment(_M):
+    """A dated entry of a document (W30): its heading, its stated date, and the words it begins with."""
+
+    heading: str = ""
+    date: str
+    basis: Literal["stated in the text"] = "stated in the text"
+    text_span: str = ""
+    section: Optional[int] = None  # the merge's: which section the entry was read in (not part of the schema)
+
+
 class Extraction(_M):
     summary: str = ""
     mentions: List[Mention] = Field(default_factory=list)
@@ -382,6 +401,7 @@ class Extraction(_M):
     time_refs: List[TimeRef] = Field(default_factory=list)
     topics: List[str] = Field(default_factory=list)
     document_date: Optional[DocumentDate] = None
+    moments: Optional[List[Moment]] = None
 
 
 class MentionLink(_M):

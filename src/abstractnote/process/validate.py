@@ -47,10 +47,10 @@ from typing import Any, Dict, List, Optional
 LINK_KEYS = ("aliases", "candidate", "claims", "closes_open_task", "decision", "evidence", "existing", "index",
              "kind", "mentions", "merge_candidates", "name", "reason", "ref", "relation_to_existing",
              "revision_summary", "summary", "tasks")
-EXTRACTION_KEYS = ("aliases", "basis", "certainty", "claims", "document_date", "due", "evidence", "iso", "kind",
-                   "mentions", "name", "object", "object_is_literal", "predicate", "quote", "ref", "role", "stance",
-                   "status", "subject", "summary", "tasks", "text", "time_refs", "topics", "valid_from",
-                   "valid_until")
+EXTRACTION_KEYS = ("aliases", "basis", "certainty", "claims", "date", "document_date", "due", "evidence", "heading",
+                   "iso", "kind", "mentions", "moments", "name", "object", "object_is_literal", "predicate", "quote",
+                   "ref", "role", "stance", "status", "subject", "summary", "tasks", "text", "text_span", "time_refs",
+                   "topics", "valid_from", "valid_until")
 #: Problems named in one error sentence at most (the rest are counted).
 PROBLEMS_SHOWN = 3
 
@@ -186,6 +186,12 @@ def extraction_problems(answer, context=""):
         frag = _fragment(t, EXTRACTION_KEYS, context)
         if frag is not None:
             problems.append("a topic holds a piece of the answer's structure (" + frag.strip() + ")")
+    for i, mo in enumerate(m for m in (a.get("moments") or []) if isinstance(m, dict)):
+        for field in ("heading", "text_span"):
+            frag = _fragment(mo.get(field), EXTRACTION_KEYS, context)
+            if frag is not None:
+                problems.append("the " + field.replace("_", " ") + " of dated part " + str(i + 1)
+                                + " holds a piece of the answer's structure (" + frag.strip() + ")")
     return problems
 
 

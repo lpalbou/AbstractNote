@@ -30,8 +30,9 @@ or ``new`` (claims) with a warning. Mapping:
   (``claim.reinforce`` + ``claim.start_earlier``), never later; a statement linked to an existing
   one on the same subject under another predicate spelling adopts the existing predicate
   (``predicate_adopted``: the model's index decides, never the string);
-  a document date stated in the text of a note whose date is approximate moves the
-  note first (``note.redate``); no window ever ends before it starts;
+  a document date stated in the text of a note whose date that statement outranks (W30
+  ``dates.PRECEDENCE``: the file's metadata or a stand-in) moves the note first (``note.redate``,
+  with what lost); no window ever ends before it starts;
 - tasks: ``task.close`` of the open task named by index, only with the note's own
   words saying it is done and never from a note older than the task (eval2 D3),
   else ``task.open`` (and ``task.close`` when the note reports it done);
@@ -51,7 +52,7 @@ from datetime import timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .. import ids
-from ..ingest.dates import CONTENT, date_basis, document_date, is_approximate, redate_sentence
+from ..ingest.dates import CONTENT, date_basis, document_date, redate_sentence, stated_date_wins
 from ..ingest.normalise import normalize_topic, text_norm
 from ..store.names import strip_kind_suffix
 from ..store.notes import _TakenIds
@@ -213,13 +214,16 @@ class _Builder:
         return bool(ws) and (" " + " ".join(ws) + " ") in self.note_words()
 
     def redate(self, ext: schemas.Extraction) -> None:
-        """``note.redate`` when the note's date is a stand-in and its text states its own date (the quote must be
-        the note's words); the revision, its statements and its mentions then carry the stated date."""
+        """``note.redate`` when the note's text states its own date (the quote must be the note's words) and that
+        stated date beats the evidence the note is dated by (W30 ``dates.PRECEDENCE``: the file's metadata or a
+        stand-in; never a person's date nor the moment the words were written). The op records what lost
+        (``from``, ``from_basis``) for the answer; the revision, its statements and its mentions carry the stated
+        date."""
         dd = ext.document_date
         if dd is None:
             return
         basis = date_basis(self.note)
-        if not is_approximate(basis):
+        if not stated_date_wins(basis):
             if basis != CONTENT:
                 self.warnings.append("The note's date is not approximate; the date its text states was not used.")
             return
@@ -236,8 +240,8 @@ class _Builder:
             return
         if abs(ids.parse_time(to) - ids.parse_time(self.at)) <= REDATE_MIN:
             return
-        self.ops.append(_op("note.redate", note_id=self.note_id, **{"from": self.at}, to=to, basis=stated,
-                            quote=dd.quote.strip()))
+        self.ops.append(_op("note.redate", note_id=self.note_id, **{"from": self.at}, from_basis=basis, to=to,
+                            basis=stated, quote=dd.quote.strip()))
         self.at = to
 
     # ---------------------------------------------------------------- mentions

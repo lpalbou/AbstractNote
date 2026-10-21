@@ -285,6 +285,9 @@ class NoteStore:
             "language": r["language"], "topics": self.note_topics(r["note_id"]),
             "priority": r["priority"], "status": r["status"], "duplicate_of": r["duplicate_of"],
             "session_id": r["session_id"], "run_id": r["run_id"], "archived_at": r["archived_at"],
+            # W30: a dated part names its container; a container counts its parts (a list folds them under it)
+            "part_of": r["part_of"],
+            "parts": self.part_count(r["note_id"]) if r["kind"] == "archive" else 0,
         }
         if r["insight_kind"]:
             out.update({
@@ -298,6 +301,15 @@ class NoteStore:
             # #[WARNING:TRUNCATION] a list preview with its "…" marker; the full text comes with the note (full=True)
             out["excerpt"] = text[:280] + ("…" if len(text) > 280 else "")
         return out
+
+    def part_count(self, note_id: str) -> int:
+        """How many dated parts a container note has (W30), archived ones left out."""
+        return int(self.q1("SELECT COUNT(*) FROM notes WHERE part_of=? AND archived_at IS NULL", (note_id,))[0])
+
+    def parts_of(self, note_id: str) -> List[sqlite3.Row]:
+        """A container's dated parts in history order (W30), archived ones left out."""
+        return self.q("SELECT * FROM notes WHERE part_of=? AND archived_at IS NULL ORDER BY occurred_at, note_id",
+                      (note_id,))
 
     def insert_note(self, conn: sqlite3.Connection, row: Dict[str, Any]) -> None:
         cols = ",".join(row.keys())
@@ -812,10 +824,19 @@ class NoteStore:
     def list_notes(self, *, q: Optional[str] = None, since: Optional[str] = None, until: Optional[str] = None,
                    kind: Optional[str] = None, topic: Optional[str] = None, entity: Optional[str] = None,
                    status: Optional[str] = None, cursor: Optional[str] = None, limit: int = 50,
-                   include_archived: bool = False) -> Dict[str, Any]:
+                   include_archived: bool = False, part_of: Optional[str] = None, parts: bool = False
+                   ) -> Dict[str, Any]:
+        """A page of notes, newest first. The dated parts of a document (W30) are folded under their container
+        (the container's ``parts`` counts them): ``part_of=<container>`` lists one container's parts, ``parts=True``
+        lists every note, parts included."""
         limit = clamp_limit(limit)
         sql = "SELECT n.* FROM notes n WHERE 1=1"
         params: List[Any] = []
+        if part_of:
+            sql += " AND n.part_of=?"
+            params.append(part_of)
+        elif not parts:
+            sql += " AND n.part_of IS NULL"
         if not include_archived and status != "archived":
             sql += " AND n.archived_at IS NULL"
         if since:
@@ -2140,6 +2161,17 @@ class _OpContext:
         self.c.execute("UPDATE tasks SET opened_at=? WHERE note_id=? AND opened_at=?", (new, note_id, old))
         for (topic,) in self.c.execute("SELECT topic FROM note_topics WHERE note_id=?", (note_id,)).fetchall():
             self.s.refresh_topic(self.c, topic)
+
+    def op_note_split(self, p: Dict[str, Any]) -> None:
+        """A document of dated moments was split (W30, ``process/split.py``): ``{note_id, parts: [{note_id, at,
+        basis, heading}]}``. The parts are notes of their own (truth rows, ``part_of`` the container, captured before
+        this revision); the op records which, and every part must be there (a replay without them is refused)."""
+        note_id = p.get("note_id") or self.note_id
+        for part in p.get("parts") or []:
+            r = self.c.execute("SELECT part_of FROM notes WHERE note_id=?", (part.get("note_id"),)).fetchone()
+            if r is None or r[0] != note_id:
+                raise ValueError(f"The dated part {part.get('note_id')} of {note_id} is not in this notebook.")
+        self.stats.setdefault("parts", []).extend(str(x.get("note_id")) for x in p.get("parts") or [])
 
     # --- end of revision
     def _record_topics_not_assigned(self) -> None:

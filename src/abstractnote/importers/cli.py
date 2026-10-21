@@ -5,7 +5,7 @@
                               [--exclude-channels a,b] [--include-retracted] [--include-system] [--operators a,b]
                               [--notebook DIR]
     abstractnote import markdown DIR [--glob '**/*.md'] [--notebook DIR]
-    abstractnote import files PATH ... [--notebook DIR]
+    abstractnote import files PATH ... [--no-split] [--notebook DIR]
 
 Every command takes ``--dry-run`` (count what would be created; nothing is written and a missing
 notebook is not created) and ``--embed-base-url`` / ``--embed-model`` (the notebook's embedding model,
@@ -64,6 +64,8 @@ def build_parser(prog: str = "abstractnote import") -> argparse.ArgumentParser:
     common(p)
     p = sub.add_parser("files", help="files or folders (one note per file, bytes stored in the notebook)")
     p.add_argument("paths", nargs="+", type=Path)
+    p.add_argument("--no-split", action="store_true",
+                   help="keep a document of dated entries (a diary) in one note instead of one note per entry")
     common(p)
     return ap
 
@@ -100,7 +102,7 @@ def main(argv: Optional[List[str]] = None, *, prog: str = "abstractnote import")
     elif args.source == "markdown":
         options.update(path=args.dir, glob=args.glob)
     else:
-        options.update(paths=args.paths)
+        options.update(paths=args.paths, no_split=args.no_split)
     try:
         nb = _open_notebook(args.notebook, args.dry_run, _embedder(args))
     except ValueError as e:

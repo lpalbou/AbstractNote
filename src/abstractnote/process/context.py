@@ -21,11 +21,12 @@ import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .. import ids
-from ..ingest.dates import date_basis, is_approximate
+from ..ingest.dates import FILE_METADATA_BASES, date_basis, is_approximate, stated_date_wins
 from ..ingest.normalise import DEFAULT_SECTION_CHARS, sections
 from ..recall.shapes import excerpt
 from ..store.embeddings import top_k
 from .packets import LATER_CLAIMS_PER_CANDIDATE, LATER_SUMMARIES_PER_CANDIDATE, later_than, slot_first
+from .split import can_split
 from .vocabulary import predicate_words, vocabulary
 
 MAX_CANDIDATE_ENTITIES = 15
@@ -353,8 +354,14 @@ def note_context(nb: Any, note_id: str, max_chars: Optional[int] = None) -> Dict
         "chars": sum(s["chars"] for s in secs), "about": about,
     }
     basis = date_basis(row)
-    if is_approximate(basis):  # only then: the header says so and extraction may give the text's own date
-        note.update({"date_basis": basis, "date_approximate": True})
+    if stated_date_wins(basis):  # only then: the header says so and extraction may give the text's own date (W30)
+        note.update({"date_basis": basis, "date_approximate": is_approximate(basis),
+                     "date_from_file": basis in FILE_METADATA_BASES and not is_approximate(basis)})
+    container = nb.store.note_row(row["part_of"]) if row["part_of"] else None
+    if container is not None:  # W30: one dated part of a document, read as a note of its own
+        note["part_of"] = {"note_id": container["note_id"], "title": container["title"]}
+    # a note understood before is read again as one note (its dated parts are named in a warning, never split)
+    note["can_split"] = can_split(row) and nb.store.current_interpretation(note_id) is None
 
     vector = nb.cache.get(row["vector_key"]) if row["vector_key"] else None
     similar: List[Dict[str, Any]] = []

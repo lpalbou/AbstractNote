@@ -32,13 +32,13 @@ revision points back to the note(s) that caused it.
 | Field | Type | Meaning |
 |---|---|---|
 | `note_id` | `nt_<26 chars>` | Deterministic, base32 of a sha256. Imports: `sha256(importer, source_key)`. Live capture: `sha256(idempotency_key)` when the client sends one (clients always should; the runs API has no idempotency key of its own), otherwise `sha256(text_norm, attachment hashes, occurred_at to the minute, source.client)`. A retried request yields the same note; the same words said again on another day yield a new note that revisits the earlier one. |
-| `kind` | enum | `idea`, `task`, `decision`, `fact`, `event`, `question`, `reflection`, `reference`, `log`, `conversation`, `personal`, `synthesis`, `insight`. Assigned by the quick filing step; `synthesis` and `insight` are system-authored. |
+| `kind` | enum | `idea`, `task`, `decision`, `fact`, `event`, `question`, `reflection`, `reference`, `log`, `conversation`, `personal`, `synthesis`, `insight`, `archive`. Assigned by the quick filing step; `synthesis` and `insight` are system-authored, and so is `archive`: a document split into dated parts (see "Dated parts"). |
 | `title` | text | Short title (model-written or taken from the source). |
 | `text` | text | The note body as received (Markdown allowed). Never truncated. |
 | `text_norm` | text | Whitespace-normalised, lower-cased copy used for hashing and full-text search. |
 | `summary` | text | One to three sentences written by the processor. |
-| `occurred_at` | ISO 8601 UTC | When the note was made or the event happened. From the client clock, the importer (message timestamp, file date, EXIF), the attachment's own metadata date or the file date the client sent for a capture that gives none, the moment of the capture, or an explicit value; moved only by a `note.redate` (see "Document dates"). |
-| `date_basis`, `date_approximate` | read only | How `occurred_at` was found (`GET /note/notes/{id}`, and the capture answer): the latest redate's basis (`content`, `stated_month`, `stated_year`, `user`), else `source.origin.date_basis` (an importer's, docs/importers.md, or a live capture's `upload`, `pasted_text`, `capture_time`, `file_mtime`, `exif`, `pdf_created` ...), else `client` for a note typed now and `unrecorded` for an older import; `date_approximate` is true for a stand-in date (`upload`, `pasted_text`, `capture_time`, `stated_month`, `stated_year`, `file_mtime`, `git_added`, `bulk_commit`, `store_updated`, `last_record`, `origin_session`, `front_matter_modified`, `unrecorded`), the ones a client offers to "Set the date". |
+| `occurred_at` | ISO 8601 UTC | When the note was made or the event happened. From the client clock, the importer (message timestamp, file date, EXIF), an upload's own metadata date or the file date the client sent (both beat the client's time on an upload), the moment of the capture, the date a dated part of a document states, or an explicit value; moved only by a `note.redate` (see "Document dates": the precedence of date evidence). |
+| `date_basis`, `date_approximate` | read only | How `occurred_at` was found (`GET /note/notes/{id}`, and the capture answer): the latest redate's basis (`content`, `stated_month`, `stated_year`, `user`), else `source.origin.date_basis` (an importer's, docs/importers.md, or a live capture's `upload`, `pasted_text`, `capture_time`, `file_mtime`, `exif`, `pdf_created` ...), else `client` for a note typed now and `unrecorded` for an older import (a dated part's `stated`, `stated_month` or `stated_year` is its `source.origin.date_basis`); `date_approximate` is true for a stand-in date (`upload`, `pasted_text`, `capture_time`, `stated_month`, `stated_year`, `file_mtime`, `git_added`, `bulk_commit`, `store_updated`, `last_record`, `origin_session`, `front_matter_modified`, `unrecorded`), the ones a client offers to "Set the date". |
 | `received_at` | ISO 8601 UTC | When AbstractNote stored it. |
 | `processed_at` | ISO 8601 UTC or null | When the last successful revision was applied. |
 | `source` | object | Provenance: `{client: web|watch|iphone|cli|agent|importer, importer?: claude-sessions|agora|markdown|files, origin: {...source-specific ids...}, author?: user id or agent name}`. |
@@ -50,6 +50,7 @@ revision points back to the note(s) that caused it.
 | `duplicate_of` | note id or null | Set only when the same idempotency key or import source key arrives again (a retry), never for the same words on another occasion. |
 | `session_id`, `run_id` | text | The gateway session and the run that captured it, when applicable. |
 | `archived_at` | ISO or null | Notes are archived, never deleted. Archiving withdraws the note's reading with it and bringing it back restores it (see "Archive"). |
+| `part_of` | note id or null | W30: the container note this note is one dated part of (see "Dated parts"); also a `dcterms:isPartOf` note link. A container's parts are `children` on `GET /note/notes/{id}` and its `parts` count in lists. |
 
 ### Attachment
 
@@ -204,7 +205,8 @@ Operations:
 | `task.reopen` | `{task_id, closed_revision_id}`: a task the superseded reading closed that the new one does not close |
 | `task.retire` | `{task_id, reason}`: a task of the superseded reading the new one does not have: status `retired` |
 | `entity.retire` | `{entity_id, reason, read_as}`: an entity only the superseded reading created and that nothing references any more (see Entity); `read_as`: the entries the new reading uses for a mention whose name or alias has the retired entry's name or alias as its lookup key (empty when it no longer names it) |
-| `note.redate` | `{note_id, from, to, basis, quote?, reason?}`: the note moves in history time (`basis` `content` when its text states its date, `user` when a person sets it); its mentions, its topics' ranges, its queue place, and the statements and tasks it wrote with the old date move with it; `source.redated` keeps `{basis, from, to, revision_id}` |
+| `note.redate` | `{note_id, from, from_basis?, to, basis, quote?, reason?}`: the note moves in history time (`basis` `content` when its text states its date, `stated` when its earliest dated part does, `user` when a person sets it; `from_basis` the evidence that lost, for the answer's "the file itself is from ..."); its mentions, its topics' ranges, its queue place, and the statements and tasks it wrote with the old date move with it; `source.redated` keeps `{basis, from, to, revision_id}` |
+| `note.split` | `{note_id, parts: [{note_id, at, basis, heading}]}` (W30): the document was split into these dated parts (see "Dated parts"). The parts are notes of their own, captured before the revision (`part_of` the container); the op records which and a replay is refused when one is missing. No index effect of its own; nothing to undo on a re-reading (a container read again is settled unchanged) or an archive (the parts are archived one by one) |
 
 User actions (`close a task`, `retract a claim`, `undo a merge`, `confirm a match`) produce revisions with
 `source = {client, account}` and no note; they are the human side of an actionable graph. Through
@@ -711,31 +713,78 @@ insight) has nothing to withdraw: it only leaves the lists and the queue.
 
 ### Document dates
 
-Dates come with their basis (ADR 0008 §7). A live capture is dated by `ingest.dates.capture_date`:
+Dates come with their basis (ADR 0008 §7). Several kinds of evidence can date a note; the strongest wins
+(`ingest.dates.PRECEDENCE`, one table, W30):
+
+| Rank | Evidence | Bases | Moved by a date the text states |
+|---|---|---|---|
+| 5 | a person set it | `user` | never (only by another re-date) |
+| 4 | the moment the words were written | `client` (typed now), `record`, `first_record`, `message` | never: the dates such a text gives are about other things |
+| 3 | the document states it | `content` (its `document_date`), `stated` (a dated part, see "Dated parts"), an importer's dated header line `front_matter`, `created_line`, `date_line`; `stated_month`, `stated_year` | a stated month or year is refined by a full stated date; the others stay |
+| 2 | the file's own metadata | `exif`, `xmp`, `pdf_created`, `office_created`, `file_mtime` | yes |
+| 1 | a stand-in of the receiving side | `upload`, `pasted_text`, `capture_time`, `git_added`, `bulk_commit`, `origin_session`, `front_matter_modified`, `store_updated`, `last_record`, `unrecorded` | yes |
+
+A live capture is dated by `ingest.dates.capture_date`; on an upload the file's date beats the client's time:
 
 | The capture | `occurred_at` | `date_basis` |
 |---|---|---|
 | a note typed now (the client's time, no attachment, no paste) | the client's time | `client` (never moved by its text) |
-| an upload with the client's time (the watch's recordings excepted: made now, they keep `client`) | the moment of the upload | `upload` |
 | a pasted text (`source.origin.pasted`, the web app sets it on a paste) | the moment of the paste | `pasted_text` |
-| no client time, an attachment with its own metadata date | that date | `exif`, `xmp`, `pdf_created`, `office_created` |
-| no client time, a file whose `last_modified` the client sent (web: `File.lastModified`; the watch has none) | that time | `file_mtime` |
-| no client time, nothing else (an upload, or a call that sent no date) | the moment of the capture | `upload` or `capture_time` |
+| an upload whose attachment carries its own metadata date (with or without a client time) | that date | `exif`, `xmp`, `pdf_created`, `office_created` |
+| an upload whose `last_modified` the client sent (web: `File.lastModified`; the watch has none) | that time | `file_mtime` |
+| an upload with nothing of its own (the watch's recordings excepted: made now, they keep `client`) | the client's time, else the moment of the capture | `upload` |
+| no client time and no file (a call that sent no date) | the moment of the capture | `capture_time` |
 
-A note with no words, no title and no readable text in any of its files is refused at capture (nothing written,
-nothing queued): it could never be understood.
+When the client's time lost to the file's date the capture answer says so ("Dated 2 July 2019 from the document; it
+was sent on 21 October 2026."). A note with no words, no title and no readable text in any of its files is refused
+at capture (nothing written, nothing queued): it could never be understood.
 
-A note's date can be a stand-in: the moment of an upload, a paste or a capture, a file's modification time, a
-commit, a session start, a store update. When the date basis is approximate (`date_approximate`), the extraction
-header says so ("this date is approximate, from the upload") and the model may give `document_date`
-`{iso, basis: "stated in the text", quote}`: the date the text gives itself (a dated letter, a report's date line,
-a meeting's minutes); `iso` is `YYYY-MM` or `YYYY` when the text states only a month or a year. At apply time it is
-used only when the quote is the note's own words (a whole-word sequence), the date is not in the future and it
-differs from `occurred_at` by more than a day: the revision's first op is `note.redate {from, to, basis, quote}`
-with basis `content` (`stated_month` / `stated_year`, on the first day, still approximate, for a month or a year
-alone), and the revision, its statements (`observed_at`, `valid_from`) and its mentions carry the stated date; the
-processed capture answer says "Dated 14 March 2019 from the document.". A note typed now (basis `client`) or a note
-with an exact basis (`record`, `message`, `front_matter`, `exif`, `pdf_created` ...) is never redated from its text.
+When a date the text states would beat the note's date (rank 2 or 1, or a stated month or year), the extraction
+header says where the date comes from ("this date is approximate, from the upload", "this date is from the file's
+metadata, pdf created") and the model may give `document_date` `{iso, basis: "stated in the text", quote}`: the date
+the text gives itself (a dated letter, a report's date line, a meeting's minutes); `iso` is `YYYY-MM` or `YYYY` when
+the text states only a month or a year. At apply time it is used only when it beats the note's evidence, the quote
+is the note's own words (a whole-word sequence), the date is not in the future and it differs from `occurred_at` by
+more than a day: the revision's first op is `note.redate {from, from_basis, to, basis, quote}` with basis `content`
+(`stated_month` / `stated_year`, on the first day, still approximate, for a month or a year alone), and the
+revision, its statements (`observed_at`, `valid_from`) and its mentions carry the stated date; the processed capture
+answer says which won and what lost, in place of the capture's own date sentence: "Dated 5 March 2025 from the
+document; the file itself is from 20 March 2026." ("...; it was sent on ...", "pasted on", "saved on" for the
+client's stand-ins, "its earlier date was ..." for an importer's). A note dated by a person, typed now, or recorded
+when its words were written is never redated from its text.
+
+### Dated parts
+
+A document that is a sequence of separately dated entries (a diary, a journal, a log of dated moments) cannot sit
+at one date (W30, `process/split.py`). Its extraction says so: `moments: [{heading, date, basis: "stated in the
+text", text_span}]` per section, the model deciding; no rule reads the text for dates. The document is split when
+it may be (`split.can_split`: its date ranks 3 or below, so it is a document; it is not a part itself, not an
+insight, and was not captured with `source.origin.no_split`, the CLI's `--no-split`) and at least two entries are
+found in its words (`split.locate_moments`: each entry's quoted opening words, else its heading, searched forward in
+the note's text and its files' text, exactly, then with case and spacing ignored; a heading's markup `#`, `-`, `*`,
+`>` before it on its line belongs to the entry). The apply step then:
+
+- captures one note per entry: its own text (from its opening words to the next entry's, or the end of its text),
+  its heading as title, `occurred_at` its stated date with basis `stated` (`stated_month` / `stated_year` for a month
+  or a year), `part_of` the container (and a `dcterms:isPartOf` link), the container's provenance plus
+  `origin.part_of`, `part`, `parts`, `heading`, `quote`, `date_basis`, the container's priority (at most normal).
+  Its id is `sha256("part:<container id>:<index>:<day>")`, so the same document again gives the same parts (a
+  duplicate) and nothing new. Each part is queued and understood as a note of its own (filed first: it has no
+  kind), in history order, and the later notes that build on what it names are marked as for any earlier note;
+- writes the container's one processing revision: `note.redate` to its earliest entry (basis `stated`, when that
+  beats its own evidence), `note.split` (the parts), `note.summary` with the extraction's summary and kind
+  `archive`; summary "A document of 3 dated parts, from 5 March 2025 to 21 March 2025; each is read as a note of its
+  own.". The container keeps its file and is not read for statements itself: its parts are. The flow skips its
+  linking (note-process's "Dated parts?" node runs the same `split_plan`).
+
+A container read again (a mark, a re-date) is settled unchanged: its parts are notes of their own and each is read
+again by itself. A part's reading never splits it again (its header says "(one dated part of the document “...”)").
+A document whose entries are not split says why in its revision's warnings (asked to keep one note, a part already,
+not a document's date, only one entry, an entry not found in its words, a date that is not one) and is read as one
+note. Lists fold the parts under their container (`GET /note/notes`: the container's `parts` counts them,
+`part_of=<id>` lists them, `parts=true` lists every note); the day view shows each part on its day. A document
+understood as one note before is not split by a re-reading: its dated entries are named in the re-reading's
+warnings (a follow-up: a split that withdraws the earlier reading first).
 
 A person can set the date: `POST /note/notes/{id}/redate {occurred_at, reason}` is a user revision (`action
 note.redate`, source `{client, account}`) with one `note.redate` op, basis `user`

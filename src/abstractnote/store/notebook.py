@@ -700,7 +700,10 @@ class Notebook:
     def note(self, note_id: str) -> Optional[Dict[str, Any]]:
         """A note in the pinned shape of ``GET /note/notes/{id}``: ``{note_id, title, text, kind, occurred_at,
         date_basis, date_approximate, received_at, status, topics, summary, source, location, attachments, revision,
-        entities, claims, revisits, insight}``.
+        entities, claims, revisits, part_of, children, insight}``.
+
+        ``part_of`` is the container (a ``NoteRef``) of a dated part, null otherwise; ``children`` a container's dated
+        parts in history order, [] otherwise (W30).
 
         ``date_basis`` says how ``occurred_at`` was found (:func:`abstractnote.ingest.dates.date_basis`) and
         ``date_approximate`` whether it is a stand-in a person may correct ("Set the date").
@@ -741,6 +744,10 @@ class Notebook:
             "claims": [self.store.claim_dict(r) for r in self.store.q(
                 "SELECT * FROM claims WHERE note_id=? ORDER BY seq", (note_id,))],
             "revisits": [shapes.note_ref(r) for r in revisits],
+            # W30: the container this dated part belongs to, and a container's parts in history order
+            "part_of": (shapes.note_ref(self.store.note_row(row["part_of"])) if row["part_of"]
+                        and self.store.note_row(row["part_of"]) is not None else None),
+            "children": [shapes.note_ref(r) for r in self.store.parts_of(note_id)],
             "insight": shapes.insight_facts(row),
             "interpretations": self.interpretations(note_id),
             # ADR 0008: why the note waits to be understood again (the reasons of its pending marks), [] when it does not

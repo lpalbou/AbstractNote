@@ -13,10 +13,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 NoteKind = Literal[
     "idea", "task", "decision", "fact", "event", "question", "reflection", "reference", "log",
-    "conversation", "personal", "synthesis", "insight",
+    "conversation", "personal", "synthesis", "insight", "archive",
 ]
 NOTE_KINDS: tuple = NoteKind.__args__  # type: ignore[attr-defined]
-FILING_KINDS: tuple = tuple(k for k in NOTE_KINDS if k not in ("synthesis", "insight"))
+#: ``archive`` (W30): a document split into dated parts, its container; system-assigned like synthesis and insight.
+FILING_KINDS: tuple = tuple(k for k in NOTE_KINDS if k not in ("synthesis", "insight", "archive"))
 
 NoteStatus = Literal["received", "queued", "processing", "processed", "failed", "duplicate", "archived"]
 Client = Literal["web", "watch", "iphone", "cli", "agent", "importer"]
@@ -47,6 +48,8 @@ OP_NAMES = (
     "task.reopen", "task.retire", "entity.retire", "claim.start_restore",
     # W28: a person's unarchive restores what the archive withdrew
     "note.unarchive", "task.restore", "entity.restore",
+    # W30: a document of dated moments became a container and one note per moment
+    "note.split",
 )
 
 

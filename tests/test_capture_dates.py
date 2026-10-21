@@ -73,7 +73,10 @@ def test_an_undated_pasted_or_uploaded_document_takes_its_stated_date(nb, how):
     note = nb.note(r.note_id)
     assert (note["occurred_at"], note["date_basis"], note["date_approximate"]) == (
         "2019-03-14T00:00:00Z", "content", False)
-    assert out["date_sentence"] == "Dated 14 March 2019 from the document."
+    # W30: the answer says which evidence won and which lost (the client's time, or the capture's moment)
+    lost = {"no date at all": "; it was saved on " + dates.long_day(r.received_at),
+            "pasted": "; it was pasted on 20 October 2026", "upload": "; it was sent on 20 October 2026"}[how]
+    assert out["date_sentence"] == "Dated 14 March 2019 from the document" + lost + "."
     [c] = note["claims"]
     assert c["observed_at"] == c["valid_from"] == "2019-03-14T00:00:00Z"
 
@@ -85,7 +88,8 @@ def test_a_stated_month_or_year_is_placed_on_its_first_day_and_stays_approximate
     note = nb.note(r.note_id)
     assert (note["occurred_at"], note["date_basis"], note["date_approximate"]) == (
         "2019-03-01T00:00:00Z", "stated_month", True)
-    assert out["date_sentence"] == "Dated March 2019 from the document."
+    assert out["date_sentence"] == "Dated March 2019 from the document; it was saved on " + dates.long_day(
+        r.received_at) + "."
     r2 = nb.capture("Annual report 2018. Oskar Lind confirmed the schedule.")
     understand(nb, r2.note_id, dated("2018", "Annual report 2018"))
     assert (nb.note(r2.note_id)["occurred_at"], nb.note(r2.note_id)["date_basis"]) == ("2018-01-01T00:00:00Z",
@@ -254,7 +258,7 @@ def test_the_capture_answer_says_where_the_date_came_from(tmp_path):
                                               "Linking": [link, corrupt, corrupt]}), bind(tmp_path / "nb"))
     out = runner.run_capture(S6_TEXT, idempotency_key="s6", source={"client": "agent"}, process_inline=True)
     assert out["status"] == "processed"
-    assert "Dated 14 March 2019 from the document." in out["response"]
+    assert "Dated 14 March 2019 from the document; it was saved on " in out["response"]
     assert out["response"].index("Dated 14 March 2019") < out["response"].index("Oskar Lind confirmed")
     from test_file_dates import PDF
 

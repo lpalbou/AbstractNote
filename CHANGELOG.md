@@ -7,6 +7,11 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 ## [Unreleased]
 
 ### Added
+- **A diary becomes dated notes**: a document that is a sequence of dated entries (a diary, a journal, a log of
+  dated moments) is kept as one entry holding the file plus one note per entry, each dated by the date it states and
+  understood on its own, oldest first; the list shows the document with its entries folded under it and the day
+  view shows each entry on its day. Importing the same document again changes nothing. `--no-split` on `abstractnote
+  capture` and `abstractnote import files` keeps such a document in one note.
 - **Bring an archived note back**: `POST /note/notes/{id}/unarchive` and `abstractnote unarchive NOTE_ID ...` (or
   `--revision` for everything one archive put away) restore the note and what it said, as it was before the archive.
 - **Repeated insights archived in one go**: `abstractnote archive-insights --repeated [--dry-run]` and `POST
@@ -29,6 +34,11 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
   small changes still add up. Before a consolidation runs, the Processing page says what changed and how many more
   may follow: "12 notes to understand again (3 sources: Zorn changed its kind, Mira is described differently and 1
   more; at most 4 more may follow)". A link that keeps bringing nothing new counts less next time, never zero.
+- **A document's own date wins over its file's date**: the date a document states about itself now beats the
+  file's metadata (its modification time, a photo's or a PDF's creation date), which beats the time the file was
+  sent; the answer says which won and what lost ("Dated 5 March 2025 from the document; the file itself is from 20
+  March 2026."). An upload is dated by its file before the time it was sent. A date you set, and the time a note
+  was typed or a message was written, are never moved by what the text says.
 - **Archiving a note takes back what it said**: an archived note no longer shapes what the notebook believes. Its
   statements are withdrawn (recorded as a retraction, "note archived"), what it had replaced is believed again, the
   things and tasks only it mentioned are put away, and it no longer counts in the notes, topics and descriptions of

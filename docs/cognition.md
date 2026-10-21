@@ -60,7 +60,10 @@ flowchart TD
   its "Instant linking" setting (`process_inline_default`, off by default); the watch always
   sends `false` and shows the filing answer. The answer says where a date from a file came from
   ("Dated 2 July 2019 from the document."); the processed answer says it when the note's own text
-  dated it (data-model.md "Document dates"). A note with nothing to read is refused by `note_capture`.
+  dated it, with what lost, in place of the capture's sentence ("Dated 5 March 2025 from the document; the file
+  itself is from 20 March 2026.", data-model.md "Document dates"), and for a document of dated entries "A document
+  of 4 dated parts, from ... to ...; each is read as a note of its own.". A note with nothing to read is refused by
+  `note_capture`.
 - **Nothing is understood twice** (ADR 0008 §8). `note_capture` with `process_inline` claims the
   queue row (`inline_run_id`, the capture run's id) in the same transaction as the enqueue, before
   the quick filing, so no drain leases the note while note-capture files and understands it; the
@@ -118,7 +121,18 @@ flowchart TD
    evidence excerpt, optional validity dates), tasks (opened, completed), time references, and
    topics. The model sees the section's whole text and a bounded orientation packet (see
    "Prompts and bounds"); the predicate vocabulary from the AbstractSemantics registry is in the
-   static system prompt and `ex:` is allowed for the rest.
+   static system prompt and `ex:` is allowed for the rest. **Moments** (W30): when the header says the note's
+   date is approximate or from the file's metadata and the text is a sequence of separately dated entries (a
+   diary, a journal, a log of dated moments), the section's answer also lists them (`moments: [{heading, date,
+   basis: "stated in the text", text_span}]`, `text_span` the exact words the entry begins with); the model
+   decides, no rule reads the text for dates. The merge step concatenates the moments of every section in order.
+   When the note may be split (data-model.md "Dated parts": a document, not a part, not `no_split`) and at least
+   two entries are found in its words (`process/split.py` `split_plan`, the same source in the flow's "Dated
+   parts?" node and in the apply step), note-process skips steps 3 and 4 and the apply step splits the document
+   into a container (kind `archive`) and one note per entry, each queued and understood as a note of its own in
+   history order (a part's header says "(one dated part of the document “...”)"). Otherwise the moments are
+   ignored with a warning saying why (asked to keep one note, a part already, not a document's date, only one,
+   not found in the words, a date that is not one), and the note is read as one note.
 3. **Resolve candidates** (`note_resolve_candidates`): for every mention, up to three existing
    entities with their kind, aliases, summary and statements as known on the note's date, their LATER
    block, last seen date and how they matched (`matched_by`, and `match`: `alias` when the mention's name or
@@ -157,7 +171,9 @@ flowchart TD
    note older than the statement it supersedes, and a statement `earlier_state_of` a later one, is inserted
    before it as the earlier belief (`claim.insert_before`), never closing it; an older note restating a belief
    moves its start back (`claim.start_earlier`); a task closes only with the note's own words and never
-   from an older note; a stated `document_date` redates a note whose date is approximate (`note.redate`); no window
+   from an older note; a stated `document_date` redates a note when it beats the note's date evidence (`note.redate`
+   with `from_basis`; W30 `dates.PRECEDENCE`: the file's metadata or a stand-in, never a person's date nor the
+   moment the words were written); a document of dated moments is split instead (step 2); no window
    ends before it starts. A note older than what is known about an entity marks it (stale summary, then-versus-now
    dropped, `graph_version`) for the consolidation. The response lists created and merged entities, claims added and superseded, and
    any warnings (unknown predicates mapped to `ex:`, unresolved references, missing summaries).
@@ -584,7 +600,9 @@ models from them and repairs invalid output. Python mirrors live in `abstractnot
  "tasks": [{"text": "string", "status": "open|done", "due": "ISO or null"}],
  "time_refs": [{"text": "string", "iso": "ISO or null"}],
  "topics": ["string"],
- "document_date": {"iso": "ISO date", "basis": "stated in the text", "quote": "the exact words"} or null}
+ "document_date": {"iso": "ISO date", "basis": "stated in the text", "quote": "the exact words"} or null,
+ "moments": [{"heading": "as written", "date": "YYYY-MM-DD, YYYY-MM or YYYY", "basis": "stated in the text",
+              "text_span": "the exact words the entry begins with"}] or null}
 ```
 
 **Every schema a model is handed is strict** (`process.schemas.strict`, applied once in `flows.build.load_schemas`,
@@ -598,8 +616,9 @@ alphabetical order and skips the optional ones (see "Validity" above). `tests/te
 sent schema with a property outside `required`, checks the schema AbstractCore's openai-compatible provider sends
 (the runtime's pydantic model, `model_json_schema()`), and compiles each schema with Outlines, the local MLX
 provider's constrained decoding. The nullable fields: in Extraction `aliases` (null = []), `object_is_literal`
-(false), `certainty` (stated), `stance` (assert), `valid_from`, `valid_until`, `due`, `iso` and `document_date`
-(null; given only when the header says the note's date is approximate and the text states its own date); in
+(false), `certainty` (stated), `stance` (assert), `valid_from`, `valid_until`, `due`, `iso`, `document_date`
+(null; given only when the header says the note's date is approximate or from the file's metadata and the text
+states its own date) and `moments` (null; only for a text of separately dated entries, W30); in
 Linking `candidate`, `merge_candidates` ([]), `name` (""), `kind`, `aliases` ([]), `reason` (""), `existing`,
 `closes_open_task` and `evidence` ("": a close without it is not applied); in EntitySummaries `ties` ([]). `claims`
 lists only the statements that relate to an existing one (a statement left out is `new`) and `tasks` only those

@@ -29,7 +29,7 @@ from ..model import FILING_KINDS, URGENCY_PRIORITY, CaptureResult, Location, Pro
 from ..store.notes import _j, note_vector_text
 from ..store.queue import PRIORITY_NORMAL
 from .blobs import BlobStore
-from .dates import capture_date, date_basis, date_sentence, detect_file_date
+from .dates import FILE_METADATA_BASES, UPLOAD, capture_date, date_basis, date_sentence, detect_file_date
 from .extract import extract, guess_mime
 from .normalise import normalize_topic, text_norm
 
@@ -103,11 +103,14 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
             about: Optional[Dict[str, Any]] = None,
             default_client: str = "cli", vision: Any = None, stt: Any = None, now: Optional[str] = None,
             inline: bool = False, inline_run_id: Optional[str] = None, title_is_text: bool = True,
+            part_of: Optional[str] = None,
             ) -> CaptureResult:
     """Store one note. ``attachments`` are resolved inputs: ``{"data": bytes, "mime"?, "filename"?, "artifact_ref"?,
     "last_modified"?}`` (``last_modified``: the file's modification time as the client knows it, ISO 8601 or epoch
     milliseconds; the web sends ``File.lastModified``). ``source.origin.pasted`` (a live client's flag that the text
-    was pasted) makes the client's time a stand-in the text may correct (basis ``pasted_text``)."""
+    was pasted) makes the client's time a stand-in the text may correct (basis ``pasted_text``). ``part_of`` (W30,
+    ``process/split.py``): the container note this note is one dated part of (``dcterms:isPartOf`` link too);
+    ``source.origin.no_split`` keeps a document of dated parts in one note."""
     text = "" if text is None else str(text)
     atts = list(attachments or [])
     if not text.strip() and not atts:
@@ -116,6 +119,8 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
         raise ValueError("The priority must be 0 (bulk), 1 (normal), 2 (high) or 3 (urgent).")
     if (importer is None) != (source_key is None):
         raise ValueError("An import needs both the importer name and the source key.")
+    if part_of is not None and nb.store.note_row(part_of) is None:
+        raise ValueError("The document this part belongs to is not in this notebook.")
     nb.require_embedder()  # before anything is written
     now = now or ids.utc_now()
     occurred = ids.normalize_time(occurred_at, field="occurred_at") if occurred_at else now
@@ -123,6 +128,7 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
     if importer:
         src["importer"] = importer
     origin = src.get("origin") if isinstance(src.get("origin"), dict) else {}
+    lost: Optional[tuple] = None
     if importer or origin.get("date_basis"):
         if not occurred_at and atts:
             # An import that gives no date: the first attachment that carries one in its own metadata dates it
@@ -136,10 +142,13 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
     else:
         # A live capture (ADR 0008 §7): typed now = the client's time; an upload or a paste = a stand-in the
         # document's own date may correct; without a caller's time, the file's date, else the capture moment.
-        occurred, basis = capture_date(ids.normalize_time(occurred_at, field="occurred_at") if occurred_at else None,
-                                       atts, pasted=bool(origin.get("pasted")), now=now, client=src.get("client"))
+        caller = ids.normalize_time(occurred_at, field="occurred_at") if occurred_at else None
+        occurred, basis = capture_date(caller, atts, pasted=bool(origin.get("pasted")), now=now,
+                                       client=src.get("client"))
         if basis != "client":
             src.setdefault("origin", {})["date_basis"] = basis
+        if caller and basis in FILE_METADATA_BASES:
+            lost = (caller, UPLOAD)  # W30: the file's date beat the client's time; the answer says so
     loc = _location(location)
     about_ref = _about(nb, about)
     norm = text_norm(text)
@@ -249,8 +258,12 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
             "client": src.get("client"), "location_json": _j(loc) if loc else None, "priority": prio,
             "priority_explicit": 1 if priority is not None else 0, "status": "received",
             "session_id": session_id, "run_id": run_id, "idempotency_key": idempotency_key, "size": size,
-            "vector_key": vkey, "about_json": _j(about_ref) if about_ref else None,
+            "vector_key": vkey, "about_json": _j(about_ref) if about_ref else None, "part_of": part_of,
         })
+        if part_of:
+            c.execute("INSERT OR IGNORE INTO note_links(src_note_id, dst_note_id, predicate, score, matched_by,"
+                      " detail_json, created_at) VALUES (?,?,'dcterms:isPartOf',1.0,'split',?,?)",
+                      (note_id, part_of, _j({"part": (src.get("origin") or {}).get("part")}), now))
         if about_ref:
             c.execute("INSERT OR IGNORE INTO note_links(src_note_id, dst_note_id, predicate, score, matched_by,"
                       " detail_json, created_at) VALUES (?,?,?,1.0,?,?,?)",
@@ -280,7 +293,9 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
         note_id=note_id, status="new", received_at=now, revisits=revisits, similar=similar,
         topics=nb.store.topic_names(),
         attachments=[_att_out({**r, "artifact_ref": None}) for r in att_rows], warnings=warnings,
-        occurred_at=occurred, date_basis=basis, date_sentence=date_sentence(occurred, basis),
+        occurred_at=occurred, date_basis=basis,
+        date_sentence=date_sentence(occurred, basis, lost_at=lost[0] if lost else None,
+                                    lost_basis=lost[1] if lost else None),
     )
 
 

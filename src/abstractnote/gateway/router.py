@@ -197,9 +197,11 @@ async def note_list(
     request: Request, q: Optional[str] = None, since: Optional[str] = None, until: Optional[str] = None,
     kind: Optional[str] = None, topic: Optional[str] = None, entity: Optional[str] = None,
     status: Optional[str] = None, cursor: Optional[str] = None, limit: int = Query(50, ge=1, le=500),
+    part_of: Optional[str] = None, parts: bool = False,
 ) -> Dict[str, Any]:
     return await _run(request, lambda nb, svc, p: _items(_call(nb, "notes", **_clean(
-        q=q, since=since, until=until, kind=kind, topic=topic, entity=entity, status=status, cursor=cursor, limit=limit))))
+        q=q, since=since, until=until, kind=kind, topic=topic, entity=entity, status=status, cursor=cursor, limit=limit,
+        part_of=part_of, parts=parts or None))))
 
 
 @router.get("/notes/{note_id}")

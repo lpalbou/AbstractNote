@@ -5,8 +5,9 @@ that holds the files) and their text is extracted by the core lane's extractors 
 ``occurred_at`` = the date the file carries in its own metadata (:func:`abstractnote.ingest.dates.detect_file_date`,
 shared with capture: a photo's EXIF date when Pillow is installed, an XMP creation date, a PDF's ``/CreationDate``,
 an Office document's ``core.xml`` created date), else the file's modification time. ``source.origin`` =
-``{path, sha256, date_basis}``; the source key is the content hash, so the same file imported again (from anywhere)
-is a duplicate.
+``{path, sha256, date_basis}`` (``no_split`` with ``--no-split``); the source key is the content hash, so the same
+file imported again (from anywhere) is a duplicate. A document of dated entries (a diary) is split into a container
+and one note per entry when it is understood (W30, ``process/split.py``), unless ``--no-split``.
 """
 
 from __future__ import annotations
@@ -35,7 +36,9 @@ def _walk(paths: Sequence[str | Path]) -> Iterator[Path]:
 
 
 def drafts(*, report: ImportReport, paths: Sequence[str | Path], since: Optional[str] = None,
-           until: Optional[str] = None) -> Iterator[NoteDraft]:
+           until: Optional[str] = None, no_split: bool = False) -> Iterator[NoteDraft]:
+    """One draft per file. ``no_split`` (``--no-split``, W30): a document of dated entries stays one note
+    (``source.origin.no_split``) instead of a container and one note per entry."""
     for path in _walk(paths):
         if path.name in SKIPPED_NAMES or any(part.startswith(".") for part in path.parts[-1:]):
             report.skip("hidden_file")
@@ -52,6 +55,8 @@ def drafts(*, report: ImportReport, paths: Sequence[str | Path], since: Optional
         digest = hashlib.sha256(data).hexdigest()
         source = {"client": "importer", "importer": IMPORTER, "origin": {"path": str(path.resolve()), "sha256": digest,
                                                                          "date_basis": basis}}
+        if no_split:
+            source["origin"]["no_split"] = True
         # the title is the file's name, not its text: a file nothing can be read from is left out at capture
         yield NoteDraft(IMPORTER, digest, "", occurred, "file", path.name, source,
                         [{"data": data, "mime": mime, "filename": path.name}], title_is_text=False)

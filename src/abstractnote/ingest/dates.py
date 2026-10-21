@@ -13,6 +13,9 @@ Two things live here:
   sent (``last_modified``), else the moment of the upload, the paste or the capture (stand-ins the text may correct).
 - :func:`document_date`: the stated document date of an extraction as a time and a basis (``content``, or
   ``stated_month`` / ``stated_year`` when the text gives only a month or a year).
+- :data:`PRECEDENCE` / :func:`stated_date_wins`: which evidence of a note's date beats which (W30, one table): a
+  person's date, then the moment the words were written, then a date the document states about itself, then the
+  file's metadata, then the receiving side's stand-ins (the client's upload, paste or capture time).
 - :func:`redate_note`: a person's re-date. A note not understood yet just moves; an understood note moves, keeps its
   statements where its interpretation placed them (the note index and AbstractMemory stay in agreement, no belief
   overlaps another) and is marked, with the notes that depend on it, for re-understanding (ADR 0008 §4).
@@ -51,6 +54,46 @@ CLIENT = "client"
 CONTENT = "content"
 #: A person set the date (``POST /note/notes/{id}/redate``).
 USER = "user"
+#: A dated part of a document (W30 "moments"): the date its heading or first line states; the date of a part note
+#: (``part_of`` a container) and of the container itself (its earliest part).
+STATED = "stated"
+
+#: The precedence of date evidence (W30; docs/data-model.md "Document dates"), strongest first. A date the document
+#: states about itself (the model's ``document_date``, a dated part, or a dated header line an importer read) beats
+#: the file's own metadata, which beats the receiving side's stand-ins. Two kinds of evidence are never moved by what
+#: a text states: a person's date (only another re-date changes it) and the moment the words were written (a note
+#: typed now, a transcript record, a hub message: the dates such a text gives are about other things).
+PRECEDENCE: Tuple[Tuple[int, str, Tuple[str, ...]], ...] = (
+    (5, "a person set it", (USER,)),
+    (4, "the moment it was written", (CLIENT, "record", "first_record", "message")),
+    (3, "the document states it", (CONTENT, STATED, "front_matter", "created_line", "date_line", STATED_MONTH,
+                                   STATED_YEAR)),
+    (2, "the file's own metadata", ("exif", "xmp", "pdf_created", "office_created", "file_mtime")),
+    (1, "a stand-in of the receiving side", (UPLOAD, PASTED, CAPTURE_TIME, "git_added", "bulk_commit",
+                                             "origin_session", "front_matter_modified", "store_updated",
+                                             "last_record", UNRECORDED)),
+)
+RANK: dict = {basis: rank for rank, _, bases in PRECEDENCE for basis in bases}
+#: The rank of a date the document states about itself.
+STATED_RANK = 3
+#: The rank of the moment the words were written: never moved by a stated date.
+WRITTEN_RANK = 4
+FILE_METADATA_BASES = frozenset(b for rank, _, bases in PRECEDENCE if rank == 2 for b in bases)
+#: The receiving side's moments (the client's time standing in for an upload, a paste, a capture).
+RECEIVED_BASES = frozenset({UPLOAD, PASTED, CAPTURE_TIME})
+
+
+def rank(basis: Optional[str]) -> int:
+    """The precedence rank of a date basis (:data:`PRECEDENCE`); an unknown basis ranks as a stand-in (1)."""
+    return int(RANK.get(str(basis or UNRECORDED), 1))
+
+
+def stated_date_wins(current: Optional[str]) -> bool:
+    """True when a date the document states about itself (rank 3, exact) may replace the note's current date:
+    the current one is the file's metadata or a stand-in (rank below 3), or a stated month or year (a full stated
+    date refines it). Never a person's date nor the moment the words were written."""
+    r = rank(current)
+    return r < STATED_RANK or (r == STATED_RANK and is_approximate(str(current)))
 
 FileDate = Tuple[str, str]  # (occurred_at ISO UTC, date_basis)
 
@@ -246,19 +289,19 @@ RECORDING_CLIENTS = frozenset({"watch"})
 
 def capture_date(occurred_at: Optional[str], attachments: Any, *, pasted: bool, now: str,
                  client: Optional[str] = None) -> Tuple[str, str]:
-    """``(occurred_at, date_basis)`` of a live capture (ADR 0008 §7, docs/importers.md "Dates").
+    """``(occurred_at, date_basis)`` of a live capture (ADR 0008 §7, W30 :data:`PRECEDENCE`, docs/importers.md "Dates").
 
     ``occurred_at`` is the caller's (already normalised) time or None. A note with no attachment and no pasted text
-    keeps the caller's time as ``client``; the caller's time on an upload or a paste is the moment of the upload
-    (``upload``) or the paste (``pasted_text``). Without a caller's time: the first attachment's own metadata date
-    (``exif``, ``xmp``, ``pdf_created``, ``office_created``), else the first ``last_modified`` a client sent with a
-    file (``file_mtime``), else the moment of the upload, the paste or the capture (``capture_time``). A watch's
-    attachment is a recording made now (:data:`RECORDING_CLIENTS`): with the watch's time it stays ``client``."""
+    keeps the caller's time as ``client``. An upload is dated by its file first, whether the caller sent a time or
+    not (the file's metadata beats the client's time): the first attachment's own metadata date (``exif``, ``xmp``,
+    ``pdf_created``, ``office_created``), else the first ``last_modified`` a client sent with a file
+    (``file_mtime``), else the caller's time or the moment of the capture as ``upload``. A paste is the moment of
+    the paste (``pasted_text``); a capture with nothing else the moment of the capture (``capture_time``). A watch's
+    attachment is a recording made now (:data:`RECORDING_CLIENTS`): with the watch's time it stays ``client``. The
+    document's own stated date may still replace any of these stand-ins when it is understood (``note.redate``)."""
     atts = list(attachments or [])
-    if occurred_at:
-        if atts and client not in RECORDING_CLIENTS:
-            return occurred_at, UPLOAD
-        return occurred_at, (PASTED if pasted else CLIENT)
+    if occurred_at and (not atts or client in RECORDING_CLIENTS):
+        return occurred_at, (PASTED if pasted and not atts else CLIENT)
     for a in atts:
         found = detect_file_date(a["data"], a.get("mime"), a.get("filename"))
         if found:
@@ -268,7 +311,7 @@ def capture_date(occurred_at: Optional[str], attachments: Any, *, pasted: bool, 
         if mtime:
             return mtime, "file_mtime"
     if atts:
-        return now, UPLOAD
+        return occurred_at or now, UPLOAD
     return now, (PASTED if pasted else CAPTURE_TIME)
 
 
@@ -282,13 +325,38 @@ def long_day(ts: str) -> str:
     return f"{d.day} {d.strftime('%B')} {d.year}"
 
 
-def date_sentence(occurred_at: str, basis: str) -> Optional[str]:
+def _lost(at: Optional[str], basis: Optional[str], won: str) -> str:
+    """The part of a date sentence that says what lost (W30): "; the file itself is from 20 March 2026" for the
+    file's metadata, "; it was sent on 21 October 2026" for an upload's client time ("pasted on" for a paste, "saved
+    on" for a capture without a date), "; its earlier date was ..." otherwise (an importer's stand-in). Empty when nothing lost or the losing date is the same day as the winner."""
+    if not at or str(at)[:10] == str(won)[:10]:
+        return ""
+    try:
+        day = long_day(at)
+    except ValueError:
+        return ""
+    if basis in FILE_METADATA_BASES:
+        return f"; the file itself is from {day}"
+    if basis == PASTED:
+        return f"; it was pasted on {day}"
+    if basis == CAPTURE_TIME:
+        return f"; it was saved on {day}"
+    if basis in RECEIVED_BASES or basis == CLIENT:
+        return f"; it was sent on {day}"
+    return f"; its earlier date was {day}"
+
+
+def date_sentence(occurred_at: str, basis: str, *, lost_at: Optional[str] = None,
+                  lost_basis: Optional[str] = None) -> Optional[str]:
     """What the capture answer says about the note's date when it did not come from the person's clock:
-    "Dated 2 July 2019 from the document." (a file's own metadata date or its last change). The stand-ins
-    (``upload``, ``pasted_text``, ``capture_time``) say nothing at capture: the text may still state the date, and
-    the answer of the understanding says it then (:func:`redate_sentence`)."""
+    "Dated 2 July 2019 from the document." (a file's own metadata date or its last change), with what lost when the
+    caller sent its own time ("Dated 2 July 2019 from the document; it was sent on 21 October 2026."). The
+    stand-ins (``upload``, ``pasted_text``, ``capture_time``) say nothing at capture: the text may still state the
+    date, and the answer of the understanding says it then (:func:`redate_sentence`)."""
     where = _FROM_FILE.get(basis)
-    return f"Dated {long_day(occurred_at)} from {where}." if where else None
+    if not where:
+        return None
+    return f"Dated {long_day(occurred_at)} from {where}{_lost(lost_at, lost_basis, occurred_at)}."
 
 
 # ----------------------------------------------------------------------------- a stated document date
@@ -315,7 +383,8 @@ def document_date(iso: str) -> Tuple[str, str]:
 
 def redate_sentence(ops: Any) -> Optional[str]:
     """The sentence an understanding adds to its answer when the note's text dated it (a ``note.redate`` op with
-    basis ``content``, ``stated_month`` or ``stated_year``): "Dated 14 March 2019 from the document."."""
+    basis ``content``, ``stated``, ``stated_month`` or ``stated_year``): which won and what lost (W30, the op's
+    ``from`` and ``from_basis``): "Dated 5 March 2025 from the document; the file itself is from 20 March 2026."."""
     for op in ops or []:
         if not isinstance(op, dict) or op.get("op") != "note.redate":
             continue
@@ -323,13 +392,14 @@ def redate_sentence(ops: Any) -> Optional[str]:
         basis, to = p.get("basis"), str(p.get("to") or "")
         if not to:
             continue
-        if basis == CONTENT:
-            return f"Dated {long_day(to)} from the document."
+        lost = _lost(p.get("from"), p.get("from_basis"), to) if p.get("from_basis") else ""
+        if basis in (CONTENT, STATED):
+            return f"Dated {long_day(to)} from the document{lost}."
         if basis == STATED_MONTH:
             d = _dt.datetime.strptime(to[:10], "%Y-%m-%d")
-            return f"Dated {d.strftime('%B')} {d.year} from the document."
+            return f"Dated {d.strftime('%B')} {d.year} from the document{lost}."
         if basis == STATED_YEAR:
-            return f"Dated {to[:4]} from the document."
+            return f"Dated {to[:4]} from the document{lost}."
     return None
 
 
@@ -392,7 +462,8 @@ def redate_note(nb: Any, note_id: str, occurred_at: Any, account: Optional[str],
     return out
 
 
-__all__ = ["APPROXIMATE_BASES", "CAPTURE_TIME", "CLIENT", "CONTENT", "NEEDS_REUNDERSTANDING", "PASTED",
-           "RedateRefused", "STATED_MONTH", "STATED_YEAR", "UNRECORDED", "UPLOAD", "USER", "capture_date",
-           "date_basis", "date_sentence", "detect_file_date", "document_date", "is_approximate", "long_day",
-           "redate_note", "redate_sentence", "understood"]
+__all__ = ["APPROXIMATE_BASES", "CAPTURE_TIME", "CLIENT", "CONTENT", "FILE_METADATA_BASES", "NEEDS_REUNDERSTANDING",
+           "PASTED", "PRECEDENCE", "RANK", "RECEIVED_BASES", "RedateRefused", "STATED", "STATED_MONTH", "STATED_RANK",
+           "STATED_YEAR", "UNRECORDED", "UPLOAD", "USER", "WRITTEN_RANK", "capture_date", "date_basis",
+           "date_sentence", "detect_file_date", "document_date", "is_approximate", "long_day", "rank", "redate_note",
+           "redate_sentence", "stated_date_wins", "understood"]

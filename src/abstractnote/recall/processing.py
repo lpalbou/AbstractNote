@@ -41,7 +41,8 @@ STEPS = ("context", "extract", "resolve", "link", "apply", "filing", "search", "
 CHILD = "<child>"
 STEP_OF_NODE: Dict[str, Dict[str, Optional[str]]] = {
     "note-process": {"filing_need": "filing", "filing": CHILD, "context": "context", "extract": "extract", "extract_again": "extract",
-                     "resolve": "resolve", "link": "link", "link_again": "link", "apply": "apply"},
+                     "resolve": "resolve", "link": "link", "link_again": "link", "apply": "apply",
+                     "apply_split": "apply"},  # W30: a document of dated parts is split by the apply step
     # the quick filing of a stored note without a kind (the refile --missing repair runs it per note)
     "note-file": {"filing_context": "filing", "filing": "filing", "file": "filing"},
     "note-capture": {"capture": "filing", "filing": "filing", "file": "filing", "process": CHILD,

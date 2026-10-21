@@ -14,7 +14,9 @@ from typing import Any, Dict, List, Optional
 from ..process.context import load_packet, save_packet
 from ..process.context import note_context as _context
 from ..process.resolve import resolve_candidates
-from ..process.revise import apply_note_revision, apply_reinterpretation, reinterpret_view
+from ..process import split, validate
+from ..process.merge import merge_extractions
+from ..process.revise import _consume, apply_note_revision, apply_reinterpretation, reinterpret_view
 from .context import ToolContext
 
 
@@ -56,9 +58,34 @@ def note_resolve_candidates(ctx: ToolContext, note_id: str, mentions: List[Dict[
     return out
 
 
+def _linked(linking: Any) -> bool:
+    """True when a linking answer decides something (the flow skips the linking of a document it splits, W30)."""
+    return isinstance(linking, dict) and bool(linking.get("mentions") or linking.get("claims") or linking.get("tasks"))
+
+
 def note_apply_revision(ctx: ToolContext, note_id: str, extraction: Any, linking: Dict[str, Any],
                         reinterpret: bool = False, pass_id: Optional[str] = None) -> Dict[str, Any]:
+    """Apply a note's reading. W30: an extraction that reads the note as a document of dated parts (``moments``)
+    splits it (``process/split.py``) instead of applying its statements; a container read again stays as it is (its
+    parts are notes of their own, each understood again by itself) and its marks are settled as unchanged."""
     nb = ctx.nb
+    if split.is_container(nb, note_id) and nb.store.current_interpretation(note_id) is not None:
+        return settle_container(nb, note_id, reinterpret=reinterpret, pass_id=pass_id)
+    if isinstance(extraction, list):
+        extraction, _ = merge_extractions(extraction)
+    if not reinterpret and nb.store.current_interpretation(note_id) is None and isinstance(extraction, dict):
+        decided = split.plan(nb, note_id, extraction)
+        if decided["split"]:
+            validate.check_apply(nb, note_id, extraction, {}, None)
+            return split.apply_split(nb, note_id, extraction, decided)
+        if decided["warning"]:
+            extraction = dict(extraction, warnings=[*(extraction.get("warnings") or []), decided["warning"]])
+        if extraction.get("moments") and extraction.get("mentions") and not _linked(linking):
+            # the flow skipped the linking because it read the parts as splittable; the apply did not find them
+            raise ValueError(decided["warning"] or split.NOT_FOUND)
+    elif isinstance(extraction, dict) and extraction.get("moments") and split.can_split(nb.store.note_row(note_id)):
+        # a note understood as one note before W30 (or before its entries were read) is not split on a re-reading
+        extraction = dict(extraction, warnings=[*(extraction.get("warnings") or []), split.NOT_SPLIT_REREAD])
     if reinterpret:
         return apply_reinterpretation(nb, note_id, extraction, linking, pass_id=pass_id)
     if nb.store.current_interpretation(note_id) is not None:
@@ -67,3 +94,29 @@ def note_apply_revision(ctx: ToolContext, note_id: str, extraction: Any, linking
         if taken is not None:  # a consolidation pass took this note's mark: the reading is a re-understanding
             return apply_reinterpretation(nb, note_id, extraction, linking, pass_id=taken[0])
     return apply_note_revision(nb, note_id, extraction, linking)
+
+
+def settle_container(nb: Any, note_id: str, *, reinterpret: bool, pass_id: Optional[str]) -> Dict[str, Any]:
+    """A container note read again (W30): nothing changes (its parts are notes of their own); its re-understanding
+    marks are settled as ``unchanged`` and the stage's claim released, as an unchanged re-reading does."""
+    current = nb.store.current_interpretation(note_id)
+    taken = pass_id
+    if not reinterpret and taken is None:
+        row = nb.store.q1("SELECT pass_id FROM reinterpret_marks WHERE note_id=? AND consumed_at IS NULL AND pass_id"
+                          " IS NOT NULL ORDER BY mark_id DESC LIMIT 1", (note_id,))
+        taken = row[0] if row is not None else None
+    if reinterpret or taken is not None:
+        packet_row = nb.store.q1("SELECT created_at FROM context_packets WHERE note_id=?", (note_id,))
+        _consume(nb, note_id, taken, "unchanged", None, packet_row[0] if packet_row else None)
+        if taken:
+            nb.queue.release(note_id, "reinterpret", taken)
+        return {"revision_id": None, "unchanged": True, "previous_revision_id": current,
+                "summary": "A document of dated parts: each part is understood as a note of its own.",
+                "entities_created": [], "entities_merged": [], "claims_added": [], "claims_reinforced": [],
+                "claims_superseded": [], "claims_retracted": [], "tasks_opened": [], "tasks_closed": [],
+                "claims_inserted_before": [], "retrospective": [], "warnings": [], "marked": 0,
+                "reinterpret_marked": {"count": 0, "notes": [], "by_entity": []}}
+    out = nb.apply_revision({"revision_id": current, "at": nb.store.revision_row(current)["at"]})
+    out["warnings"] = list(out.get("warnings") or []) + ["This note was already processed; the earlier revision stands."]
+    out["already_applied"] = True
+    return out

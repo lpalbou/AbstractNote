@@ -612,7 +612,8 @@ def connect(path: str) -> sqlite3.Connection:
 
 # Columns added after the first notebooks were created (in-place upgrade on open).
 _ADDED_COLUMNS = {
-    "notes": [("about_json", "TEXT")],
+    # W30: a dated part of a document (``part_of`` = its container note), a note of its own
+    "notes": [("about_json", "TEXT"), ("part_of", "TEXT")],
     # schema 3 (ADR 0008): a retired entity (``entity.retire``), a task a re-understanding withdrew, the
     # dependency record of a revision (``context_json``)
     "entities": [("name_key", "TEXT"), ("display_name", "TEXT"), ("key_clash_with", "TEXT"),
@@ -637,6 +638,7 @@ _ADDED_COLUMNS = {
 #: entities that are not merged away, except a legacy duplicate that a replayed revision created while the key was
 #: already taken (``key_clash_with`` names the holder) until ``Notebook.normalize_entities`` merges it.
 POST_DDL = """
+CREATE INDEX IF NOT EXISTS idx_notes_part_of ON notes(part_of);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_name_key ON entities(name_key)
   WHERE merged_into IS NULL AND key_clash_with IS NULL;
 CREATE INDEX IF NOT EXISTS idx_entities_name_key_all ON entities(name_key);

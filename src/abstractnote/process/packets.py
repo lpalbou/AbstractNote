@@ -163,6 +163,10 @@ def note_header(note: Dict[str, Any], part: int = 0, parts: int = 1) -> str:
         # A stand-in date (a file date, a commit, a session start): the text may state the real one.
         bits.append("written about " + when + " (now, for this note; this date is approximate, from the "
                     + str(n.get("date_basis") or "import").replace("_", " ") + ")")
+    elif when and n.get("date_from_file"):
+        # W30: the file's own metadata (EXIF, a PDF or Office creation date); a date the text states beats it.
+        bits.append("written about " + when + " (now, for this note; this date is from the file's metadata, "
+                    + str(n.get("date_basis") or "file").replace("_", " ") + ")")
     elif when:
         bits.append("written " + when + " (now, for this note)")
     extra = []
@@ -176,6 +180,9 @@ def note_header(note: Dict[str, Any], part: int = 0, parts: int = 1) -> str:
         extra.append("at " + clip(n.get("location"), 60))
     if extra:
         bits.append("(" + "; ".join(extra) + ")")
+    whole = n.get("part_of") if isinstance(n.get("part_of"), dict) else None
+    if whole:  # W30: one dated part of a larger document, read as a note of its own
+        bits.append("(one dated part of the document “" + clip(whole.get("title") or "untitled", 120) + "”)")
     if parts and int(parts) > 1:
         bits.append("[part " + str(int(part) + 1) + " of " + str(int(parts)) + "]")
     return " ".join(bits)
