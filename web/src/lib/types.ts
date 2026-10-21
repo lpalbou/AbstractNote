@@ -53,6 +53,8 @@ export type Note = NoteRef & {
   /** A dated part of a document names its container; a container lists its parts in history order (W30). */
   part_of?: NoteRef | null;
   children?: NoteRef[];
+  /** Why the last re-understanding pass could not read it again (held for the day, held by another reading, a failed reading), null when none (W31). */
+  reinterpret_error?: string | null;
 };
 
 /** Entity card relation (W1 entity_card). */
@@ -283,12 +285,14 @@ export type Consolidation = {
    * `left_out` for the next one and `notice` is its one-sentence end-user line (ADR 0007). `reinterpreted` /
    * `unchanged`: the notes the reinterpret stage understood again, or found unchanged (ADR 0008).
    */
-  last: { finished_at: string | null; status: string; merges: number | null; communities: number | null; labelled: number | null; summaries_refreshed: number | null; insights: number | null; left_out?: { summaries: number; labels: number; reinterpret?: number; propagated?: number; propagated_from?: { entity_id: string; name: string; notes: number }[]; reasons: string[] } | null; budget_spent?: boolean; notice?: string | null; reinterpreted?: number | null; unchanged?: number | null } | null;
+  last: { finished_at: string | null; status: string; merges: number | null; communities: number | null; labelled: number | null; summaries_refreshed: number | null; insights: number | null; left_out?: { summaries: number; labels: number; reinterpret?: number; propagated?: number; propagated_from?: { entity_id: string; name: string; notes: number }[]; reasons: string[]; reinterpret_reasons?: { reason: string; notes: number }[] } | null; budget_spent?: boolean; notice?: string | null; why?: string | null; reinterpreted?: number | null; unchanged?: number | null } | null;
   /** `reinterpret`: notes an earlier note changed, waiting to be understood again (ADR 0008). */
   pending: { stale_labels: number; unlabelled: number; stale_summaries: number; reinterpret?: number };
   /** What waits to be understood again and why, before the stage runs (ADR 0008 §5; `GET /note/consolidation`). */
   reinterpret?: {
     pending: number; by_entity: { entity_id: string; name: string; notes: number }[]; reasons: string[]; context_unknown: number; consumed_today: number; last_marked_at: string | null;
+    /** The sentences the pending marks keep from the last pass that could not read them again, with how many notes each (W31). */
+    errors?: { error: string; notes: number }[];
     /** The notes waiting because an idea they rely on was understood differently, and the upper bound of how many more may follow (ADR 0008 §4a). */
     propagated?: { pending: number; by_source: { entity_id: string; name: string; notes: number }[]; may_follow?: number; may_follow_from?: { entity_id: string; name: string; notes: number }[] };
     /** The activation gate over the notes not read again since an earlier note reached them (AbstractMemory ADR 0001): the candidates, the notes it marked, the ideas whose change weighs most, and how many it would mark with its centre at 0.8 and 1.2 times θ. */
