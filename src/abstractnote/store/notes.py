@@ -1795,6 +1795,8 @@ class _OpContext:
         cid = p["claim_id"]
         if self.c.execute("SELECT 1 FROM claims WHERE claim_id=?", (cid,)).fetchone():
             return
+        if not p.get("observed_at"):  # W32: said in words, never a bare NOT NULL constraint
+            raise ValueError(f"The statement {cid} has no date (observed_at), so it cannot be placed in time.")
         self._require_entity(p["subject_id"])
         if p.get("object_id"):
             self._require_entity(p["object_id"])

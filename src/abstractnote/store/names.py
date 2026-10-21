@@ -100,6 +100,9 @@ def _alias_close_matches(store: Any, rev: Dict[str, Any], eid: str, name: str, a
     warnings: List[str] = []
     at = rev.get("at")
     for alias in aliases:
+        if not at:  # W32: a review item is a dated statement; a revision without its date cannot place one
+            raise ValueError(f"The revision {rev.get('revision_id')} has no date, so the match of “{name}” cannot be"
+                             " kept for review.")
         holder = store.name_key_holder(ids.name_key(alias))
         if holder is None or holder == eid:
             continue

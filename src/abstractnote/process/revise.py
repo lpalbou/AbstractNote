@@ -1298,6 +1298,21 @@ def _read_as(nb: Any, b: Any, ext: Any, entity_id: str) -> List[str]:
     return out
 
 
+def reinterpret_revision_id(store: Any, note_id: str, current: str) -> str:
+    """The id of the re-understanding of ``note_id`` that supersedes ``current``: deterministic (the same reading
+    applied twice is one revision), and past an attempt that failed and was set aside (W32: the Mnemosyne run's
+    ADR-0005 re-reading failed once and every later pass was refused "failed before and was set aside", so the note
+    could never be read again), the next attempt gets the next id, as a first reading's attempts do."""
+    rid = ids.revision_id_for_action(REINTERPRET_ACTION, note_id, current)
+    n = 1
+    while True:
+        row = store.revision_row(rid)
+        if row is None or not row["abandoned"]:
+            return rid
+        n += 1
+        rid = ids.revision_id_for_action(REINTERPRET_ACTION, note_id, f"{current}#{n}")
+
+
 def plan_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any, *, run_id: Optional[str] = None,
                           reason: Optional[str] = None) -> Dict[str, Any]:
     """The re-understanding of a note (pure: nothing is written). ``{unchanged, summary_only, previous_revision_id,
@@ -1329,8 +1344,11 @@ def plan_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any, 
     b.tasks(ext, link)
     b.topics(ext)
     b.ops.append(_op("note.summary", note_id=note_id, summary=ext.summary or None, kind=None, language=None))
-    rid = ids.revision_id_for_action(REINTERPRET_ACTION, note_id, current)
-    built = reuse_taken_names(s, {"revision_id": rid, "note_id": note_id, "ops": b.ops, "warnings": b.warnings})
+    rid = reinterpret_revision_id(s, note_id, current)
+    # W32: the revision's date goes with it, as Notebook.apply_revision gives it: a review item this rewrite adds
+    # (names._alias_close_matches) is a statement dated by it, and the dated-summary rule reads it
+    built = reuse_taken_names(s, {"revision_id": rid, "note_id": note_id, "at": b.at, "ops": b.ops,
+                                  "warnings": b.warnings})
     chain_set = set(chain)
     cq = ",".join("?" for _ in chain)
 

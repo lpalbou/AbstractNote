@@ -1229,7 +1229,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "EXTRACTION_KEYS = ('aliases', 'basis', 'certainty', 'claims', 'date', 'document_date', 'due', 'evidence', 'heading', 'iso', 'kind', 'mentions', 'moments', 'name', 'object', 'object_is_literal', 'predicate', 'quote', 'ref', 'role', 'stance', 'status', 'subject', 'summary', 'tasks', 'text', 'text_span', 'time_refs', 'topics', 'valid_from', 'valid_until')\nFLOW_FUNCTIONS = ('_fragment', '_label', '_is_index', '_same_twice', 'link_problems', 'extraction_problems', 'context_text', 'problems_sentence')\nLINK_KEYS = ('aliases', 'candidate', 'claims', 'closes_open_task', 'decision', 'evidence', 'existing', 'index', 'kind', 'mentions', 'merge_candidates', 'name', 'reason', 'ref', 'relation_to_existing', 'revision_summary', 'summary', 'tasks')\nPROBLEMS_SHOWN = 3\ndef _fragment(text, keys, context):\n    \"\"\"The first fragment of a JSON answer inside ``text`` (see the module docstring), or None.\"\"\"\n    import re\n    s = str(text or '')\n    if '\"' not in s:\n        return None\n    key_pat = re.compile('(?<![A-Za-z0-9_])(?:' + '|'.join(keys) + ')\"\\\\s*:')\n    close_pat = re.compile('\"\\\\s*[}\\\\]]\\\\s*(?:,|[}\\\\]]|$)')\n    flat = ' '.join(str(context or '').split())\n    for pat in (key_pat, close_pat):\n        for m in pat.finditer(s):\n            frag = ' '.join(m.group(0).split())\n            if frag and frag in flat:\n                continue\n            return m.group(0)\n    return None\ndef _label(value, fallback):\n    v = ' '.join(str(value or '').split())\n    if len(v) > 40:\n        v = v[:40] + '…'\n    return '“' + v + '”' if v else fallback\ndef _is_index(value, count):\n    return isinstance(value, int) and (not isinstance(value, bool)) and (0 <= value < count)\ndef _same_twice(items, key, what, problems, fields=None, target=None):\n    \"\"\"An index answered twice in contradiction: any difference (``fields`` None), else a difference in one of\n    ``fields`` or a ``target`` named by one entry and left empty by the other. Each index is reported once. Null,\n    an empty string and an empty list are the same absent value.\"\"\"\n\n    def present(entry):\n        return {f: v for f, v in entry.items() if v is not None and v != '' and (v != [])}\n    seen = {}\n    reported = set()\n    for it in items:\n        if not isinstance(it, dict):\n            continue\n        k = it.get(key)\n        if k in seen and k not in reported:\n            first = seen[k]\n            if fields is None:\n                bad = present(first) != present(it)\n            else:\n                bad = any((first.get(f) != it.get(f) for f in fields))\n                if target is not None and (first.get(target) is None) != (it.get(target) is None):\n                    bad = True\n            if bad:\n                reported.add(k)\n                problems.append(what + ' ' + str(k) + ' is answered twice, differently')\n        seen.setdefault(k, it)\ndef link_problems(answer, candidates=None, context=''):\n    \"\"\"The structural problems of one Linking answer (empty: valid). ``candidates`` maps each mention ref the note\n    offered to its number of candidates (None: the refs are not checked); ``context`` is the text fragments may\n    quote (the note's words and its extraction).\"\"\"\n    problems = []\n    a = answer if isinstance(answer, dict) else {}\n    mentions = [m for m in a.get('mentions') or [] if isinstance(m, dict)]\n    for m in mentions:\n        name = _label(m.get('name'), 'mention ' + str(m.get('ref')))\n        for field in ('summary', 'reason', 'name'):\n            frag = _fragment(m.get(field), LINK_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field + ' of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        for alias in m.get('aliases') or []:\n            frag = _fragment(alias, LINK_KEYS, context)\n            if frag is not None:\n                problems.append('an alias of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        ref = str(m.get('ref'))\n        if candidates is not None:\n            if ref not in candidates:\n                problems.append('a decision names mention ' + ref + ', which the note does not have')\n                continue\n            count = int(candidates.get(ref) or 0)\n            decision = m.get('decision')\n            if decision in ('reuse', 'unsure') and (not _is_index(m.get('candidate'), count)):\n                problems.append('the ' + str(decision) + ' decision for ' + name + ' names no candidate from its list')\n            if decision == 'merge':\n                pair = m.get('merge_candidates') or []\n                if not (isinstance(pair, list) and len(pair) == 2 and all((_is_index(x, count) for x in pair)) and (pair[0] != pair[1])):\n                    problems.append('the merge decision for ' + name + ' does not name two of its candidates')\n    _same_twice(mentions, 'ref', 'mention', problems)\n    for c in a.get('claims') or []:\n        if isinstance(c, dict):\n            frag = _fragment(c.get('reason'), LINK_KEYS, context)\n            if frag is not None:\n                problems.append('the reason for statement ' + str(c.get('index')) + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    _same_twice(list(a.get('claims') or []), 'index', 'statement', problems, ('relation_to_existing',), 'existing')\n    _same_twice(list(a.get('tasks') or []), 'index', 'task', problems, (), 'closes_open_task')\n    frag = _fragment(a.get('revision_summary'), LINK_KEYS, context)\n    if frag is not None:\n        problems.append(\"the revision summary holds a piece of the answer's structure (\" + frag.strip() + ')')\n    return problems\ndef extraction_problems(answer, context=''):\n    \"\"\"The structural problems of one Extraction answer (empty: valid); ``context`` is the text it read.\"\"\"\n    problems = []\n    a = answer if isinstance(answer, dict) else {}\n    frag = _fragment(a.get('summary'), EXTRACTION_KEYS, context)\n    if frag is not None:\n        problems.append(\"the summary holds a piece of the answer's structure (\" + frag.strip() + ')')\n    mentions = [m for m in a.get('mentions') or [] if isinstance(m, dict)]\n    for m in mentions:\n        name = _label(m.get('name'), 'mention ' + str(m.get('ref')))\n        for field in ('name', 'role'):\n            frag = _fragment(m.get(field), EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field + ' of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        for alias in m.get('aliases') or []:\n            frag = _fragment(alias, EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('an alias of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    _same_twice(mentions, 'ref', 'mention', problems)\n    for t in a.get('topics') or []:\n        frag = _fragment(t, EXTRACTION_KEYS, context)\n        if frag is not None:\n            problems.append(\"a topic holds a piece of the answer's structure (\" + frag.strip() + ')')\n    for i, mo in enumerate((m for m in a.get('moments') or [] if isinstance(m, dict))):\n        for field in ('heading', 'text_span'):\n            frag = _fragment(mo.get(field), EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field.replace('_', ' ') + ' of dated part ' + str(i + 1) + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    return problems\ndef context_text(texts, extraction):\n    \"\"\"What an answer's prose may quote verbatim: the texts the model read and every string of the extraction\n    (a linking answer quotes the extraction's names, roles and evidence).\"\"\"\n    parts = [str(t or '') for t in texts or []]\n    todo = [extraction]\n    while todo:\n        x = todo.pop()\n        if isinstance(x, str):\n            parts.append(x)\n        elif isinstance(x, dict):\n            todo.extend(x.values())\n        elif isinstance(x, list):\n            todo.extend(x)\n    return '\\n'.join(parts)\ndef problems_sentence(what, problems, again):\n    \"\"\"One sentence for the person and the queue log: \"The model's linking answer was malformed twice (the summary\n    of “Zorn Labs” holds a piece of the answer's structure (\",\"reason\":)); nothing from it was applied.\".\"\"\"\n    shown = list(problems[:PROBLEMS_SHOWN])\n    more = len(problems) - len(shown)\n    detail = '; '.join(shown) + ('; and ' + str(more) + ' more' if more > 0 else '')\n    return \"The model's \" + what + ' answer was malformed' + (' twice' if again else '') + ' (' + detail + '); nothing from it was applied.'\nd = data if isinstance(data, dict) else {}\ntext = str((item or {}).get(\"text\") or \"\") if isinstance(item, dict) else str(item or \"\")\ncorrupt = extraction_problems(d, text)\nempty = not (d.get(\"mentions\") or []) and len(text.strip()) >= 1\nreturn {\"again\": bool(corrupt) or empty}\n"
+        "codeBody": "EXTRACTION_KEYS = ('aliases', 'basis', 'certainty', 'claims', 'date', 'document_date', 'due', 'evidence', 'heading', 'iso', 'kind', 'mentions', 'moments', 'name', 'object', 'object_is_literal', 'predicate', 'quote', 'ref', 'role', 'stance', 'status', 'subject', 'summary', 'tasks', 'text', 'text_span', 'time_refs', 'topics', 'valid_from', 'valid_until')\nFLOW_FUNCTIONS = ('_fragment', '_label', '_is_index', '_same_twice', 'link_problems', 'extraction_problems', 'context_text', 'problems_sentence')\nLINK_KEYS = ('aliases', 'candidate', 'claims', 'closes_open_task', 'decision', 'evidence', 'existing', 'index', 'kind', 'mentions', 'merge_candidates', 'name', 'reason', 'ref', 'relation_to_existing', 'revision_summary', 'summary', 'tasks')\nPROBLEMS_SHOWN = 3\ndef _fragment(text, keys, context):\n    \"\"\"The first fragment of a JSON answer inside ``text`` (see the module docstring), or None.\"\"\"\n    import re\n    s = str(text or '')\n    if '\"' not in s:\n        return None\n    key_pat = re.compile('(?<![A-Za-z0-9_])(?:' + '|'.join(keys) + ')\"\\\\s*:')\n    close_pat = re.compile('\"\\\\s*[}\\\\]]\\\\s*(?:,|[}\\\\]]|$)')\n    flat = ' '.join(str(context or '').split())\n    for pat in (key_pat, close_pat):\n        for m in pat.finditer(s):\n            frag = ' '.join(m.group(0).split())\n            if frag and frag in flat:\n                continue\n            return m.group(0)\n    return None\ndef _label(value, fallback):\n    v = ' '.join(str(value or '').split())\n    if len(v) > 40:\n        v = v[:40] + '…'\n    return '“' + v + '”' if v else fallback\ndef _is_index(value, count):\n    return isinstance(value, int) and (not isinstance(value, bool)) and (0 <= value < count)\ndef _same_twice(items, key, what, problems, fields=None, target=None):\n    \"\"\"An index answered twice in contradiction: any difference (``fields`` None), else a difference in one of\n    ``fields`` or a ``target`` named by one entry and left empty by the other. Each index is reported once. Null,\n    an empty string and an empty list are the same absent value.\"\"\"\n\n    def present(entry):\n        return {f: v for f, v in entry.items() if v is not None and v != '' and (v != [])}\n    seen = {}\n    reported = set()\n    for it in items:\n        if not isinstance(it, dict):\n            continue\n        k = it.get(key)\n        if k in seen and k not in reported:\n            first = seen[k]\n            if fields is None:\n                bad = present(first) != present(it)\n            else:\n                bad = False\n                for f in fields:\n                    if first.get(f) != it.get(f):\n                        bad = True\n                if target is not None and (first.get(target) is None) != (it.get(target) is None):\n                    bad = True\n            if bad:\n                reported.add(k)\n                problems.append(what + ' ' + str(k) + ' is answered twice, differently')\n        seen.setdefault(k, it)\ndef link_problems(answer, candidates=None, context=''):\n    \"\"\"The structural problems of one Linking answer (empty: valid). ``candidates`` maps each mention ref the note\n    offered to its number of candidates (None: the refs are not checked); ``context`` is the text fragments may\n    quote (the note's words and its extraction).\"\"\"\n    problems = []\n    a = answer if isinstance(answer, dict) else {}\n    mentions = [m for m in a.get('mentions') or [] if isinstance(m, dict)]\n    for m in mentions:\n        name = _label(m.get('name'), 'mention ' + str(m.get('ref')))\n        for field in ('summary', 'reason', 'name'):\n            frag = _fragment(m.get(field), LINK_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field + ' of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        for alias in m.get('aliases') or []:\n            frag = _fragment(alias, LINK_KEYS, context)\n            if frag is not None:\n                problems.append('an alias of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        ref = str(m.get('ref'))\n        if candidates is not None:\n            if ref not in candidates:\n                problems.append('a decision names mention ' + ref + ', which the note does not have')\n                continue\n            count = int(candidates.get(ref) or 0)\n            decision = m.get('decision')\n            if decision in ('reuse', 'unsure') and (not _is_index(m.get('candidate'), count)):\n                problems.append('the ' + str(decision) + ' decision for ' + name + ' names no candidate from its list')\n            if decision == 'merge':\n                pair = m.get('merge_candidates') or []\n                both = isinstance(pair, list) and len(pair) == 2\n                if both:\n                    for x in pair:\n                        if not _is_index(x, count):\n                            both = False\n                if not (both and pair[0] != pair[1]):\n                    problems.append('the merge decision for ' + name + ' does not name two of its candidates')\n    _same_twice(mentions, 'ref', 'mention', problems)\n    for c in a.get('claims') or []:\n        if isinstance(c, dict):\n            frag = _fragment(c.get('reason'), LINK_KEYS, context)\n            if frag is not None:\n                problems.append('the reason for statement ' + str(c.get('index')) + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    _same_twice(list(a.get('claims') or []), 'index', 'statement', problems, ('relation_to_existing',), 'existing')\n    _same_twice(list(a.get('tasks') or []), 'index', 'task', problems, (), 'closes_open_task')\n    frag = _fragment(a.get('revision_summary'), LINK_KEYS, context)\n    if frag is not None:\n        problems.append(\"the revision summary holds a piece of the answer's structure (\" + frag.strip() + ')')\n    return problems\ndef extraction_problems(answer, context=''):\n    \"\"\"The structural problems of one Extraction answer (empty: valid); ``context`` is the text it read.\"\"\"\n    problems = []\n    a = answer if isinstance(answer, dict) else {}\n    frag = _fragment(a.get('summary'), EXTRACTION_KEYS, context)\n    if frag is not None:\n        problems.append(\"the summary holds a piece of the answer's structure (\" + frag.strip() + ')')\n    mentions = [m for m in a.get('mentions') or [] if isinstance(m, dict)]\n    for m in mentions:\n        name = _label(m.get('name'), 'mention ' + str(m.get('ref')))\n        for field in ('name', 'role'):\n            frag = _fragment(m.get(field), EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field + ' of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        for alias in m.get('aliases') or []:\n            frag = _fragment(alias, EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('an alias of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    _same_twice(mentions, 'ref', 'mention', problems)\n    for t in a.get('topics') or []:\n        frag = _fragment(t, EXTRACTION_KEYS, context)\n        if frag is not None:\n            problems.append(\"a topic holds a piece of the answer's structure (\" + frag.strip() + ')')\n    for i, mo in enumerate((m for m in a.get('moments') or [] if isinstance(m, dict))):\n        for field in ('heading', 'text_span'):\n            frag = _fragment(mo.get(field), EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field.replace('_', ' ') + ' of dated part ' + str(i + 1) + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    return problems\ndef context_text(texts, extraction):\n    \"\"\"What an answer's prose may quote verbatim: the texts the model read and every string of the extraction\n    (a linking answer quotes the extraction's names, roles and evidence).\"\"\"\n    parts = [str(t or '') for t in texts or []]\n    todo = [extraction]\n    while todo:\n        x = todo.pop()\n        if isinstance(x, str):\n            parts.append(x)\n        elif isinstance(x, dict):\n            todo.extend(x.values())\n        elif isinstance(x, list):\n            todo.extend(x)\n    return '\\n'.join(parts)\ndef problems_sentence(what, problems, again):\n    \"\"\"One sentence for the person and the queue log: \"The model's linking answer was malformed twice (the summary\n    of “Zorn Labs” holds a piece of the answer's structure (\",\"reason\":)); nothing from it was applied.\".\"\"\"\n    shown = list(problems[:PROBLEMS_SHOWN])\n    more = len(problems) - len(shown)\n    detail = '; '.join(shown) + ('; and ' + str(more) + ' more' if more > 0 else '')\n    return \"The model's \" + what + ' answer was malformed' + (' twice' if again else '') + ' (' + detail + '); nothing from it was applied.'\nd = data if isinstance(data, dict) else {}\ntext = str((item or {}).get(\"text\") or \"\") if isinstance(item, dict) else str(item or \"\")\ncorrupt = extraction_problems(d, text)\nempty = not (d.get(\"mentions\") or []) and len(text.strip()) >= 1\nreturn {\"again\": bool(corrupt) or empty}\n"
       }
     },
     {
@@ -1754,7 +1754,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "EXTRACTION_KEYS = ('aliases', 'basis', 'certainty', 'claims', 'date', 'document_date', 'due', 'evidence', 'heading', 'iso', 'kind', 'mentions', 'moments', 'name', 'object', 'object_is_literal', 'predicate', 'quote', 'ref', 'role', 'stance', 'status', 'subject', 'summary', 'tasks', 'text', 'text_span', 'time_refs', 'topics', 'valid_from', 'valid_until')\nFLOW_FUNCTIONS = ('_fragment', '_label', '_is_index', '_same_twice', 'link_problems', 'extraction_problems', 'context_text', 'problems_sentence')\nLINK_KEYS = ('aliases', 'candidate', 'claims', 'closes_open_task', 'decision', 'evidence', 'existing', 'index', 'kind', 'mentions', 'merge_candidates', 'name', 'reason', 'ref', 'relation_to_existing', 'revision_summary', 'summary', 'tasks')\nPROBLEMS_SHOWN = 3\ndef _fragment(text, keys, context):\n    \"\"\"The first fragment of a JSON answer inside ``text`` (see the module docstring), or None.\"\"\"\n    import re\n    s = str(text or '')\n    if '\"' not in s:\n        return None\n    key_pat = re.compile('(?<![A-Za-z0-9_])(?:' + '|'.join(keys) + ')\"\\\\s*:')\n    close_pat = re.compile('\"\\\\s*[}\\\\]]\\\\s*(?:,|[}\\\\]]|$)')\n    flat = ' '.join(str(context or '').split())\n    for pat in (key_pat, close_pat):\n        for m in pat.finditer(s):\n            frag = ' '.join(m.group(0).split())\n            if frag and frag in flat:\n                continue\n            return m.group(0)\n    return None\ndef _label(value, fallback):\n    v = ' '.join(str(value or '').split())\n    if len(v) > 40:\n        v = v[:40] + '…'\n    return '“' + v + '”' if v else fallback\ndef _is_index(value, count):\n    return isinstance(value, int) and (not isinstance(value, bool)) and (0 <= value < count)\ndef _same_twice(items, key, what, problems, fields=None, target=None):\n    \"\"\"An index answered twice in contradiction: any difference (``fields`` None), else a difference in one of\n    ``fields`` or a ``target`` named by one entry and left empty by the other. Each index is reported once. Null,\n    an empty string and an empty list are the same absent value.\"\"\"\n\n    def present(entry):\n        return {f: v for f, v in entry.items() if v is not None and v != '' and (v != [])}\n    seen = {}\n    reported = set()\n    for it in items:\n        if not isinstance(it, dict):\n            continue\n        k = it.get(key)\n        if k in seen and k not in reported:\n            first = seen[k]\n            if fields is None:\n                bad = present(first) != present(it)\n            else:\n                bad = any((first.get(f) != it.get(f) for f in fields))\n                if target is not None and (first.get(target) is None) != (it.get(target) is None):\n                    bad = True\n            if bad:\n                reported.add(k)\n                problems.append(what + ' ' + str(k) + ' is answered twice, differently')\n        seen.setdefault(k, it)\ndef link_problems(answer, candidates=None, context=''):\n    \"\"\"The structural problems of one Linking answer (empty: valid). ``candidates`` maps each mention ref the note\n    offered to its number of candidates (None: the refs are not checked); ``context`` is the text fragments may\n    quote (the note's words and its extraction).\"\"\"\n    problems = []\n    a = answer if isinstance(answer, dict) else {}\n    mentions = [m for m in a.get('mentions') or [] if isinstance(m, dict)]\n    for m in mentions:\n        name = _label(m.get('name'), 'mention ' + str(m.get('ref')))\n        for field in ('summary', 'reason', 'name'):\n            frag = _fragment(m.get(field), LINK_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field + ' of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        for alias in m.get('aliases') or []:\n            frag = _fragment(alias, LINK_KEYS, context)\n            if frag is not None:\n                problems.append('an alias of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        ref = str(m.get('ref'))\n        if candidates is not None:\n            if ref not in candidates:\n                problems.append('a decision names mention ' + ref + ', which the note does not have')\n                continue\n            count = int(candidates.get(ref) or 0)\n            decision = m.get('decision')\n            if decision in ('reuse', 'unsure') and (not _is_index(m.get('candidate'), count)):\n                problems.append('the ' + str(decision) + ' decision for ' + name + ' names no candidate from its list')\n            if decision == 'merge':\n                pair = m.get('merge_candidates') or []\n                if not (isinstance(pair, list) and len(pair) == 2 and all((_is_index(x, count) for x in pair)) and (pair[0] != pair[1])):\n                    problems.append('the merge decision for ' + name + ' does not name two of its candidates')\n    _same_twice(mentions, 'ref', 'mention', problems)\n    for c in a.get('claims') or []:\n        if isinstance(c, dict):\n            frag = _fragment(c.get('reason'), LINK_KEYS, context)\n            if frag is not None:\n                problems.append('the reason for statement ' + str(c.get('index')) + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    _same_twice(list(a.get('claims') or []), 'index', 'statement', problems, ('relation_to_existing',), 'existing')\n    _same_twice(list(a.get('tasks') or []), 'index', 'task', problems, (), 'closes_open_task')\n    frag = _fragment(a.get('revision_summary'), LINK_KEYS, context)\n    if frag is not None:\n        problems.append(\"the revision summary holds a piece of the answer's structure (\" + frag.strip() + ')')\n    return problems\ndef extraction_problems(answer, context=''):\n    \"\"\"The structural problems of one Extraction answer (empty: valid); ``context`` is the text it read.\"\"\"\n    problems = []\n    a = answer if isinstance(answer, dict) else {}\n    frag = _fragment(a.get('summary'), EXTRACTION_KEYS, context)\n    if frag is not None:\n        problems.append(\"the summary holds a piece of the answer's structure (\" + frag.strip() + ')')\n    mentions = [m for m in a.get('mentions') or [] if isinstance(m, dict)]\n    for m in mentions:\n        name = _label(m.get('name'), 'mention ' + str(m.get('ref')))\n        for field in ('name', 'role'):\n            frag = _fragment(m.get(field), EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field + ' of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        for alias in m.get('aliases') or []:\n            frag = _fragment(alias, EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('an alias of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    _same_twice(mentions, 'ref', 'mention', problems)\n    for t in a.get('topics') or []:\n        frag = _fragment(t, EXTRACTION_KEYS, context)\n        if frag is not None:\n            problems.append(\"a topic holds a piece of the answer's structure (\" + frag.strip() + ')')\n    for i, mo in enumerate((m for m in a.get('moments') or [] if isinstance(m, dict))):\n        for field in ('heading', 'text_span'):\n            frag = _fragment(mo.get(field), EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field.replace('_', ' ') + ' of dated part ' + str(i + 1) + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    return problems\ndef context_text(texts, extraction):\n    \"\"\"What an answer's prose may quote verbatim: the texts the model read and every string of the extraction\n    (a linking answer quotes the extraction's names, roles and evidence).\"\"\"\n    parts = [str(t or '') for t in texts or []]\n    todo = [extraction]\n    while todo:\n        x = todo.pop()\n        if isinstance(x, str):\n            parts.append(x)\n        elif isinstance(x, dict):\n            todo.extend(x.values())\n        elif isinstance(x, list):\n            todo.extend(x)\n    return '\\n'.join(parts)\ndef problems_sentence(what, problems, again):\n    \"\"\"One sentence for the person and the queue log: \"The model's linking answer was malformed twice (the summary\n    of “Zorn Labs” holds a piece of the answer's structure (\",\"reason\":)); nothing from it was applied.\".\"\"\"\n    shown = list(problems[:PROBLEMS_SHOWN])\n    more = len(problems) - len(shown)\n    detail = '; '.join(shown) + ('; and ' + str(more) + ' more' if more > 0 else '')\n    return \"The model's \" + what + ' answer was malformed' + (' twice' if again else '') + ' (' + detail + '); nothing from it was applied.'\nd = dict(data) if isinstance(data, dict) else {}\ntext = str((item or {}).get(\"text\") or \"\") if isinstance(item, dict) else str(item or \"\")\ncorrupt = extraction_problems(d, text)\nif corrupt:\n    return {\"entry\": d, \"failed\": True, \"failure\": problems_sentence(\"reading\", corrupt, True)}\nif not (d.get(\"mentions\") or []):\n    d[\"warnings\"] = list(d.get(\"warnings\") or []) + [\"A part of this note names nothing although it has \"\n                                                  \"text, even when read a second time.\"]\nreturn {\"entry\": d, \"failed\": False, \"failure\": \"\"}\n"
+        "codeBody": "EXTRACTION_KEYS = ('aliases', 'basis', 'certainty', 'claims', 'date', 'document_date', 'due', 'evidence', 'heading', 'iso', 'kind', 'mentions', 'moments', 'name', 'object', 'object_is_literal', 'predicate', 'quote', 'ref', 'role', 'stance', 'status', 'subject', 'summary', 'tasks', 'text', 'text_span', 'time_refs', 'topics', 'valid_from', 'valid_until')\nFLOW_FUNCTIONS = ('_fragment', '_label', '_is_index', '_same_twice', 'link_problems', 'extraction_problems', 'context_text', 'problems_sentence')\nLINK_KEYS = ('aliases', 'candidate', 'claims', 'closes_open_task', 'decision', 'evidence', 'existing', 'index', 'kind', 'mentions', 'merge_candidates', 'name', 'reason', 'ref', 'relation_to_existing', 'revision_summary', 'summary', 'tasks')\nPROBLEMS_SHOWN = 3\ndef _fragment(text, keys, context):\n    \"\"\"The first fragment of a JSON answer inside ``text`` (see the module docstring), or None.\"\"\"\n    import re\n    s = str(text or '')\n    if '\"' not in s:\n        return None\n    key_pat = re.compile('(?<![A-Za-z0-9_])(?:' + '|'.join(keys) + ')\"\\\\s*:')\n    close_pat = re.compile('\"\\\\s*[}\\\\]]\\\\s*(?:,|[}\\\\]]|$)')\n    flat = ' '.join(str(context or '').split())\n    for pat in (key_pat, close_pat):\n        for m in pat.finditer(s):\n            frag = ' '.join(m.group(0).split())\n            if frag and frag in flat:\n                continue\n            return m.group(0)\n    return None\ndef _label(value, fallback):\n    v = ' '.join(str(value or '').split())\n    if len(v) > 40:\n        v = v[:40] + '…'\n    return '“' + v + '”' if v else fallback\ndef _is_index(value, count):\n    return isinstance(value, int) and (not isinstance(value, bool)) and (0 <= value < count)\ndef _same_twice(items, key, what, problems, fields=None, target=None):\n    \"\"\"An index answered twice in contradiction: any difference (``fields`` None), else a difference in one of\n    ``fields`` or a ``target`` named by one entry and left empty by the other. Each index is reported once. Null,\n    an empty string and an empty list are the same absent value.\"\"\"\n\n    def present(entry):\n        return {f: v for f, v in entry.items() if v is not None and v != '' and (v != [])}\n    seen = {}\n    reported = set()\n    for it in items:\n        if not isinstance(it, dict):\n            continue\n        k = it.get(key)\n        if k in seen and k not in reported:\n            first = seen[k]\n            if fields is None:\n                bad = present(first) != present(it)\n            else:\n                bad = False\n                for f in fields:\n                    if first.get(f) != it.get(f):\n                        bad = True\n                if target is not None and (first.get(target) is None) != (it.get(target) is None):\n                    bad = True\n            if bad:\n                reported.add(k)\n                problems.append(what + ' ' + str(k) + ' is answered twice, differently')\n        seen.setdefault(k, it)\ndef link_problems(answer, candidates=None, context=''):\n    \"\"\"The structural problems of one Linking answer (empty: valid). ``candidates`` maps each mention ref the note\n    offered to its number of candidates (None: the refs are not checked); ``context`` is the text fragments may\n    quote (the note's words and its extraction).\"\"\"\n    problems = []\n    a = answer if isinstance(answer, dict) else {}\n    mentions = [m for m in a.get('mentions') or [] if isinstance(m, dict)]\n    for m in mentions:\n        name = _label(m.get('name'), 'mention ' + str(m.get('ref')))\n        for field in ('summary', 'reason', 'name'):\n            frag = _fragment(m.get(field), LINK_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field + ' of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        for alias in m.get('aliases') or []:\n            frag = _fragment(alias, LINK_KEYS, context)\n            if frag is not None:\n                problems.append('an alias of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        ref = str(m.get('ref'))\n        if candidates is not None:\n            if ref not in candidates:\n                problems.append('a decision names mention ' + ref + ', which the note does not have')\n                continue\n            count = int(candidates.get(ref) or 0)\n            decision = m.get('decision')\n            if decision in ('reuse', 'unsure') and (not _is_index(m.get('candidate'), count)):\n                problems.append('the ' + str(decision) + ' decision for ' + name + ' names no candidate from its list')\n            if decision == 'merge':\n                pair = m.get('merge_candidates') or []\n                both = isinstance(pair, list) and len(pair) == 2\n                if both:\n                    for x in pair:\n                        if not _is_index(x, count):\n                            both = False\n                if not (both and pair[0] != pair[1]):\n                    problems.append('the merge decision for ' + name + ' does not name two of its candidates')\n    _same_twice(mentions, 'ref', 'mention', problems)\n    for c in a.get('claims') or []:\n        if isinstance(c, dict):\n            frag = _fragment(c.get('reason'), LINK_KEYS, context)\n            if frag is not None:\n                problems.append('the reason for statement ' + str(c.get('index')) + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    _same_twice(list(a.get('claims') or []), 'index', 'statement', problems, ('relation_to_existing',), 'existing')\n    _same_twice(list(a.get('tasks') or []), 'index', 'task', problems, (), 'closes_open_task')\n    frag = _fragment(a.get('revision_summary'), LINK_KEYS, context)\n    if frag is not None:\n        problems.append(\"the revision summary holds a piece of the answer's structure (\" + frag.strip() + ')')\n    return problems\ndef extraction_problems(answer, context=''):\n    \"\"\"The structural problems of one Extraction answer (empty: valid); ``context`` is the text it read.\"\"\"\n    problems = []\n    a = answer if isinstance(answer, dict) else {}\n    frag = _fragment(a.get('summary'), EXTRACTION_KEYS, context)\n    if frag is not None:\n        problems.append(\"the summary holds a piece of the answer's structure (\" + frag.strip() + ')')\n    mentions = [m for m in a.get('mentions') or [] if isinstance(m, dict)]\n    for m in mentions:\n        name = _label(m.get('name'), 'mention ' + str(m.get('ref')))\n        for field in ('name', 'role'):\n            frag = _fragment(m.get(field), EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field + ' of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        for alias in m.get('aliases') or []:\n            frag = _fragment(alias, EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('an alias of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    _same_twice(mentions, 'ref', 'mention', problems)\n    for t in a.get('topics') or []:\n        frag = _fragment(t, EXTRACTION_KEYS, context)\n        if frag is not None:\n            problems.append(\"a topic holds a piece of the answer's structure (\" + frag.strip() + ')')\n    for i, mo in enumerate((m for m in a.get('moments') or [] if isinstance(m, dict))):\n        for field in ('heading', 'text_span'):\n            frag = _fragment(mo.get(field), EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field.replace('_', ' ') + ' of dated part ' + str(i + 1) + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    return problems\ndef context_text(texts, extraction):\n    \"\"\"What an answer's prose may quote verbatim: the texts the model read and every string of the extraction\n    (a linking answer quotes the extraction's names, roles and evidence).\"\"\"\n    parts = [str(t or '') for t in texts or []]\n    todo = [extraction]\n    while todo:\n        x = todo.pop()\n        if isinstance(x, str):\n            parts.append(x)\n        elif isinstance(x, dict):\n            todo.extend(x.values())\n        elif isinstance(x, list):\n            todo.extend(x)\n    return '\\n'.join(parts)\ndef problems_sentence(what, problems, again):\n    \"\"\"One sentence for the person and the queue log: \"The model's linking answer was malformed twice (the summary\n    of “Zorn Labs” holds a piece of the answer's structure (\",\"reason\":)); nothing from it was applied.\".\"\"\"\n    shown = list(problems[:PROBLEMS_SHOWN])\n    more = len(problems) - len(shown)\n    detail = '; '.join(shown) + ('; and ' + str(more) + ' more' if more > 0 else '')\n    return \"The model's \" + what + ' answer was malformed' + (' twice' if again else '') + ' (' + detail + '); nothing from it was applied.'\nd = dict(data) if isinstance(data, dict) else {}\ntext = str((item or {}).get(\"text\") or \"\") if isinstance(item, dict) else str(item or \"\")\ncorrupt = extraction_problems(d, text)\nif corrupt:\n    return {\"entry\": d, \"failed\": True, \"failure\": problems_sentence(\"reading\", corrupt, True)}\nif not (d.get(\"mentions\") or []):\n    d[\"warnings\"] = list(d.get(\"warnings\") or []) + [\"A part of this note names nothing although it has \"\n                                                  \"text, even when read a second time.\"]\nreturn {\"entry\": d, \"failed\": False, \"failure\": \"\"}\n"
       }
     },
     {
@@ -1916,11 +1916,147 @@
       }
     },
     {
-      "id": "merge",
+      "id": "sections_kept",
       "type": "code",
       "position": {
         "x": 5280.0,
         "y": 718.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Every part of the reading kept?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "kept",
+            "label": "kept",
+            "type": "array"
+          },
+          {
+            "id": "asked",
+            "label": "asked",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "ok",
+            "label": "ok",
+            "type": "boolean"
+          },
+          {
+            "id": "failure",
+            "label": "failure",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "n_kept = len([x for x in (kept or []) if isinstance(x, dict)])\nn_asked = len(list(asked or []))\nif n_kept == n_asked:\n    return {\"ok\": True, \"failure\": \"\"}\nreturn {\"ok\": False, \"failure\": \"Only {kept} of the {asked} parts of this note's {what} were kept, so nothing was changed.\".format(kept=n_kept, asked=n_asked, what='reading')}\n"
+      }
+    },
+    {
+      "id": "sections_kept_ok",
+      "type": "if",
+      "position": {
+        "x": 5760.0,
+        "y": 424.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Every part of the reading kept?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "sections_kept_lost",
+      "type": "on_flow_end",
+      "position": {
+        "x": 6240.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "on_flow_end",
+        "label": "Stopped: a part of the reading was lost",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "error",
+            "label": "error",
+            "type": "string"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          },
+          {
+            "id": "status",
+            "label": "status",
+            "type": "string"
+          }
+        ],
+        "outputs": [],
+        "pinDefaults": {
+          "success": false,
+          "status": "failed"
+        }
+      }
+    },
+    {
+      "id": "merge",
+      "type": "code",
+      "position": {
+        "x": 6240.0,
+        "y": 640.0
       },
       "data": {
         "nodeType": "code",
@@ -1970,8 +2106,8 @@
       "id": "dated_parts",
       "type": "code",
       "position": {
-        "x": 5760.0,
-        "y": 424.0
+        "x": 6720.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "code",
@@ -2031,8 +2167,8 @@
       "id": "split_branch",
       "type": "if",
       "position": {
-        "x": 6240.0,
-        "y": 320.0
+        "x": 7200.0,
+        "y": 744.0
       },
       "data": {
         "nodeType": "if",
@@ -2067,7 +2203,7 @@
       "id": "apply_split_args",
       "type": "code",
       "position": {
-        "x": 6720.0,
+        "x": 7680.0,
         "y": 320.0
       },
       "data": {
@@ -2123,8 +2259,8 @@
       "id": "apply_split",
       "type": "tool_calls",
       "position": {
-        "x": 7200.0,
-        "y": 744.0
+        "x": 8160.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "tool_calls",
@@ -2179,8 +2315,8 @@
       "id": "apply_split_out",
       "type": "code",
       "position": {
-        "x": 7680.0,
-        "y": 320.0
+        "x": 8640.0,
+        "y": 640.0
       },
       "data": {
         "nodeType": "code",
@@ -2235,8 +2371,8 @@
       "id": "end_split",
       "type": "on_flow_end",
       "position": {
-        "x": 8160.0,
-        "y": 320.0
+        "x": 9120.0,
+        "y": 0.0
       },
       "data": {
         "nodeType": "on_flow_end",
@@ -2283,7 +2419,7 @@
       "id": "resolve_args",
       "type": "code",
       "position": {
-        "x": 6720.0,
+        "x": 7680.0,
         "y": 640.0
       },
       "data": {
@@ -2334,8 +2470,8 @@
       "id": "resolve",
       "type": "tool_calls",
       "position": {
-        "x": 7200.0,
-        "y": 1064.0
+        "x": 8160.0,
+        "y": 640.0
       },
       "data": {
         "nodeType": "tool_calls",
@@ -2390,8 +2526,8 @@
       "id": "resolve_out",
       "type": "code",
       "position": {
-        "x": 7680.0,
-        "y": 640.0
+        "x": 8640.0,
+        "y": 960.0
       },
       "data": {
         "nodeType": "code",
@@ -2441,8 +2577,8 @@
       "id": "link_parts",
       "type": "code",
       "position": {
-        "x": 8160.0,
-        "y": 640.0
+        "x": 9120.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "code",
@@ -2502,8 +2638,8 @@
       "id": "each_link",
       "type": "loop",
       "position": {
-        "x": 8640.0,
-        "y": 640.0
+        "x": 9600.0,
+        "y": 0.0
       },
       "data": {
         "nodeType": "loop",
@@ -2548,8 +2684,8 @@
       "id": "link_prompt",
       "type": "string_template",
       "position": {
-        "x": 8640.0,
-        "y": 960.0
+        "x": 9600.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "string_template",
@@ -2582,7 +2718,7 @@
       "id": "link",
       "type": "llm_call",
       "position": {
-        "x": 9120.0,
+        "x": 10080.0,
         "y": 0.0
       },
       "data": {
@@ -2875,7 +3011,7 @@
       "id": "link_valid",
       "type": "code",
       "position": {
-        "x": 9600.0,
+        "x": 10560.0,
         "y": 0.0
       },
       "data": {
@@ -2939,14 +3075,14 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "EXTRACTION_KEYS = ('aliases', 'basis', 'certainty', 'claims', 'date', 'document_date', 'due', 'evidence', 'heading', 'iso', 'kind', 'mentions', 'moments', 'name', 'object', 'object_is_literal', 'predicate', 'quote', 'ref', 'role', 'stance', 'status', 'subject', 'summary', 'tasks', 'text', 'text_span', 'time_refs', 'topics', 'valid_from', 'valid_until')\nFLOW_FUNCTIONS = ('_fragment', '_label', '_is_index', '_same_twice', 'link_problems', 'extraction_problems', 'context_text', 'problems_sentence')\nLINK_KEYS = ('aliases', 'candidate', 'claims', 'closes_open_task', 'decision', 'evidence', 'existing', 'index', 'kind', 'mentions', 'merge_candidates', 'name', 'reason', 'ref', 'relation_to_existing', 'revision_summary', 'summary', 'tasks')\nPROBLEMS_SHOWN = 3\ndef _fragment(text, keys, context):\n    \"\"\"The first fragment of a JSON answer inside ``text`` (see the module docstring), or None.\"\"\"\n    import re\n    s = str(text or '')\n    if '\"' not in s:\n        return None\n    key_pat = re.compile('(?<![A-Za-z0-9_])(?:' + '|'.join(keys) + ')\"\\\\s*:')\n    close_pat = re.compile('\"\\\\s*[}\\\\]]\\\\s*(?:,|[}\\\\]]|$)')\n    flat = ' '.join(str(context or '').split())\n    for pat in (key_pat, close_pat):\n        for m in pat.finditer(s):\n            frag = ' '.join(m.group(0).split())\n            if frag and frag in flat:\n                continue\n            return m.group(0)\n    return None\ndef _label(value, fallback):\n    v = ' '.join(str(value or '').split())\n    if len(v) > 40:\n        v = v[:40] + '…'\n    return '“' + v + '”' if v else fallback\ndef _is_index(value, count):\n    return isinstance(value, int) and (not isinstance(value, bool)) and (0 <= value < count)\ndef _same_twice(items, key, what, problems, fields=None, target=None):\n    \"\"\"An index answered twice in contradiction: any difference (``fields`` None), else a difference in one of\n    ``fields`` or a ``target`` named by one entry and left empty by the other. Each index is reported once. Null,\n    an empty string and an empty list are the same absent value.\"\"\"\n\n    def present(entry):\n        return {f: v for f, v in entry.items() if v is not None and v != '' and (v != [])}\n    seen = {}\n    reported = set()\n    for it in items:\n        if not isinstance(it, dict):\n            continue\n        k = it.get(key)\n        if k in seen and k not in reported:\n            first = seen[k]\n            if fields is None:\n                bad = present(first) != present(it)\n            else:\n                bad = any((first.get(f) != it.get(f) for f in fields))\n                if target is not None and (first.get(target) is None) != (it.get(target) is None):\n                    bad = True\n            if bad:\n                reported.add(k)\n                problems.append(what + ' ' + str(k) + ' is answered twice, differently')\n        seen.setdefault(k, it)\ndef link_problems(answer, candidates=None, context=''):\n    \"\"\"The structural problems of one Linking answer (empty: valid). ``candidates`` maps each mention ref the note\n    offered to its number of candidates (None: the refs are not checked); ``context`` is the text fragments may\n    quote (the note's words and its extraction).\"\"\"\n    problems = []\n    a = answer if isinstance(answer, dict) else {}\n    mentions = [m for m in a.get('mentions') or [] if isinstance(m, dict)]\n    for m in mentions:\n        name = _label(m.get('name'), 'mention ' + str(m.get('ref')))\n        for field in ('summary', 'reason', 'name'):\n            frag = _fragment(m.get(field), LINK_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field + ' of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        for alias in m.get('aliases') or []:\n            frag = _fragment(alias, LINK_KEYS, context)\n            if frag is not None:\n                problems.append('an alias of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        ref = str(m.get('ref'))\n        if candidates is not None:\n            if ref not in candidates:\n                problems.append('a decision names mention ' + ref + ', which the note does not have')\n                continue\n            count = int(candidates.get(ref) or 0)\n            decision = m.get('decision')\n            if decision in ('reuse', 'unsure') and (not _is_index(m.get('candidate'), count)):\n                problems.append('the ' + str(decision) + ' decision for ' + name + ' names no candidate from its list')\n            if decision == 'merge':\n                pair = m.get('merge_candidates') or []\n                if not (isinstance(pair, list) and len(pair) == 2 and all((_is_index(x, count) for x in pair)) and (pair[0] != pair[1])):\n                    problems.append('the merge decision for ' + name + ' does not name two of its candidates')\n    _same_twice(mentions, 'ref', 'mention', problems)\n    for c in a.get('claims') or []:\n        if isinstance(c, dict):\n            frag = _fragment(c.get('reason'), LINK_KEYS, context)\n            if frag is not None:\n                problems.append('the reason for statement ' + str(c.get('index')) + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    _same_twice(list(a.get('claims') or []), 'index', 'statement', problems, ('relation_to_existing',), 'existing')\n    _same_twice(list(a.get('tasks') or []), 'index', 'task', problems, (), 'closes_open_task')\n    frag = _fragment(a.get('revision_summary'), LINK_KEYS, context)\n    if frag is not None:\n        problems.append(\"the revision summary holds a piece of the answer's structure (\" + frag.strip() + ')')\n    return problems\ndef extraction_problems(answer, context=''):\n    \"\"\"The structural problems of one Extraction answer (empty: valid); ``context`` is the text it read.\"\"\"\n    problems = []\n    a = answer if isinstance(answer, dict) else {}\n    frag = _fragment(a.get('summary'), EXTRACTION_KEYS, context)\n    if frag is not None:\n        problems.append(\"the summary holds a piece of the answer's structure (\" + frag.strip() + ')')\n    mentions = [m for m in a.get('mentions') or [] if isinstance(m, dict)]\n    for m in mentions:\n        name = _label(m.get('name'), 'mention ' + str(m.get('ref')))\n        for field in ('name', 'role'):\n            frag = _fragment(m.get(field), EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field + ' of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        for alias in m.get('aliases') or []:\n            frag = _fragment(alias, EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('an alias of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    _same_twice(mentions, 'ref', 'mention', problems)\n    for t in a.get('topics') or []:\n        frag = _fragment(t, EXTRACTION_KEYS, context)\n        if frag is not None:\n            problems.append(\"a topic holds a piece of the answer's structure (\" + frag.strip() + ')')\n    for i, mo in enumerate((m for m in a.get('moments') or [] if isinstance(m, dict))):\n        for field in ('heading', 'text_span'):\n            frag = _fragment(mo.get(field), EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field.replace('_', ' ') + ' of dated part ' + str(i + 1) + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    return problems\ndef context_text(texts, extraction):\n    \"\"\"What an answer's prose may quote verbatim: the texts the model read and every string of the extraction\n    (a linking answer quotes the extraction's names, roles and evidence).\"\"\"\n    parts = [str(t or '') for t in texts or []]\n    todo = [extraction]\n    while todo:\n        x = todo.pop()\n        if isinstance(x, str):\n            parts.append(x)\n        elif isinstance(x, dict):\n            todo.extend(x.values())\n        elif isinstance(x, list):\n            todo.extend(x)\n    return '\\n'.join(parts)\ndef problems_sentence(what, problems, again):\n    \"\"\"One sentence for the person and the queue log: \"The model's linking answer was malformed twice (the summary\n    of “Zorn Labs” holds a piece of the answer's structure (\",\"reason\":)); nothing from it was applied.\".\"\"\"\n    shown = list(problems[:PROBLEMS_SHOWN])\n    more = len(problems) - len(shown)\n    detail = '; '.join(shown) + ('; and ' + str(more) + ' more' if more > 0 else '')\n    return \"The model's \" + what + ' answer was malformed' + (' twice' if again else '') + ' (' + detail + '); nothing from it was applied.'\ncands = {}\nfor r in resolved or []:\n    if isinstance(r, dict):\n        cands[str(r.get('ref'))] = len([c for c in (r.get('candidates') or []) if isinstance(c, dict)])\ntexts = [str(s.get('text') or '') for s in (sections or []) if isinstance(s, dict)]\nproblems = link_problems(data, cands, context_text(texts, extraction))\nagain = str(prompt or \"\")\nif problems:\n    again += (\"\\n\\nYour previous answer to this message could not be used: \" + \"; \".join(problems[:5])\n              + \". Answer again in full: a reuse or unsure decision gives its candidate's index from that \"\n              \"mention's list (or the decision is create), and every text field holds only its own text.\")\nreturn {\"ok\": not problems, \"retry_prompt\": again}\n"
+        "codeBody": "EXTRACTION_KEYS = ('aliases', 'basis', 'certainty', 'claims', 'date', 'document_date', 'due', 'evidence', 'heading', 'iso', 'kind', 'mentions', 'moments', 'name', 'object', 'object_is_literal', 'predicate', 'quote', 'ref', 'role', 'stance', 'status', 'subject', 'summary', 'tasks', 'text', 'text_span', 'time_refs', 'topics', 'valid_from', 'valid_until')\nFLOW_FUNCTIONS = ('_fragment', '_label', '_is_index', '_same_twice', 'link_problems', 'extraction_problems', 'context_text', 'problems_sentence')\nLINK_KEYS = ('aliases', 'candidate', 'claims', 'closes_open_task', 'decision', 'evidence', 'existing', 'index', 'kind', 'mentions', 'merge_candidates', 'name', 'reason', 'ref', 'relation_to_existing', 'revision_summary', 'summary', 'tasks')\nPROBLEMS_SHOWN = 3\ndef _fragment(text, keys, context):\n    \"\"\"The first fragment of a JSON answer inside ``text`` (see the module docstring), or None.\"\"\"\n    import re\n    s = str(text or '')\n    if '\"' not in s:\n        return None\n    key_pat = re.compile('(?<![A-Za-z0-9_])(?:' + '|'.join(keys) + ')\"\\\\s*:')\n    close_pat = re.compile('\"\\\\s*[}\\\\]]\\\\s*(?:,|[}\\\\]]|$)')\n    flat = ' '.join(str(context or '').split())\n    for pat in (key_pat, close_pat):\n        for m in pat.finditer(s):\n            frag = ' '.join(m.group(0).split())\n            if frag and frag in flat:\n                continue\n            return m.group(0)\n    return None\ndef _label(value, fallback):\n    v = ' '.join(str(value or '').split())\n    if len(v) > 40:\n        v = v[:40] + '…'\n    return '“' + v + '”' if v else fallback\ndef _is_index(value, count):\n    return isinstance(value, int) and (not isinstance(value, bool)) and (0 <= value < count)\ndef _same_twice(items, key, what, problems, fields=None, target=None):\n    \"\"\"An index answered twice in contradiction: any difference (``fields`` None), else a difference in one of\n    ``fields`` or a ``target`` named by one entry and left empty by the other. Each index is reported once. Null,\n    an empty string and an empty list are the same absent value.\"\"\"\n\n    def present(entry):\n        return {f: v for f, v in entry.items() if v is not None and v != '' and (v != [])}\n    seen = {}\n    reported = set()\n    for it in items:\n        if not isinstance(it, dict):\n            continue\n        k = it.get(key)\n        if k in seen and k not in reported:\n            first = seen[k]\n            if fields is None:\n                bad = present(first) != present(it)\n            else:\n                bad = False\n                for f in fields:\n                    if first.get(f) != it.get(f):\n                        bad = True\n                if target is not None and (first.get(target) is None) != (it.get(target) is None):\n                    bad = True\n            if bad:\n                reported.add(k)\n                problems.append(what + ' ' + str(k) + ' is answered twice, differently')\n        seen.setdefault(k, it)\ndef link_problems(answer, candidates=None, context=''):\n    \"\"\"The structural problems of one Linking answer (empty: valid). ``candidates`` maps each mention ref the note\n    offered to its number of candidates (None: the refs are not checked); ``context`` is the text fragments may\n    quote (the note's words and its extraction).\"\"\"\n    problems = []\n    a = answer if isinstance(answer, dict) else {}\n    mentions = [m for m in a.get('mentions') or [] if isinstance(m, dict)]\n    for m in mentions:\n        name = _label(m.get('name'), 'mention ' + str(m.get('ref')))\n        for field in ('summary', 'reason', 'name'):\n            frag = _fragment(m.get(field), LINK_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field + ' of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        for alias in m.get('aliases') or []:\n            frag = _fragment(alias, LINK_KEYS, context)\n            if frag is not None:\n                problems.append('an alias of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        ref = str(m.get('ref'))\n        if candidates is not None:\n            if ref not in candidates:\n                problems.append('a decision names mention ' + ref + ', which the note does not have')\n                continue\n            count = int(candidates.get(ref) or 0)\n            decision = m.get('decision')\n            if decision in ('reuse', 'unsure') and (not _is_index(m.get('candidate'), count)):\n                problems.append('the ' + str(decision) + ' decision for ' + name + ' names no candidate from its list')\n            if decision == 'merge':\n                pair = m.get('merge_candidates') or []\n                both = isinstance(pair, list) and len(pair) == 2\n                if both:\n                    for x in pair:\n                        if not _is_index(x, count):\n                            both = False\n                if not (both and pair[0] != pair[1]):\n                    problems.append('the merge decision for ' + name + ' does not name two of its candidates')\n    _same_twice(mentions, 'ref', 'mention', problems)\n    for c in a.get('claims') or []:\n        if isinstance(c, dict):\n            frag = _fragment(c.get('reason'), LINK_KEYS, context)\n            if frag is not None:\n                problems.append('the reason for statement ' + str(c.get('index')) + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    _same_twice(list(a.get('claims') or []), 'index', 'statement', problems, ('relation_to_existing',), 'existing')\n    _same_twice(list(a.get('tasks') or []), 'index', 'task', problems, (), 'closes_open_task')\n    frag = _fragment(a.get('revision_summary'), LINK_KEYS, context)\n    if frag is not None:\n        problems.append(\"the revision summary holds a piece of the answer's structure (\" + frag.strip() + ')')\n    return problems\ndef extraction_problems(answer, context=''):\n    \"\"\"The structural problems of one Extraction answer (empty: valid); ``context`` is the text it read.\"\"\"\n    problems = []\n    a = answer if isinstance(answer, dict) else {}\n    frag = _fragment(a.get('summary'), EXTRACTION_KEYS, context)\n    if frag is not None:\n        problems.append(\"the summary holds a piece of the answer's structure (\" + frag.strip() + ')')\n    mentions = [m for m in a.get('mentions') or [] if isinstance(m, dict)]\n    for m in mentions:\n        name = _label(m.get('name'), 'mention ' + str(m.get('ref')))\n        for field in ('name', 'role'):\n            frag = _fragment(m.get(field), EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field + ' of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        for alias in m.get('aliases') or []:\n            frag = _fragment(alias, EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('an alias of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    _same_twice(mentions, 'ref', 'mention', problems)\n    for t in a.get('topics') or []:\n        frag = _fragment(t, EXTRACTION_KEYS, context)\n        if frag is not None:\n            problems.append(\"a topic holds a piece of the answer's structure (\" + frag.strip() + ')')\n    for i, mo in enumerate((m for m in a.get('moments') or [] if isinstance(m, dict))):\n        for field in ('heading', 'text_span'):\n            frag = _fragment(mo.get(field), EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field.replace('_', ' ') + ' of dated part ' + str(i + 1) + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    return problems\ndef context_text(texts, extraction):\n    \"\"\"What an answer's prose may quote verbatim: the texts the model read and every string of the extraction\n    (a linking answer quotes the extraction's names, roles and evidence).\"\"\"\n    parts = [str(t or '') for t in texts or []]\n    todo = [extraction]\n    while todo:\n        x = todo.pop()\n        if isinstance(x, str):\n            parts.append(x)\n        elif isinstance(x, dict):\n            todo.extend(x.values())\n        elif isinstance(x, list):\n            todo.extend(x)\n    return '\\n'.join(parts)\ndef problems_sentence(what, problems, again):\n    \"\"\"One sentence for the person and the queue log: \"The model's linking answer was malformed twice (the summary\n    of “Zorn Labs” holds a piece of the answer's structure (\",\"reason\":)); nothing from it was applied.\".\"\"\"\n    shown = list(problems[:PROBLEMS_SHOWN])\n    more = len(problems) - len(shown)\n    detail = '; '.join(shown) + ('; and ' + str(more) + ' more' if more > 0 else '')\n    return \"The model's \" + what + ' answer was malformed' + (' twice' if again else '') + ' (' + detail + '); nothing from it was applied.'\ncands = {}\nfor r in resolved or []:\n    if isinstance(r, dict):\n        cands[str(r.get('ref'))] = len([c for c in (r.get('candidates') or []) if isinstance(c, dict)])\ntexts = [str(s.get('text') or '') for s in (sections or []) if isinstance(s, dict)]\nproblems = link_problems(data, cands, context_text(texts, extraction))\nagain = str(prompt or \"\")\nif problems:\n    again += (\"\\n\\nYour previous answer to this message could not be used: \" + \"; \".join(problems[:5])\n              + \". Answer again in full: a reuse or unsure decision gives its candidate's index from that \"\n              \"mention's list (or the decision is create), and every text field holds only its own text.\")\nreturn {\"ok\": not problems, \"retry_prompt\": again}\n"
       }
     },
     {
       "id": "link_ok",
       "type": "if",
       "position": {
-        "x": 10080.0,
+        "x": 11040.0,
         "y": 0.0
       },
       "data": {
@@ -2982,7 +3118,7 @@
       "id": "keep_linking",
       "type": "add_to_list",
       "position": {
-        "x": 10560.0,
+        "x": 11520.0,
         "y": 0.0
       },
       "data": {
@@ -3031,7 +3167,7 @@
       "id": "link_again",
       "type": "llm_call",
       "position": {
-        "x": 10560.0,
+        "x": 11520.0,
         "y": 320.0
       },
       "data": {
@@ -3324,7 +3460,7 @@
       "id": "link_checked",
       "type": "code",
       "position": {
-        "x": 11040.0,
+        "x": 12000.0,
         "y": 0.0
       },
       "data": {
@@ -3388,14 +3524,14 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "EXTRACTION_KEYS = ('aliases', 'basis', 'certainty', 'claims', 'date', 'document_date', 'due', 'evidence', 'heading', 'iso', 'kind', 'mentions', 'moments', 'name', 'object', 'object_is_literal', 'predicate', 'quote', 'ref', 'role', 'stance', 'status', 'subject', 'summary', 'tasks', 'text', 'text_span', 'time_refs', 'topics', 'valid_from', 'valid_until')\nFLOW_FUNCTIONS = ('_fragment', '_label', '_is_index', '_same_twice', 'link_problems', 'extraction_problems', 'context_text', 'problems_sentence')\nLINK_KEYS = ('aliases', 'candidate', 'claims', 'closes_open_task', 'decision', 'evidence', 'existing', 'index', 'kind', 'mentions', 'merge_candidates', 'name', 'reason', 'ref', 'relation_to_existing', 'revision_summary', 'summary', 'tasks')\nPROBLEMS_SHOWN = 3\ndef _fragment(text, keys, context):\n    \"\"\"The first fragment of a JSON answer inside ``text`` (see the module docstring), or None.\"\"\"\n    import re\n    s = str(text or '')\n    if '\"' not in s:\n        return None\n    key_pat = re.compile('(?<![A-Za-z0-9_])(?:' + '|'.join(keys) + ')\"\\\\s*:')\n    close_pat = re.compile('\"\\\\s*[}\\\\]]\\\\s*(?:,|[}\\\\]]|$)')\n    flat = ' '.join(str(context or '').split())\n    for pat in (key_pat, close_pat):\n        for m in pat.finditer(s):\n            frag = ' '.join(m.group(0).split())\n            if frag and frag in flat:\n                continue\n            return m.group(0)\n    return None\ndef _label(value, fallback):\n    v = ' '.join(str(value or '').split())\n    if len(v) > 40:\n        v = v[:40] + '…'\n    return '“' + v + '”' if v else fallback\ndef _is_index(value, count):\n    return isinstance(value, int) and (not isinstance(value, bool)) and (0 <= value < count)\ndef _same_twice(items, key, what, problems, fields=None, target=None):\n    \"\"\"An index answered twice in contradiction: any difference (``fields`` None), else a difference in one of\n    ``fields`` or a ``target`` named by one entry and left empty by the other. Each index is reported once. Null,\n    an empty string and an empty list are the same absent value.\"\"\"\n\n    def present(entry):\n        return {f: v for f, v in entry.items() if v is not None and v != '' and (v != [])}\n    seen = {}\n    reported = set()\n    for it in items:\n        if not isinstance(it, dict):\n            continue\n        k = it.get(key)\n        if k in seen and k not in reported:\n            first = seen[k]\n            if fields is None:\n                bad = present(first) != present(it)\n            else:\n                bad = any((first.get(f) != it.get(f) for f in fields))\n                if target is not None and (first.get(target) is None) != (it.get(target) is None):\n                    bad = True\n            if bad:\n                reported.add(k)\n                problems.append(what + ' ' + str(k) + ' is answered twice, differently')\n        seen.setdefault(k, it)\ndef link_problems(answer, candidates=None, context=''):\n    \"\"\"The structural problems of one Linking answer (empty: valid). ``candidates`` maps each mention ref the note\n    offered to its number of candidates (None: the refs are not checked); ``context`` is the text fragments may\n    quote (the note's words and its extraction).\"\"\"\n    problems = []\n    a = answer if isinstance(answer, dict) else {}\n    mentions = [m for m in a.get('mentions') or [] if isinstance(m, dict)]\n    for m in mentions:\n        name = _label(m.get('name'), 'mention ' + str(m.get('ref')))\n        for field in ('summary', 'reason', 'name'):\n            frag = _fragment(m.get(field), LINK_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field + ' of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        for alias in m.get('aliases') or []:\n            frag = _fragment(alias, LINK_KEYS, context)\n            if frag is not None:\n                problems.append('an alias of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        ref = str(m.get('ref'))\n        if candidates is not None:\n            if ref not in candidates:\n                problems.append('a decision names mention ' + ref + ', which the note does not have')\n                continue\n            count = int(candidates.get(ref) or 0)\n            decision = m.get('decision')\n            if decision in ('reuse', 'unsure') and (not _is_index(m.get('candidate'), count)):\n                problems.append('the ' + str(decision) + ' decision for ' + name + ' names no candidate from its list')\n            if decision == 'merge':\n                pair = m.get('merge_candidates') or []\n                if not (isinstance(pair, list) and len(pair) == 2 and all((_is_index(x, count) for x in pair)) and (pair[0] != pair[1])):\n                    problems.append('the merge decision for ' + name + ' does not name two of its candidates')\n    _same_twice(mentions, 'ref', 'mention', problems)\n    for c in a.get('claims') or []:\n        if isinstance(c, dict):\n            frag = _fragment(c.get('reason'), LINK_KEYS, context)\n            if frag is not None:\n                problems.append('the reason for statement ' + str(c.get('index')) + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    _same_twice(list(a.get('claims') or []), 'index', 'statement', problems, ('relation_to_existing',), 'existing')\n    _same_twice(list(a.get('tasks') or []), 'index', 'task', problems, (), 'closes_open_task')\n    frag = _fragment(a.get('revision_summary'), LINK_KEYS, context)\n    if frag is not None:\n        problems.append(\"the revision summary holds a piece of the answer's structure (\" + frag.strip() + ')')\n    return problems\ndef extraction_problems(answer, context=''):\n    \"\"\"The structural problems of one Extraction answer (empty: valid); ``context`` is the text it read.\"\"\"\n    problems = []\n    a = answer if isinstance(answer, dict) else {}\n    frag = _fragment(a.get('summary'), EXTRACTION_KEYS, context)\n    if frag is not None:\n        problems.append(\"the summary holds a piece of the answer's structure (\" + frag.strip() + ')')\n    mentions = [m for m in a.get('mentions') or [] if isinstance(m, dict)]\n    for m in mentions:\n        name = _label(m.get('name'), 'mention ' + str(m.get('ref')))\n        for field in ('name', 'role'):\n            frag = _fragment(m.get(field), EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field + ' of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        for alias in m.get('aliases') or []:\n            frag = _fragment(alias, EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('an alias of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    _same_twice(mentions, 'ref', 'mention', problems)\n    for t in a.get('topics') or []:\n        frag = _fragment(t, EXTRACTION_KEYS, context)\n        if frag is not None:\n            problems.append(\"a topic holds a piece of the answer's structure (\" + frag.strip() + ')')\n    for i, mo in enumerate((m for m in a.get('moments') or [] if isinstance(m, dict))):\n        for field in ('heading', 'text_span'):\n            frag = _fragment(mo.get(field), EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field.replace('_', ' ') + ' of dated part ' + str(i + 1) + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    return problems\ndef context_text(texts, extraction):\n    \"\"\"What an answer's prose may quote verbatim: the texts the model read and every string of the extraction\n    (a linking answer quotes the extraction's names, roles and evidence).\"\"\"\n    parts = [str(t or '') for t in texts or []]\n    todo = [extraction]\n    while todo:\n        x = todo.pop()\n        if isinstance(x, str):\n            parts.append(x)\n        elif isinstance(x, dict):\n            todo.extend(x.values())\n        elif isinstance(x, list):\n            todo.extend(x)\n    return '\\n'.join(parts)\ndef problems_sentence(what, problems, again):\n    \"\"\"One sentence for the person and the queue log: \"The model's linking answer was malformed twice (the summary\n    of “Zorn Labs” holds a piece of the answer's structure (\",\"reason\":)); nothing from it was applied.\".\"\"\"\n    shown = list(problems[:PROBLEMS_SHOWN])\n    more = len(problems) - len(shown)\n    detail = '; '.join(shown) + ('; and ' + str(more) + ' more' if more > 0 else '')\n    return \"The model's \" + what + ' answer was malformed' + (' twice' if again else '') + ' (' + detail + '); nothing from it was applied.'\ncands = {}\nfor r in resolved or []:\n    if isinstance(r, dict):\n        cands[str(r.get('ref'))] = len([c for c in (r.get('candidates') or []) if isinstance(c, dict)])\ntexts = [str(s.get('text') or '') for s in (sections or []) if isinstance(s, dict)]\nproblems = link_problems(data, cands, context_text(texts, extraction))\nreturn {\"entry\": data, \"failed\": bool(problems),\n        \"failure\": problems_sentence(\"linking\", problems, True) if problems else \"\"}\n"
+        "codeBody": "EXTRACTION_KEYS = ('aliases', 'basis', 'certainty', 'claims', 'date', 'document_date', 'due', 'evidence', 'heading', 'iso', 'kind', 'mentions', 'moments', 'name', 'object', 'object_is_literal', 'predicate', 'quote', 'ref', 'role', 'stance', 'status', 'subject', 'summary', 'tasks', 'text', 'text_span', 'time_refs', 'topics', 'valid_from', 'valid_until')\nFLOW_FUNCTIONS = ('_fragment', '_label', '_is_index', '_same_twice', 'link_problems', 'extraction_problems', 'context_text', 'problems_sentence')\nLINK_KEYS = ('aliases', 'candidate', 'claims', 'closes_open_task', 'decision', 'evidence', 'existing', 'index', 'kind', 'mentions', 'merge_candidates', 'name', 'reason', 'ref', 'relation_to_existing', 'revision_summary', 'summary', 'tasks')\nPROBLEMS_SHOWN = 3\ndef _fragment(text, keys, context):\n    \"\"\"The first fragment of a JSON answer inside ``text`` (see the module docstring), or None.\"\"\"\n    import re\n    s = str(text or '')\n    if '\"' not in s:\n        return None\n    key_pat = re.compile('(?<![A-Za-z0-9_])(?:' + '|'.join(keys) + ')\"\\\\s*:')\n    close_pat = re.compile('\"\\\\s*[}\\\\]]\\\\s*(?:,|[}\\\\]]|$)')\n    flat = ' '.join(str(context or '').split())\n    for pat in (key_pat, close_pat):\n        for m in pat.finditer(s):\n            frag = ' '.join(m.group(0).split())\n            if frag and frag in flat:\n                continue\n            return m.group(0)\n    return None\ndef _label(value, fallback):\n    v = ' '.join(str(value or '').split())\n    if len(v) > 40:\n        v = v[:40] + '…'\n    return '“' + v + '”' if v else fallback\ndef _is_index(value, count):\n    return isinstance(value, int) and (not isinstance(value, bool)) and (0 <= value < count)\ndef _same_twice(items, key, what, problems, fields=None, target=None):\n    \"\"\"An index answered twice in contradiction: any difference (``fields`` None), else a difference in one of\n    ``fields`` or a ``target`` named by one entry and left empty by the other. Each index is reported once. Null,\n    an empty string and an empty list are the same absent value.\"\"\"\n\n    def present(entry):\n        return {f: v for f, v in entry.items() if v is not None and v != '' and (v != [])}\n    seen = {}\n    reported = set()\n    for it in items:\n        if not isinstance(it, dict):\n            continue\n        k = it.get(key)\n        if k in seen and k not in reported:\n            first = seen[k]\n            if fields is None:\n                bad = present(first) != present(it)\n            else:\n                bad = False\n                for f in fields:\n                    if first.get(f) != it.get(f):\n                        bad = True\n                if target is not None and (first.get(target) is None) != (it.get(target) is None):\n                    bad = True\n            if bad:\n                reported.add(k)\n                problems.append(what + ' ' + str(k) + ' is answered twice, differently')\n        seen.setdefault(k, it)\ndef link_problems(answer, candidates=None, context=''):\n    \"\"\"The structural problems of one Linking answer (empty: valid). ``candidates`` maps each mention ref the note\n    offered to its number of candidates (None: the refs are not checked); ``context`` is the text fragments may\n    quote (the note's words and its extraction).\"\"\"\n    problems = []\n    a = answer if isinstance(answer, dict) else {}\n    mentions = [m for m in a.get('mentions') or [] if isinstance(m, dict)]\n    for m in mentions:\n        name = _label(m.get('name'), 'mention ' + str(m.get('ref')))\n        for field in ('summary', 'reason', 'name'):\n            frag = _fragment(m.get(field), LINK_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field + ' of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        for alias in m.get('aliases') or []:\n            frag = _fragment(alias, LINK_KEYS, context)\n            if frag is not None:\n                problems.append('an alias of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        ref = str(m.get('ref'))\n        if candidates is not None:\n            if ref not in candidates:\n                problems.append('a decision names mention ' + ref + ', which the note does not have')\n                continue\n            count = int(candidates.get(ref) or 0)\n            decision = m.get('decision')\n            if decision in ('reuse', 'unsure') and (not _is_index(m.get('candidate'), count)):\n                problems.append('the ' + str(decision) + ' decision for ' + name + ' names no candidate from its list')\n            if decision == 'merge':\n                pair = m.get('merge_candidates') or []\n                both = isinstance(pair, list) and len(pair) == 2\n                if both:\n                    for x in pair:\n                        if not _is_index(x, count):\n                            both = False\n                if not (both and pair[0] != pair[1]):\n                    problems.append('the merge decision for ' + name + ' does not name two of its candidates')\n    _same_twice(mentions, 'ref', 'mention', problems)\n    for c in a.get('claims') or []:\n        if isinstance(c, dict):\n            frag = _fragment(c.get('reason'), LINK_KEYS, context)\n            if frag is not None:\n                problems.append('the reason for statement ' + str(c.get('index')) + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    _same_twice(list(a.get('claims') or []), 'index', 'statement', problems, ('relation_to_existing',), 'existing')\n    _same_twice(list(a.get('tasks') or []), 'index', 'task', problems, (), 'closes_open_task')\n    frag = _fragment(a.get('revision_summary'), LINK_KEYS, context)\n    if frag is not None:\n        problems.append(\"the revision summary holds a piece of the answer's structure (\" + frag.strip() + ')')\n    return problems\ndef extraction_problems(answer, context=''):\n    \"\"\"The structural problems of one Extraction answer (empty: valid); ``context`` is the text it read.\"\"\"\n    problems = []\n    a = answer if isinstance(answer, dict) else {}\n    frag = _fragment(a.get('summary'), EXTRACTION_KEYS, context)\n    if frag is not None:\n        problems.append(\"the summary holds a piece of the answer's structure (\" + frag.strip() + ')')\n    mentions = [m for m in a.get('mentions') or [] if isinstance(m, dict)]\n    for m in mentions:\n        name = _label(m.get('name'), 'mention ' + str(m.get('ref')))\n        for field in ('name', 'role'):\n            frag = _fragment(m.get(field), EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field + ' of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n        for alias in m.get('aliases') or []:\n            frag = _fragment(alias, EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('an alias of ' + name + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    _same_twice(mentions, 'ref', 'mention', problems)\n    for t in a.get('topics') or []:\n        frag = _fragment(t, EXTRACTION_KEYS, context)\n        if frag is not None:\n            problems.append(\"a topic holds a piece of the answer's structure (\" + frag.strip() + ')')\n    for i, mo in enumerate((m for m in a.get('moments') or [] if isinstance(m, dict))):\n        for field in ('heading', 'text_span'):\n            frag = _fragment(mo.get(field), EXTRACTION_KEYS, context)\n            if frag is not None:\n                problems.append('the ' + field.replace('_', ' ') + ' of dated part ' + str(i + 1) + \" holds a piece of the answer's structure (\" + frag.strip() + ')')\n    return problems\ndef context_text(texts, extraction):\n    \"\"\"What an answer's prose may quote verbatim: the texts the model read and every string of the extraction\n    (a linking answer quotes the extraction's names, roles and evidence).\"\"\"\n    parts = [str(t or '') for t in texts or []]\n    todo = [extraction]\n    while todo:\n        x = todo.pop()\n        if isinstance(x, str):\n            parts.append(x)\n        elif isinstance(x, dict):\n            todo.extend(x.values())\n        elif isinstance(x, list):\n            todo.extend(x)\n    return '\\n'.join(parts)\ndef problems_sentence(what, problems, again):\n    \"\"\"One sentence for the person and the queue log: \"The model's linking answer was malformed twice (the summary\n    of “Zorn Labs” holds a piece of the answer's structure (\",\"reason\":)); nothing from it was applied.\".\"\"\"\n    shown = list(problems[:PROBLEMS_SHOWN])\n    more = len(problems) - len(shown)\n    detail = '; '.join(shown) + ('; and ' + str(more) + ' more' if more > 0 else '')\n    return \"The model's \" + what + ' answer was malformed' + (' twice' if again else '') + ' (' + detail + '); nothing from it was applied.'\ncands = {}\nfor r in resolved or []:\n    if isinstance(r, dict):\n        cands[str(r.get('ref'))] = len([c for c in (r.get('candidates') or []) if isinstance(c, dict)])\ntexts = [str(s.get('text') or '') for s in (sections or []) if isinstance(s, dict)]\nproblems = link_problems(data, cands, context_text(texts, extraction))\nreturn {\"entry\": data, \"failed\": bool(problems),\n        \"failure\": problems_sentence(\"linking\", problems, True) if problems else \"\"}\n"
       }
     },
     {
       "id": "relink_corrupt",
       "type": "if",
       "position": {
-        "x": 11520.0,
+        "x": 12480.0,
         "y": 0.0
       },
       "data": {
@@ -3431,7 +3567,7 @@
       "id": "stopped_linking",
       "type": "on_flow_end",
       "position": {
-        "x": 12000.0,
+        "x": 12960.0,
         "y": 0.0
       },
       "data": {
@@ -3469,7 +3605,7 @@
       "id": "keep_relinking",
       "type": "add_to_list",
       "position": {
-        "x": 12000.0,
+        "x": 12960.0,
         "y": 320.0
       },
       "data": {
@@ -3518,8 +3654,8 @@
       "id": "linkings",
       "type": "get_var",
       "position": {
-        "x": 8640.0,
-        "y": 1280.0
+        "x": 9600.0,
+        "y": 640.0
       },
       "data": {
         "nodeType": "get_var",
@@ -3550,11 +3686,147 @@
       }
     },
     {
+      "id": "links_kept",
+      "type": "code",
+      "position": {
+        "x": 10080.0,
+        "y": 424.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Every part of the linking kept?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "kept",
+            "label": "kept",
+            "type": "array"
+          },
+          {
+            "id": "asked",
+            "label": "asked",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "ok",
+            "label": "ok",
+            "type": "boolean"
+          },
+          {
+            "id": "failure",
+            "label": "failure",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "n_kept = len([x for x in (kept or []) if isinstance(x, dict)])\nn_asked = len(list(asked or []))\nif n_kept == n_asked:\n    return {\"ok\": True, \"failure\": \"\"}\nreturn {\"ok\": False, \"failure\": \"Only {kept} of the {asked} parts of this note's {what} were kept, so nothing was changed.\".format(kept=n_kept, asked=n_asked, what='linking')}\n"
+      }
+    },
+    {
+      "id": "links_kept_ok",
+      "type": "if",
+      "position": {
+        "x": 10560.0,
+        "y": 346.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Every part of the linking kept?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "links_kept_lost",
+      "type": "on_flow_end",
+      "position": {
+        "x": 11040.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "on_flow_end",
+        "label": "Stopped: a part of the linking was lost",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "error",
+            "label": "error",
+            "type": "string"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          },
+          {
+            "id": "status",
+            "label": "status",
+            "type": "string"
+          }
+        ],
+        "outputs": [],
+        "pinDefaults": {
+          "success": false,
+          "status": "failed"
+        }
+      }
+    },
+    {
       "id": "merge_links",
       "type": "code",
       "position": {
-        "x": 9120.0,
-        "y": 424.0
+        "x": 11040.0,
+        "y": 640.0
       },
       "data": {
         "nodeType": "code",
@@ -3599,8 +3871,8 @@
       "id": "apply_args",
       "type": "code",
       "position": {
-        "x": 9600.0,
-        "y": 346.0
+        "x": 11520.0,
+        "y": 744.0
       },
       "data": {
         "nodeType": "code",
@@ -3655,7 +3927,7 @@
       "id": "apply",
       "type": "tool_calls",
       "position": {
-        "x": 10080.0,
+        "x": 12000.0,
         "y": 320.0
       },
       "data": {
@@ -3711,8 +3983,8 @@
       "id": "apply_out",
       "type": "code",
       "position": {
-        "x": 10560.0,
-        "y": 744.0
+        "x": 12480.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "code",
@@ -3754,20 +4026,115 @@
             "id": "tool_output",
             "label": "tool_output",
             "type": "object"
+          },
+          {
+            "id": "failed",
+            "label": "failed",
+            "type": "boolean"
+          },
+          {
+            "id": "failure",
+            "label": "failure",
+            "type": "string"
           }
         ],
         "pinDefaults": {
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_apply_revision returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_apply_revision failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_apply_revision returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_apply_revision returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_apply_revision failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_apply_revision returned something other than an object.\"\nif failure is not None:\n    return {\"failed\": True, \"failure\": failure}\nreturn dict(out, tool_output=out, failed=False, failure=None)\n"
+      }
+    },
+    {
+      "id": "apply_failed",
+      "type": "if",
+      "position": {
+        "x": 12960.0,
+        "y": 640.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Revise the graph: failed?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "stopped_apply",
+      "type": "on_flow_end",
+      "position": {
+        "x": 13440.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "on_flow_end",
+        "label": "Stopped: the reading could not be applied",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "error",
+            "label": "error",
+            "type": "string"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          },
+          {
+            "id": "status",
+            "label": "status",
+            "type": "string"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          }
+        ],
+        "outputs": [],
+        "pinDefaults": {
+          "success": false,
+          "status": "failed"
+        }
       }
     },
     {
       "id": "end",
       "type": "on_flow_end",
       "position": {
-        "x": 11040.0,
+        "x": 13440.0,
         "y": 320.0
       },
       "data": {
@@ -4262,18 +4629,74 @@
       "targetHandle": "exec-in"
     },
     {
+      "id": "e-extractions-value-sections_kept-kept",
+      "source": "extractions",
+      "sourceHandle": "value",
+      "target": "sections_kept",
+      "targetHandle": "kept"
+    },
+    {
+      "id": "e-sections-items-sections_kept-asked",
+      "source": "sections",
+      "sourceHandle": "items",
+      "target": "sections_kept",
+      "targetHandle": "asked"
+    },
+    {
+      "id": "e-each_section-done-sections_kept-exec-in",
+      "source": "each_section",
+      "sourceHandle": "done",
+      "target": "sections_kept",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-sections_kept-ok-sections_kept_ok-condition",
+      "source": "sections_kept",
+      "sourceHandle": "ok",
+      "target": "sections_kept_ok",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-sections_kept-exec-out-sections_kept_ok-exec-in",
+      "source": "sections_kept",
+      "sourceHandle": "exec-out",
+      "target": "sections_kept_ok",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-sections_kept-failure-sections_kept_lost-response",
+      "source": "sections_kept",
+      "sourceHandle": "failure",
+      "target": "sections_kept_lost",
+      "targetHandle": "response"
+    },
+    {
+      "id": "e-sections_kept-failure-sections_kept_lost-error",
+      "source": "sections_kept",
+      "sourceHandle": "failure",
+      "target": "sections_kept_lost",
+      "targetHandle": "error"
+    },
+    {
+      "id": "e-sections_kept_ok-false-sections_kept_lost-exec-in",
+      "source": "sections_kept_ok",
+      "sourceHandle": "false",
+      "target": "sections_kept_lost",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-sections_kept_ok-true-merge-exec-in",
+      "source": "sections_kept_ok",
+      "sourceHandle": "true",
+      "target": "merge",
+      "targetHandle": "exec-in"
+    },
+    {
       "id": "e-extractions-value-merge-extractions",
       "source": "extractions",
       "sourceHandle": "value",
       "target": "merge",
       "targetHandle": "extractions"
-    },
-    {
-      "id": "e-each_section-done-merge-exec-in",
-      "source": "each_section",
-      "sourceHandle": "done",
-      "target": "merge",
-      "targetHandle": "exec-in"
     },
     {
       "id": "e-context_out-note-dated_parts-note",
@@ -4738,18 +5161,74 @@
       "targetHandle": "exec-in"
     },
     {
+      "id": "e-linkings-value-links_kept-kept",
+      "source": "linkings",
+      "sourceHandle": "value",
+      "target": "links_kept",
+      "targetHandle": "kept"
+    },
+    {
+      "id": "e-link_parts-items-links_kept-asked",
+      "source": "link_parts",
+      "sourceHandle": "items",
+      "target": "links_kept",
+      "targetHandle": "asked"
+    },
+    {
+      "id": "e-each_link-done-links_kept-exec-in",
+      "source": "each_link",
+      "sourceHandle": "done",
+      "target": "links_kept",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-links_kept-ok-links_kept_ok-condition",
+      "source": "links_kept",
+      "sourceHandle": "ok",
+      "target": "links_kept_ok",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-links_kept-exec-out-links_kept_ok-exec-in",
+      "source": "links_kept",
+      "sourceHandle": "exec-out",
+      "target": "links_kept_ok",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-links_kept-failure-links_kept_lost-response",
+      "source": "links_kept",
+      "sourceHandle": "failure",
+      "target": "links_kept_lost",
+      "targetHandle": "response"
+    },
+    {
+      "id": "e-links_kept-failure-links_kept_lost-error",
+      "source": "links_kept",
+      "sourceHandle": "failure",
+      "target": "links_kept_lost",
+      "targetHandle": "error"
+    },
+    {
+      "id": "e-links_kept_ok-false-links_kept_lost-exec-in",
+      "source": "links_kept_ok",
+      "sourceHandle": "false",
+      "target": "links_kept_lost",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-links_kept_ok-true-merge_links-exec-in",
+      "source": "links_kept_ok",
+      "sourceHandle": "true",
+      "target": "merge_links",
+      "targetHandle": "exec-in"
+    },
+    {
       "id": "e-linkings-value-merge_links-linkings",
       "source": "linkings",
       "sourceHandle": "value",
       "target": "merge_links",
       "targetHandle": "linkings"
-    },
-    {
-      "id": "e-each_link-done-merge_links-exec-in",
-      "source": "each_link",
-      "sourceHandle": "done",
-      "target": "merge_links",
-      "targetHandle": "exec-in"
     },
     {
       "id": "e-start-note_id-apply_args-note_id",
@@ -4808,6 +5287,48 @@
       "targetHandle": "exec-in"
     },
     {
+      "id": "e-apply_out-failed-apply_failed-condition",
+      "source": "apply_out",
+      "sourceHandle": "failed",
+      "target": "apply_failed",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-apply_out-exec-out-apply_failed-exec-in",
+      "source": "apply_out",
+      "sourceHandle": "exec-out",
+      "target": "apply_failed",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-apply_out-failure-stopped_apply-response",
+      "source": "apply_out",
+      "sourceHandle": "failure",
+      "target": "stopped_apply",
+      "targetHandle": "response"
+    },
+    {
+      "id": "e-apply_out-failure-stopped_apply-error",
+      "source": "apply_out",
+      "sourceHandle": "failure",
+      "target": "stopped_apply",
+      "targetHandle": "error"
+    },
+    {
+      "id": "e-start-note_id-stopped_apply-note_id",
+      "source": "start",
+      "sourceHandle": "note_id",
+      "target": "stopped_apply",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-apply_failed-true-stopped_apply-exec-in",
+      "source": "apply_failed",
+      "sourceHandle": "true",
+      "target": "stopped_apply",
+      "targetHandle": "exec-in"
+    },
+    {
       "id": "e-apply_out-summary-end-response",
       "source": "apply_out",
       "sourceHandle": "summary",
@@ -4836,9 +5357,9 @@
       "targetHandle": "revision"
     },
     {
-      "id": "e-apply_out-exec-out-end-exec-in",
-      "source": "apply_out",
-      "sourceHandle": "exec-out",
+      "id": "e-apply_failed-false-end-exec-in",
+      "source": "apply_failed",
+      "sourceHandle": "false",
       "target": "end",
       "targetHandle": "exec-in"
     }

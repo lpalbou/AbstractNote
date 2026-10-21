@@ -9,6 +9,7 @@ resolve step answered are kept in the stored packet so a later no-call check can
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
 
 from ..process.context import load_packet, save_packet
@@ -18,6 +19,8 @@ from ..process import split, validate
 from ..process.merge import merge_extractions
 from ..process.revise import _consume, apply_note_revision, apply_reinterpretation, reinterpret_view
 from .context import ToolContext
+
+_log = logging.getLogger("abstractnote.process")
 
 
 def note_context(ctx: ToolContext, note_id: str, max_chars: Optional[int] = None) -> Dict[str, Any]:
@@ -67,7 +70,18 @@ def note_apply_revision(ctx: ToolContext, note_id: str, extraction: Any, linking
                         reinterpret: bool = False, pass_id: Optional[str] = None) -> Dict[str, Any]:
     """Apply a note's reading. W30: an extraction that reads the note as a document of dated parts (``moments``)
     splits it (``process/split.py``) instead of applying its statements; a container read again stays as it is (its
-    parts are notes of their own, each understood again by itself) and its marks are settled as unchanged."""
+    parts are notes of their own, each understood again by itself) and its marks are settled as unchanged. A reading
+    the notebook refuses is logged on ``abstractnote.process`` with its note and reason (ADR 0007, W32) and raised."""
+    try:
+        return _apply(ctx, note_id, extraction, linking, reinterpret, pass_id)
+    except Exception as exc:
+        _log.warning("note_apply_revision: the reading of %s was not applied (%s: %s)", note_id,
+                     type(exc).__name__, exc)
+        raise
+
+
+def _apply(ctx: ToolContext, note_id: str, extraction: Any, linking: Dict[str, Any], reinterpret: bool,
+           pass_id: Optional[str]) -> Dict[str, Any]:
     nb = ctx.nb
     if split.is_container(nb, note_id) and nb.store.current_interpretation(note_id) is not None:
         return settle_container(nb, note_id, reinterpret=reinterpret, pass_id=pass_id)

@@ -103,7 +103,12 @@ def _same_twice(items, key, what, problems, fields=None, target=None):
             if fields is None:
                 bad = present(first) != present(it)
             else:
-                bad = any(first.get(f) != it.get(f) for f in fields)
+                # no any()/all() here: the flow's code-node sandbox has neither (W32: a NameError inside the linking
+                # loop ended the iteration and its answer was dropped without a word)
+                bad = False
+                for f in fields:
+                    if first.get(f) != it.get(f):
+                        bad = True
                 if target is not None and (first.get(target) is None) != (it.get(target) is None):
                     bad = True
             if bad:
@@ -143,8 +148,12 @@ def link_problems(answer, candidates=None, context=""):
                                 + " names no candidate from its list")
             if decision == "merge":
                 pair = m.get("merge_candidates") or []
-                if not (isinstance(pair, list) and len(pair) == 2 and all(_is_index(x, count) for x in pair)
-                        and pair[0] != pair[1]):
+                both = isinstance(pair, list) and len(pair) == 2
+                if both:
+                    for x in pair:
+                        if not _is_index(x, count):
+                            both = False
+                if not (both and pair[0] != pair[1]):
                     problems.append("the merge decision for " + name + " does not name two of its candidates")
     _same_twice(mentions, "ref", "mention", problems)
     for c in a.get("claims") or []:

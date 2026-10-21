@@ -744,10 +744,13 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
     f.add_to_list("keep_retry", "Keep the second reading", "extractions", ("flag_empty", "entry"))
     f.then("reread_corrupt", "keep_retry", "false")
     f.get_var("extractions", "extractions", [])
+    # W32 (ADR 0007): a node that raises inside a loop body only ends that iteration (the runtime goes on with the
+    # next item), so a part whose answer was lost would be applied without a word; every part must be kept
+    _parts_kept(f, "sections_kept", "reading", ("extractions", "value"), ("sections", "items"),
+                ("each_section", "done"), "merge")
     f.code("merge", "Merge the sections", MERGE_EXTRACTIONS,
            inputs={"extractions": ("array", ("extractions", "value"))},
            outputs=[("extraction", "object"), ("mentions", "array")])
-    f.then("each_section", "merge", "done")
     # W30: a document the extraction read as a sequence of dated entries (``moments``) is split by the apply step
     # into a container and one note per entry; its linking is not needed (each part is read as a note of its own).
     f.code(
@@ -847,24 +850,60 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
     f.add_to_list("keep_relinking", "Keep the second linking", "linkings", ("link_checked", "entry"))
     f.then("relink_corrupt", "keep_relinking", "false")
     f.get_var("linkings", "linkings", [])
+    _parts_kept(f, "links_kept", "linking", ("linkings", "value"), ("link_parts", "items"), ("each_link", "done"),
+                "merge_links")
     f.code("merge_links", "Merge the linking parts",
            packet_code(["merge_linkings"], "return {\"linking\": merge_linkings(linkings)}"),
            inputs={"linkings": ("array", ("linkings", "value"))}, outputs=[("linking", "object")])
-    f.then("each_link", "merge_links", "done")
-    rev = f.tool_step(
+    # W32 (ADR 0007): an apply the notebook refused ends the run on its own end node, "failed" in words and in
+    # `status`, with the tool's sentence as the error, instead of the runtime's generic stop at the result node
+    rev = f._tool_nodes(
         "apply", "Revise the graph", "note_apply_revision",
         {"note_id": ("string", S("note_id")), "extraction": ("object", ("merge", "extraction")),
          "linking": ("object", ("merge_links", "linking"))},
         [("revision_id", "string"), ("summary", "string")],
-        after=("merge_links", "exec-out"),
+        ("merge_links", "exec-out"), raising=False,
     )
+    f.if_("apply_failed", "Revise the graph: failed?", (rev, "failed"))
+    f.then(rev, "apply_failed")
+    f.end("stopped_apply", "Stopped: the reading could not be applied", {
+        "response": ("string", (rev, "failure")), "error": ("string", (rev, "failure")),
+        "success": ("boolean", False), "status": ("string", "failed"), "note_id": ("string", S("note_id")),
+    })
+    f.then("apply_failed", "stopped_apply", "true")
     f.end("end", "Done", {
         "response": ("string", (rev, "summary")), "note_id": ("string", S("note_id")),
         "revision_id": ("string", (rev, "revision_id")), "revision": ("object", (rev, "tool_output")),
         "status": ("string", "processed"),
     })
-    f.then(rev, "end")
+    f.then("apply_failed", "end", "false")
     return f.finish()
+
+
+#: The sentence of a note whose loop lost a part's answer (W32); ``{kept}``, ``{asked}``, ``{what}`` filled in the flow.
+PARTS_LOST = "Only {kept} of the {asked} parts of this note's {what} were kept, so nothing was changed."
+
+
+def _parts_kept(f: Flow, node_id: str, what: str, kept: tuple, asked: tuple, after: tuple, then: str) -> None:
+    """After a loop over a note's parts: every part's answer was kept (``kept`` has one entry per ``asked`` item),
+    else the run ends on its own node with the sentence (:data:`PARTS_LOST`) instead of applying what is left."""
+    f.code(
+        node_id, f"Every part of the {what} kept?",
+        "n_kept = len([x for x in (kept or []) if isinstance(x, dict)])\n"
+        "n_asked = len(list(asked or []))\n"
+        "if n_kept == n_asked:\n"
+        "    return {\"ok\": True, \"failure\": \"\"}\n"
+        f"return {{\"ok\": False, \"failure\": {PARTS_LOST!r}.format(kept=n_kept, asked=n_asked, what={what!r})}}",
+        inputs={"kept": ("array", kept), "asked": ("array", asked)}, outputs=[("ok", "boolean"), ("failure", "string")],
+    )
+    f.then(after[0], node_id, after[1])
+    f.if_(f"{node_id}_ok", f"Every part of the {what} kept?", (node_id, "ok"))
+    f.then(node_id, f"{node_id}_ok")
+    f.end(f"{node_id}_lost", f"Stopped: a part of the {what} was lost", {
+        "response": ("string", (node_id, "failure")), "error": ("string", (node_id, "failure")),
+        "success": ("boolean", False), "status": ("string", "failed")})
+    f.then(f"{node_id}_ok", f"{node_id}_lost", "false")
+    f.then(f"{node_id}_ok", then, "true")
 
 
 def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, Any]:
