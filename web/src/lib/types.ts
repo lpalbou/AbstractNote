@@ -50,6 +50,9 @@ export type Note = NoteRef & {
   /** Where the note's date came from (`client`, `content`, `pdf_created`, `file_mtime`, ...) and whether it is approximate (ADR 0008 §7). */
   date_basis?: string;
   date_approximate?: boolean;
+  /** A dated part of a document names its container; a container lists its parts in history order (W30). */
+  part_of?: NoteRef | null;
+  children?: NoteRef[];
 };
 
 /** Entity card relation (W1 entity_card). */

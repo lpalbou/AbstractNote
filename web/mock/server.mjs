@@ -949,6 +949,8 @@ export function createMockGateway(options = {}) {
         revisits: (n.revisits || []).map((r) => db.notes.get(r.note_id)).filter(Boolean).map(noteRef),
         insight: null,
         date_basis: n.source?.client ? "client" : "unrecorded", date_approximate: !n.source?.client,
+        // W30: a dated part names its container; a container lists its parts (the mock has neither)
+        part_of: null, children: [],
         // ADR 0008: the interpretation history (first understanding, then each re-understanding) and why it waits
         interpretations: rev ? [{ revision_id: rev.revision_id, at: rev.at, recorded_at: rev.recorded_at, action: null, summary: rev.summary, context: null, context_unknown: true, superseded_by: null }] : [],
         reinterpret_pending: [],
