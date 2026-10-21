@@ -105,7 +105,7 @@ LINKING = _obj({
     "claims": _arr(_obj({
         "index": {"type": "integer", "description": "index of the claim in the extraction"},
         "relation_to_existing": {"type": "string", "enum": ["new", "restates", "refines", "supersedes", "contradicts",
-                                                          "earlier_state_of"]},
+                                                          "earlier_state_of", "same_statement_as_previous"]},
         "existing": {"type": ["integer", "null"], "description": "index of the existing claim in the context packet"},
         "reason": _str("short"),
     }, ["index", "relation_to_existing"])),

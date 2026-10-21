@@ -1,7 +1,7 @@
 {{batch.envelope}}
 Summary of the note: {{batch.summary}}
 
-Mentions, each with its candidate existing entities:
+{{batch.previous}}Mentions, each with its candidate existing entities:
 {{batch.mentions}}
 
 Statements in the note:

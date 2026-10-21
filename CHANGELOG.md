@@ -29,6 +29,13 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
   by `dedupe-sources` no longer count twice either.
 - **Status says which AbstractMemory runs**: `GET /note/status` reports the version of the AbstractMemory that is
   loaded, not the one an older installation recorded.
+- **A note read again keeps its own facts in place**: when a note is understood again after an earlier one
+  arrives, it is first shown how it was understood before, and a fact it still states stays the same fact under
+  the same name, even when its value, certainty or dates now read differently. A budget no longer moves to a
+  second name ("budget cap" beside "annual budget") because the note was read again.
+- **Earlier evidence keeps the start it gave**: when an older note shows that a belief already held on its date,
+  reading the later note again keeps that earlier start (the belief stays true between the two dates), and
+  understanding the older note differently still gives it back.
 - **What a thing is**: the description of a person, project or tool now says what it is (its kind,
   its role or purpose, and what it belongs to or works with), instead of the latest thing
   that happened to it. It is rewritten only when a note changes

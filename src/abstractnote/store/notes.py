@@ -2219,13 +2219,21 @@ class _OpContext:
     def op_claim_revise(self, p: Dict[str, Any]) -> None:
         """The same statement (subject, predicate, object) read again with another certainty, stance, window or
         evidence: updated in place (``previous`` keeps the earlier values; review 1.2: never dropped, never a second
-        copy). A window another revision closed stays closed. ``assertion_id`` names its new AbstractMemory copy."""
+        copy). A window another revision closed stays closed. ``assertion_id`` names its new AbstractMemory copy.
+        ``valid_from`` is the belief's start (the reading's own, ``own_valid_from``, moved back by the earlier evidence
+        that stands, W29). A statement the re-reading named the same as its previous one (``same_statement_as_previous``,
+        W29) may carry another value (``object_id`` / ``object_literal``): the claim id and predicate stay."""
         row = self._claim(p["claim_id"])
         self.c.execute(
             "UPDATE claims SET certainty=?, stance=?, valid_from=?, evidence=?, assertion_id=?, valid_until=CASE WHEN"
             " closed_revision_id IS NULL THEN ? ELSE valid_until END WHERE claim_id=?",
             (p["certainty"], p.get("stance") or "assert", p.get("valid_from"), p.get("evidence"), p["assertion_id"],
              p.get("valid_until"), p["claim_id"]))
+        if "object_id" in p or "object_literal" in p:
+            self.c.execute("UPDATE claims SET object_id=?, object_literal=? WHERE claim_id=?",
+                           (p.get("object_id"), None if p.get("object_id") else p.get("object_literal"), p["claim_id"]))
+            self._dirty_claim_relation(row)  # the old value's relation; the new one below
+            row = self._claim(p["claim_id"])
         obj_text = row["object_literal"] or ""
         if row["object_id"]:
             obj_text = self.c.execute("SELECT name FROM entities WHERE entity_id=?", (row["object_id"],)).fetchone()[0]

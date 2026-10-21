@@ -23,6 +23,7 @@ Choosing a predicate:
 - Never a vague predicate (`ex:related_to`, `ex:about`, `ex:involves`, `ex:has`) when the text says how the two relate; two things named together with no stated relation give no statement.
 - A fact with one value at a time (a status, a version, an owner, a deadline, a place, what something runs on now) always takes the same predicate, so a later value can replace the earlier one; a relation that adds up (uses, depends on, takes part in, has part, has feature) is one statement per value.
 - When the context lists the predicates the notebook already uses about these names, use the same one for the same relation rather than a synonym.
+- When the context shows how this note was previously understood (a note read again), a statement this text makes again about the same subject and the same kind of fact keeps the predicate written there, even when its value, certainty or date now reads differently.
 
 Rules:
 - Use only the note and the context given; never invent entities or dates. The note's own date is "now".

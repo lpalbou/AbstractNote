@@ -266,9 +266,13 @@ class Archive:
         revised = [x for x in self.later_reinterpret().get(row["claim_id"], []) if x["op"] == "claim.revise"]
         if revised:  # read again in place after R: the archive shows the reading it held (the first one revised)
             prev = revised[0].get("previous") or {}
-            for k in ("certainty", "stance", "valid_from", "evidence"):
+            for k in ("certainty", "stance", "valid_from", "evidence", "object_id", "object_literal"):
                 if k in prev:
                     out[k] = prev[k]
+            if "object_id" in prev:  # W29: a previous statement read again with another value
+                out.pop("object_name", None)
+                if prev["object_id"]:
+                    out["object_name"] = self.store._name(prev["object_id"])
         return out
 
 

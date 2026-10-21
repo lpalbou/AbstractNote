@@ -63,6 +63,8 @@ from .merge import merge_extractions
 from .vocabulary import normalize_predicate
 
 CLOSE_MATCH = "skos:closeMatch"
+#: W29: the linking relation naming a statement of the note's previous reading (``existing`` = its P number).
+SAME_AS_PREVIOUS = schemas.SAME_AS_PREVIOUS
 #: A model merge of an entry with at least this many notes goes to review instead (eval2 D1).
 MERGE_REVIEW_NOTES = 5
 #: A ``contradicts`` from an older note stays a dispute only when the model marked it disputed and the two
@@ -96,6 +98,8 @@ class _Builder:
         self._note_words: Optional[str] = None
         self.stats = {"created": {}}
         self.merged: set = set()  # entities a merge of this revision already involves (no chains, eval2 D1)
+        # W29: statements this reading named the same as one of its previous reading's (claim ids kept in place)
+        self.same_as_previous: set = set()
 
     # ---------------------------------------------------------------- helpers
     def candidate(self, ref: str, index: Optional[int]) -> Optional[str]:
@@ -111,6 +115,16 @@ class _Builder:
             return None
         row = self.nb.store.claim_row(lst[index])
         return row["claim_id"] if row is not None else None
+
+    def previous_claim(self, index: Optional[int]) -> Optional[Any]:
+        """The statement ``P<index>`` of the note's previous reading (``packet.previous_claims``, written by
+        :func:`reinterpret_view` for a note read again), or None: outside the list, or a note read for the first
+        time (it has no previous reading)."""
+        lst = self.packet.get("previous_claims") or []
+        if not isinstance(index, int) or isinstance(index, bool) or not (0 <= index < len(lst)):
+            return None
+        row = self.nb.store.claim_row(lst[index])
+        return row if row is not None and row["note_id"] == self.note_id and row["status"] != REINTERPRETED else None
 
     def open_task(self, index: Optional[int]) -> Optional[str]:
         lst = self.packet.get("open_tasks") or []
@@ -444,8 +458,13 @@ class _Builder:
                 self.warnings.append(w)
             lc = by_index.get(i)
             relation = lc.relation_to_existing if lc else "new"
+            if relation == SAME_AS_PREVIOUS:
+                kept = self.same_statement(i, lc, subject, predicate, obj_id, literal, c)
+                if kept:
+                    continue
+                relation = "new"
             existing = None
-            if lc is not None and lc.existing is not None:
+            if lc is not None and lc.existing is not None and lc.relation_to_existing != SAME_AS_PREVIOUS:
                 existing = self.existing_claim(lc.existing)
                 if existing is None:
                     self.warnings.append(f"Statement {i} referred to an existing statement outside the context; "
@@ -552,6 +571,48 @@ class _Builder:
                         self.ops.append(op)
                 elif relation == "new":
                     self.parallel_belief(i, payload)
+
+    def same_statement(self, i: int, lc: Any, subject: str, predicate: str, obj_id: Optional[str],
+                       literal: Optional[str], c: Any) -> bool:
+        """W29 (retro-C §2): the linking says statement ``i`` is its previous reading's statement ``P<existing>``. It
+        keeps that statement's claim id and predicate (revised in place by :func:`plan_reinterpretation`: the value,
+        certainty and window may change, the id and predicate do not). Refused with a warning (the statement is then
+        new) when the number is not in the previous reading, the subject is another one, or the value is of another
+        kind (an entity against a text). True when the statement was written."""
+        prev = self.previous_claim(lc.existing)
+        if prev is None:
+            self.warnings.append(f"Statement {i} was named the same as a previous statement that its previous reading"
+                                 " does not have; it was treated as new.")
+            return False
+        if not self.same_subject(prev, subject):
+            self.warnings.append(f"Statement {i} was named the same as a previous statement about another subject; "
+                                 "it was treated as new.")
+            return False
+        if (prev["object_id"] is None) != (obj_id is None):
+            self.warnings.append(f"Statement {i} was named the same as a previous statement with another kind of "
+                                 "value; it was treated as new.")
+            return False
+        if prev["claim_id"] in self.claim_ids:
+            return True  # two statements named the same previous one: the first is kept (multi_link says the rest)
+        if predicate != prev["predicate"]:
+            self.warnings.append(f"predicate_kept: {predicate} -> {prev['predicate']} (statement {i} is the previous "
+                                 "reading's statement it names).")
+        given_from = self._time(c.valid_from, "valid_from", i)
+        valid_from: Optional[str] = given_from or self.at
+        valid_until = self._time(c.valid_until, "valid_until", i)
+        if valid_until and valid_from and valid_until < valid_from:
+            if given_from:
+                self.warnings.append(f"Statement {i} ends before it starts; its end was ignored.")
+                valid_until = None
+            else:
+                valid_from = None
+        self.claim_ids.add(prev["claim_id"])
+        self.same_as_previous.add(prev["claim_id"])
+        self.ops.append(_op("claim.add", claim_id=prev["claim_id"], subject_id=prev["subject_id"],
+                            predicate=prev["predicate"], object_id=obj_id, object_literal=literal,
+                            certainty=c.certainty, stance=c.stance, observed_at=self.at, valid_from=valid_from,
+                            valid_until=valid_until, evidence=c.evidence or None, note_id=self.note_id))
+        return True
 
     def extra_links(self, what: str, targets: str, links: List[Tuple[int, str, Optional[int]]], applied: str) -> None:
         """ADR 0007: one statement (or task) linked to SEVERAL existing statements (open tasks) is a valid answer
@@ -1147,19 +1208,23 @@ def replay_claim_state(nb: Any, claim_id: str, exclude: Sequence[str]) -> Dict[s
     return st
 
 
-def replay_claim_start(nb: Any, claim_id: str, exclude: Sequence[str]) -> Dict[str, Optional[str]]:
-    """``{observed_at, valid_from}`` of a claim from its own add and the start moves of every applied revision
-    (``claim.start_earlier``: the earlier of the two; ``claim.start_restore``: set), leaving out the revisions in
-    ``exclude`` (a superseded reading): the start a belief returns to when the earlier evidence is withdrawn."""
+def claim_start_parts(nb: Any, claim_id: str, exclude: Sequence[str] = ()
+                      ) -> Tuple[Dict[str, Optional[str]], Dict[str, Dict[str, Optional[str]]]]:
+    """``(own, moves)`` of a claim's start, replayed from the revision log leaving out the revisions in ``exclude``:
+    ``own`` = ``{observed_at, valid_from}`` its own note's readings gave it (its ``claim.add``, then each
+    ``claim.revise``'s ``own_valid_from``: the start the re-reading itself read); ``moves`` = per earlier note, the
+    earliest ``{observed_at, valid_from}`` its ``claim.start_earlier`` gave it as earlier evidence (R1), dropped again
+    by that note's ``claim.start_restore`` (its reading that moved it was withdrawn, INT a8d4340)."""
     row = nb.store.claim_row(claim_id)
-    start: Dict[str, Optional[str]] = {"observed_at": row["observed_at"], "valid_from": row["valid_from"]}
+    own: Dict[str, Optional[str]] = {"observed_at": row["observed_at"], "valid_from": row["valid_from"]}
     added = nb.store.revision_row(row["revision_id"])
     for op in json.loads(added["ops_json"]) if added else []:
         p = op.get("payload") or {}
         if op.get("op") == "claim.add" and p.get("claim_id") == claim_id:
-            start = {"observed_at": p.get("observed_at"), "valid_from": p.get("valid_from")}
+            own = {"observed_at": p.get("observed_at"), "valid_from": p.get("valid_from")}
     skip = set(exclude)
-    for r in nb.store.q("SELECT revision_id, ops_json FROM revisions WHERE applied_index=1 AND abandoned=0 AND"
+    moves: Dict[str, Dict[str, Optional[str]]] = {}
+    for r in nb.store.q("SELECT revision_id, note_id, ops_json FROM revisions WHERE applied_index=1 AND abandoned=0 AND"
                         " ops_json LIKE ? ORDER BY seq", (f'%"{claim_id}"%',)):
         if r["revision_id"] in skip or r["revision_id"] == row["revision_id"]:
             continue
@@ -1167,14 +1232,37 @@ def replay_claim_start(nb: Any, claim_id: str, exclude: Sequence[str]) -> Dict[s
             p = op.get("payload") or {}
             if p.get("claim_id") != claim_id:
                 continue
-            if op.get("op") == "claim.start_earlier":
-                if p.get("observed_at") and (not start["observed_at"] or p["observed_at"] < start["observed_at"]):
-                    start["observed_at"] = p["observed_at"]
-                if start["valid_from"] and p.get("valid_from") and p["valid_from"] < start["valid_from"]:
-                    start["valid_from"] = p["valid_from"]
-            elif op.get("op") == "claim.start_restore":
-                start = {"observed_at": p["observed_at"], "valid_from": p.get("valid_from")}
-    return start
+            name = op.get("op")
+            if name == "claim.revise":
+                own = {**own, "valid_from": p.get("own_valid_from", p.get("valid_from"))}
+            elif name == "claim.start_earlier":
+                m = moves.setdefault(str(r["note_id"]), {"observed_at": None, "valid_from": None})
+                for k in ("observed_at", "valid_from"):
+                    if p.get(k) and (not m[k] or p[k] < m[k]):
+                        m[k] = p[k]
+            elif name == "claim.start_restore":
+                moves.pop(str(r["note_id"]), None)
+    return own, moves
+
+
+def earliest_start(own: Dict[str, Optional[str]], moves: Dict[str, Dict[str, Optional[str]]]
+                   ) -> Dict[str, Optional[str]]:
+    """The start a belief holds: its own reading's start moved back by the earlier evidence that stands (never later;
+    a statement without a known start keeps none, as ``claim.start_earlier`` does)."""
+    out = dict(own)
+    for m in moves.values():
+        if m.get("observed_at") and (not out["observed_at"] or m["observed_at"] < out["observed_at"]):
+            out["observed_at"] = m["observed_at"]
+        if out["valid_from"] and m.get("valid_from") and m["valid_from"] < out["valid_from"]:
+            out["valid_from"] = m["valid_from"]
+    return out
+
+
+def replay_claim_start(nb: Any, claim_id: str, exclude: Sequence[str]) -> Dict[str, Optional[str]]:
+    """``{observed_at, valid_from}`` of a claim from its own readings and the earlier evidence that stands, leaving
+    out the revisions in ``exclude`` (a superseded reading): the start a belief returns to when the earlier evidence
+    is withdrawn (:func:`claim_start_parts`, :func:`earliest_start`)."""
+    return earliest_start(*claim_start_parts(nb, claim_id, exclude))
 
 
 def _claim_fields(row: Any) -> Dict[str, Any]:
@@ -1242,6 +1330,7 @@ def plan_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any, 
     own_by_key = {_claim_key(nb, r["subject_id"], r["predicate"], r["object_id"], r["object_literal"]): r
                   for r in own_rows}
     own_ids = {r["claim_id"] for r in own_rows}
+    own_by_id = {r["claim_id"]: r for r in own_rows}
     cross_claims = {r["claim_id"]: r for r in s.q(
         f"SELECT * FROM claims WHERE closed_revision_id IN ({cq}) AND (note_id IS NULL OR note_id!=?)",
         [*chain, note_id])} if chain else {}
@@ -1271,30 +1360,45 @@ def plan_reinterpretation(nb: Any, note_id: str, extraction: Any, linking: Any, 
                 continue
             key = _claim_key(nb, p["subject_id"], p["predicate"], p.get("object_id"), p.get("object_literal"))
             own = own_by_key.get(key)
+            if own is None and p["claim_id"] in b.same_as_previous:
+                own = own_by_id.get(p["claim_id"])  # W29: the previous statement, read again with another value
             if own is not None:
                 claim_map[p["claim_id"]] = own["claim_id"]
                 kept.add(own["claim_id"])
                 slots.setdefault((key[0], key[1]), own["claim_id"])
                 closed = own["closed_revision_id"] is not None
-                now = (p["certainty"], p.get("stance") or "assert", p.get("valid_from"), p.get("evidence"),
-                       None if closed else p.get("valid_until"))
+                # W29 (A3): the start an earlier note's evidence moved back stands; this reading gives only its own
+                # start (``own_valid_from``), and the belief's start is the earlier of the two (never later)
+                own_start, moves = claim_start_parts(nb, own["claim_id"])  # own_start: the previous copy's start
+                start = earliest_start({"observed_at": own["observed_at"], "valid_from": p.get("valid_from")},
+                                       moves)["valid_from"]
+                value = (p.get("object_id"), None if p.get("object_id") else p.get("object_literal"))
+                was_value = (own["object_id"], None if own["object_id"] else own["object_literal"])
+                now = (p["certainty"], p.get("stance") or "assert", start, p.get("evidence"),
+                       None if closed else p.get("valid_until"), value)
                 was = (own["certainty"], own["stance"] or "assert", own["valid_from"], own["evidence"],
-                       None if closed else own["valid_until"])
+                       None if closed else own["valid_until"], was_value)
                 if now != was:
                     copy = _copy_id(rid, own["claim_id"])
                     assertion = {**_claim_fields(own), "claim_id": copy, "of_claim_id": own["claim_id"],
                                  "certainty": p["certainty"], "stance": p.get("stance") or "assert",
+                                 "object_id": value[0], "object_literal": value[1],
                                  "valid_from": p.get("valid_from"), "evidence": p.get("evidence"),
                                  "valid_until": own["valid_until"] if closed else p.get("valid_until")}
+                    extra: Dict[str, Any] = {}
+                    previous = {"certainty": own["certainty"], "stance": own["stance"],
+                                "valid_from": own["valid_from"], "valid_until": own["valid_until"],
+                                "evidence": own["evidence"]}
+                    if value != was_value:
+                        extra = {"object_id": value[0], "object_literal": value[1]}
+                        previous.update(object_id=was_value[0], object_literal=was_value[1])
                     out.append(_op("claim.revise", claim_id=own["claim_id"], certainty=p["certainty"],
-                                   stance=p.get("stance") or "assert", valid_from=p.get("valid_from"),
+                                   stance=p.get("stance") or "assert", valid_from=start,
+                                   own_valid_from=p.get("valid_from"),
                                    valid_until=p.get("valid_until"), evidence=p.get("evidence"), assertion_id=copy,
                                    previous_assertion_id=own["assertion_id"] or own["claim_id"],
-                                   empty_at=own["valid_from"] or own["observed_at"], assertion=assertion,
-                                   previous={"certainty": own["certainty"], "stance": own["stance"],
-                                             "valid_from": own["valid_from"], "valid_until": own["valid_until"],
-                                             "evidence": own["evidence"]},
-                                   reason=reason or "read again"))
+                                   empty_at=own_start["valid_from"] or own_start["observed_at"], assertion=assertion,
+                                   previous=previous, reason=reason or "read again", **extra))
                     revised.append(own["claim_id"])
                 continue
             cid = p["claim_id"]
@@ -1560,7 +1664,7 @@ def reinterpret_view(nb: Any, note_id: str, out: Dict[str, Any]) -> Dict[str, An
     stays valid. Fails loudly when the context has not the expected keys (seam with lane R1)."""
     from .context import claim_view, save_packet
 
-    for k in ("existing_claims", "candidate_entities", "open_tasks"):
+    for k in ("note", "existing_claims", "candidate_entities", "open_tasks"):
         if k not in out:
             raise RuntimeError(f"note_context returned no {k!r}; the re-understanding view cannot be built (seam R1).")
     s = nb.store
@@ -1581,6 +1685,24 @@ def reinterpret_view(nb: Any, note_id: str, out: Dict[str, Any]) -> Dict[str, An
         cands.append(c)
     out["candidate_entities"] = cands
     out["open_tasks"] = [t for t in out["open_tasks"] if t.get("task_id") not in own_tasks]
+    # W29 (retro-C §2): the note's OWN previous reading is shown first (packets: "This note was previously understood
+    # as:"), its statements numbered P0, P1, ... (``packet.previous_claims``), so a statement read again is named the
+    # same as its previous one (``same_statement_as_previous``) and keeps its claim id and predicate
+    rows = s.q("SELECT * FROM claims WHERE note_id=? AND status!=? ORDER BY seq, claim_id", (note_id, REINTERPRETED))
+    packet["previous_claims"] = [r["claim_id"] for r in rows]
+    named = []
+    for (eid,) in s.q("SELECT entity_id FROM entity_notes WHERE note_id=? ORDER BY entity_id", (note_id,)):
+        e = s.entity_row(s.canonical(eid))
+        if e is not None and e["entity_id"] not in [x["entity_id"] for x in named]:
+            named.append({"entity_id": e["entity_id"], "name": e["display_name"] or e["name"], "kind": e["kind"]})
+    views = []
+    for i, r in enumerate(rows):  # the names as the person writes them (the block reads like the note)
+        v = claim_view(nb, r, i)
+        v["subject"] = s._display(r["subject_id"]) or v["subject"]
+        if r["object_id"]:
+            v["object"] = s._display(r["object_id"]) or v["object"]
+        views.append(v)
+    out["note"] = {**out["note"], "previous_reading": {"claims": views, "entities": named}}
     cq = ",".join("?" for _ in chain)
     by_entity = {c["entity_id"]: c for c in cands}
     for r in s.q(f"SELECT * FROM claims WHERE closed_revision_id IN ({cq}) AND (note_id IS NULL OR note_id!=?) AND"

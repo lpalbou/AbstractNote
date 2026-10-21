@@ -44,6 +44,14 @@ LATER_LABEL = ("LATER (recorded after this note's date — do not restate; say i
 #: changed about that idea since the note was read, as known on the note's date (no impact number is ever shown).
 CHANGED_LABEL = ("Understood differently since this note was read (ideas this note relies on, as known on its date;"
                  " read the note again in their light, and answer as before where its meaning does not change):")
+#: The block of a note read again (W29, retro-C §2): its OWN previous reading, shown first, statements numbered P0,
+#: P1, ... so the linking can name a statement read again the same as its previous one (``same_statement_as_previous``).
+PREVIOUS_LABEL = ("This note was previously understood as (its own earlier reading, before what the notebook knows;"
+                  " a statement this note still makes is the same statement as its previous one: name it by its"
+                  " P number with `same_statement_as_previous`):")
+#: The extraction's version of that block: the spelling to keep.
+PREVIOUS_EXTRACT_LABEL = ("This note was previously understood as (its own earlier reading; a statement this text"
+                          " makes again keeps the same subject and the same predicate as written here):")
 #: Characters kept of a summary, an evidence excerpt or a role in a packet line.
 SUMMARY_CHARS = 240
 EVIDENCE_CHARS = 200
@@ -101,6 +109,38 @@ def slot_first(claims: List[Any], prefer: Any, limit: int) -> List[Any]:
     return own + (near + far)[:max(0, int(limit) - len(own))]
 
 
+def previous_block(reading: Any, label: str, numbered: bool) -> str:
+    """The note's own previous reading as a block (W29): the label, the entities it named, then each statement with
+    its predicate as spelled, its value and its window (``P<n>`` numbers when ``numbered``, the index the linking's
+    ``same_statement_as_previous`` names). Empty for a note read for the first time."""
+    r = reading if isinstance(reading, dict) else {}
+    claims = [c for c in (r.get("claims") or []) if isinstance(c, dict)]
+    ents = [e for e in (r.get("entities") or []) if isinstance(e, dict)]
+    if not claims and not ents:
+        return ""
+    lines = [label]
+    if ents:
+        lines.append("  named: " + "; ".join(clip(e.get("name"), 80) + " — " + str(e.get("kind") or "thing")
+                                             for e in ents) + ".")
+    for c in claims:
+        obj = c.get("object")
+        obj = ("“" + clip(obj, 80) + "”") if c.get("object_is_literal") else clip(obj, 80)
+        text = clip(c.get("subject"), 60) + " " + str(c.get("predicate") or "") + " " + obj
+        start = str(c.get("valid_from") or "")[:10]
+        until = str(c.get("valid_until") or "")[:10]
+        if start and until:
+            when = " (from " + start + " to " + until + ")"
+        elif until:
+            when = " (until " + until + ")"
+        elif start:
+            when = " (since " + start + ")"
+        else:
+            when = ""
+        tail = " · " + str(c.get("certainty") or "stated") if numbered else ""
+        lines.append(("  P" + str(c.get("index")) + " " if numbered else "- ") + text + tail + when)
+    return "\n".join(lines)
+
+
 def note_envelope() -> str:
     """The user message's head ``<runtime_metadata>`` envelope: the SAME bytes for every call.
 
@@ -148,6 +188,9 @@ def extraction_packet(note: Dict[str, Any], section: Dict[str, Any], parts: int,
     n = note if isinstance(note, dict) else {}
     sec = section if isinstance(section, dict) else {"text": str(section or "")}
     lines = []
+    previous = previous_block(n.get("previous_reading"), PREVIOUS_EXTRACT_LABEL, False)
+    if previous:  # W29: a note read again sees its own previous reading first
+        lines.append(previous)
     names = []
     for e in (candidate_entities or [])[:KNOWN_NAMES]:
         if isinstance(e, dict) and str(e.get("name") or "").strip():
@@ -342,6 +385,7 @@ def link_batches(note: Dict[str, Any], extraction: Dict[str, Any], resolved: Lis
         if int(b.get("omitted") or 0):
             changed_lines.append("    (" + str(int(b.get("omitted"))) + " more changed statements not shown)")
     changed = (CHANGED_LABEL + "\n" + "\n".join(changed_lines)) if changed_lines else ""
+    previous = previous_block(n.get("previous_reading"), PREVIOUS_LABEL, True)
     out = []
     for gi, group in enumerate(groups):
         mlines = []
@@ -397,6 +441,8 @@ def link_batches(note: Dict[str, Any], extraction: Dict[str, Any], resolved: Lis
             "tasks": "\n".join(tlines) if tlines else "(none)",
             "open_tasks": "\n".join(olines) if olines else "(none)",
             "changed": changed,
+            # W29: before the mentions and their known-then / LATER cards; empty (no bytes) on a first reading
+            "previous": (previous + "\n\n") if previous else "",
             "as_of": ("Write every summary as of " + day + ", this note's date: what the entity was then, from this"
                       " note and what was known then; never use what was recorded later.") if day else
                      "Write every summary from this note and what was known when it was written.",

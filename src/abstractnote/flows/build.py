@@ -652,7 +652,7 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
     f.then("sections", "each_section")
     f.code(
         "extract_packet", "What extraction sees",
-        packet_code(["clip", "note_envelope", "note_header", "extraction_packet"],
+        packet_code(["clip", "previous_block", "note_envelope", "note_header", "extraction_packet"],
                     "return {\"packet\": extraction_packet(note, item, parts, similar_notes, candidate_entities,"
                     " open_tasks, topics)}"),
         inputs={"note": ("object", (ctx, "note")), "item": ("object", ("each_section", "item")),
@@ -726,8 +726,8 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
     )
     f.code(
         "link_parts", "What linking sees",
-        packet_code(["clip", "later_than", "predicate_terms", "slot_first", "note_envelope", "note_header",
-                     "claim_line", "candidate_card", "link_batches"],
+        packet_code(["clip", "later_than", "predicate_terms", "slot_first", "previous_block", "note_envelope",
+                     "note_header", "claim_line", "candidate_card", "link_batches"],
                     "return {\"items\": link_batches(note, extraction, resolved, open_tasks)}"),
         inputs={"note": ("object", (ctx, "note")), "extraction": ("object", ("merge", "extraction")),
                 "resolved": ("array", (res, "mentions")), "open_tasks": ("array", (ctx, "open_tasks"))},

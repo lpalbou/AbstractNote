@@ -279,7 +279,8 @@ def measure(nb: Any, rid: str, tuning: PropagationTuning = TUNING) -> List[Dict[
             elif name == "claim.revise":
                 was = p.get("previous") or {}
                 if (p.get("certainty"), p.get("stance") or "assert") != (was.get("certainty"),
-                                                                       was.get("stance") or "assert"):
+                                                                       was.get("stance") or "assert") \
+                        or "object_id" in was:  # W29: the previous statement read again with another value
                     revised.add(p["claim_id"])
             elif name in _CLAIM_OPS_WITH_ID:
                 other_ops.add(p["claim_id"])

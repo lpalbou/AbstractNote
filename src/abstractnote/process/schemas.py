@@ -29,7 +29,11 @@ STANCES = ["assert", "revise", "retract"]
 MENTION_DECISIONS = ["reuse", "create", "merge", "unsure"]
 #: ``earlier_state_of`` (appended, ADR 0008 §2): the statement is an earlier state of a LATER existing statement
 #: about the same subject; it is placed before it (``claim.insert_before``), never closing it.
-CLAIM_RELATIONS = ["new", "restates", "refines", "supersedes", "contradicts", "earlier_state_of"]
+#: ``same_statement_as_previous`` (appended, W29): a note read again names a statement of its OWN previous reading
+#: (``existing`` = its P number in the "previously understood as" block); it keeps that statement's claim id and
+#: predicate, revised in place.
+SAME_AS_PREVIOUS = "same_statement_as_previous"
+CLAIM_RELATIONS = ["new", "restates", "refines", "supersedes", "contradicts", "earlier_state_of", SAME_AS_PREVIOUS]
 REFLECTION_KINDS = ["warning", "reminder", "connection", "contradiction", "evolution"]
 
 
@@ -218,7 +222,8 @@ LINKING: Dict[str, Any] = _o({
         "index": {"type": "integer", "description": "index of the claim in the extraction"},
         "relation_to_existing": _e(CLAIM_RELATIONS),
         "existing": {"type": ["integer", "null"], "description": "the # number of the existing statement in the "
-                     "packet (for earlier_state_of: a statement of the LATER block)"},
+                     "packet (for earlier_state_of: a statement of the LATER block; for "
+                     "same_statement_as_previous: the P number of the note's previous reading)"},
         "reason": _s("short"),
     }, {"existing": None, "reason": ""})),
     "tasks": _a(_o({

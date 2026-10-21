@@ -479,7 +479,21 @@ dependency record of its current interpretation, on what was known at the note's
 statements and similar notes recorded on or before it, the summaries written for a date on or before it), leaving
 out what that reading itself wrote; equal: the note is `unchanged`, its mark is consumed and no model is called.
 Otherwise the note goes through `note-process` (filing is not repeated; a note without a kind is filed first): its context leaves out its own previous
-reading (its statements and tasks) and shows again what that reading had closed; the apply sees that the pass took
+reading (its statements and tasks) from the known-then and LATER cards and shows again what that reading had closed.
+The previous reading is shown on its own instead, FIRST (W29, retro-C §2): `note_context` gives `note.previous_reading`
+`{claims: [{index, claim_id, subject, predicate, object, certainty, valid_from, valid_until, ...}], entities: [{entity_id,
+name, kind}]}` and keeps the claim ids in the packet (`previous_claims`); the extraction packet's `known` starts with
+"This note was previously understood as (its own earlier reading; a statement this text makes again keeps the same
+subject and the same predicate as written here):" and the extraction prompt says to keep the predicate written there;
+the linking message carries the block `{{batch.previous}}` before the mentions and their cards, its statements
+numbered `P0`, `P1`, ... (`P0 Zorn Labs ex:annual_budget “40k” · stated (since 2025-02-05)`), empty (no bytes) on a
+first reading. The linking names a statement read again with `same_statement_as_previous` (`existing` = its P
+number): it stays that statement, the same claim id and predicate, revised in place when its value, certainty or window
+changed (a statement the model now spells `ex:budget_cap` stays `ex:annual_budget`, warning `predicate_kept: a -> b`);
+a number outside the list, another subject or another kind of value (an entity against a text) is refused with a
+warning and the statement is new. A statement that now relates to another note's statement in a way the previous
+reading did not takes that relation instead (its predicate follows the statement it names, R1's adoption). The
+previous statements the new reading does not make close as `reinterpreted`, as before. The apply sees that the pass took
 the note's mark and builds a `note.reinterpret` revision (or records `unchanged` when the new reading's statements,
 mentions, tasks and topics equal the old ones; summaries alone do not count; what this re-reading saw, `related`
 included, is appended to `reading_confirmations` for the current reading, never written into the revision, so the
@@ -577,7 +591,7 @@ Schema enums)
 {"mentions": [{"ref": "m1", "decision": "reuse|create|merge|unsure", "candidate": 0,
                "merge_candidates": [0, 1], "name": "preferred name", "kind": "person|org|project|concept|place|event|artifact|software|thing",
                "aliases": ["..."], "summary": "what the entity is on the note's date, one or two sentences: for create and unsure, and for a reused entity whose description this note changes; otherwise null (a missing one is a warning, never a failed note)", "reason": "short"}],
- "claims": [{"index": 0, "relation_to_existing": "new|restates|refines|supersedes|contradicts|earlier_state_of",
+ "claims": [{"index": 0, "relation_to_existing": "new|restates|refines|supersedes|contradicts|earlier_state_of|same_statement_as_previous",
              "existing": 0, "reason": "short"}],
  "tasks": [{"index": 0, "closes_open_task": 0, "evidence": "the note's words that say it is done"}],
  "revision_summary": "one sentence"}
