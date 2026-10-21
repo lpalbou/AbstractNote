@@ -433,13 +433,18 @@ them all, and the as-received axis shows what the notebook believed before.
   objects of its statements, the statements it related to (reinforced, closed), its tasks and the tasks it closed;
   its mentions are `entity_notes`. This, not what the packet merely showed, is the invalidation key (a hub entity
   shown in every packet marks only the notes that used it).
-- **Marks** (`reinterpret_marks`, truth: kept by a rebuild, never written by a replay): when a revision is
-  applied, the notes whose current interpretation used an entity it touched (created, mentioned, the subject or
-  object of a statement it added or closed, an alias or summary it wrote, an entity it retired), or an entity whose
-  canonical name or alias has the same key as one of those (exact keys, ADR 0004), or an entity whose name or alias
-  the note's own words write (whole words), or that closed a task whose words contain or are contained in a task
-  this note opened, are marked `{note_id, reason, by_note_id, by_revision_id, entities, from_at, marked_at}`. The
-  reason is a sentence ("An earlier note (2026-03-05) says more about LUT."). Forward only: a note understood for
+- **Candidates and marks** (`gate_decisions` and `reinterpret_marks`, truth: kept by a rebuild, never written by a
+  replay): when a note's reading (first or again) is applied, the notes whose current interpretation used an entity
+  it touched (created, mentioned, the subject or object of a statement it added or closed, an alias or summary it
+  wrote, an entity it retired), or an entity whose canonical name or alias has the same key as one of those (exact
+  keys, ADR 0004), or an entity whose name or alias the note's own words write (whole words), or that closed a task
+  whose words contain or are contained in a task this note opened, are **candidates**: one `gate_decisions` row
+  each, written in the projection transaction. The activation gate ("The activation gate" below, AbstractMemory ADR
+  0001 rule 7) then decides which candidates are marked `{note_id, reason, by_note_id, by_revision_id, entities,
+  from_at, marked_at, impact}` (`impact` = the gate's value). Until R7 (2026-10-21) every candidate was marked; on
+  the operator's 1,000-note notebook a two-note archive marked 790 notes that way. A person's actions below still
+  mark directly (impact 1). The reason is a sentence ("An earlier note (2026-03-05) says more about LUT."). Forward
+  only: a note understood for
   the first time marks only notes on or after its date (the same date included); a re-understanding marks only
   notes after it in history order (date, then received time, then id), so marks never go back in history and a
   pass terminates. A person's re-date marks forward from the earlier of the two dates over the moved note's used
@@ -448,7 +453,8 @@ them all, and the as-received axis shows what the notebook believed before.
   statement's date; a join or separation a person confirmed from the earlier first mention. The canonical-name
   repair and duplicate archiving mark nothing (they join copies, not meanings). A note has at most one untaken mark
   (idempotent); once a pass took it the note is in flight, and a new mark is a new row for the next pass. The apply
-  result says how many notes it marked and why (`marked`, `reinterpret_marked`).
+  result says how many notes it marked and why (`marked`, `reinterpret_marked`) and how many were candidates
+  (`gate: {candidates, marked}`).
 - **`note.reinterpret`**: the consolidation's reinterpret stage (cognition.md) or `note_apply_revision(...,
   reinterpret=true)` reads a marked note again with `note-process` (its context leaves out its own previous
   reading and shows again what that reading had closed). The new reading supersedes the previous one's effects;
@@ -527,14 +533,17 @@ meaning is measured and from where it spreads (`recall/propagation.py`).
   them and `A(F)` F's whole relation weight: normalised by the TARGET, so a leaf that is only about E relies on it
   fully and a hub with hundreds of relations barely relies on one neighbour. `recency` = 1 when the relation was
   stated (or reinforced) on or after the change date, else `1 / (1 + days / RECENCY_DAYS)`.
-- **The hop** (one per re-understanding, in the same transaction as its change records): for each deep record of
-  entity E not yet spread in this pass, `m0 = min(magnitude, carried)` (`carried` = the impact of the mark that
-  took the note: 1 for a direct mark or a person's request, the impact for a propagated one: a re-reading never
-  passes on more than it was given); for every neighbour F the re-reading did not touch itself (its users have
-  direct marks), `impact = m0 * PROPAGATION_DECAY * r(E -> F)`; under `PROPAGATION_FLOOR` nothing is marked
-  (`below_floor`), beyond `MAX_PROPAGATION_HOPS` neither (`hop_cut`, a guard: the floor binds first); otherwise the
-  notes after the re-read note in history order whose current reading used F (the §4 rule: `note_dependencies`,
-  mentions, the exact name and alias keys) are marked when the change is visible at their date.
+- **The hop** (one per re-understanding, in the same transaction as its change records), through the activation
+  gate below: for each record of entity E with a strength above 0 not yet spread in this pass, `m0 = min(strength,
+  carried)` (`carried` = the gate value of the mark that took the note, 1 for a person's request or a mark from
+  before the gate: a re-reading never passes on more than it was given); for every neighbour F the re-reading did
+  not touch itself (its users are direct candidates), `impact = m0 * PROPAGATION_DECAY * r(E -> F)`; under
+  `MIN_CONTRIBUTION` it is counted (`below_floor`), beyond `MAX_PROPAGATION_HOPS` too (`hop_cut`, a guard); otherwise
+  each note after the re-read note in history order whose current reading used F (the §4 rule: `note_dependencies`,
+  mentions, the exact name and alias keys), when the change is visible at its date, receives `impact *
+  reliance(N, F) * recency * conductance` (its own reliance on F, see the gate); the note's decision row
+  (`reason_code` `propagated`) accumulates it with its open rows, and the note is marked `propagated` when the gate
+  reaches the floor. A neighbour none of whose notes was marked counts as `below_floor`.
 - **Visibility**: a change of statements, relations or identity is dated at the re-read note's date, so every later
   note sees it; a summary-only change is seen only by the notes whose known-then summary of E (the latest at or
   before their date) is the one this re-understanding wrote: the notes between it and the next note that described
@@ -556,13 +565,16 @@ meaning is measured and from where it spreads (`recall/propagation.py`).
   when that state did not change, and reads the note when the reading never recorded it. A re-reading the model
   answers the same writes no revision: nothing is measured, the spread stops there.
 - **Termination**: each entity spreads at most once per pass (a later deep change of it in the same pass records
-  `skipped`), every propagated mark is strictly after the note that raised it, and the carried impact shrinks by at
-  least `PROPAGATION_DECAY` per hop, so a wave dies within `floor(log(FLOOR) / log(DECAY))` = 3 hops whatever the
-  cycles and the number of passes; a second pass without new earlier notes finds no mark and makes no call.
+  `skipped`), every propagated mark is strictly after the note that raised it, a note is read at most once per pass,
+  and each hop hands on the gate of `DECAY x min(strength, carried) x reliance`, whose slope never exceeds the loop
+  gain `PROPAGATION_DECAY x 1 x GATE_K / 4 = 0.75 < 1` (a tuning that breaks it is refused), so a wave dies out
+  whatever the cycles and the number of passes; a second pass without new earlier notes finds no mark and makes no
+  call.
 - **Before the run**: `reinterpret.propagated.may_follow` is an upper bound of the notes propagated marks may add
-  (a numeric dry run: every idea a waiting note uses changes with magnitude 1, recency taken as 1, strongest path
-  to the fixed point; the later users of a reached idea after that note, not waiting already), with the ideas it
-  comes from: a bound over the ideas the waiting notes use now, never a promise.
+  (a numeric dry run: every idea a waiting note uses changes with strength 1, the gate with every unknown at its
+  maximum (reliance 1, recency 1, full conductance), strongest path to the fixed point; the later users of a reached
+  idea after that note, not waiting already), with the ideas it comes from: a bound over the ideas the waiting
+  notes use now, never a promise.
 - **Constants** (`recall.propagation.PropagationTuning`, one frozen object; a value outside its band is refused):
 
 | Constant | Value | What it decides (measured basis: untracked/reports/R6.md) |
@@ -579,6 +591,73 @@ meaning is measured and from where it spreads (`recall/propagation.py`).
 
 - **Upgrade** (schema 4): `meta.propagation_record = {schema: 4, since_seq, upgraded_at}`; re-understandings up to
   `since_seq` have no change record and spread nothing; marks written before are `direct` with impact 1.
+
+#### The activation gate: candidates, not marks (AbstractMemory ADR 0001 rules 7-8)
+
+Whether a candidate is read again is decided by its effect, not by its distance (`recall/activation.py`), right
+after the projection of the reading that made it a candidate (`Notebook._gate` for a first reading,
+`recall.propagation.propagate` for a re-reading; `Notebook.recover` completes a stop in between).
+
+- **What the reading changed**: change records (`idea_changes`, now written for first readings too, as of the
+  reading's own sequence: statements and summaries recorded later are not looked at, a statement withdrawn later
+  still counts as there) for the entities behind the candidates: K (retired, joined, separated), s (the summary it
+  wrote against the entity's previous one, standardised between the reader's rewrite noise and another idea), C
+  (share of the entity's statements it added, closed or changed), R (share of its relations replaced). An entity
+  the note only names in its words, or only mentions, has no change: its users are candidates with potential 0.
+- **Strength** of a change on E: `min(1, (WEIGHT_KIND K + WEIGHT_SUMMARY s + WEIGHT_CLAIMS C + WEIGHT_RELATIONS
+  R) / mass ** MASS_ALPHA)`, `mass = 1 + support_notes` (the notes that mentioned E or stated something about it
+  before, the changing note excluded; stored in `idea_changes.support_notes` and `strength`). A thin idea moves on
+  little, a hub needs more: a statement added to an entity with 30 supporting notes is under the floor, the same on a
+  one-note idea is not, and a kind change (8) dominates whatever the mass. A candidate reached through a name it
+  shares with E (the exact-key match) gets `WEIGHT_KIND / mass(X) ** MASS_ALPHA` when this reading created E,
+  aliased it or renamed it (a new idea answers to X's name: X's identity is in question), nothing otherwise.
+- **Reliance** of the later note N on the entity X it used: `(sum over N's own statements and the statements it
+  repeated of 1 when X is the subject, STATEMENT_OBJECT_WEIGHT when it is the object, + MENTION_WEIGHT if N mentions
+  X) / (N's statements + MENTION_WEIGHT x N's mentions)`: claims weigh ten times a bare mention, so a 100-statement
+  transcript that names a hub relies on it little and a note whose statements are about it relies on it much.
+  `recency = 1 / (1 + between / RECENCY_NOTES)`, `between` = the notes that used X between the change and N in
+  history order (the later N, the more its reading rests on them). `conductance` = the edge's learnt multiplier.
+- **Potential**: `contribution = sum over (X, E) of factor x min(strength, cap) x reliance x recency x
+  conductance` (a task the earlier note opened that N closed adds `TASK_MATCH`); `factor` = 1 and `cap` = 1 for a
+  first reading or a person's re-reading, `PROPAGATION_DECAY` and the carried gate for a re-reading taken through a
+  mark (one hop further, `hops` + 1). The note's potential is the sum of the contributions of all its **open** rows
+  (decided, not closed): several small changes, from several entities and several notes, add up until N is read
+  again. **Gate** `g = 1 / (1 + e^(-GATE_K (potential - GATE_THETA)))`; N is marked `direct` with impact g when `g >=
+  PROPAGATION_FLOOR`, i.e. potential >= 0.134 (about an eighth of the note resting on an idea that fully changed).
+- **The record** (`gate_decisions`, truth, copied by a rebuild): `{decision_id, revision_id, note_id, by_note_id,
+  pass_id, reason_code (direct | propagated), hops, reason, from_at, via_json {used entity: [touched entity]},
+  task_match, contribution, potential, gated, marked, sources_json, recorded_at, decided_at, closed_at, outcome}`;
+  `sources_json` = `[{entity_id, via, signal (kind | name | summary | claims | relations | none | task), raw, mass,
+  change {kind_change, summary_distance, claim_share, relation_share}, strength, reliance, recency, between,
+  conductance, contribution}]`. A row stays open until the note is read again (any outcome: its marks consumed),
+  then `closed_at` and `outcome` (`reinterpreted` | `unchanged`) are set. Thresholds are re-tuned from the stored
+  potentials without re-running anything (`would_mark_at`, api.md).
+- **Edges learn** (`edge_conductance {entity_id, note_id, conductance, changed, unchanged, last_outcome,
+  updated_at}`, truth, copied by a rebuild; no row = 1): when a note a decision marked is read again, every edge
+  (used entity -> note) of its marked open rows gains `CONDUCTANCE_STEP` if the re-reading changed something and
+  loses it if not, within `[CONDUCTANCE_MIN, 1]`: an edge whose ripples keep coming out unchanged conducts less,
+  never zero.
+- **Constants** (the same `PropagationTuning`, calibration in its docstring and untracked/reports/R7.md):
+
+| Constant | Value | What it decides |
+|---|---|---|
+| `GATE_K` / `GATE_THETA` | 6 / 0.5 | the logistic's slope and centre; with the floor 0.1 a candidate is marked at potential >= 0.134; `DECAY x 1 x GATE_K / 4` must stay < 1 (refused otherwise) |
+| `MASS_ALPHA` | 0.5 | the change divided by `(1 + supporting notes) ** 0.5` |
+| `WEIGHT_KIND` / `WEIGHT_SUMMARY` / `WEIGHT_CLAIMS` / `WEIGHT_RELATIONS` | 8 / 4 / 2 / 1 | the signals' weights: a kind change saturates up to a 63-note hub, a full summary move up to 15 notes, half the statements replaced on an idea with 2 supporting notes gives 0.58 |
+| `STATEMENT_OBJECT_WEIGHT` / `MENTION_WEIGHT` | 0.5 / 0.1 | the reliance of a statement with the idea as object, and of a bare mention |
+| `RECENCY_NOTES` | 20 | the hyperbolic activity scale (AbstractMemory's attention `decay_window`) |
+| `TASK_MATCH` | 1 | a task the earlier note opened and the later one closed |
+| `MIN_CONTRIBUTION` | 0.01 | a propagated contribution under it is counted, not recorded |
+| `CONDUCTANCE_MIN` / `CONDUCTANCE_STEP` | 0.25 / 0.25 | the conductance's floor and step |
+
+- **Measured on the incident** (untracked/reports/R7.md, offline replay on a copy of the mnemo notebook, no model):
+  the two archive notes' first readings had 637 and 605 candidates (R2's rule marked 634 and 10, the rest already
+  held a mark); the gate at these constants marks 0 and 1 (Key_Moments.md itself, by Self_Model.md), and none of
+  the 72 watch-app notes (51 of them were marked directly in the incident). θ x 0.8 would mark 23 + 3 (9 of them
+  watch-app notes: reader noise such as "Core" and "README.md" redescribed); θ x 1.2: 0 + 1.
+- **Upgrade** (schema 5): `gate_decisions` and `edge_conductance` are created empty, `idea_changes` gains
+  `support_notes` and `strength`; marks written before stay as they were (a waiting mark from before the gate is
+  read like before).
 
 ### Archive (W28)
 

@@ -47,8 +47,19 @@ a drain is understood twice, and the structured-output lane corrupts one link an
 4. **Invalidation is dependency-bounded and forward-only.** When a note with date t is applied and
    touches entities E, the later notes whose revisions USED E (an entity the revision reused, created,
    or made the subject or object of a claim or task; not merely a candidate the packet showed), or
-   whose mentions now match E's names or aliases, are marked for re-understanding with the reason and
-   the note that caused it. Notes earlier than t are never affected (their context excludes later
+   whose mentions now match E's names or aliases, are CANDIDATES for re-understanding. *Amended 2026-10-21
+   (R7) by AbstractMemory ADR 0001 rules 7-8 (the operator's ruling: the ripple is an activation with a
+   threshold):* a candidate is marked, with the reason and the note that caused it, only when the activation
+   gate says so: per entity, the change the note measurably made (kind, summary distance standardised by the
+   reader's rewrite noise, share of statements and of relations replaced) divided by the entity's mass (the notes
+   that already supported it), weighted by how much the candidate relies on it (the share of its own statements
+   involving it; a mention weighs little) and by recency, accumulated over the entities and the notes that reached
+   the candidate since it was last read, through a logistic gate `1 / (1 + e^-k(x - θ))`, marked when the gate
+   reaches the floor. Every decision is recorded with its potential (`gate_decisions`); edges learn their
+   conductance from the re-readings they caused, within bounds. Until this amendment every candidate was marked:
+   on the operator's 1,000-note notebook two archive notes marked 790 later notes that only shared hubs or names
+   with them (2026-10-21; untracked/reports/R7.md). A person's re-date, archive, retraction or confirmed join
+   still marks directly. Notes earlier than t are never affected (their context excludes later
    knowledge); two notes with the same date are ordered by their received time. A person's re-date or
    archive of a note marks dependents forward from the earlier of the old and the new date. A pass
    re-understands marked notes in ascending date, each once; a re-interpretation may mark later notes
@@ -60,8 +71,9 @@ a drain is understood twice, and the structured-output lane corrupts one link an
    replaced; constants in data-model.md, each measured by comparing the note's old and new reading), the later notes
    that used a proximal entity are marked for re-understanding too. A proximal entity is one whose statements rest on
    the changed one: its reliance is its statements with that entity over all its relations, weighted by recency. The
-   impact carried to it is the change's magnitude times `PROPAGATION_DECAY` times that reliance, and nothing under
-   `PROPAGATION_FLOOR` is marked; what is cut is counted. A mark is raised only when the change is visible at the
+   impact carried to it is the change's strength (capped by what the re-reading was given) times `PROPAGATION_DECAY`
+   times that reliance, and the later note's share of it (its own reliance on the proximal entity) goes through the
+   same activation gate as §4 (amended), so nothing under the floor is marked; what is cut is counted. A mark is raised only when the change is visible at the
    marked note's date, carries its source and impact, and is read in history order (stronger marks first, in two
    tiers). The model decides at each re-reading. A propagated re-reading that changes nothing, or that the no-call
    check settles, stops the spread through that entity. A re-reading never passes on more impact than it was given,
@@ -97,7 +109,12 @@ graph can change after an ingest, and the then-and-now, themes and summaries mus
 over the dated history, which is what makes "how the notebook understood this over time" answerable.
 The revision log grows (one revision per re-interpretation); the as-received axis makes the growth
 useful. A deep change can cost re-readings beyond the notes that used the changed entity, bounded by reliance,
-decay and the floor; the thresholds are tuned on stored change records (`idea_changes`). The schema gains the dependency record and the re-understanding marks (a migration flag marks
+decay and the floor; the thresholds are tuned on stored change records (`idea_changes`). Since the §4 amendment
+(AbstractMemory ADR 0001) a thin change on a hub, a mere mention or a name in the text no longer re-reads the
+notes that used it; the cost is bounded by the measured change, and the gate's record (`gate_decisions`) says what
+other dials would have marked. A reading the model links to nothing that changes (an archive whose ideas it filed
+as new entries) re-reads little, even when a person expects it to move a concept: the gate reads what the reading
+changed, never what it should have changed. The schema gains the dependency record and the re-understanding marks (a migration flag marks
 revisions written before the record existed: they are re-understood on their first mark). AbstractMemory
 gains the additive closure kind `reinterpreted` (a change and release of abstractmemory that precedes the
 AbstractNote release depending on it); closures of that kind are not turning points in then-and-now.
@@ -110,4 +127,7 @@ foundation scenarios of 2026-10-20 (a later note whose meaning changes once its 
 arrives; a later note that created its own entity for something defined earlier; a task closed later
 that an earlier note shows was another task), all graded on a separate collection against the live
 gateway, plus no-model proofs for placement, invalidation and convergence (a pass terminates and a
-second pass without new earlier notes changes nothing).
+second pass without new earlier notes changes nothing). The activation gate (§4 amended) is validated by
+`tests/test_activation_gate.py` (two sub-threshold sources cross together; a hub's mass keeps a small change
+under the floor; a kind-class change on a hub marks; decisions recorded; conductance learns; loop gain < 1) and by
+the offline replay of the 2026-10-21 Mnemosyne incident (untracked/reports/R7.md).

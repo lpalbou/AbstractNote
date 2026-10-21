@@ -13,13 +13,14 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 4  # 2: entities.name_key/display_name/key_clash_with, entity_aliases.alias_key;
+SCHEMA_VERSION = 5  # 2: entities.name_key/display_name/key_clash_with, entity_aliases.alias_key;
 #                    3: ADR 0008 (revisions.context_json, reinterpret_marks, note_dependencies, soft-removed mentions,
 #                    topics and tasks of a superseded interpretation, retired entities);
-#                    4: ADR 0008 §4a (idea_changes, the propagated fields of reinterpret_marks)
+#                    4: ADR 0008 §4a (idea_changes, the propagated fields of reinterpret_marks);
+#                    5: ADR 0008 §4 amended by AbstractMemory ADR 0001 rules 7-8 (gate_decisions, edge_conductance)
 
 TRUTH_TABLES = ("meta", "notes", "attachments", "note_links", "queue", "revisions", "vectors", "context_packets",
-                "reinterpret_marks", "idea_changes", "reading_confirmations")
+                "reinterpret_marks", "idea_changes", "reading_confirmations", "gate_decisions", "edge_conductance")
 #: Derived tables a rebuild copies (entity ids are stable, and the community labels are the model's work), and the
 #: consolidation bookkeeping (its progress rows and the measured seconds per item the next ETA starts from), and the
 #: ``refile --missing`` repairs' progress rows.
@@ -206,6 +207,54 @@ CREATE TABLE IF NOT EXISTS idea_changes (
   PRIMARY KEY (revision_id, entity_id)
 );
 CREATE INDEX IF NOT EXISTS idx_idea_changes_pass ON idea_changes(pass_id, entity_id);
+
+-- AbstractMemory ADR 0001 rule 7 (ADR 0008 §4 amended): every later note that used what a revision touched is a
+-- CANDIDATE; the activation gate (recall/activation.py) decides whether it is marked. One row per (revision,
+-- candidate note, reason_code): ``via_json`` {used entity: [touched entity]} (written in the projection
+-- transaction, so a crash before the gate leaves the row pending for ``Notebook.recover``), then the decision:
+-- ``contribution`` (this revision's reliance-weighted, mass-divided measured change), ``potential`` (the note's
+-- accumulated potential: every open row of the note), ``gated`` (logistic of the potential), ``marked`` 1/0,
+-- ``sources_json`` [{entity_id, via, change, mass, reliance, recency, conductance, contribution, ...}]. A row is
+-- open until the note is read again (``closed_at``, with the reading's ``outcome``). Truth: copied by a rebuild.
+CREATE TABLE IF NOT EXISTS gate_decisions (
+  decision_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  revision_id TEXT NOT NULL,
+  note_id TEXT NOT NULL,
+  by_note_id TEXT,
+  pass_id TEXT,
+  reason_code TEXT NOT NULL DEFAULT 'direct',
+  hops INTEGER NOT NULL DEFAULT 0,
+  reason TEXT NOT NULL DEFAULT '',
+  from_at TEXT,
+  via_json TEXT NOT NULL DEFAULT '{}',
+  task_match INTEGER NOT NULL DEFAULT 0,
+  contribution REAL,
+  potential REAL,
+  gated REAL,
+  marked INTEGER,
+  sources_json TEXT,
+  recorded_at TEXT NOT NULL,
+  decided_at TEXT,
+  closed_at TEXT,
+  outcome TEXT,
+  UNIQUE (revision_id, note_id, reason_code)
+);
+CREATE INDEX IF NOT EXISTS idx_gate_decisions_note ON gate_decisions(note_id, closed_at);
+CREATE INDEX IF NOT EXISTS idx_gate_decisions_open ON gate_decisions(closed_at, decided_at);
+
+-- AbstractMemory ADR 0001 rule 8: the conductance of an edge (source entity -> note) learnt from the re-readings it
+-- caused: a re-reading that changed something conducts more next time, an unchanged one less, by a fixed step,
+-- bounded (never zero, never above 1). No row = full conductance. Truth: copied by a rebuild.
+CREATE TABLE IF NOT EXISTS edge_conductance (
+  entity_id TEXT NOT NULL,
+  note_id TEXT NOT NULL,
+  conductance REAL NOT NULL,
+  changed INTEGER NOT NULL DEFAULT 0,
+  unchanged INTEGER NOT NULL DEFAULT 0,
+  last_outcome TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (entity_id, note_id)
+);
 
 -- ADR 0008 §4a with ADR 0003 (INT2): a re-reading that came out unchanged writes no revision; what it was read
 -- against (the stored packet's dependency record, ``related`` included) is appended here for the reading it confirmed
@@ -576,6 +625,9 @@ _ADDED_COLUMNS = {
     "reinterpret_marks": [("reason_code", "TEXT NOT NULL DEFAULT 'direct'"), ("source_entity_id", "TEXT"),
                           ("source_revision_id", "TEXT"), ("impact", "REAL NOT NULL DEFAULT 1.0"),
                           ("hops", "INTEGER NOT NULL DEFAULT 0")],
+    # schema 5 (AbstractMemory ADR 0001 rule 7): the mass the activation gate divided a change by (the notes that
+    # supported the entity before) and the change's strength; first readings write change records too
+    "idea_changes": [("support_notes", "INTEGER"), ("strength", "REAL")],
     # the claims of an understanding outside a drain (store/queue.py, ADR 0008 §8; R4)
     "queue": [("inline_run_id", "TEXT"), ("inline_until", "TEXT"), ("reinterpret_run_id", "TEXT"),
               ("reinterpret_until", "TEXT")],

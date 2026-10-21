@@ -21,6 +21,14 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
   consolidation with nothing new changes nothing.
 
 ### Changed
+- **An earlier note re-reads only what it really changes** (ADR 0008 §4 amended by AbstractMemory ADR 0001): a note
+  that arrives with an earlier date no longer sends every later note that shares a person, a project or a word with
+  it back to be understood again. What it changed about each idea is measured, weighed against how much the notebook
+  already knew about that idea and how much each later note rests on it, and added up; only the notes it moves
+  enough are read again (on the evaluation notebook, two archive notes that sent 790 notes back now send 1). Several
+  small changes still add up. Before a consolidation runs, the Processing page says what changed and how many more
+  may follow: "12 notes to understand again (3 sources: Zorn changed its kind, Mira is described differently and 1
+  more; at most 4 more may follow)". A link that keeps bringing nothing new counts less next time, never zero.
 - **Archiving a note takes back what it said**: an archived note no longer shapes what the notebook believes. Its
   statements are withdrawn (recorded as a retraction, "note archived"), what it had replaced is believed again, the
   things and tasks only it mentioned are put away, and it no longer counts in the notes, topics and descriptions of

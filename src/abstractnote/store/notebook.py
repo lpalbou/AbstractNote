@@ -334,6 +334,8 @@ class Notebook:
             raise RuntimeError("Simulated stop between the index and the AbstractMemory commits.")
         if rev.get("action") == REINTERPRET_ACTION and self.store.marking:
             self._propagate(rev["revision_id"])
+        elif rev.get("note_id") and not rev.get("action") and self.store.marking:
+            self._gate(rev["revision_id"])
         row = self.store.revision_row(rev["revision_id"])
         if not row["applied_kg"]:
             with self.store.lock:
@@ -355,7 +357,30 @@ class Notebook:
             return
         from ..recall.propagation import propagate
 
-        result["propagation"] = propagate(self, revision_id)
+        out = propagate(self, revision_id)
+        if out.get("reinterpret_marked") is not None:  # the gate decided the direct candidates (ADR 0008 §4 amended)
+            result["reinterpret_marked"] = out.pop("reinterpret_marked")
+        result["propagation"] = out
+        with self.store.lock:
+            self.store.conn.execute("UPDATE revisions SET result_json=? WHERE revision_id=?",
+                                    (_j(result), revision_id))
+
+    def _gate(self, revision_id: str) -> None:
+        """AbstractMemory ADR 0001 rule 7 (ADR 0008 §4 amended): decide the candidates of an applied first reading
+        (``recall.activation.gate_first_reading``: what it measurably changed about each entity a later note used,
+        divided by the entity's mass, weighted by how much the later note relies on it, accumulated, through the
+        logistic gate). Done once (``result.gate``), completed by :meth:`recover` after a stop, never during a
+        rebuild (the decisions and the marks are truth, copied)."""
+        row = self.store.revision_row(revision_id)
+        result = dict(_uj(row["result_json"], {}) or {})
+        if "gate" in result:
+            return
+        from ..recall.activation import gate_first_reading
+
+        out = gate_first_reading(self, revision_id)
+        result["gate"] = {"candidates": out["candidates"], "marked": out["marked"]}
+        if out.get("reinterpret_marked") is not None:
+            result["reinterpret_marked"] = out["reinterpret_marked"]
         with self.store.lock:
             self.store.conn.execute("UPDATE revisions SET result_json=? WHERE revision_id=?",
                                     (_j(result), revision_id))
@@ -382,7 +407,7 @@ class Notebook:
         for k in ("claims_reinterpreted", "claims_revised", "claims_reopened", "claims_start_restored",
                   "reinforcements_dropped",
                   "tasks_reopened", "tasks_retired", "entities_retired", "stale_context", "reinterpreted",
-                  "propagation"):
+                  "propagation", "gate"):
             if result.get(k):
                 out[k] = result[k]
         if already_applied:
@@ -498,12 +523,17 @@ class Notebook:
         """What waits to be understood again and why (``NoteStore.reinterpret_state``), readable before the
         consolidation's ``reinterpret`` stage runs; ``propagated`` adds ``may_follow`` and ``may_follow_from``: the
         upper bound of the notes ideas understood differently may add (``recall.propagation.may_follow``, ADR 0008
-        §4a)."""
+        §4a); ``candidates``, ``marked``, ``top_sources``, ``would_mark_at``, ``theta``, ``floor`` and ``threshold``
+        come from the activation gate (``recall.activation.gate_state``)."""
+        from ..recall.activation import gate_state
         from ..recall.propagation import may_follow
 
         out = self.store.reinterpret_state()
         bound = may_follow(self)
         out["propagated"].update({"may_follow": bound["may_follow"], "may_follow_from": bound["by_source"]})
+        # AbstractMemory ADR 0001 rule 7: what the activation gate decided over the open candidates (and would decide
+        # with θ scaled by 0.8 and 1.2), readable before the run so the thresholds are tuned from the record
+        out.update(gate_state(self))
         return out
 
     def idea_changes(self, revision_id: str) -> List[Dict[str, Any]]:
@@ -1292,7 +1322,8 @@ class Notebook:
                 c.execute("DELETE FROM meta")
                 c.execute("INSERT INTO meta SELECT * FROM old.meta" + (" WHERE key!='embedding_pin'" if reembed else ""))
                 tables = ["notes", "attachments", "note_links", "queue", "queue_errors", "context_packets", "revisions",
-                          "reinterpret_marks", "idea_changes", "reading_confirmations", *KEPT_TABLES]
+                          "reinterpret_marks", "idea_changes", "reading_confirmations", "gate_decisions",
+                          "edge_conductance", *KEPT_TABLES]
                 if not reembed:
                     tables.append("vectors")
                 for table in tables:

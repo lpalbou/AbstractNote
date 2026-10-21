@@ -267,16 +267,23 @@ def test_an_alias_key_equal_to_a_later_entry_name_marks_it(nb):
     assert pending(nb) == [a["note_id"]]
 
 
-def test_an_earlier_note_that_names_a_later_entry_marks_it_even_when_it_made_its_own(nb):
+def test_an_earlier_note_that_only_names_a_later_entry_makes_it_a_candidate_not_a_mark(nb):
     """The earlier note's words write "Priya" (a later note's entry) but it created "Priya Natt" without that alias:
-    the later note is still marked (its Priya may be Priya Natt). MUTATION: drop _names_in_note from the touched
-    set."""
+    the later note is a CANDIDATE (its Priya may be Priya Natt), recorded with its potential, but the earlier note
+    changed nothing measurable about Priya, so the activation gate does not mark it (R7, AbstractMemory ADR 0001
+    rule 7: decided by effect, not by a name; until R7 this marked it). MUTATION: drop _names_in_note from the
+    touched set (no candidate row)."""
+    from abstractnote.recall.activation import decisions_of
+
     clock = Clock()
     a = run(nb, "Met Priya about the spectrometer.", D20, extraction([mention("m1", "Priya", "person")]),
             link({"m1": {"name": "Priya", "kind": "person"}}), now=clock.next())
-    run(nb, "Priya Natt wrote the plan.", D05, extraction([mention("m1", "Priya Natt", "person")]),
-        link({"m1": {"name": "Priya Natt", "kind": "person"}}), now=clock.next())
-    assert pending(nb) == [a["note_id"]]
+    b = run(nb, "Priya Natt wrote the plan.", D05, extraction([mention("m1", "Priya Natt", "person")]),
+            link({"m1": {"name": "Priya Natt", "kind": "person"}}), now=clock.next())
+    [d] = decisions_of(nb.store, a["note_id"])
+    assert d["revision_id"] == b["out"]["revision_id"] and d["potential"] == 0 and d["marked"] is False
+    assert list(d["via"]) == ["ex:person-priya"] and pending(nb) == []
+    assert b["out"]["gate"] == {"candidates": 1, "marked": 0}
 
 
 def test_f3_an_earlier_task_marks_the_later_close_and_never_closes_it(nb):
@@ -307,7 +314,8 @@ def test_f5_a_note_that_only_saw_the_entity_is_not_marked(nb):
             extraction([mention("m1", "watch app", "software")]), link({"m1": {"name": "watch app", "kind": "software"}}),
             now=clock.next())
     assert "ex:org-zorn-labs" in json.loads(nb.store.revision_row(w["out"]["revision_id"])["context_json"])["entities"]
-    run(nb, "Zorn Labs was founded in a garage.", "2022-05-01T09:00:00Z", extraction([mention("m1", "Zorn Labs", "org")]),
+    run(nb, "Zorn Labs was founded in a garage.", "2022-05-01T09:00:00Z",
+        extraction([mention("m1", "Zorn Labs", "org")], [stmt("m1", "ex:founded_in", "a garage", literal=True)]),
         link({"m1": "ex:org-zorn-labs"}), now=clock.next())
     assert pending(nb) == [z["note_id"]]
 
@@ -318,8 +326,9 @@ def test_same_date_a_new_note_marks_its_peers_a_reinterpretation_only_later_ones
     sweep. MUTATION: strict > for the new note, or >= for the re-understanding."""
     clock = Clock()
     a = day20_budget(nb, clock.next())
-    b = run(nb, "LUT review in the same second.", D20, extraction([mention("m1", "LUT", "project")]), link({"m1": LUT}),
-            now=clock.next())
+    b = run(nb, "LUT review in the same second.", D20,
+            extraction([mention("m1", "LUT", "project")], [stmt("m1", "ex:review", "done", literal=True)]),
+            link({"m1": LUT}), now=clock.next())
     assert pending(nb) == [a["note_id"]]  # b, received later the same second, marks a
     nb.store.consume_reinterpret_mark(a["note_id"])
     ext = extraction([mention("m1", "LUT", "project")],
@@ -509,7 +518,7 @@ def test_a_notebook_from_schema_2_is_flagged_and_its_revisions_have_no_record(tm
     nbk = Notebook.open(tmp_path / "old")
     try:
         flag = nbk.store.meta_get(DEPENDENCY_RECORD_META)
-        assert flag["schema"] == 3 and flag["since_seq"] >= 1 and nbk.store.meta_get("schema_version") == 4
+        assert flag["schema"] == 3 and flag["since_seq"] >= 1 and nbk.store.meta_get("schema_version") == 5
         assert nbk.note(a["note_id"])["interpretations"][0]["context_unknown"] is True
         assert cons.digest_unchanged(nbk, a["note_id"]) is False
     finally:
@@ -662,8 +671,9 @@ def test_the_stage_under_a_spent_budget_leaves_the_marks_and_says_so(tmp_path):
         for i in range(3):
             run(nbk, f"LUT budget item {i} decided.", f"2026-03-2{i}T09:00:00Z", extraction([mention("m1", "LUT", "project")]),
                 link({"m1": {"name": "LUT", "kind": "project"} if i == 0 else LUT}), now=clock.next())
-        run(nbk, "The LUT figure is a placeholder.", D05, extraction([mention("m1", "LUT", "project")]), link({"m1": LUT}),
-            now=clock.next())
+        run(nbk, "The LUT figure is a placeholder.", D05,
+            extraction([mention("m1", "LUT", "project")], [stmt("m1", "ex:figure", "placeholder", literal=True)]),
+            link({"m1": LUT}), now=clock.next())
         assert len(pending(nbk)) == 3
     finally:
         nbk.close()

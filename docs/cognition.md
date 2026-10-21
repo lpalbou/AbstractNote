@@ -469,8 +469,9 @@ rebuild replays it.
 
 **Re-understanding** (stage `reinterpret`, ADR 0008; the records and marks are in data-model.md
 "Re-understanding"). A note understood without its foundation is understood again when the foundation
-arrives: when a note is applied, the later notes whose current interpretation USED what it touched are marked
-(with the reason and the note that caused it), and this stage reads them again. `note_reinterpret_next` takes
+arrives: when a note is applied, the later notes whose current interpretation USED what it touched are candidates,
+and the activation gate (below) marks those on which what it measurably changed weighs enough (with the reason and
+the note that caused it); this stage reads them again. `note_reinterpret_next` takes
 the pending marks of the open consolidation in history order (date, then received time, then id), each note at
 most once per pass (a mark that arrives for a note the pass already read waits for the next pass). Before any
 model call it runs the no-call check: the note's context is looked up again (the same `note_context` and
@@ -509,13 +510,33 @@ what is left is `results.not_reached.reinterpret`. The close reports `reinterpre
 budget did not reach; a run that left notes is `completed_with_gaps` and its notice says "3 notes could not be
 understood again this time; they will be read again next time." The progress line reads "Re-understanding 12
 notes" (web: "Re-understanding 3 of 12 notes"); `GET /note/consolidation` `pending.reinterpret` gives the count
-before the run, and `consolidation.state(nb)["reinterpret"]` the count by entity and the reasons.
+before the run, and `consolidation.state(nb)["reinterpret"]` the count by entity, the reasons, and the gate's
+record (`candidates`, `marked`, `top_sources`, `would_mark_at`); the pending line reads "12 notes to understand again
+(3 sources: Zorn changed its kind, Mira is described differently and 1 more; at most 4 more may follow)" and the
+progress line "Re-understanding 12 notes (3 sources: ...)".
+
+The activation gate (AbstractMemory ADR 0001 rules 7-8; data-model.md "The activation gate"). A candidate is not a
+mark. Right after a reading is applied, `recall/activation.py` measures what it changed about each entity a
+candidate used (retired or joined, its summary against the previous one, the share of its statements and of its
+relations it changed; for a first reading as of the reading itself), divides that by the entity's mass (`(1 +
+supporting notes) ** 0.5`: a hub needs much more than a thin idea, except a kind change, which weighs 8), weights it
+by how much the candidate relies on the entity (the share of its own statements about it; a bare mention weighs a
+tenth of a statement) and by how many notes used the entity in between, and adds it to what earlier readings left
+open on that candidate. The sum goes through a logistic gate (`k = 6`, `θ = 0.5`); the candidate is marked when the
+gate reaches 0.1 (a potential of 0.134). Every decision is recorded (`gate_decisions`) with its potential, gate and
+sources, and `GET /note/consolidation` shows the candidates, the notes marked, the sources and how many `θ x 0.8` or
+`θ x 1.2` would mark, so the dials are tuned from the record. When a marked note is read again, the edge that marked
+it conducts a quarter less if nothing changed and a quarter more if something did (never under 0.25). On the
+operator's 1,000-note notebook the two Mnemosyne archive notes that marked 790 notes directly mark 1 through the gate
+(untracked/reports/R7.md).
 
 Deep changes spread (ADR 0008 §4a). Each applied re-understanding is measured against the reading it replaced (per
 entity: retired or joined, the summary's embedding distance, the share of its statements and of its relations
-replaced) and, when an idea changed deeply, the later notes of the ideas that rely on it through statements are
-marked `propagated` with the impact the change carries (decay 0.5 per hop, nothing under 0.1, never more than the
-re-reading was given), so a wave dies within three hops and cycles end. Those notes are read in the same pass, after
+replaced) and the change goes through the same gate twice: the later notes that used the entity are its direct
+candidates (with the decay 0.5 and never more than the re-reading was given), and the later notes of the ideas that
+rely on it through statements receive `0.5 x min(strength, carried) x reliance(idea) x their own reliance` and are
+marked `propagated` when the gate reaches the floor; each hop hands on the gate's value and the gate's slope keeps the
+loop gain at 0.75, so a wave dies out and cycles end. Those notes are read in the same pass, after
 the direct ones when their impact is low, with the "Understood differently since this note was read" block in
 their linking packet (what changed about the idea, as known on their date; never a number). The model decides: a
 re-reading that comes out the same writes nothing and the spread stops there. Before the run,

@@ -288,7 +288,11 @@ export type Consolidation = {
     pending: number; by_entity: { entity_id: string; name: string; notes: number }[]; reasons: string[]; context_unknown: number; consumed_today: number; last_marked_at: string | null;
     /** The notes waiting because an idea they rely on was understood differently, and the upper bound of how many more may follow (ADR 0008 §4a). */
     propagated?: { pending: number; by_source: { entity_id: string; name: string; notes: number }[]; may_follow?: number; may_follow_from?: { entity_id: string; name: string; notes: number }[] };
+    /** The activation gate over the notes not read again since an earlier note reached them (AbstractMemory ADR 0001): the candidates, the notes it marked, the ideas whose change weighs most, and how many it would mark with its centre at 0.8 and 1.2 times θ. */
+    candidates?: number; marked?: number; sources?: number; top_sources?: GateSource[]; candidate_sources?: GateSource[]; would_mark_at?: Record<string, number>; theta?: number; floor?: number; threshold?: number;
   };
 };
+/** One idea whose measured change put notes up for re-understanding: `words` says what changed ("changed its kind"). */
+export type GateSource = { entity_id: string; name: string; signal: string | null; words: string; change?: Record<string, number | null> | null; mass?: number | null; strength?: number | null; notes: number; contribution: number };
 /** The notes of a re-understanding pass read because an idea they rely on was understood differently (ADR 0008 §4a). */
 export type ConsolidationPropagated = { notes: number; names: string[]; sources: number };

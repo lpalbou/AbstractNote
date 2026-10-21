@@ -9,7 +9,7 @@
 import { randomId } from "@abstractframework/ui-kit";
 import type { Api } from "./api";
 import { niceMax } from "./progression";
-import type { ActiveWork, Consolidation, ConsolidationPropagated, Processing, RecentRevision } from "./types";
+import type { ActiveWork, Consolidation, ConsolidationPropagated, GateSource, Processing, RecentRevision } from "./types";
 
 export const POLL_MS = 3000;
 /** The queued notes the page lists (the queue's own order). */
@@ -213,7 +213,7 @@ export function stateLine(p: Processing): { tone: StateTone; text: string } {
   if (run && run.stage !== "done") {
     const i = consolidationStageIndex(run.stage);
     const stage = i >= 0 && i < CONSOLIDATION_STAGES.length ? CONSOLIDATION_STAGES[i].label : "";
-    const progress = run.stage === "reinterpret" ? reinterpretWords(run.stage_done, run.stage_total, run.propagated) : stage && run.stage_total ? `${stage} ${run.stage_done} of ${run.stage_total}` : stage;
+    const progress = run.stage === "reinterpret" ? reinterpretWords(run.stage_done, run.stage_total, run.propagated, p.consolidation?.reinterpret?.top_sources, p.consolidation?.reinterpret?.sources) : stage && run.stage_total ? `${stage} ${run.stage_done} of ${run.stage_total}` : stage;
     return { tone: "live", text: ["Consolidating your notebook", progress, etaWords(run.eta_s)].filter(Boolean).join(" · ") };
   }
   const other = groupActive(p.active)[0];
@@ -229,15 +229,29 @@ export function stateLine(p: Processing): { tone: StateTone; text: string } {
 
 /**
  * The reinterpret stage in words (ADR 0008): "Re-understanding 12 notes", then "Re-understanding 3 of 12 notes";
- * with the notes read because an idea they rely on changed (§4a): "Re-understanding 12 notes (5 because Zorn changed)".
+ * with the ideas whose change put them there (the activation gate's sources, AbstractMemory ADR 0001):
+ * "Re-understanding 12 notes (3 sources: Zorn changed its kind, Mira has new or changed statements and 1 more)";
+ * without them, the notes read because an idea they rely on changed (§4a): "Re-understanding 12 notes (5 because Zorn changed)".
  */
-export function reinterpretWords(done: number, total: number, propagated?: ConsolidationPropagated | null): string {
+export function reinterpretWords(done: number, total: number, propagated?: ConsolidationPropagated | null, sources?: GateSource[] | null, count?: number | null): string {
   const t = Math.max(0, Number(total) || 0);
   const d = Math.max(0, Math.min(t, Number(done) || 0));
   if (!t) return "Re-understanding";
   const head = d ? `Re-understanding ${d} of ${plural(t, "note", "notes")}` : `Re-understanding ${plural(t, "note", "notes")}`;
-  const why = becauseWords(propagated, t);
+  const why = sourcesWords(sources, count) || becauseWords(propagated, t);
   return why ? `${head} (${why})` : head;
+}
+
+/** "3 sources: Zorn changed its kind, Mira has new or changed statements and 1 more" (`count`: all the sources, when
+ * more than the listed ones); "" without sources. */
+export function sourcesWords(sources: GateSource[] | null | undefined, count?: number | null): string {
+  const named = (sources ?? []).filter((x) => x && typeof x.name === "string" && x.name.trim());
+  if (!named.length) return "";
+  const total = Math.max(named.length, Number(count) || 0);
+  const shown = named.slice(0, 2).map((x) => (x.words ? `${x.name} ${x.words}` : x.name));
+  const more = total - shown.length;
+  const list = more ? `${shown.join(", ")} and ${more} more` : shown.length === 2 ? `${shown[0]} and ${shown[1]}` : shown[0];
+  return `${plural(total, "source", "sources")}: ${list}`;
 }
 
 /** "5 because Zorn changed", "5 because Zorn and 2 other ideas changed"; "" when no note waits because of an idea. */
@@ -324,12 +338,15 @@ export function lastConsolidationLine(last: Consolidation["last"], nowMs: number
 
 /**
  * What the next consolidation has waiting: "3 themes to name · 2 themes changed since named · 88 summaries to refresh";
- * with `reinterpret` (ADR 0008 §4a): "12 notes to understand again (5 because Zorn changed)".
+ * with `reinterpret` (ADR 0008 §4a, the activation gate's sources and the bound of what may follow, before the run):
+ * "12 notes to understand again (3 sources: Zorn changed its kind, Mira is described differently and 1 more; at most 4 more may follow)".
  */
 export function pendingConsolidationLine(p: Consolidation["pending"] | null | undefined, r?: Consolidation["reinterpret"] | null): string {
   if (!p) return "";
   const prop = r?.propagated;
-  const why = p.reinterpret && prop ? becauseWords({ notes: prop.pending, names: prop.by_source.map((x) => x.name), sources: prop.by_source.length }, p.reinterpret) : "";
+  const because = p.reinterpret && prop ? becauseWords({ notes: prop.pending, names: prop.by_source.map((x) => x.name), sources: prop.by_source.length }, p.reinterpret) : "";
+  const follow = p.reinterpret && prop?.may_follow ? `at most ${prop.may_follow} more may follow` : "";
+  const why = [(p.reinterpret && sourcesWords(r?.top_sources, r?.sources)) || because, follow].filter(Boolean).join("; ");
   return [
     p.unlabelled ? `${plural(p.unlabelled, "theme", "themes")} to name` : "",
     p.stale_labels ? `${plural(p.stale_labels, "theme", "themes")} changed since named` : "",

@@ -149,16 +149,23 @@ def reread_d20(w: World, n: Dict[str, str], *, reinterpret: bool = True) -> Dict
 def test_a_deep_change_spreads_one_hop_to_the_later_notes_of_a_proximal_idea(nb):
     """P1: the day-20 re-reading replaces half of Zorn's statements (C = 2/4, deep); the board relies on Zorn
     (its one relation), so day 22 (after day 20, used only the board) is marked ``propagated`` from Zorn with the
-    impact min(m, 1) * DECAY * reliance and 1 hop; day 15 (before day 20) is not (forward only); day 12 keeps its
-    direct mark. MUTATIONS: drop the Notebook._propagate call; later_dependents from a date instead of after the
-    note (forward only); reliance without recency."""
+    gate of DECAY * min(strength, carried) * reliance(Zorn -> board) * reliance(day 22, board) (R7: the activation
+    gate, AbstractMemory ADR 0001 rule 7; ``carried`` = the gate of day 20's own mark) and 1 hop; day 15 (before day
+    20) is not (forward only); day 12 keeps its direct mark. MUTATIONS: drop the Notebook._propagate call;
+    later_dependents from a date instead of after the note (forward only); reliance without recency; a direct mark
+    carrying 1.0 instead of its gate."""
+    from abstractnote.recall import activation as act
+
     w, n = zorn_world(nb)
     assert {m["note_id"] for m in nb.store.reinterpret_marks()} == {n["d12"], n["d20"]}
+    g20 = marks_of(nb, n["d20"])[0]["impact"]
+    assert 0 < g20 < 1
     r = reread_d20(w, n)
     rid = r["out"]["revision_id"]
     rec = {x["entity_id"]: x for x in nb.idea_changes(rid)}[n["zorn"]]
     assert rec["claim_share"] == 0.5 and rec["deep"] and not rec["summary_only"] and rec["spread"]
-    expected = round(0.5 * T.PROPAGATION_DECAY * rho(day(20), day(12)), 4)
+    assert rec["carried"] == g20 and rec["support_notes"] == 2  # day 12 and day 5 supported Zorn before
+    expected = round(act.logistic(T.PROPAGATION_DECAY * min(rec["strength"], g20) * rho(day(20), day(12))), 4)
     [mark] = [m for m in marks_of(nb, n["d22"]) if m["consumed_at"] is None]
     assert mark["reason_code"] == "propagated" and mark["source_entity_id"] == n["zorn"]
     assert mark["source_revision_id"] == rid and mark["hops"] == 1 and mark["impact"] == expected
@@ -190,7 +197,8 @@ def test_an_unchanged_re_reading_stops_the_spread(nb):
     r = w.read("", day(20), [("m1", "Zorn", "org", n["zorn"], None)], [stmt("m1", "ex:is_a", "company")],
                note_id=n["d20"], reinterpret=True)
     assert r["out"]["unchanged"] is True
-    assert nb.store.q1("SELECT COUNT(*) FROM idea_changes")[0] == 0 and marks_of(nb, n["d22"]) == []
+    assert nb.store.q1("SELECT COUNT(*) FROM idea_changes WHERE note_id=?", (n["d20"],))[0] == 0
+    assert marks_of(nb, n["d22"]) == []
 
 
 def test_a_certainty_change_counts_as_a_replaced_statement(nb):
@@ -417,9 +425,13 @@ def deep_reread(w: World, nid: str, name: str, eid: str, value: str) -> Callable
 
 
 def test_the_carried_cap_damps_a_chain_and_a_second_pass_makes_no_call(nb):
-    """P2 (chain a - b - c): the archive marks Ya directly; Ya's re-reading spreads Alpha to Beta (Yb, hop 1), Yb's
-    to Gamma (Yc, hop 2) with min(m, carried) as the start, Yc's falls under the floor. Each note is read once, and
-    the second pass has nothing to read. MUTATIONS: m0 = m (no carried cap); the hop count not carried."""
+    """P2 (chain a - b - c): the archive marks Ya directly; Ya's re-reading spreads Alpha to Beta (Yb, hop 1, the gate
+    of DECAY * min(strength, carried) * reliance); Yb's re-reading starts from min(strength, Yb's gate), so Gamma's
+    note gets a potential whose gate stays under the floor: the chain dies at hop 2 (R7: with the activation gate a
+    hop hands on its gate, AbstractMemory ADR 0001 rules 3 and 7). Each note is read once, and the second pass has
+    nothing to read. MUTATIONS: m0 = m (no carried cap: Yc is marked); the hop count not carried."""
+    from abstractnote.recall import activation as act
+
     w = World(nb)
     x = w.read("Alpha depends on Beta.", day(10), [("m1", "Alpha", "project", None, None),
                                                    ("m2", "Beta", "project", None, None)],
@@ -435,23 +447,28 @@ def test_the_carried_cap_damps_a_chain_and_a_second_pass_makes_no_call(nb):
                 [stmt("m1", "ex:status", "late")])["note_id"]
     yc = w.read("Gamma is late.", day(22), [("m1", "Gamma", "project", g, "Gamma is a project.")],
                 [stmt("m1", "ex:status", "late")])["note_id"]
-    w.read("Alpha was renamed.", day(1), [("m1", "Alpha", "project", a, None)], [stmt("m1", "ex:renamed", "yes")])
+    w.read("Alpha was renamed.", day(1), [("m1", "Alpha", "project", a, None)],
+           [stmt("m1", "ex:renamed", "yes"), stmt("m1", "ex:owner", "Mira"), stmt("m1", "ex:phase", "two")])
     assert {m["note_id"] for m in nb.store.reinterpret_marks()} == {x, ya}
     script = {x: lambda: w.read("", day(10), [("m1", "Alpha", "project", a, None), ("m2", "Beta", "project", b, None)],
                                 [stmt("m1", "ex:depends_on", "m2", literal=False)], note_id=x),
               ya: deep_reread(w, ya, "Alpha", a, "cancelled"), yb: deep_reread(w, yb, "Beta", b, "cancelled"),
               yc: deep_reread(w, yc, "Gamma", g, "cancelled")}
+    g_ya = marks_of(nb, ya)[0]["impact"]
     read = stage_pass(w, script)
-    assert sorted(read) == sorted({x, ya, yb, yc}) and len(read) == len(set(read))
-    p1 = round(1.0 * T.PROPAGATION_DECAY * rho(day(20), day(10)) / 2, 4)
-    p2 = round(min(1.0, p1) * T.PROPAGATION_DECAY * rho(day(21), day(11)), 4)
+    assert sorted(read) == sorted({x, ya, yb}) and len(read) == len(set(read))
+    rev_ya = nb.store.q1("SELECT revision_id FROM revisions WHERE note_id=? AND action='note.reinterpret'", (ya,))[0]
+    alpha = {r["entity_id"]: r for r in nb.idea_changes(rev_ya)}[a]
+    assert alpha["carried"] == g_ya and alpha["strength"] > g_ya  # the cap binds
+    p1 = round(act.logistic(T.PROPAGATION_DECAY * min(alpha["strength"], g_ya) * rho(day(20), day(10)) / 2), 4)
     mb = [m for m in marks_of(nb, yb) if m["reason_code"] == "propagated"]
-    mc = [m for m in marks_of(nb, yc) if m["reason_code"] == "propagated"]
-    assert [(m["impact"], m["hops"]) for m in mb] == [(p1, 1)]
-    assert [(m["impact"], m["hops"]) for m in mc] == [(p2, 2)] and p2 >= T.PROPAGATION_FLOOR
-    last = nb.store.q1("SELECT revision_id FROM revisions WHERE note_id=? AND action='note.reinterpret'", (yc,))[0]
-    gamma = {r["entity_id"]: r for r in nb.idea_changes(last)}[g]
-    assert gamma["carried"] == p2 and gamma["spread_json"]["below_floor"] >= 1
+    assert [(m["impact"], m["hops"]) for m in mb] == [(p1, 1)] and p1 >= T.PROPAGATION_FLOOR
+    assert marks_of(nb, yc) == []
+    rev_yb = nb.store.q1("SELECT revision_id FROM revisions WHERE note_id=? AND action='note.reinterpret'", (yb,))[0]
+    beta = {r["entity_id"]: r for r in nb.idea_changes(rev_yb)}[b]
+    assert beta["carried"] == p1 and beta["hops"] == 1 and beta["spread_json"]["below_floor"] >= 1
+    [dec] = [d for d in act.decisions_of(nb.store, yc) if d["reason_code"] == "propagated"]
+    assert not dec["marked"] and dec["gated"] < T.PROPAGATION_FLOOR and dec["hops"] == 2
     assert nb.store.pending_marks() == []
     assert stage_pass(w, script) == []  # the second pass: nothing marked, no re-reading, no call
 
@@ -633,7 +650,7 @@ def test_schema_3_to_4_adds_the_change_records_and_the_refile_rows_in_order(tmp_
     nbk = Notebook.open(path)
     try:
         s = nbk.store
-        assert s.meta_get("schema_version") == 4
+        assert s.meta_get("schema_version") == 5  # R7: schema 5 adds gate_decisions and edge_conductance
         flag = s.meta_get(PROPAGATION_RECORD_META)
         assert flag["schema"] == 4 and flag["since_seq"] >= 1
         assert s.q1("SELECT COUNT(*) FROM idea_changes")[0] == 0
@@ -708,7 +725,8 @@ def test_a_stop_between_the_apply_and_the_spread_is_completed_by_recover(nb, mon
     monkeypatch.setattr(Notebook, "_propagate", boom)
     with pytest.raises(RuntimeError):
         reread_d20(w, n)
-    assert nb.store.q1("SELECT COUNT(*) FROM idea_changes")[0] == 0 and marks_of(nb, n["d22"]) == []
+    assert nb.store.q1("SELECT COUNT(*) FROM idea_changes WHERE note_id=?", (n["d20"],))[0] == 0
+    assert marks_of(nb, n["d22"]) == []
     monkeypatch.setattr(Notebook, "_propagate", real)
     assert nb.recover()
     assert nb.store.q1("SELECT COUNT(*) FROM idea_changes WHERE deep=1")[0] >= 1

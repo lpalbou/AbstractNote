@@ -1631,6 +1631,7 @@ def _consume(nb: Any, note_id: str, pass_id: Optional[str], outcome: str, revisi
             s.consume_marks(note_id, pass_id, outcome, revision_id, c=c)
             return
         now = ids.utc_now()
+        s.close_gate_window(c, note_id, outcome, now)  # AbstractMemory ADR 0001 rules 7-8: the window closes, edges learn
         c.execute("UPDATE reinterpret_marks SET consumed_at=?, outcome=?, consumed_revision_id=?,"
                   " pass_id=COALESCE(pass_id, 'direct'), taken_at=COALESCE(taken_at, ?) WHERE note_id=? AND"
                   " consumed_at IS NULL AND (pass_id IS NOT NULL OR marked_at<=?)",

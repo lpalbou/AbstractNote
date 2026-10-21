@@ -1263,7 +1263,8 @@ class NoteStore:
             code = m.get("reason_code") or DIRECT
             if code not in MARK_CODES:
                 raise ValueError(f"A re-understanding mark is one of {', '.join(MARK_CODES)}, not {code!r}.")
-            impact = 1.0 if code != PROPAGATED else float(m["impact"])
+            # the activation gate's value (AbstractMemory ADR 0001 rule 7); a person's action carries 1.0
+            impact = float(m["impact"]) if code == PROPAGATED or m.get("impact") is not None else 1.0
             vals = (m["reason"], m.get("by_note_id"), m.get("by_revision_id"), _j(sorted(set(m.get("entities") or []))),
                     m.get("from_at"), marked_at, code, m.get("source_entity_id"), m.get("source_revision_id"), impact,
                     int(m.get("hops") or 0))
@@ -1276,6 +1277,11 @@ class NoteStore:
                 continue
             have = c.execute("SELECT mark_id, reason_code, impact FROM reinterpret_marks WHERE note_id=? AND"
                              " consumed_at IS NULL AND pass_id IS NULL", (m["note_id"],)).fetchone()
+            if have is not None and (have["reason_code"] or DIRECT) == DIRECT and code == DIRECT and \
+                    impact > float(have["impact"]):  # a direct mark is never doubled; its gate value only rises
+                c.execute("UPDATE reinterpret_marks SET impact=?, hops=MIN(hops, ?) WHERE mark_id=?",
+                          (impact, int(m.get("hops") or 0), have["mark_id"]))
+                continue
             if have is None or (have["reason_code"] or DIRECT) != PROPAGATED:
                 continue  # direct dominates (and a direct mark is never doubled)
             if code != PROPAGATED or impact > float(have["impact"]):
@@ -1302,6 +1308,7 @@ class NoteStore:
         now = ids.utc_now()
 
         def run(conn: sqlite3.Connection) -> int:
+            self.close_gate_window(conn, note_id, outcome, now)
             if pass_id:
                 cur = conn.execute("UPDATE reinterpret_marks SET consumed_at=?, outcome=?, consumed_revision_id=?, calls=?,"
                                    " error=NULL WHERE note_id=? AND pass_id=? AND consumed_at IS NULL",
@@ -1317,6 +1324,14 @@ class NoteStore:
             return run(c)
         with self.tx() as conn:
             return run(conn)
+
+    @staticmethod
+    def close_gate_window(c: sqlite3.Connection, note_id: str, outcome: str, at: str) -> int:
+        """The note was read again: its open gate rows close and the edges that marked it learn
+        (``recall.activation.close_window``, AbstractMemory ADR 0001 rules 7-8)."""
+        from ..recall.activation import close_window
+
+        return close_window(c, note_id, outcome, at)
 
     def fail_mark(self, note_id: str, pass_id: str, error: str) -> None:
         """A failed re-understanding (review 4.2): the mark stays pending (taken by this pass, so the next pass takes it
@@ -1442,23 +1457,33 @@ class NoteStore:
         or closed a task like one of ``opened_task_texts`` (whole-word containment either way; review 3.7). ``after``
         = the order key of the note that caused it (only notes strictly after it in history order: forward only, same
         date ordered by received time); ``from_at`` = a date (notes on or after it; user actions). Only notes that
-        were understood and are not archived. Returns ``{note_id: {entities: [...], tasks: bool}}``."""
+        were understood and are not archived. Returns ``{note_id: {entities: [...], tasks: bool, via: {used entity:
+        [entity of ``entity_ids`` (canonical) that reached it]}}}`` (``via`` names the touched entity behind each used
+        one: itself, or the entity whose name or alias it shares; the activation gate measures through it)."""
         canon = {self.canonical(e, c) for e in entity_ids if e}
         members: set = set()
+        origin: Dict[str, set] = {}
         for e in canon:
-            members.update(self.merged_members(e, c))
-        keys: set = set()
+            for m in self.merged_members(e, c):
+                members.add(m)
+                origin.setdefault(m, set()).add(e)
+        keys: Dict[str, set] = {}
         for e in sorted(members):
             r = c.execute("SELECT name_key, display_name, name FROM entities WHERE entity_id=?", (e,)).fetchone()
+            ks = set()
             if r is not None:
-                keys.update(k for k in (r["name_key"], ids.name_key(r["display_name"] or r["name"])) if k)
-            keys.update(a[0] for a in c.execute("SELECT alias_key FROM entity_aliases WHERE entity_id=? AND alias_key IS"
-                                                " NOT NULL", (e,)).fetchall())
+                ks.update(k for k in (r["name_key"], ids.name_key(r["display_name"] or r["name"])) if k)
+            ks.update(a[0] for a in c.execute("SELECT alias_key FROM entity_aliases WHERE entity_id=? AND alias_key IS"
+                                              " NOT NULL", (e,)).fetchall())
+            for k in ks:
+                keys.setdefault(k, set()).update(origin[e])
         named: Dict[str, str] = {}
         if keys:
             kq = ",".join("?" for _ in keys)
-            for (eid,) in c.execute(f"SELECT entity_id FROM entities WHERE name_key IN ({kq}) UNION SELECT entity_id FROM"
-                                    f" entity_aliases WHERE alias_key IN ({kq})", [*keys, *keys]).fetchall():
+            for eid, key in c.execute(f"SELECT entity_id, name_key FROM entities WHERE name_key IN ({kq}) UNION SELECT"
+                                      f" entity_id, alias_key FROM entity_aliases WHERE alias_key IN ({kq})",
+                                      [*keys, *keys]).fetchall():
+                origin.setdefault(eid, set()).update(keys.get(key) or ())  # a touched entity's name reaches it
                 if eid not in members:
                     named[eid] = self.canonical(eid, c)
         targets = {e: self.canonical(e, c) for e in members}
@@ -1476,10 +1501,14 @@ class NoteStore:
             for nid, eid in rows:
                 if nid in skip:
                     continue
-                d = out.setdefault(nid, {"entities": [], "tasks": False})
+                d = out.setdefault(nid, {"entities": [], "tasks": False, "via": {}})
                 e = targets.get(eid, eid)
                 if e not in d["entities"]:
                     d["entities"].append(e)
+                via = d["via"].setdefault(e, [])
+                for src in sorted(origin.get(eid) or ()):
+                    if src not in via:
+                        via.append(src)
         texts = [" " + " ".join(_words(t)) + " " for t in opened_task_texts if _words(t)]
         if texts:
             rows = c.execute(
@@ -1491,7 +1520,7 @@ class NoteStore:
                     continue
                 w = " " + " ".join(_words(text)) + " "
                 if w.strip() and any(w in t or t in w for t in texts):
-                    out.setdefault(nid, {"entities": [], "tasks": False})["tasks"] = True
+                    out.setdefault(nid, {"entities": [], "tasks": False, "via": {}})["tasks"] = True
         return out
 
     @staticmethod
@@ -2362,37 +2391,8 @@ class _OpContext:
                       [(note_id, k, v, self.rid) for k, v in sorted(rows)])
 
     def _names_in_note(self, note: Any) -> List[str]:
-        """Live entities whose canonical name or an alias occurs in the note's own words (case-folded whole words:
-        the exact-name rule of candidate generation, ADR 0004). An earlier note that NAMES an entity a later note
-        used changes what that later note could mean, even when it decided its mention was another entity (F2)."""
-        from pathlib import Path
-
-        parts = [note["title"] or "", note["text"] or ""]
-        root = Path(self.s.path).parent
-        for a in self.c.execute("SELECT sha256, extracted_chars FROM attachments WHERE note_id=?", (note["note_id"],)):
-            path = root / "extracted" / f"{a[0]}.txt"
-            if a[1] and path.exists():
-                parts.append(path.read_text(encoding="utf-8"))
-        tokens = _words("\n".join(parts))
-        if not tokens:
-            return []
-        token_set = set(tokens)
-        joined = " " + " ".join(tokens) + " "
-        found: List[str] = []
-        forms = [(r[0], r[1]) for r in self.c.execute(
-            "SELECT entity_id, name FROM entities WHERE retired_revision_id IS NULL UNION ALL SELECT entity_id,"
-            " display_name FROM entities WHERE display_name IS NOT NULL AND retired_revision_id IS NULL UNION ALL"
-            " SELECT entity_id, alias FROM entity_aliases").fetchall()]
-        for eid, form in forms:
-            ws = _words(str(form or "").replace("_", " "))
-            if not ws or any(w not in token_set for w in ws):
-                continue
-            if len(ws) > 1 and (" " + " ".join(ws) + " ") not in joined:
-                continue
-            e = self.s.canonical(eid, self.c)
-            if e not in found:
-                found.append(e)
-        return found
+        """:func:`names_in_note` in the projection's connection."""
+        return names_in_note(self.s, self.c, note)
 
     def _mark_repeaters(self, marks: List[Dict[str, Any]], note_id: str, from_at: str, op: str, why: str,
                         code: str) -> None:
@@ -2428,12 +2428,19 @@ class _OpContext:
                 touched |= set(self._names_in_note(note)) | self.adr8["retired"]
                 opened = [op["payload"].get("text") for op in self.rev.get("ops") or [] if op["op"] == "task.open"]
                 day = note["occurred_at"][:10]
-                for nid, d in self.s.later_dependents(c, touched, after=key, from_at=frm, exclude=[self.note_id],
-                                                      opened_task_texts=[t for t in opened if t]).items():
+                # AbstractMemory ADR 0001 rule 7 (ADR 0008 §4 amended): every later note that used what this reading
+                # touched is a CANDIDATE, never a mark; recall/activation.py decides it right after this projection
+                # from what the reading measurably changed (written here, so a stop before the gate leaves it pending)
+                cands = self.s.later_dependents(c, touched, after=key, from_at=frm, exclude=[self.note_id],
+                                                opened_task_texts=[t for t in opened if t])
+                for nid, d in sorted(cands.items()):
                     why = (f"An earlier note ({day}) says more about {names(d['entities'])}." if d["entities"] else
                            f"An earlier note ({day}) opened a task like one this note closed.")
-                    marks.append({"note_id": nid, "reason": why, "by_note_id": self.note_id, "by_revision_id": self.rid,
-                                  "entities": d["entities"], "from_at": note["occurred_at"]})
+                    c.execute("INSERT OR IGNORE INTO gate_decisions(revision_id, note_id, by_note_id, reason_code, reason,"
+                              " from_at, via_json, task_match, recorded_at) VALUES (?,?,?,'direct',?,?,?,?,?)",
+                              (self.rid, nid, self.note_id, why, note["occurred_at"], _j(d.get("via") or {}),
+                               int(bool(d.get("tasks"))), self.recorded_at))
+                self.stats["reinterpret_candidates"] = len(cands)
         action = self.rev.get("action")
         if action in MARKING_ACTIONS or self.adr8["archived"]:
             def forward(from_at: str, eids: Iterable[str], why: str, exclude: Sequence[str] = (),
@@ -2484,6 +2491,40 @@ class _OpContext:
             "count": len(set(new)), "notes": sorted(set(new)),
             "by_entity": [{"entity_id": e, "name": self.s._name(e), "notes": n}
                           for e, n in sorted(by_entity.items(), key=lambda kv: (-kv[1], kv[0]))[:10]]}
+
+
+def names_in_note(store: NoteStore, c: sqlite3.Connection, note: Any) -> List[str]:
+    """Live entities whose canonical name or an alias occurs in the note's own words (case-folded whole words:
+    the exact-name rule of candidate generation, ADR 0004). An earlier note that NAMES an entity a later note
+    used is a candidate source for that later note (F2); the activation gate then weighs what it changed about it."""
+    from pathlib import Path
+
+    parts = [note["title"] or "", note["text"] or ""]
+    root = Path(store.path).parent
+    for a in c.execute("SELECT sha256, extracted_chars FROM attachments WHERE note_id=?", (note["note_id"],)):
+        path = root / "extracted" / f"{a[0]}.txt"
+        if a[1] and path.exists():
+            parts.append(path.read_text(encoding="utf-8"))
+    tokens = _words("\n".join(parts))
+    if not tokens:
+        return []
+    token_set = set(tokens)
+    joined = " " + " ".join(tokens) + " "
+    found: List[str] = []
+    forms = [(r[0], r[1]) for r in c.execute(
+        "SELECT entity_id, name FROM entities WHERE retired_revision_id IS NULL UNION ALL SELECT entity_id,"
+        " display_name FROM entities WHERE display_name IS NOT NULL AND retired_revision_id IS NULL UNION ALL"
+        " SELECT entity_id, alias FROM entity_aliases").fetchall()]
+    for eid, form in forms:
+        ws = _words(str(form or "").replace("_", " "))
+        if not ws or any(w not in token_set for w in ws):
+            continue
+        if len(ws) > 1 and (" " + " ".join(ws) + " ") not in joined:
+            continue
+        e = store.canonical(eid, c)
+        if e not in found:
+            found.append(e)
+    return found
 
 
 def _repeaters(c: sqlite3.Connection, claim_ids: Sequence[str], note_id: str) -> Dict[str, List[str]]:

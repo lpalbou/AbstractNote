@@ -64,6 +64,21 @@ class PropagationTuning:
     - DECAY / FLOOR: simulation on notebook-1000 (5,258 live entities, 8,694 edges): at 0.5 / 0.1 a random entity
       reaches p50 1 / p90 4 proximal ideas, the largest hub (degree 518) 336 at one hop; without a floor the whole
       notebook is reached in two hops.
+    - The activation gate (R7, 2026-10-21, AbstractMemory ADR 0001 rules 7-8; untracked/reports/R7.md and
+      R7-evidence/replay.json). GATE_K is bounded by the loop gain: DECAY 0.5 x max reliance 1 x k / 4 < 1 gives
+      k < 8; k = 6 (gain 0.75). θ = 0.5 with the floor 0.1 marks at potential >= 0.134: about an eighth of a note's
+      statements resting on an idea that fully changed. MASS_ALPHA 0.5 and the weights (K 8, s 4, C 2, R 1) were set
+      so that a kind change saturates up to a 63-note hub, a full summary move up to 15 notes, a statement added to a
+      30-note hub stays under the floor and half the statements of a 2-note idea replaced gives 0.58. Replay of the
+      Mnemosyne incident on a copy of the mnemo notebook (the two archive notes' first readings, as of their own
+      sequence, no model): candidates 637 (Key_Moments.md) and 605 (Self_Model.md), of which R2's rule had marked
+      634 and 10; the gate at these values marks 0 and 1, and none of the 72 watch-app notes (51 marked in the
+      incident). Sensitivity: θ x 0.8 -> 23 + 3 (9 watch-app notes, reader noise such as "Core" redescribed);
+      θ x 1.2 -> 0 + 1; MASS_ALPHA 0.25 or 0 -> 4 + 1; no recency -> 6 + 1 (3 watch-app); mention weight 0.5 or all
+      weights 1 -> 0 + 1. No later note in that notebook rests on Mnemosyne, consciousness or awareness for more than
+      6 % of its statements, and neither reading changed the entity concept (which 15-20 notes rest on): had one of
+      them changed its kind, the gate would mark 9 (0 watch-app). Not yet calibrated on live re-readings (H0-style:
+      the share of noise-induced marks) nor on labelled outcomes: conductance learning is the in-use correction.
     """
 
     DEEP_SUMMARY_DISTANCE: float = 0.56   # d at or above: deep (H0: noise-proxy p95 0.511 + 0.05; design 0.40)
@@ -77,6 +92,21 @@ class PropagationTuning:
     MAX_PROPAGATION_HOPS: int = 3         # a guard: the floor binds first (0.5^3 * 1 = 0.125, 0.5^4 < 0.1)
     RECENCY_DAYS: float = 180.0           # hyperbolic recency of a relation last stated before the change
     ENDED_CLAIM_WEIGHT: float = 0.5       # an ended or superseded statement counts half in the reliance
+    # --- the activation gate (AbstractMemory ADR 0001 rules 7-8; recall/activation.py; calibration below)
+    GATE_K: float = 6.0                   # logistic slope k; loop gain DECAY * 1 * k / 4 must stay < 1 (0.75)
+    GATE_THETA: float = 0.5               # logistic centre θ; marked when gate >= FLOOR, i.e. potential >= 0.134
+    MASS_ALPHA: float = 0.5               # change / (1 + supporting notes) ** α: a hub needs more to move
+    WEIGHT_KIND: float = 8.0              # K (retired, joined, separated, or its name taken by a new idea)
+    WEIGHT_SUMMARY: float = 4.0           # s (summary distance standardised by the reader's rewrite noise)
+    WEIGHT_CLAIMS: float = 2.0            # C (share of its statements added, closed or changed)
+    WEIGHT_RELATIONS: float = 1.0         # R (share of its relations replaced)
+    STATEMENT_OBJECT_WEIGHT: float = 0.5  # a statement with the idea as object relies on it half as much
+    MENTION_WEIGHT: float = 0.1           # a bare mention weighs a tenth of a statement in the note's reliance
+    RECENCY_NOTES: float = 20.0           # notes that used the idea between the change and the note (hyperbolic)
+    TASK_MATCH: float = 1.0               # strength of a task the earlier note opened and the later one closed
+    MIN_CONTRIBUTION: float = 0.01        # a propagated contribution under it is counted, not recorded
+    CONDUCTANCE_MIN: float = 0.25         # an edge never conducts less (never silenced)
+    CONDUCTANCE_STEP: float = 0.25        # per re-reading: + when it changed something, - when unchanged
 
     def __post_init__(self) -> None:
         def bad(why: str) -> None:
@@ -99,6 +129,22 @@ class PropagationTuning:
             bad("RECENCY_DAYS must be positive")
         if not 0.0 <= self.ENDED_CLAIM_WEIGHT <= 1.0:
             bad("ENDED_CLAIM_WEIGHT must be in [0, 1]")
+        if not self.GATE_K > 0 or not 0.0 < self.GATE_THETA:
+            bad("GATE_K and GATE_THETA must be positive")
+        if not self.PROPAGATION_DECAY * 1.0 * self.GATE_K / 4.0 < 1.0:
+            bad("the loop gain PROPAGATION_DECAY * max reliance (1) * GATE_K / 4 must stay below 1")
+        if not 0.0 <= self.MASS_ALPHA <= 1.0:
+            bad("MASS_ALPHA must be in [0, 1]")
+        for name in ("WEIGHT_KIND", "WEIGHT_SUMMARY", "WEIGHT_CLAIMS", "WEIGHT_RELATIONS", "TASK_MATCH"):
+            if not getattr(self, name) >= 0.0:
+                bad(f"{name} must not be negative")
+        for name in ("STATEMENT_OBJECT_WEIGHT", "MENTION_WEIGHT"):
+            if not 0.0 < getattr(self, name) <= 1.0:
+                bad(f"{name} must be in (0, 1]")
+        if not self.RECENCY_NOTES > 0 or not 0.0 <= self.MIN_CONTRIBUTION < self.PROPAGATION_FLOOR:
+            bad("RECENCY_NOTES must be positive and 0 <= MIN_CONTRIBUTION < PROPAGATION_FLOOR")
+        if not 0.0 < self.CONDUCTANCE_MIN <= 1.0 or not 0.0 < self.CONDUCTANCE_STEP <= 1.0:
+            bad("CONDUCTANCE_MIN and CONDUCTANCE_STEP must be in (0, 1]")
 
 
 TUNING = PropagationTuning()
@@ -373,8 +419,8 @@ def measure(nb: Any, rid: str, tuning: PropagationTuning = TUNING) -> List[Dict[
 
 def carried_of(c: Any, note_id: str) -> Tuple[float, int, Optional[str]]:
     """``(carried, hops, pass_id)`` of the re-understanding of ``note_id`` being applied: the marks a pass took for it
-    (or, read by hand, the marks it had): a direct mark carries 1.0 at hop 0, a propagated one its impact and hops
-    (the strongest). Without any mark (a person asked): 1.0 at hop 0."""
+    (or, read by hand, the marks it had): a mark carries its gated impact and hops (the strongest; a person's action
+    or a mark from before the gate carries 1.0). Without any mark (a person asked): 1.0 at hop 0."""
     rows = c.execute("SELECT reason_code, impact, hops, pass_id FROM reinterpret_marks WHERE note_id=? AND"
                      " consumed_at IS NULL", (note_id,)).fetchall()
     taken = [r for r in rows if r["pass_id"]]
@@ -382,12 +428,10 @@ def carried_of(c: Any, note_id: str) -> Tuple[float, int, Optional[str]]:
     if not use:
         return 1.0, 0, None
     pass_id = taken[0]["pass_id"] if taken else None
-    # a direct mark (W28: or an archived / restored foundation, read like direct) carries 1.0 at hop 0
-    best = max(use, key=lambda r: (1.0 if r["reason_code"] != "propagated" else float(r["impact"]),
-                                   -int(r["hops"] or 0)))
-    if best["reason_code"] != "propagated":
-        return 1.0, 0, pass_id
-    return float(best["impact"]), int(best["hops"] or 0), pass_id
+    # AbstractMemory ADR 0001 rule 7: every mark carries the gate's value (a person's action, W28's archived or
+    # restored foundation, or a mark from before the gate: 1.0)
+    best = max(use, key=lambda r: (float(r["impact"] if r["impact"] is not None else 1.0), -int(r["hops"] or 0)))
+    return float(best["impact"] if best["impact"] is not None else 1.0), int(best["hops"] or 0), pass_id
 
 
 def visible(c: Any, store: Any, entity_id: str, rid: str, record: Dict[str, Any], note_at: str) -> bool:
@@ -409,21 +453,31 @@ def _reason(c: Any, source: str, via: str, day: str) -> str:
 
 def spread(nb: Any, c: Any, rid: str, records: List[Dict[str, Any]], *, carried: float, hops: int,
            pass_id: Optional[str], tuning: PropagationTuning = TUNING) -> Dict[str, Any]:
-    """One hop from each deep change of ``rid`` (in the caller's transaction): mark the later notes that used a
-    proximal entity (``propagated``), fill each record's ``spread`` and ``spread_json``. Returns the totals."""
+    """One hop from each changed idea of ``rid`` (in the caller's transaction), through the activation gate
+    (AbstractMemory ADR 0001 rule 7): for a proximal idea F of a changed idea E, a later note N that used F receives
+    ``DECAY * min(strength(E), carried) * reliance(E -> F) * reliance(N, F) * recency * conductance``; its open
+    potential accumulates (every source of this hop, every earlier open row), and N is marked ``propagated`` (impact =
+    the gate) when the gate reaches the floor. Fills each record's ``spread`` and ``spread_json``; returns totals."""
+    from .activation import _open_potential, _Reader, logistic, strength, support_notes
+
     s = nb.store
     _rev, _ops, _prev, note = _reading_of(c, rid)
     key = (note["occurred_at"], note["received_at"], note["note_id"])
     t = note["occurred_at"]
     canon = _canon_map(c)
-    touched = {r["entity_id"] for r in records}  # the re-read note's own entities: ADR 0008 §4 marks their users
+    seq = int(_rev["seq"])
+    rd = _Reader(c, canon, tuning)
+    touched = {r["entity_id"] for r in records}  # the re-read note's own entities: their users are direct candidates
     totals = {"marked": 0, "upgraded": 0, "below_floor": 0, "hop_cut": 0, "invisible": 0, "already_spread": 0,
               "reached": 0, "sources": []}
-    marks: List[Dict[str, Any]] = []
     at_of: Dict[str, str] = {}
+    per_note: Dict[str, Dict[str, Any]] = {}
     for rec in sorted(records, key=lambda r: (-r["magnitude"], r["entity_id"])):
         rec["spread"] = False
-        if not rec["deep"]:
+        mass = 1.0 + support_notes(c, canon, rec["entity_id"], seq, exclude=[note["note_id"]])
+        _raw, st, top = strength(rec, mass, tuning)
+        rec["support_notes"], rec["strength"] = int(mass - 1), round(st, 4)
+        if st <= 0:
             rec["spread_json"] = None
             continue
         eid = rec["entity_id"]
@@ -432,16 +486,16 @@ def spread(nb: Any, c: Any, rid: str, records: List[Dict[str, Any]], *, carried:
             totals["already_spread"] += 1  # each entity spreads at most once per pass (the visited set)
             rec["spread_json"] = json.dumps({"skipped": "already spread in this pass"})
             continue
-        m0 = min(rec["magnitude"], carried)  # the loop-breaker: a re-reading never passes on more than it was given
-        info: Dict[str, Any] = {"m0": round(m0, 4), "capped_by": round(max(0.0, rec["magnitude"] - m0), 4),
+        m0 = min(st, carried)  # the loop-breaker: a re-reading never passes on more than it was given
+        info: Dict[str, Any] = {"m0": round(m0, 4), "capped_by": round(max(0.0, st - m0), 4), "signal": top,
                                 "reached": [], "below_floor": 0, "hop_cut": 0, "invisible": 0}
         for f, link in sorted(neighbours(c, canon, eid, tuning).items()):
             if f in touched:
                 continue
             r = reliance(c, canon, eid, f, t, tuning, link=link)
             p = m0 * tuning.PROPAGATION_DECAY * r
-            if p < tuning.PROPAGATION_FLOOR:
-                info["below_floor"] += 1
+            if p < tuning.MIN_CONTRIBUTION:
+                info["below_floor"] += 1  # counted, never recorded (ADR 0007 §4)
                 continue
             if hops + 1 > tuning.MAX_PROPAGATION_HOPS:
                 info["hop_cut"] += 1
@@ -453,30 +507,79 @@ def spread(nb: Any, c: Any, rid: str, records: List[Dict[str, Any]], *, carried:
                 if not visible(c, s, eid, rid, rec, at_of[nid]):
                     info["invisible"] += 1
                     continue
+                rel_n = rd.reliance(nid, f)
+                rec_n, between = rd.recency(f, key, nid)
+                cond = rd.conductance(f, nid)
+                val = p * rel_n * rec_n * cond
+                if val < tuning.MIN_CONTRIBUTION:
+                    info["below_floor"] += 1
+                    continue
+                d = per_note.setdefault(nid, {"sources": [], "contribution": 0.0, "best": None})
+                src = {"entity_id": eid, "via": f, "signal": top, "strength": round(st, 4), "mass": mass,
+                       "reliance_idea": round(r, 4), "reliance": round(rel_n, 4), "recency": round(rec_n, 4),
+                       "between": between, "conductance": round(cond, 4), "contribution": round(val, 6)}
+                d["sources"].append(src)
+                d["contribution"] += val
+                if d["best"] is None or val > d["best"]["contribution"]:
+                    d["best"] = src
                 got.append(nid)
-                marks.append({"note_id": nid, "reason": _reason(c, eid, f, t[:10]), "by_note_id": note["note_id"],
-                              "by_revision_id": rid, "entities": [f], "from_at": t, "reason_code": "propagated",
-                              "source_entity_id": eid, "source_revision_id": rid, "impact": round(p, 4),
-                              "hops": hops + 1})
             info["reached"].append({"entity_id": f, "impact": round(p, 4), "reliance": round(r, 4), "notes": got})
         rec["spread"] = True
-        rec["spread_json"] = json.dumps(info, sort_keys=True)
+        rec["spread_json"] = info
         totals["sources"].append(eid)
         for k in ("below_floor", "hop_cut", "invisible"):
             totals[k] += info[k]
         totals["reached"] += len(info["reached"])
+    marks: List[Dict[str, Any]] = []
+    gated_of: Dict[str, float] = {}
+    now = ids.utc_now()
+    for nid, d in sorted(per_note.items()):
+        potential = d["contribution"] + _open_potential(c, nid)
+        g = logistic(potential, tuning)
+        marked = g >= tuning.PROPAGATION_FLOOR
+        gated_of[nid] = g if marked else 0.0
+        best = d["best"]
+        c.execute("INSERT OR IGNORE INTO gate_decisions(revision_id, note_id, by_note_id, pass_id, reason_code, hops,"
+                  " reason, from_at, via_json, contribution, potential, gated, marked, sources_json, recorded_at,"
+                  " decided_at) VALUES (?,?,?,?,'propagated',?,?,?,?,?,?,?,?,?,?,?)",
+                  (rid, nid, note["note_id"], pass_id, hops + 1, _reason(c, best["entity_id"], best["via"], t[:10]), t,
+                   json.dumps({x["via"]: [x["entity_id"]] for x in d["sources"]}, sort_keys=True),
+                   round(d["contribution"], 6), round(potential, 6), round(g, 6), int(marked),
+                   json.dumps(d["sources"], sort_keys=True), now, now))
+        if marked:
+            marks.append({"note_id": nid, "reason": _reason(c, best["entity_id"], best["via"], t[:10]),
+                          "by_note_id": note["note_id"], "by_revision_id": rid, "entities": [best["via"]], "from_at": t,
+                          "reason_code": "propagated", "source_entity_id": best["entity_id"],
+                          "source_revision_id": rid, "impact": round(g, 4), "hops": hops + 1})
+    for rec in records:  # after the gate: a reached idea lists the notes marked; one that marked none is below the floor
+        info = rec.get("spread_json")
+        if isinstance(info, dict):
+            kept = []
+            for r in info.get("reached") or []:
+                r["notes"] = [n for n in r["notes"] if gated_of.get(n)]
+                if r["notes"]:
+                    kept.append(r)
+                else:
+                    info["below_floor"] += 1
+                    totals["below_floor"] += 1
+            totals["reached"] -= len(info.get("reached") or []) - len(kept)
+            info["reached"] = kept
+            rec["spread_json"] = json.dumps(info, sort_keys=True)
     if marks:
         upgraded: List[str] = []
-        new = s.mark_reinterpret(c, marks, ids.utc_now(), upgraded)
+        new = s.mark_reinterpret(c, marks, now, upgraded)
         totals["marked"], totals["upgraded"] = len(set(new)), len(set(upgraded))
     return totals
 
 
 def propagate(nb: Any, rid: str, tuning: PropagationTuning = TUNING) -> Dict[str, Any]:
-    """Measure an applied re-understanding and spread its deep changes (``Notebook._finish``): the change records
-    and the marks are written in one transaction. Idempotent by the records' key (a re-understanding already
-    measured returns the stored totals), so a crash between the apply and the spread is completed by
-    ``Notebook.recover``."""
+    """Measure an applied re-understanding, decide its direct candidates through the activation gate (the later notes
+    that used what it touched: ``recall.activation.decide``, with the decay and the carried cap of the mark that took
+    it) and spread its changes one hop (:func:`spread`, the same gate): the change records, the decisions and the
+    marks are written in one transaction. Idempotent by the records' key (a re-understanding already measured returns
+    the stored totals), so a crash between the apply and the spread is completed by ``Notebook.recover``."""
+    from .activation import decide
+
     s = nb.store
     have = s.q("SELECT * FROM idea_changes WHERE revision_id=?", (rid,))
     if have:
@@ -484,6 +587,8 @@ def propagate(nb: Any, rid: str, tuning: PropagationTuning = TUNING) -> Dict[str
     rev = s.revision_row(rid)
     with s.lock:
         carried, hops, pass_id = carried_of(s.conn, rev["note_id"])
+        marked_by = s.conn.execute("SELECT COUNT(*) FROM reinterpret_marks WHERE note_id=? AND consumed_at IS NULL",
+                                   (rev["note_id"],)).fetchone()[0]
     records = measure(nb, rid, tuning)
     note = s.note_row(rev["note_id"])
     now = ids.utc_now()
@@ -491,19 +596,32 @@ def propagate(nb: Any, rid: str, tuning: PropagationTuning = TUNING) -> Dict[str
         if c.execute("SELECT 1 FROM idea_changes WHERE revision_id=? LIMIT 1", (rid,)).fetchone() is not None:
             return {"records": len(records), "already_measured": True}
         totals = spread(nb, c, rid, records, carried=carried, hops=hops, pass_id=pass_id, tuning=tuning)
+        # the direct candidates (ADR 0008 §4 amended): a re-reading taken through a mark hands on at most what it was
+        # given, decayed (a person's re-reading, with no mark, is a source event: no decay)
+        factor = tuning.PROPAGATION_DECAY if marked_by else 1.0
+        direct = decide(nb, c, rid, {r["entity_id"]: r for r in records}, factor=factor, cap=carried,
+                        hops=hops + (1 if marked_by else 0), pass_id=pass_id, tuning=tuning)
         model = getattr(nb.cache, "model_id", None)
         for r in records:
             c.execute(
                 "INSERT OR IGNORE INTO idea_changes(revision_id, entity_id, note_id, as_of, pass_id, kind_change,"
                 " summary_distance, summary_basis, claim_share, relation_share, support_claims, support_relations,"
-                " magnitude, deep, summary_only, carried, hops, embedder_model, spread, spread_json, recorded_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " magnitude, deep, summary_only, carried, hops, embedder_model, spread, spread_json, recorded_at,"
+                " support_notes, strength) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (rid, r["entity_id"], rev["note_id"], note["occurred_at"], pass_id, r["kind_change"],
                  r["summary_distance"], r["summary_basis"], r["claim_share"], r["relation_share"],
                  r["support_claims"], r["support_relations"], r["magnitude"], int(r["deep"]), int(r["summary_only"]),
-                 carried, hops, model, int(r.get("spread") or 0), r.get("spread_json"), now))
+                 carried, hops, model, int(r.get("spread") or 0), r.get("spread_json"), now, r.get("support_notes"),
+                 r.get("strength")))
+    from .activation import _by_entity
+
+    with s.lock:
+        by_entity = _by_entity(s, s.conn, direct["marks"], direct["newly_marked"])
     return {"records": len(records), "deep": sum(1 for r in records if r["deep"]), "carried": carried, "hops": hops,
-            **{k: v for k, v in totals.items()}}
+            **{k: v for k, v in totals.items()},
+            "gate": {"candidates": direct["candidates"], "marked": direct["marked"]},
+            "reinterpret_marked": {"count": len(direct["newly_marked"]), "notes": direct["newly_marked"],
+                                   "by_entity": by_entity}}
 
 
 def changes_of(store: Any, revision_id: str) -> List[Dict[str, Any]]:
@@ -620,8 +738,9 @@ _bound_cache: Dict[str, Tuple[Any, Dict[str, Any]]] = {}
 def may_follow(nb: Any, tuning: PropagationTuning = TUNING) -> Dict[str, Any]:
     """``{may_follow, by_source: [{entity_id, name, notes}]}``: an upper bound of the notes that propagated marks may
     add when the waiting notes are understood again, readable before the run (ADR 0007, ADR 0008 §4a). A numeric
-    dry run, no model: every idea a waiting note uses is assumed to change with magnitude 1 (recency taken as 1),
-    the impact spreads over the statements to the fixed point (strongest path, decay, floor, hop guard), and the
+    dry run, no model: every idea a waiting note uses is assumed to change with strength 1 (recency taken as 1),
+    the impact spreads over the statements to the fixed point (strongest path, decay, the activation gate with the
+    note's own reliance taken as 1, the floor, hop guard), and the
     later notes that used a reached idea, after the waiting note in history order and not waiting already, are
     counted once. A bound over the ideas the waiting notes use now, never a promise."""
     s = nb.store
@@ -665,6 +784,7 @@ def may_follow(nb: Any, tuning: PropagationTuning = TUNING) -> Dict[str, Any]:
                 used[p["note_id"]] = sorted({canon.get(e, e) for e in s.used_by(c, p["note_id"])["entity"]})
         waiting = {p["note_id"] for p in pend}
         reach_cache: Dict[str, Dict[str, float]] = {}
+        from .activation import logistic
 
         def reach(src: str) -> Dict[str, float]:
             if src in reach_cache:
@@ -677,7 +797,9 @@ def may_follow(nb: Any, tuning: PropagationTuning = TUNING) -> Dict[str, Any]:
                 if best.get(x, (0.0, 0))[0] > v:
                     continue
                 for f, a in (adj.get(x) or {}).items():
-                    p = v * tuning.PROPAGATION_DECAY * min(1.0, a / mass[f])
+                    # the activation gate with every unknown at its maximum (the note relies on F fully, no notes
+                    # between, full conductance): an upper bound of what the hop can mark, and what it hands on
+                    p = logistic(v * tuning.PROPAGATION_DECAY * min(1.0, a / mass[f]), tuning)
                     if p < tuning.PROPAGATION_FLOOR or h + 1 > tuning.MAX_PROPAGATION_HOPS:
                         continue
                     if p > best.get(f, (0.0, 0))[0]:

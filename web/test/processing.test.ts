@@ -27,6 +27,7 @@ import {
   revisionChips,
   consolidationGapsWords,
   reinterpretWords,
+  sourcesWords,
   stateLine,
   stepIndex,
   stepperFor,
@@ -305,7 +306,16 @@ describe("the state sentence", () => {
     expect(reinterpretWords(3, 12, { notes: 5, names: ["Zorn", "Mira"], sources: 3 })).toBe("Re-understanding 3 of 12 notes (5 because Zorn and 2 other ideas changed)");
     expect(reinterpretWords(0, 12, { notes: 0, names: [], sources: 0 })).toBe("Re-understanding 12 notes");
     expect(stateLine(processing({ active: [], consolidation: { ...c, run: { ...run, propagated: { notes: 5, names: ["Zorn"], sources: 1 } } } })).text).toBe("Consolidating your notebook · Re-understanding 12 notes (5 because Zorn changed) · about 7 min left");
-    expect(pendingConsolidationLine({ unlabelled: 0, stale_labels: 0, stale_summaries: 0, reinterpret: 12 }, { pending: 12, by_entity: [], reasons: [], context_unknown: 0, consumed_today: 0, last_marked_at: null, propagated: { pending: 5, by_source: [{ entity_id: "e1", name: "Zorn", notes: 5 }], may_follow: 9 } })).toBe("12 notes to understand again (5 because Zorn changed)");
+    expect(pendingConsolidationLine({ unlabelled: 0, stale_labels: 0, stale_summaries: 0, reinterpret: 12 }, { pending: 12, by_entity: [], reasons: [], context_unknown: 0, consumed_today: 0, last_marked_at: null, propagated: { pending: 5, by_source: [{ entity_id: "e1", name: "Zorn", notes: 5 }], may_follow: 9 } })).toBe("12 notes to understand again (5 because Zorn changed; at most 9 more may follow)");
+    // AbstractMemory ADR 0001 (R7): the activation gate's sources, what changed about each, and the bound, before the run
+    const src = (name: string, words: string) => ({ entity_id: name, name, signal: "kind", words, notes: 3, contribution: 1 });
+    const gate = { pending: 12, by_entity: [], reasons: [], context_unknown: 0, consumed_today: 0, last_marked_at: null, propagated: { pending: 0, by_source: [], may_follow: 4 }, top_sources: [src("Zorn", "changed its kind"), src("Mira", "is described differently"), src("Priya", "has new or changed statements")] };
+    expect(pendingConsolidationLine({ unlabelled: 0, stale_labels: 0, stale_summaries: 0, reinterpret: 12 }, gate)).toBe("12 notes to understand again (3 sources: Zorn changed its kind, Mira is described differently and 1 more; at most 4 more may follow)");
+    expect(sourcesWords([src("Zorn", "changed its kind")])).toBe("1 source: Zorn changed its kind");
+    expect(sourcesWords([src("Zorn", "changed its kind"), src("Mira", "is described differently")])).toBe("2 sources: Zorn changed its kind and Mira is described differently");
+    expect(sourcesWords([])).toBe("");
+    expect(sourcesWords([src("Zorn", "changed its kind"), src("Mira", "is described differently")], 12)).toBe("12 sources: Zorn changed its kind, Mira is described differently and 10 more");
+    expect(stateLine(processing({ active: [], consolidation: { ...c, reinterpret: gate } })).text).toBe("Consolidating your notebook · Re-understanding 12 notes (3 sources: Zorn changed its kind, Mira is described differently and 1 more) · about 7 min left");
     const now = Date.parse("2026-10-20T10:00:00");
     const last = { finished_at: new Date(Date.parse("2026-10-19T03:12:00")).toISOString(), status: "completed_with_gaps", merges: 0, communities: 3, labelled: 0, summaries_refreshed: 0, insights: 0, reinterpreted: 5, unchanged: 2, left_out: { summaries: 0, labels: 0, reinterpret: 3, reasons: ["x"] }, budget_spent: true, notice: "n" };
     expect(lastConsolidationLine(last, now)).toBe("Yesterday: 5 notes understood again, 3 themes.");
