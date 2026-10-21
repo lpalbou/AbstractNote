@@ -1214,7 +1214,8 @@ def claim_start_parts(nb: Any, claim_id: str, exclude: Sequence[str] = ()
     ``own`` = ``{observed_at, valid_from}`` its own note's readings gave it (its ``claim.add``, then each
     ``claim.revise``'s ``own_valid_from``: the start the re-reading itself read); ``moves`` = per earlier note, the
     earliest ``{observed_at, valid_from}`` its ``claim.start_earlier`` gave it as earlier evidence (R1), dropped again
-    by that note's ``claim.start_restore`` (its reading that moved it was withdrawn, INT a8d4340)."""
+    by that note's ``claim.start_restore`` (its reading that moved it was withdrawn, INT a8d4340, or it was archived:
+    W28's ops name the note in ``withdrawn_note_id``)."""
     row = nb.store.claim_row(claim_id)
     own: Dict[str, Optional[str]] = {"observed_at": row["observed_at"], "valid_from": row["valid_from"]}
     added = nb.store.revision_row(row["revision_id"])
@@ -1233,15 +1234,18 @@ def claim_start_parts(nb: Any, claim_id: str, exclude: Sequence[str] = ()
             if p.get("claim_id") != claim_id:
                 continue
             name = op.get("op")
+            # the note the move belongs to: an archive / unarchive (W28) is a user revision (note_id null) that names
+            # the note whose move it withdraws or restores in ``withdrawn_note_id`` (INT3)
+            mover = str(p.get("withdrawn_note_id") or r["note_id"])
             if name == "claim.revise":
                 own = {**own, "valid_from": p.get("own_valid_from", p.get("valid_from"))}
             elif name == "claim.start_earlier":
-                m = moves.setdefault(str(r["note_id"]), {"observed_at": None, "valid_from": None})
+                m = moves.setdefault(mover, {"observed_at": None, "valid_from": None})
                 for k in ("observed_at", "valid_from"):
                     if p.get(k) and (not m[k] or p[k] < m[k]):
                         m[k] = p[k]
             elif name == "claim.start_restore":
-                moves.pop(str(r["note_id"]), None)
+                moves.pop(mover, None)
     return own, moves
 
 

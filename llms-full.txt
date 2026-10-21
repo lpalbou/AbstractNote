@@ -1437,7 +1437,7 @@ graph.
 | `certainty` | `stated`, `probable`, `possible`, `reported`, `disputed` (tokens, not numbers) |
 | `stance` | `assert`, `revise`, `retract`: what the note does to earlier knowledge |
 | `observed_at` | the note's `occurred_at`; moved back to an earlier note's date when that note restates or refines the claim (`claim.start_earlier`, never later) |
-| `valid_from`, `valid_until` | the validity window; `valid_from` defaults to `observed_at` for state claims and is null for timeless facts or for a statement that stopped before its note was written (`valid_until` earlier than the note); `valid_until` is set when a later note supersedes or retracts the claim, when the claim is an earlier belief placed before a later one (`claim.insert_before`: the later one's start; a Linking `earlier_state_of`), and equals `valid_from` when you retract it ("never true"); it is never earlier than `valid_from`. An earlier note that restates or refines the claim moves `valid_from` back to its date when it was later (`min`, never later; no start stays no start) |
+| `valid_from`, `valid_until` | the validity window; `valid_from` defaults to `observed_at` for state claims and is null for timeless facts or for a statement that stopped before its note was written (`valid_until` earlier than the note); `valid_until` is set when a later note supersedes or retracts the claim, when the claim is an earlier belief placed before a later one (`claim.insert_before`: the later one's start; a Linking `earlier_state_of`), and equals `valid_from` when you retract it ("never true"); it is never earlier than `valid_from`. An earlier note that restates or refines the claim moves `valid_from` back to its date when it was later (`min`, never later; no start stays no start), and that start stands when the claim's own note is read again: the belief's start is the earlier of the new reading's own start and the earlier evidence that still stands (W29) |
 | `status` | `active`, `superseded`, `retracted`, `reinterpreted` (the note was understood again and its new reading does not make this statement: an empty window, never a belief; see "Re-understanding") |
 | `superseded_by` | the claim that replaced it |
 | `evidence` | the verbatim excerpt of the note that supports the claim |
@@ -1502,11 +1502,11 @@ Operations:
 | `entity.restore` | `{entity_id, retired_revision_id}`: an entry an archive retired, back while that retirement stands |
 | `note.reinterpret` | `{note_id, supersedes, reason, by_note_ids}`: the first op of a re-understanding (see "Re-understanding"): the interpretation `supersedes` is superseded, its mentions and topics are soft-removed (`entity_notes_removed`, `note_topics_removed`) for the new reading's ops to add them again |
 | `claim.reinterpret` | `{claim_id, valid_until, assertion_id, reason}`: a statement of the superseded reading the new one does not make: status `reinterpreted`, window emptied at its own start; AbstractMemory closes its copy with the closure kind `reinterpreted` |
-| `claim.revise` | `{claim_id, certainty, stance, valid_from, valid_until, evidence, assertion_id, previous, previous_assertion_id, empty_at, assertion}`: the same statement (subject, predicate, object) read again with another certainty, stance, window or evidence: updated in place (`previous` keeps the earlier values; a window another revision closed stays closed); AbstractMemory gets the new copy `assertion` and closes the previous one empty (kind `reinterpreted`) |
+| `claim.revise` | `{claim_id, certainty, stance, valid_from, own_valid_from, valid_until, evidence, assertion_id, previous, previous_assertion_id, empty_at, assertion, object_id?, object_literal?}`: the same statement (subject, predicate, object, or the previous statement the linking named `same_statement_as_previous`, which may carry another value: `object_id`/`object_literal`) read again with another certainty, stance, window, evidence or value: updated in place, the claim id and predicate kept (`previous` keeps the earlier values, the earlier value too; a window another revision closed stays closed). `own_valid_from` is the start the re-reading read; `valid_from` (the index) is the earlier of it and the start the earlier evidence that stands gave the belief (`claim.start_earlier` of other notes not withdrawn by their `claim.start_restore`, W29); AbstractMemory gets the new copy `assertion` valid from `own_valid_from` (the earlier part stays the additive earlier-evidence assertion) and closes the previous one empty at its own start (`empty_at`, kind `reinterpreted`) |
 | `claim.reopen` | `{claim_id, status, valid_until, superseded_by, closed_reason, closed_revision_id, closed_by_revision, assertion_id, previous_assertion_id, empty_at, assertion}`: a statement of another note that the superseded reading had closed (superseded, retracted, narrowed) and the new reading leaves alone: restored to the state the other revisions give it; AbstractMemory gets a re-opened copy (a window cannot widen there) |
 | `claim.repoint` | `{claim_id, superseded_by, previous}`: a statement the superseded reading closed and the new reading closes on the same slot: it stays closed, superseded by the new reading's statement |
 | `reinforcement.drop` | `{claim_id, revision_id}`: a reinforcement the superseded reading made that the new one does not repeat |
-| `claim.start_restore` | `{claim_id, observed_at, valid_from, earlier_assertions: [{assertion_id, empty_at}], reason}`: the inverse of `claim.start_earlier`: the superseded reading's earlier evidence moved the belief's start back and the new reading no longer restates it: `observed_at` and `valid_from` return to the start replayed from the claim's own add and the moves that remain; AbstractMemory closes each additive earlier-evidence assertion empty with the kind `reinterpreted`; as received before the re-understanding the moved start is still shown |
+| `claim.start_restore` | `{claim_id, observed_at, valid_from, earlier_assertions: [{assertion_id, empty_at}], reason}`: the inverse of `claim.start_earlier`: the superseded reading's earlier evidence moved the belief's start back and the new reading no longer restates it: `observed_at` and `valid_from` return to the start replayed from the claim's own readings (its add, then each `claim.revise`'s `own_valid_from`) and the moves of other notes that remain (a note's moves count until its own `claim.start_restore`, or the one of the archive that withdraws it, which names it in `withdrawn_note_id`; the unarchive's `claim.start_earlier` counts for that note again); AbstractMemory closes each additive earlier-evidence assertion empty with the kind `reinterpreted`; as received before the re-understanding the moved start is still shown |
 | `task.reopen` | `{task_id, closed_revision_id}`: a task the superseded reading closed that the new one does not close |
 | `task.retire` | `{task_id, reason}`: a task of the superseded reading the new one does not have: status `retired` |
 | `entity.retire` | `{entity_id, reason, read_as}`: an entity only the superseded reading created and that nothing references any more (see Entity); `read_as`: the entries the new reading uses for a mention whose name or alias has the retired entry's name or alias as its lookup key (empty when it no longer names it) |
@@ -1762,7 +1762,7 @@ them all, and the as-received axis shows what the notebook believed before.
 
 | op of the superseded reading | in the re-understanding |
 |---|---|
-| `claim.add` (its own statements) | same subject, predicate and object in the new reading: kept as is, or `claim.revise` in place when certainty, stance, window or evidence differ; otherwise `claim.reinterpret` |
+| `claim.add` (its own statements) | same subject, predicate and object in the new reading, or named `same_statement_as_previous` (the linking's relation to its own previous reading, `existing` = the P number of the "This note was previously understood as" block; same subject and kind of value): kept as is, or `claim.revise` in place when certainty, stance, window, evidence or (named) value differ, the claim id and predicate kept; a start earlier evidence of another note moved back stays (W29); otherwise `claim.reinterpret` |
 | `claim.supersede`, `claim.retract`, `claim.insert_before` (`after_claim_id`) on another note's statement | the new reading writes on the same slot (subject and predicate): stays closed (`claim.repoint` to the new statement); otherwise `claim.reopen` to the state the other revisions give it |
 | `claim.reinforce` | repeated: kept; otherwise `reinforcement.drop` |
 | `claim.start_earlier` (earlier evidence moved another note's belief back) | restated again by the new reading: kept; otherwise `claim.start_restore` (the start the other revisions give it; its earlier-evidence assertions close empty in AbstractMemory) and the belief it had narrowed is re-opened (`claim.reopen` above) |
@@ -2538,7 +2538,21 @@ dependency record of its current interpretation, on what was known at the note's
 statements and similar notes recorded on or before it, the summaries written for a date on or before it), leaving
 out what that reading itself wrote; equal: the note is `unchanged`, its mark is consumed and no model is called.
 Otherwise the note goes through `note-process` (filing is not repeated; a note without a kind is filed first): its context leaves out its own previous
-reading (its statements and tasks) and shows again what that reading had closed; the apply sees that the pass took
+reading (its statements and tasks) from the known-then and LATER cards and shows again what that reading had closed.
+The previous reading is shown on its own instead, FIRST (W29, retro-C §2): `note_context` gives `note.previous_reading`
+`{claims: [{index, claim_id, subject, predicate, object, certainty, valid_from, valid_until, ...}], entities: [{entity_id,
+name, kind}]}` and keeps the claim ids in the packet (`previous_claims`); the extraction packet's `known` starts with
+"This note was previously understood as (its own earlier reading; a statement this text makes again keeps the same
+subject and the same predicate as written here):" and the extraction prompt says to keep the predicate written there;
+the linking message carries the block `{{batch.previous}}` before the mentions and their cards, its statements
+numbered `P0`, `P1`, ... (`P0 Zorn Labs ex:annual_budget “40k” · stated (since 2025-02-05)`), empty (no bytes) on a
+first reading. The linking names a statement read again with `same_statement_as_previous` (`existing` = its P
+number): it stays that statement, the same claim id and predicate, revised in place when its value, certainty or window
+changed (a statement the model now spells `ex:budget_cap` stays `ex:annual_budget`, warning `predicate_kept: a -> b`);
+a number outside the list, another subject or another kind of value (an entity against a text) is refused with a
+warning and the statement is new. A statement that now relates to another note's statement in a way the previous
+reading did not takes that relation instead (its predicate follows the statement it names, R1's adoption). The
+previous statements the new reading does not make close as `reinterpreted`, as before. The apply sees that the pass took
 the note's mark and builds a `note.reinterpret` revision (or records `unchanged` when the new reading's statements,
 mentions, tasks and topics equal the old ones; summaries alone do not count; what this re-reading saw, `related`
 included, is appended to `reading_confirmations` for the current reading, never written into the revision, so the
@@ -2636,7 +2650,7 @@ Schema enums)
 {"mentions": [{"ref": "m1", "decision": "reuse|create|merge|unsure", "candidate": 0,
                "merge_candidates": [0, 1], "name": "preferred name", "kind": "person|org|project|concept|place|event|artifact|software|thing",
                "aliases": ["..."], "summary": "what the entity is on the note's date, one or two sentences: for create and unsure, and for a reused entity whose description this note changes; otherwise null (a missing one is a warning, never a failed note)", "reason": "short"}],
- "claims": [{"index": 0, "relation_to_existing": "new|restates|refines|supersedes|contradicts|earlier_state_of",
+ "claims": [{"index": 0, "relation_to_existing": "new|restates|refines|supersedes|contradicts|earlier_state_of|same_statement_as_previous",
              "existing": 0, "reason": "short"}],
  "tasks": [{"index": 0, "closes_open_task": 0, "evidence": "the note's words that say it is done"}],
  "revision_summary": "one sentence"}
@@ -3489,6 +3503,13 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
   by `dedupe-sources` no longer count twice either.
 - **Status says which AbstractMemory runs**: `GET /note/status` reports the version of the AbstractMemory that is
   loaded, not the one an older installation recorded.
+- **A note read again keeps its own facts in place**: when a note is understood again after an earlier one
+  arrives, it is first shown how it was understood before, and a fact it still states stays the same fact under
+  the same name, even when its value, certainty or dates now read differently. A budget no longer moves to a
+  second name ("budget cap" beside "annual budget") because the note was read again.
+- **Earlier evidence keeps the start it gave**: when an older note shows that a belief already held on its date,
+  reading the later note again keeps that earlier start (the belief stays true between the two dates), and
+  understanding the older note differently still gives it back.
 - **What a thing is**: the description of a person, project or tool now says what it is (its kind,
   its role or purpose, and what it belongs to or works with), instead of the latest thing
   that happened to it. It is rewritten only when a note changes

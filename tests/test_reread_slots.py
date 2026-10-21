@@ -365,3 +365,28 @@ def test_s2_through_the_flows_the_re_reading_keeps_one_budget_predicate(tmp_path
         assert nbk.store.q1("SELECT COUNT(*) FROM revisions WHERE action='note.reinterpret'")[0] <= 1
     finally:
         nbk.close()
+
+
+def test_an_archived_mover_no_longer_moves_the_start_when_the_later_note_is_read_again(nb):
+    """INT3 seam (W28 x W29): an archive is a user revision (note_id null) whose ``claim.start_restore`` names the
+    archived note in ``withdrawn_note_id``; the start replay must drop THAT note's move, so reading the later note
+    again after the archive keeps its own start (not the archived note's), and after the unarchive (a
+    ``claim.start_earlier`` for that note again) the earlier start counts again. MUTANT: claim_start_parts keyed by the
+    revision's note_id only."""
+    clock = Clock()
+    m = _moved(nb, clock)
+    x40 = m["x40"]
+    possible = lambda: extraction([mention("m1", "LUT", "project")],  # noqa: E731
+                                  [stmt("m1", "ex:budget", "40k", literal=True, certainty="possible",
+                                        evidence="LUT budget 40k")])
+    nb.archive_note(m["d10"], "laurent", "test")
+    assert (nb.store.claim_row(x40)["observed_at"], nb.store.claim_row(x40)["valid_from"]) == (D20, D20)
+    r = run(nb, "", D20, possible(), link({"m1": LUT}), reinterpret=True, note_id=m["d20"], now=clock.next())
+    assert r["out"]["claims_revised"] == [x40]
+    row = nb.store.claim_row(x40)
+    assert (row["valid_from"], row["certainty"]) == (D20, "possible")
+    assert x40 not in nb.kg.active_claim_ids(D15)
+    nb.unarchive_note(m["d10"], "laurent")
+    assert nb.store.claim_row(x40)["valid_from"] == D10
+    r2 = run(nb, "", D20, possible(), link({"m1": LUT}), reinterpret=True, note_id=m["d20"], now=clock.next())
+    assert r2["out"]["unchanged"] is True and nb.store.claim_row(x40)["valid_from"] == D10
