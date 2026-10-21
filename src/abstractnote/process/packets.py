@@ -403,6 +403,12 @@ def link_batches(note: Dict[str, Any], extraction: Dict[str, Any], resolved: Lis
             changed_lines.append("    now read as: " + clip(x, 160))
         if int(b.get("omitted") or 0):
             changed_lines.append("    (" + str(int(b.get("omitted"))) + " more changed statements not shown)")
+        for o in b.get("same_name") or []:  # identity in question: both cards, the model decides for this note
+            line = ("    another entry with this exact name exists: " + clip(o.get("name"), 80) + " — "
+                    + str(o.get("kind") or "thing"))
+            if str(o.get("summary") or "").strip():
+                line += ": “" + clip(o.get("summary"), SUMMARY_CHARS) + "”"
+            changed_lines.append(line + " (decide which one this note means; both may be kept apart)")
     changed = (CHANGED_LABEL + "\n" + "\n".join(changed_lines)) if changed_lines else ""
     previous = previous_block(n.get("previous_reading"), PREVIOUS_LABEL, True)
     # W31 (F1): a note read again sees when each known-then statement was written (LATER statements always say

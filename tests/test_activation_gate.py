@@ -15,7 +15,7 @@ import pytest
 from abstractnote.recall import activation as act
 from abstractnote.recall import propagation as prop
 from abstractnote.store.notebook import Notebook
-from test_reinterpret import Clock, extraction, link, mention, run, stmt
+from test_reinterpret import Clock, extraction, link, mention, run, stmt  # noqa: F401
 
 T = prop.TUNING
 
@@ -154,11 +154,11 @@ def test_a_hub_with_high_mass_does_not_mark_on_a_small_change_but_a_thin_idea_do
 
 
 def test_a_kind_change_on_a_hub_does_mark_and_a_mere_mention_does_not(nb):
-    """K dominates (rule 7): an archive creates a person whose alias is the hub project's name (its identity is now in
-    question: a kind-class change, WEIGHT_KIND 8): the note whose statement is about the hub is marked even with the
-    hub's mass; a note that only mentions the hub among statements about other things relies on it little (claims >
-    mentions) and is not. MUTATIONS: name_signal never true; WEIGHT_KIND 1; MENTION_WEIGHT 1 (a mention weighs a
-    statement)."""
+    """K dominates (rule 7): an archive creates a thing whose alias is the hub's name (an exact-alias close match: the
+    hub's identity is in question, a kind-class event on the hub, WEIGHT_KIND 8 over its mass): the note whose
+    statement is about the hub is marked even with the hub's mass; a note that only mentions the hub among statements
+    about other things relies on it little (claims > mentions) and is not. MUTATIONS: identity events never
+    detected; WEIGHT_KIND 1; MENTION_WEIGHT 1 (a mention weighs a statement)."""
     clock = Clock()
     h = hub(nb, clock)
     about = note(nb, clock, "Laurent ships and Laurent rests.", day(20),
@@ -175,7 +175,8 @@ def test_a_kind_change_on_a_hub_does_mark_and_a_mere_mention_does_not(nb):
             link({"m1": {"name": "Laurent ship", "kind": "thing", "aliases": ["Laurent"]}}), now=clock.next())
     da = decision(nb, about["note_id"], x["out"]["revision_id"])
     [src] = [s for s in da["sources"] if s["via"] == h and s["entity_id"] != h]
-    assert src["signal"] == "name" and src["mass"] >= 31 and src["strength"] == 1.0
+    assert src["signal"] == "identity" and src["mass"] >= 31
+    assert src["strength"] == round(T.WEIGHT_KIND / src["mass"] ** T.MASS_ALPHA, 4)
     assert da["marked"] and about["note_id"] in pending(nb)
     ds = decision(nb, side["note_id"], x["out"]["revision_id"])
     [s2] = [s for s in ds["sources"] if s["via"] == h and s["entity_id"] != h]
@@ -416,3 +417,179 @@ def test_a_pass_that_reads_the_note_again_closes_its_window_and_teaches_the_edge
     assert nb.store.q1("SELECT conductance FROM edge_conductance WHERE entity_id=? AND note_id=?",
                        (z, n1["note_id"]))[0] == 1.0 - T.CONDUCTANCE_STEP
     assert act.gate_state(nb)["candidates"] == 0 and stage_pass(w, script) == []
+
+
+# ----------------------------------------------------------------------------- identity in question (lead ruling 2026-10-21)
+
+
+def mnemosyne_world(nb: Notebook, clock: Clock) -> Dict[str, Any]:
+    """Mnemosyne, a project used by 6 notes: 4 make statements about it among others (one of them a single statement
+    among 31), 2 only mention it in notes that say a lot about other things; then a 2025 archive creates "Mnemosyne incarnation", a person whose alias is
+    "Mnemosyne", apart from the project (an exact-alias close match kept for review)."""
+    w: Dict[str, Any] = {"about": [], "passing": []}
+    first = note(nb, clock, "Mnemosyne is a memory project.", day(10, 7), [("m1", "Mnemosyne", "project")],
+                 [stmt("m1", "ex:is_a", "memory project", literal=True)])
+    x = w["x"] = eid(nb, "Mnemosyne")
+    w["about"].append(first["note_id"])
+    long = note(nb, clock, "Ben's long log; Mnemosyne kept one line of it.", day(15, 7),
+                [("m1", "Ben", "person"), ("m2", "Mnemosyne", "project")],
+                [stmt("m2", "ex:kept", "one line", literal=True)] +
+                [stmt("m1", f"ex:entry_{j}", f"e{j}", literal=True) for j in range(30)], {"m1": {"name": "Ben", "kind": "person"},
+                                                                                           "m2": x})
+    w["about"].append(long["note_id"])  # one statement about it among 31: its identity still weighs (the floor)
+    for i in range(2):
+        r = note(nb, clock, f"Mnemosyne and Ana met about step {i}.", day(11 + i, 7),
+                 [("m1", "Mnemosyne", "project"), ("m2", "Ana", "person")],
+                 [stmt("m1", "ex:step", f"step {i}", literal=True)] +
+                 [stmt("m2", f"ex:fact_{j}", f"v{j}", literal=True) for j in range(3)],
+                 {"m1": x, "m2": {"name": "Ana", "kind": "person"} if i == 0 else eid(nb, "Ana")})
+        w["about"].append(r["note_id"])
+    for i in range(2):
+        r = note(nb, clock, f"Ben wrote a long log {i}; Mnemosyne was named once.", day(20 + i, 7),
+                 [("m1", "Ben", "person"), ("m2", "Mnemosyne", "project")],
+                 [stmt("m1", f"ex:log_{j}", f"line {j}", literal=True) for j in range(12)],
+                 {"m1": eid(nb, "Ben"), "m2": x})
+        w["passing"].append(r["note_id"])
+    settle(nb)
+    w["archive"] = run(nb, "Mnemosyne incarnation chose its name upon self-awareness.", "2025-03-08T09:00:00Z",
+                       extraction([mention("m1", "Mnemosyne incarnation", "person", aliases=["Mnemosyne"])],
+                                  [stmt("m1", "ex:chose_name_at", "self-awareness", literal=True)]),
+                       link({"m1": {"name": "Mnemosyne incarnation", "kind": "person", "aliases": ["Mnemosyne"]}}),
+                       now=clock.next())
+    w["e"] = eid(nb, "Mnemosyne incarnation")
+    return w
+
+
+def test_an_exact_name_match_from_a_new_entry_puts_the_existing_ones_identity_in_question(nb):
+    """Lead ruling: the archive's new person with the exact alias "Mnemosyne", created apart from the project, is a
+    change event on the EXISTING project (identity in question, K-class, recorded on it), so its 6 later notes are
+    candidates through the gate with the project's mass (7): the 4 notes that state something about it are marked,
+    the 2 that only name it among a dozen other statements are not (gated by reliance). The close match's own
+    statement counts as no change. MUTATIONS: identity events never detected; the identity strength clamped to 1;
+    no IDENTITY_RELIANCE_FLOOR; the close match counted as a statement."""
+    clock = Clock()
+    w = mnemosyne_world(nb, clock)
+    rid = w["archive"]["out"]["revision_id"]
+    rec = nb.store.q1("SELECT * FROM idea_changes WHERE revision_id=? AND entity_id=?", (rid, w["x"]))
+    assert rec["kind_change"] == 1.0 and rec["claim_share"] == 0.0 and rec["support_notes"] == 6
+    decisions = {n: decision(nb, n, rid) for n in w["about"] + w["passing"]}
+    assert len(decisions) == 6 and w["archive"]["out"]["gate"]["candidates"] == 6
+    for n, d in decisions.items():
+        [src] = [x for x in d["sources"] if x["signal"] == "identity"]
+        assert src["via"] == w["x"] and src["identity_with"] == [w["e"]] and src["mass"] == 7
+        assert src["strength"] == round(T.WEIGHT_KIND / 7 ** T.MASS_ALPHA, 4) > 1
+        assert d["contribution"] == pytest.approx(src["contribution"], abs=1e-6)  # counted once, on the event
+    assert all(decisions[n]["marked"] for n in w["about"])
+    assert not any(decisions[n]["marked"] for n in w["passing"])
+    assert set(pending(nb)) == set(w["about"])
+    assert all(x["reliance"] < T.IDENTITY_RELIANCE_FLOOR for n in w["passing"] for x in decisions[n]["sources"])
+
+
+def test_the_same_on_a_hub_does_not_fire_on_identity_alone_unless_the_note_rests_on_it(nb):
+    """The hub case: a new entry takes the exact name of a 128-note hub. Its identity strength is 8 / sqrt(129) =
+    0.70, so the 128 notes that mention it in one statement among nine stay under the floor; the one note whose
+    statements are all about it is marked. MUTATION: the identity strength without the mass."""
+    clock = Clock()
+    lone = note(nb, clock, "Laurent is a person and Laurent lives in Lyon.", day(1, 6), [("m1", "Laurent", "person")],
+                [stmt("m1", "ex:is_a", "person", literal=True), stmt("m1", "ex:lives_in", "Lyon", literal=True)])
+    h = eid(nb, "Laurent")
+    ana = None
+    for i in range(128):
+        r = note(nb, clock, f"Laurent and Ana: item {i}.", day(2 + i % 27, 6 + i // 27),
+                 [("m1", "Laurent", "person"), ("m2", "Ana", "person")],
+                 [stmt("m1", "ex:wrote", f"item {i}", literal=True)] +
+                 [stmt("m2", f"ex:fact_{j}", f"v{j}", literal=True) for j in range(8)],
+                 {"m1": h, "m2": ana or {"name": "Ana", "kind": "person"}})
+        ana = ana or eid(nb, "Ana")
+    settle(nb)
+    x = run(nb, "Laurent of Lyon, a robot, was built in 2020.", "2020-01-01T09:00:00Z",
+            extraction([mention("m1", "Laurent of Lyon", "thing", aliases=["Laurent"])],
+                       [stmt("m1", "ex:built_in", "2020", literal=True)]),
+            link({"m1": {"name": "Laurent of Lyon", "kind": "thing", "aliases": ["Laurent"]}}), now=clock.next())
+    rid = x["out"]["revision_id"]
+    assert x["out"]["gate"]["candidates"] == 129
+    d = decision(nb, lone["note_id"], rid)
+    [src] = [s for s in d["sources"] if s["signal"] == "identity"]
+    assert src["mass"] == 130 and src["strength"] < 1 and d["marked"]
+    assert pending(nb) == [lone["note_id"]] and x["out"]["gate"]["marked"] == 1
+
+
+def test_keeping_the_two_apart_clears_the_event_and_confirming_them_the_same_merges_and_marks(nb):
+    """Review: "keep apart" (the close match retracted) clears the identity event: its share leaves the open rows
+    (kept on record), the notes it alone marked are consumed ``cleared`` and nothing new is marked. On a second
+    notebook, "confirm" merges the new entry into the project and marks the project's notes like a merge (direct).
+    MUTATIONS: no clearing on the retraction; the retraction of a close match marks forward like any statement."""
+    clock = Clock()
+    w = mnemosyne_world(nb, clock)
+    item = next(it for it in nb.review()["items"] if it["kind"] == "close_match")
+    cid = nb.store.q1("SELECT claim_id FROM claims WHERE predicate='skos:closeMatch' AND subject_id=?", (w["e"],))[0]
+    before = len(nb.store.q("SELECT * FROM reinterpret_marks"))
+    out = nb.retract_claim(cid, None, "They are different.")
+    assert pending(nb) == []
+    rows = nb.store.q("SELECT * FROM reinterpret_marks WHERE note_id IN (%s)" % ",".join("?" * 4), w["about"])
+    assert {r["outcome"] for r in rows} == {"cleared"} and len(nb.store.q("SELECT * FROM reinterpret_marks")) == before
+    d = decision(nb, w["about"][0], w["archive"]["out"]["revision_id"])
+    [src] = [x for x in d["sources"] if x["signal"] == "identity"]
+    assert src["cleared_at"] and d["contribution"] == 0 and not d["marked"]
+    assert out["revision_id"]
+    # confirmed the same: a merge, marked like a merge
+    nb2 = Notebook.open(nb.root.parent / "nb2")
+    try:
+        w2 = mnemosyne_world(nb2, Clock())
+        nb2.store.conn.execute("DELETE FROM reinterpret_marks")
+        item = next(it for it in nb2.review()["items"] if it["kind"] == "close_match")
+        nb2.confirm_match(item["review_id"], None)
+        assert nb2.store.entity_row(w2["e"])["merged_into"] == w2["x"]
+        marked = {m["note_id"]: m for m in nb2.store.reinterpret_marks()}
+        assert set(w2["about"] + w2["passing"]) <= set(marked)
+        assert all(marked[n]["reason_code"] == "direct" and marked[n]["impact"] == 1.0 for n in w2["about"])
+    finally:
+        nb2.close()
+
+
+def test_the_re_reading_packet_shows_both_cards(nb):
+    """The note the identity event marked is read again with both entries side by side ("another entry with this
+    exact name exists: ..."), so the model decides for this note whether it means the project or the person; a note
+    it did not mark gets no such line. MUTATION: no identity block in the packet."""
+    from abstractnote.process.packets import CHANGED_LABEL, link_batches
+    from abstractnote.tools.context import ToolContext
+    from abstractnote.tools.process import note_context
+
+    clock = Clock()
+    w = mnemosyne_world(nb, clock)
+    ctx = note_context(ToolContext(nb=nb), w["about"][1])
+    [block] = ctx["note"]["understood_differently"]
+    assert block["entity_id"] == w["x"] and [o["entity_id"] for o in block["same_name"]] == [w["e"]]
+    ext = {"summary": "x", "mentions": [mention("m1", "Mnemosyne", "project")], "claims": [], "tasks": []}
+    [batch] = link_batches(ctx["note"], ext, [{"ref": "m1", "candidates": []}], [])
+    assert batch["changed"].startswith(CHANGED_LABEL)
+    assert "another entry with this exact name exists: Mnemosyne incarnation — person" in batch["changed"]
+    other = note_context(ToolContext(nb=nb), w["passing"][0])
+    assert other["note"].get("understood_differently") is None
+
+
+def test_a_name_given_to_an_existing_entry_reaches_the_other_by_its_name(nb):
+    """Without a newly created entry (an existing one is reused and given the hub's name as an alias) there is no
+    close-match event; the exact-key match still reaches the other entry's notes through the name signal of the
+    revision that gave the name. MUTATION: name_signal never true."""
+    clock = Clock()
+    a = note(nb, clock, "Zorn is a company.", day(20), [("m1", "Zorn", "org")], [stmt("m1", "ex:is_a", "company")])
+    z = eid(nb, "Zorn")
+    q = note(nb, clock, "Quill is a lab.", day(21), [("m1", "Quill", "org")], [stmt("m1", "ex:is_a", "lab")])
+    settle(nb)
+    qid = eid(nb, "Quill")
+    from test_reinterpret import cand, ml
+
+    def reuse_with_alias(packet: Dict[str, Any], cands: Dict[str, Any]) -> Dict[str, Any]:
+        return {"mentions": [ml("m1", "reuse", cand(cands, "m1", qid), aliases=["Zorn"], summary=None)],
+                "claims": [], "tasks": [], "revision_summary": "test"}
+
+    x = run(nb, "Quill, once called Zorn, was a lab.", day(5),
+            extraction([mention("m1", "Quill", "org", aliases=["Zorn"])], [stmt("m1", "ex:was", "a lab", literal=True)]),
+            reuse_with_alias, now=clock.next())
+    assert nb.store.q1("SELECT 1 FROM entity_aliases WHERE entity_id=? AND alias_key='zorn'", (qid,)) is not None
+    assert not act.identity_events(nb.store.conn, x["out"]["revision_id"], prop._canon_map(nb.store.conn))
+    [d] = [d for d in act.decisions_of(nb.store, a["note_id"]) if d["revision_id"] == x["out"]["revision_id"]]
+    [src] = [s for s in d["sources"] if s["via"] == z and s["entity_id"] == qid]
+    assert src["signal"] == "name" and src["strength"] > 0 and d["marked"]
+    assert {a["note_id"], q["note_id"]} <= set(pending(nb))

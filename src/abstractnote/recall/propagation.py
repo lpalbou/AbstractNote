@@ -79,6 +79,11 @@ class PropagationTuning:
       6 % of its statements, and neither reading changed the entity concept (which 15-20 notes rest on): had one of
       them changed its kind, the gate would mark 9 (0 watch-app). Not yet calibrated on live re-readings (H0-style:
       the share of noise-induced marks) nor on labelled outcomes: conductance learning is the in-use correction.
+    - Identity in question (lead ruling, 2026-10-21): an exact-name close match from a new entry is a K-class event on
+      the existing entity, strength 8 / mass ** 0.5 unclamped, IDENTITY_RELIANCE_FLOOR 0.1 for a note with a
+      statement about it (the project Mnemosyne's notes rely on it for 0.1-4.4 % of their statements; without the
+      floor none would cross, with it 5 of 6 do and a 128-note hub's notes need >= 19 %). Replay with it: 15 + 2
+      marked (5 Mnemosyne, 10 "GitHub" via the archive's "GitHub service" (5 watch-app), Key_Moments.md, 1 "claude").
     """
 
     DEEP_SUMMARY_DISTANCE: float = 0.56   # d at or above: deep (H0: noise-proxy p95 0.511 + 0.05; design 0.40)
@@ -107,6 +112,7 @@ class PropagationTuning:
     MIN_CONTRIBUTION: float = 0.01        # a propagated contribution under it is counted, not recorded
     CONDUCTANCE_MIN: float = 0.25         # an edge never conducts less (never silenced)
     CONDUCTANCE_STEP: float = 0.25        # per re-reading: + when it changed something, - when unchanged
+    IDENTITY_RELIANCE_FLOOR: float = 0.1  # identity in question: a note with a statement on the idea relies >= this
 
     def __post_init__(self) -> None:
         def bad(why: str) -> None:
@@ -143,6 +149,8 @@ class PropagationTuning:
                 bad(f"{name} must be in (0, 1]")
         if not self.RECENCY_NOTES > 0 or not 0.0 <= self.MIN_CONTRIBUTION < self.PROPAGATION_FLOOR:
             bad("RECENCY_NOTES must be positive and 0 <= MIN_CONTRIBUTION < PROPAGATION_FLOOR")
+        if not 0.0 <= self.IDENTITY_RELIANCE_FLOOR <= 1.0:
+            bad("IDENTITY_RELIANCE_FLOOR must be in [0, 1]")
         if not 0.0 < self.CONDUCTANCE_MIN <= 1.0 or not 0.0 < self.CONDUCTANCE_STEP <= 1.0:
             bad("CONDUCTANCE_MIN and CONDUCTANCE_STEP must be in (0, 1]")
 
@@ -590,6 +598,11 @@ def propagate(nb: Any, rid: str, tuning: PropagationTuning = TUNING) -> Dict[str
         marked_by = s.conn.execute("SELECT COUNT(*) FROM reinterpret_marks WHERE note_id=? AND consumed_at IS NULL",
                                    (rev["note_id"],)).fetchone()[0]
     records = measure(nb, rid, tuning)
+    from .activation import identity_events, with_identity
+
+    with s.lock:  # an exact-name close match from an entry this re-reading created: identity in question
+        records = list(with_identity({r["entity_id"]: r for r in records},
+                                     identity_events(s.conn, rid, _canon_map(s.conn))).values())
     note = s.note_row(rev["note_id"])
     now = ids.utc_now()
     with s.tx() as c:
@@ -681,7 +694,7 @@ def understood_differently(nb: Any, note_id: str) -> Tuple[List[Dict[str, Any]],
     s = nb.store
     row = s.note_row(note_id)
     pairs = related_sources(s, note_id)
-    if row is None or not pairs:
+    if row is None:
         return [], {}
     as_of = row["occurred_at"]
     cur = s.current_interpretation(note_id)
@@ -691,6 +704,11 @@ def understood_differently(nb: Any, note_id: str) -> Tuple[List[Dict[str, Any]],
         seen = ctx.get("summaries") or {}
     blocks: List[Dict[str, Any]] = []
     related: Dict[str, Any] = {}
+    from .activation import identity_blocks
+
+    ident = identity_blocks(s, note_id)  # an exact-name close match marked it: both cards, the model decides
+    if not pairs and not ident:
+        return [], {}
     for eid, rid in pairs:
         related[eid] = related_state(s, eid, as_of)
         if len(blocks) >= CHANGED_SOURCES:
@@ -726,6 +744,11 @@ def understood_differently(nb: Any, note_id: str) -> Tuple[List[Dict[str, Any]],
                        "omitted": len(lines_old) + len(lines_new) - len(keep_old) - len(keep_new)})
     if len(pairs) > CHANGED_SOURCES:
         blocks.append({"more_sources": len(pairs) - CHANGED_SOURCES})
+    for b in ident[:CHANGED_SOURCES]:
+        blocks.append({"entity_id": b["entity_id"], "name": b["name"], "kind": b["kind"], "summary_now": b["summary"],
+                       "summary_before": None, "no_longer": [], "now": [], "omitted": 0, "same_name": b["same_name"]})
+    if len(ident) > CHANGED_SOURCES:
+        blocks.append({"more_sources": len(ident) - CHANGED_SOURCES})
     return blocks, related
 
 

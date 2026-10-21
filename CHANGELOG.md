@@ -30,10 +30,14 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
   that arrives with an earlier date no longer sends every later note that shares a person, a project or a word with
   it back to be understood again. What it changed about each idea is measured, weighed against how much the notebook
   already knew about that idea and how much each later note rests on it, and added up; only the notes it moves
-  enough are read again (on the evaluation notebook, two archive notes that sent 790 notes back now send 1). Several
+  enough are read again (on the evaluation notebook, two archive notes that sent 790 notes back now send 17). Several
   small changes still add up. Before a consolidation runs, the Processing page says what changed and how many more
   may follow: "12 notes to understand again (3 sources: Zorn changed its kind, Mira is described differently and 1
   more; at most 4 more may follow)". A link that keeps bringing nothing new counts less next time, never zero.
+  When an earlier note brings a new entry with the exact name of one you already have (kept apart, for review), the
+  notes that say something about the existing one are read again with both shown side by side, so each is linked to
+  the right one; a well-known one is reread only where a note rests on it. Confirming the two are the same joins
+  them; keeping them apart stops those re-readings.
 - **A document's own date wins over its file's date**: the date a document states about itself now beats the
   file's metadata (its modification time, a photo's or a PDF's creation date), which beats the time the file was
   sent; the answer says which won and what lost ("Dated 5 March 2025 from the document; the file itself is from 20

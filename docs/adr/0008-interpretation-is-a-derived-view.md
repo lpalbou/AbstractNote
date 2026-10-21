@@ -58,8 +58,11 @@ a drain is understood twice, and the structured-output lane corrupts one link an
    reaches the floor. Every decision is recorded with its potential (`gate_decisions`); edges learn their
    conductance from the re-readings they caused, within bounds. Until this amendment every candidate was marked:
    on the operator's 1,000-note notebook two archive notes marked 790 later notes that only shared hubs or names
-   with them (2026-10-21; untracked/reports/R7.md). A person's re-date, archive, retraction or confirmed join
-   still marks directly. Notes earlier than t are never affected (their context excludes later
+   with them (2026-10-21; untracked/reports/R7.md). An exact-name or exact-alias close match from a newly created
+   entry to an existing one is an "identity in question" change on the EXISTING entity (kind-class, its mass), its
+   notes re-read with both entries shown; confirming the match merges and marks like a merge, keeping them apart
+   clears it (lead ruling 2026-10-21). A person's re-date, archive, retraction or confirmed join still marks
+   directly. Notes earlier than t are never affected (their context excludes later
    knowledge); two notes with the same date are ordered by their received time. A person's re-date or
    archive of a note marks dependents forward from the earlier of the old and the new date. A pass
    re-understands marked notes in ascending date, each once; a re-interpretation may mark later notes

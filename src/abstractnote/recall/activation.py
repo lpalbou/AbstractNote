@@ -43,6 +43,7 @@ from .propagation import (TUNING, PropagationTuning, _canon_map, _cosine, _membe
 
 #: The signal that dominates a source's strength, in end-user words (the Processing page: "X changed its kind").
 SIGNAL_WORDS = {"kind": "changed its kind", "name": "shares its name with a new entry",
+                "identity": "shares its exact name with a new entry",
                 "summary": "is described differently", "claims": "has new or changed statements",
                 "relations": "has new or changed relations", "task": "opened a task a later note closed"}
 
@@ -119,6 +120,49 @@ def name_signal(ops: Sequence[Dict[str, Any]], eid: str, canon: Dict[str, str]) 
     return False
 
 
+#: The predicate of a close match kept for review (process/revise.py ``CLOSE_MATCH``): a statement from a new entry to
+#: an existing one whose name or alias it matches exactly; review only, never meaning, so no change counts it.
+CLOSE_MATCH = "skos:closeMatch"
+
+
+def identity_events(c: Any, rid: str, canon: Dict[str, str]) -> Dict[str, List[str]]:
+    """``{existing entity: [new entries]}``: the exact-name or exact-alias close matches revision ``rid`` recorded
+    from an entry it CREATED to one that already existed (lead ruling 2026-10-21 on the Mnemosyne run: an
+    "identity in question" change event on the EXISTING entity, K-class, decided per later note by the reader)."""
+    rev = c.execute("SELECT ops_json FROM revisions WHERE revision_id=?", (rid,)).fetchone()
+    ops = json.loads(rev[0] or "[]") if rev is not None else []
+    created = {op["payload"]["entity_id"] for op in ops if op.get("op") == "entity.create"}
+    out: Dict[str, List[str]] = {}
+    for op in ops:
+        p = op.get("payload") or {}
+        if op.get("op") != "claim.add" or p.get("predicate") != CLOSE_MATCH or not p.get("object_id"):
+            continue
+        e, x = p["subject_id"], p["object_id"]
+        if e not in created or x in created:
+            continue
+        e, x = canon.get(e, e), canon.get(x, x)
+        if e != x and e not in out.setdefault(x, []):
+            out[x].append(e)
+    return out
+
+
+def with_identity(records: Dict[str, Dict[str, Any]], events: Dict[str, List[str]]) -> Dict[str, Dict[str, Any]]:
+    """Add the identity events to change records: the existing entity's record gets ``identity_with`` (the new
+    entries), ``kind_base`` (its own K) and ``kind_change`` 1 (the change record says its identity is in question)."""
+    for x, es in events.items():
+        r = records.setdefault(x, {"entity_id": x, "kind_change": 0.0, "summary_distance": None, "summary_basis": "none",
+                                   "summary_signal": 0.0, "claim_share": 0.0, "relation_share": 0.0,
+                                   "support_claims": 0, "support_relations": 0, "magnitude": 0.0, "deep": False,
+                                   "summary_only": False})
+        r["kind_base"] = float(r.get("kind_base", r.get("kind_change") or 0.0))
+        r["identity_with"] = sorted(set(r.get("identity_with") or []) | set(es))
+        r["kind_change"] = 1.0
+        r["magnitude"] = 1.0
+        r["deep"] = True
+        r["summary_only"] = False
+    return records
+
+
 def measure_first(nb: Any, rid: str, entities: Iterable[str], tuning: PropagationTuning = TUNING
                   ) -> Dict[str, Dict[str, Any]]:
     """The change records of a FIRST reading ``rid`` for ``entities`` (canonical ids), as of the revision itself
@@ -153,7 +197,8 @@ def measure_first(nb: Any, rid: str, entities: Iterable[str], tuning: Propagatio
             claims = c.execute(
                 f"SELECT cl.*, v.seq AS rseq, (SELECT v2.seq FROM revisions v2 WHERE v2.revision_id="
                 f"cl.closed_revision_id) AS cseq FROM claims cl JOIN revisions v ON v.revision_id=cl.revision_id WHERE"
-                f" (cl.subject_id IN ({q}) OR cl.object_id IN ({q})) AND v.seq<=?", [*mem, *mem, seq]).fetchall()
+                f" (cl.subject_id IN ({q}) OR cl.object_id IN ({q})) AND v.seq<=? AND cl.predicate!=?",
+                [*mem, *mem, seq, CLOSE_MATCH]).fetchall()
 
             def live_at(r: Any) -> bool:  # said something at the revision (a later closure had not happened yet)
                 if r["status"] in ("retracted", "reinterpreted") and (r["cseq"] is None or r["cseq"] <= seq):
@@ -218,7 +263,8 @@ def measure_first(nb: Any, rid: str, entities: Iterable[str], tuning: Propagatio
         r["deep"] = bool(structural or summary_deep)
         r["summary_only"] = bool(s_norm > 0 and r["kind_change"] == 0 and r["claim_share"] == 0
                                  and r["relation_share"] == 0)
-    return rows
+    with s.lock:
+        return with_identity(rows, identity_events(s.conn, rid, _canon_map(s.conn)))
 
 
 class _Reader:
@@ -263,6 +309,10 @@ class _Reader:
         den = len(st) + m * len(ms)
         return min(1.0, num / den) if den > 0 else 0.0
 
+    def has_statement(self, note_id: str, eid: str) -> bool:
+        st, _ms = self.note(note_id)
+        return any(s == eid or o == eid for s, o in st)
+
     def users(self, eid: str) -> List[Tuple[str, str, str]]:
         if eid not in self._users:
             mem = _members(self.canon, eid)
@@ -306,7 +356,24 @@ def contributions(rd: _Reader, row: Dict[str, Any], records: Dict[str, Dict[str,
     nid = row["note_id"]
     out: List[Dict[str, Any]] = []
     for x, sources in sorted((row.get("via") or {}).items()):
+        ident = list((records.get(x) or {}).get("identity_with") or [])
+        if ident:  # identity in question (an exact-name close match from a new entry): K-class on X, X's mass
+            mass = masses.get(x, 1.0)
+            raw = t.WEIGHT_KIND
+            st = raw / max(1.0, mass) ** t.MASS_ALPHA  # not clamped: a thin idea's identity weighs on every reference
+            rel = rd.reliance(nid, x)
+            if rd.has_statement(nid, x):
+                rel = max(rel, t.IDENTITY_RELIANCE_FLOOR)
+            rec_f, between = rd.recency(x, after, nid)
+            cond = rd.conductance(x, nid)
+            val = factor * min(st, cap) * rel * rec_f * cond
+            out.append({"entity_id": ident[0], "via": x, "signal": "identity", "identity_with": ident,
+                        "raw": round(raw, 4), "mass": mass, "strength": round(st, 4), "reliance": round(rel, 4),
+                        "recency": round(rec_f, 4), "between": between, "conductance": round(cond, 4),
+                        "change": {"kind_change": 1.0, "identity": True}, "contribution": round(val, 6)})
         for e in sorted(set(sources)):
+            if e in ident:
+                continue  # counted once, on X's identity event
             src: Dict[str, Any] = {"entity_id": e, "via": x}
             if x != e:  # reached by name: only a new name on E puts X's identity in question
                 sig = 1.0 if name_signal(ops, e, rd.canon) else 0.0
@@ -316,6 +383,8 @@ def contributions(rd: _Reader, row: Dict[str, Any], records: Dict[str, Dict[str,
                 src.update({"signal": "name" if sig else "none", "raw": round(raw, 4), "mass": mass})
             else:
                 rec = records.get(e) or {}
+                if ident:  # its identity is counted above; here only its own change
+                    rec = {**rec, "kind_change": rec.get("kind_base", 0.0)}
                 mass = masses.get(e, 1.0)
                 raw, st, top = strength(rec, mass, t)
                 only_summary = float(rec.get("summary_signal") or 0) > 0 and not any(
@@ -363,7 +432,7 @@ def decide(nb: Any, c: Any, rid: str, records: Dict[str, Dict[str, Any]], *, fac
     masses: Dict[str, float] = {}
     for row in rows:
         for x, es in (row.get("via") or {}).items():
-            for e in [x, *es]:
+            for e in [x, *es, *((records.get(x) or {}).get("identity_with") or [])]:
                 if e not in masses:
                     masses[e] = 1.0 + support_notes(c, canon, e, seq, exclude=[note["note_id"]])
     now = ids.utc_now()
@@ -443,7 +512,7 @@ def gate_first_reading(nb: Any, rid: str, tuning: PropagationTuning = TUNING) ->
     with s.tx() as c:
         rev = c.execute("SELECT * FROM revisions WHERE revision_id=?", (rid,)).fetchone()
         note = c.execute("SELECT * FROM notes WHERE note_id=?", (rev["note_id"],)).fetchone()
-        res = decide(nb, c, rid, records, factor=1.0, cap=1.0, hops=0, pass_id=None, tuning=tuning)
+        res = decide(nb, c, rid, records, factor=1.0, cap=math.inf, hops=0, pass_id=None, tuning=tuning)
         canon = _canon_map(c)
         masses = {e: 1.0 + support_notes(c, canon, e, int(rev["seq"]), exclude=[note["note_id"]]) for e in records}
         record_changes(c, rid, note, records, masses, getattr(nb.cache, "model_id", None), tuning)
@@ -486,6 +555,71 @@ def close_window(c: Any, note_id: str, outcome: str, at: str, tuning: Propagatio
         c.execute(f"UPDATE gate_decisions SET closed_at=?, outcome=? WHERE decision_id IN ({_qs(len(rows))})",
                   [at, outcome, *[r["decision_id"] for r in rows]])
     return len(rows)
+
+
+def clear_identity(c: Any, store: Any, new_id: str, existing_id: str, at: str,
+                   tuning: PropagationTuning = TUNING) -> Dict[str, Any]:
+    """A person kept the two entries apart (the close match retracted, "keep apart" in /review): the identity event
+    of ``existing_id`` raised by ``new_id`` is cleared. Its share leaves every open row (the source stays on record,
+    ``cleared_at``), and a note it marked whose remaining potential no longer reaches the floor is not read for it:
+    its waiting mark from those readings is consumed ``cleared``. Returns ``{rows, cleared_marks}``."""
+    new_id, existing_id = store.canonical(new_id, c), store.canonical(existing_id, c)
+    rows = c.execute("SELECT * FROM gate_decisions WHERE closed_at IS NULL AND decided_at IS NOT NULL AND"
+                     " sources_json LIKE '%\"identity\"%'").fetchall()
+    touched: Dict[str, Set[str]] = {}
+    n = 0
+    for r in rows:
+        srcs = json.loads(r["sources_json"] or "[]")
+        cut = 0.0
+        for src in srcs:
+            if src.get("signal") == "identity" and not src.get("cleared_at") and src.get("via") == existing_id and \
+                    new_id in (src.get("identity_with") or [src.get("entity_id")]):
+                src["cleared_at"] = at
+                cut += float(src.get("contribution") or 0.0)
+        if not cut:
+            continue
+        n += 1
+        c.execute("UPDATE gate_decisions SET contribution=?, sources_json=? WHERE decision_id=?",
+                  (round(max(0.0, float(r["contribution"] or 0.0) - cut), 6), json.dumps(srcs, sort_keys=True),
+                   r["decision_id"]))
+        touched.setdefault(r["note_id"], set()).add(r["revision_id"])
+    cleared = 0
+    for nid, revs in sorted(touched.items()):
+        if logistic(_open_potential(c, nid), tuning) >= tuning.PROPAGATION_FLOOR:
+            continue  # other changes still reach it
+        q = _qs(len(revs))
+        cur = c.execute(f"UPDATE reinterpret_marks SET consumed_at=?, outcome='cleared', pass_id=COALESCE(pass_id,"
+                        f" 'cleared'), taken_at=COALESCE(taken_at, ?) WHERE note_id=? AND consumed_at IS NULL AND"
+                        f" pass_id IS NULL AND reason_code='direct' AND by_revision_id IN ({q})",
+                        [at, at, nid, *sorted(revs)])
+        cleared += int(cur.rowcount or 0)
+        c.execute("UPDATE gate_decisions SET marked=0 WHERE note_id=? AND closed_at IS NULL AND revision_id IN"
+                  f" ({q})", [nid, *sorted(revs)])
+    return {"rows": n, "cleared_marks": cleared}
+
+
+def identity_blocks(store: Any, note_id: str) -> List[Dict[str, Any]]:
+    """For the re-reading packet: the identity events that marked this note (not cleared), as both cards:
+    ``[{entity_id, name, kind, summary, same_name: [{entity_id, name, kind, summary}]}]``."""
+    seen: Dict[str, Set[str]] = {}
+    for r in store.q("SELECT sources_json FROM gate_decisions WHERE note_id=? AND closed_at IS NULL AND marked=1 AND"
+                     " sources_json LIKE '%\"identity\"%' ORDER BY decision_id", (note_id,)):
+        for src in json.loads(r[0] or "[]"):
+            if src.get("signal") == "identity" and not src.get("cleared_at") and float(src.get("contribution") or 0):
+                seen.setdefault(src["via"], set()).update(src.get("identity_with") or [src.get("entity_id")])
+
+    def card(eid: str) -> Dict[str, Any]:
+        e = store.entity_row(eid)
+        cur = store.current_summary_row(eid)
+        return {"entity_id": eid, "name": (e["display_name"] or e["name"]) if e is not None else eid,
+                "kind": e["kind"] if e is not None else "thing", "summary": cur["summary"] if cur is not None else None}
+
+    out = []
+    for x, es in sorted(seen.items()):
+        live = [e for e in sorted(es) if store.canonical(e) != store.canonical(x)]  # joined since: nothing to decide
+        if live:
+            out.append({**card(x), "same_name": [card(e) for e in live]})
+    return out
 
 
 def gate_state(nb: Any, tuning: PropagationTuning = TUNING) -> Dict[str, Any]:
@@ -548,6 +682,7 @@ def decisions_of(store: Any, note_id: str) -> List[Dict[str, Any]]:
     return out
 
 
-__all__ = ["SIGNAL_WORDS", "close_window", "contributions", "decide", "decisions_of", "gate_first_reading",
+__all__ = ["CLOSE_MATCH", "SIGNAL_WORDS", "clear_identity", "close_window", "identity_blocks", "identity_events",
+           "with_identity", "contributions", "decide", "decisions_of", "gate_first_reading",
            "gate_state", "logistic", "loop_gain", "measure_first", "name_signal", "record_changes", "strength",
            "support_notes", "threshold"]

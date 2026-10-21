@@ -637,7 +637,19 @@ after the projection of the reading that made it a candidate (`Notebook._gate` f
   little, a hub needs more: a statement added to an entity with 30 supporting notes is under the floor, the same on a
   one-note idea is not, and a kind change (8) dominates whatever the mass. A candidate reached through a name it
   shares with E (the exact-key match) gets `WEIGHT_KIND / mass(X) ** MASS_ALPHA` when this reading created E,
-  aliased it or renamed it (a new idea answers to X's name: X's identity is in question), nothing otherwise.
+  aliased it or renamed it (a new idea answers to X's name), nothing otherwise.
+- **Identity in question** (lead ruling 2026-10-21, the Mnemosyne run): an exact-name or exact-alias close match a
+  reading records from an entry it CREATED to one that already existed (the `skos:closeMatch` review item) is a
+  change event on the EXISTING entity: its change record has `kind_change` 1 (K-class) and the gate's source
+  `signal` `identity` with `identity_with` = the new entries. Its strength is `WEIGHT_KIND / mass(X) ** MASS_ALPHA`
+  without the clamp (a 6-note idea: 3.0; a 128-note hub: 0.70), and the reliance of a note that states something
+  about X is at least `IDENTITY_RELIANCE_FLOOR` (every statement about X may be about the other entry): a thin idea's
+  notes are re-read when they say anything about it, a hub's only when they rest on it. The close match's own
+  statement is review, never a change (it counts in no C or R). The re-reading packet shows both cards ("another
+  entry with this exact name exists: <name> — <kind>: <summary>"), so the reader decides per note. In review,
+  "confirm" merges the new entry into the existing one and marks like a merge; "keep apart" (retracting the close
+  match) clears the event: its share leaves the open rows (`cleared_at` on the source, kept), the notes it alone
+  marked are consumed `cleared`, and nothing is marked forward (no meaning changed).
 - **Reliance** of the later note N on the entity X it used: `(sum over N's own statements and the statements it
   repeated of 1 when X is the subject, STATEMENT_OBJECT_WEIGHT when it is the object, + MENTION_WEIGHT if N mentions
   X) / (N's statements + MENTION_WEIGHT x N's mentions)`: claims weigh ten times a bare mention, so a 100-statement
@@ -676,12 +688,15 @@ after the projection of the reading that made it a candidate (`Notebook._gate` f
 | `TASK_MATCH` | 1 | a task the earlier note opened and the later one closed |
 | `MIN_CONTRIBUTION` | 0.01 | a propagated contribution under it is counted, not recorded |
 | `CONDUCTANCE_MIN` / `CONDUCTANCE_STEP` | 0.25 / 0.25 | the conductance's floor and step |
+| `IDENTITY_RELIANCE_FLOOR` | 0.1 | the least reliance of a note with a statement about an idea whose identity is in question |
 
 - **Measured on the incident** (untracked/reports/R7.md, offline replay on a copy of the mnemo notebook, no model):
   the two archive notes' first readings had 637 and 605 candidates (R2's rule marked 634 and 10, the rest already
-  held a mark); the gate at these constants marks 0 and 1 (Key_Moments.md itself, by Self_Model.md), and none of
-  the 72 watch-app notes (51 of them were marked directly in the incident). θ x 0.8 would mark 23 + 3 (9 of them
-  watch-app notes: reader noise such as "Core" and "README.md" redescribed); θ x 1.2: 0 + 1.
+  held a mark). With the identity events the gate marks 15 and 2: 5 of the 6 notes of the project "Mnemosyne" (the
+  archive's person "Mnemosyne incarnation" has its exact alias; the sixth only names it), 10 notes of "GitHub" (the
+  archive created "GitHub service" with that alias: 5 of them are watch-app notes; "keep apart" in review clears
+  them), Key_Moments.md itself and one note of "claude" ("Claude AI participant"). Without the identity events it
+  marked 0 and 1. θ x 0.8: 29 + 3; θ x 1.2: 5 + 2.
 - **Upgrade** (schema 5): `gate_decisions` and `edge_conductance` are created empty, `idea_changes` gains
   `support_notes` and `strength`; marks written before stay as they were (a waiting mark from before the gate is
   read like before).

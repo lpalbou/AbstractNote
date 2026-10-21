@@ -2639,6 +2639,14 @@ class _OpContext:
                 forward(n[0], self.s.used_by(c, note_id)["entity"], why, exclude=[note_id], code=SOURCE_UNARCHIVED)
                 self._mark_repeaters(marks, note_id, n[0], "reopen", why, SOURCE_UNARCHIVED)
             for row in self.adr8["retracted"] if action == "claim.retract" else []:
+                if row["predicate"] == "skos:closeMatch" and row["object_id"]:
+                    # "keep apart" in review: no meaning changed, the identity event it raised is cleared
+                    # (AbstractMemory ADR 0001 rule 7; lead ruling 2026-10-21)
+                    from ..recall.activation import clear_identity
+
+                    self.stats["identity_cleared"] = clear_identity(c, self.s, row["subject_id"], row["object_id"],
+                                                                    self.recorded_at)
+                    continue
                 forward(row["observed_at"], [x for x in (row["subject_id"], row["object_id"]) if x],
                         "A statement it builds on was withdrawn.")
             for a, b, how in self.adr8["paired"]:

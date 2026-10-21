@@ -550,9 +550,14 @@ open on that candidate. The sum goes through a logistic gate (`k = 6`, `θ = 0.5
 gate reaches 0.1 (a potential of 0.134). Every decision is recorded (`gate_decisions`) with its potential, gate and
 sources, and `GET /note/consolidation` shows the candidates, the notes marked, the sources and how many `θ x 0.8` or
 `θ x 1.2` would mark, so the dials are tuned from the record. When a marked note is read again, the edge that marked
-it conducts a quarter less if nothing changed and a quarter more if something did (never under 0.25). On the
-operator's 1,000-note notebook the two Mnemosyne archive notes that marked 790 notes directly mark 1 through the gate
-(untracked/reports/R7.md).
+it conducts a quarter less if nothing changed and a quarter more if something did (never under 0.25). A new entry
+created apart from an existing one whose exact name or alias it carries (a close match kept for review) puts the
+existing one's identity in question: a kind-class change on it, divided by its mass, so the notes that say anything
+about a thin idea are read again with both entries shown side by side ("another entry with this exact name exists:
+..."), a hub's only when they rest on it; confirming the two the same in review merges them, keeping them apart
+clears it. On the
+operator's 1,000-note notebook the two Mnemosyne archive notes that marked 790 notes directly mark 17 through the gate,
+5 of them the notes of the project Mnemosyne (untracked/reports/R7.md).
 
 A statement the PERSON retracted (`Notebook.retract_claim`) is no previous statement to keep (W31, INT3): it is
 listed apart under "withdrawn by you — do not restate (you said these are wrong):", with no P number (so
