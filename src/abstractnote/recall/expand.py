@@ -74,9 +74,9 @@ def entity_card(nb: Any, entity_id: str, at: Optional[str] = None, as_received: 
             mrow = s.entity_row(m)
             names.append(mrow["display_name"] or mrow["name"])
     aliases = distinct_names(names, exclude=[name])  # one per canonical name, never the entity's own
-    history = [{"at": r["at"], "summary": r["summary"], "note_id": r["note_id"], "revision_id": r["revision_id"]}
-               for r in s.q(f"SELECT * FROM entity_summaries WHERE entity_id IN ({q}) AND at<=? ORDER BY at, revision_id",
-                            [*members, ref])]
+    # dated knowledge order (store.notes.SUMMARY_ORDER): the date each summary describes, then the revision log
+    history = [{"at": r["at"], "summary": r["summary"], "note_id": r["note_id"], "revision_id": r["revision_id"],
+                "recorded_at": r["recorded_at"]} for r in s.summary_rows(members, at=ref)]
     summary = history[-1]["summary"] if history else (row["summary"] if at_n is None else None)
     notes = s.q(f"SELECT DISTINCT n.* FROM entity_notes en JOIN notes n ON n.note_id=en.note_id WHERE en.entity_id IN"
                 f" ({q}) AND en.at<=? AND n.archived_at IS NULL ORDER BY n.occurred_at DESC LIMIT ?",
@@ -102,7 +102,42 @@ def entity_card(nb: Any, entity_id: str, at: Optional[str] = None, as_received: 
         "notes": [shapes.note_ref(r) for r in notes],
         "open_tasks": [shapes.task(r) | {"status": "open", "closed_at": None} for r in tasks],
         "sparkline": [{"month": k, "notes": v} for k, v in months.items()],
+        "retired": retirement(nb, eid) if at_n is None else None,
     }
+
+
+def retirement(nb: Any, entity_id: str) -> Optional[Dict[str, Any]]:
+    """What retired this entry (ADR 0008 ``entity.retire``), or None when it is not retired: ``{at, revision_id,
+    note_id, note_title, reason, into: [{entity_id, name}], sentence}``. ``into`` are the entries the new reading of
+    the note uses for the words that made it; the sentence says it in one line for its page."""
+    from ..ingest.dates import long_day
+
+    s = nb.store
+    row = s.entity_row(entity_id)
+    if row is None or not row["retired_revision_id"]:
+        return None
+    rev = s.q1("SELECT * FROM revisions WHERE revision_id=?", (row["retired_revision_id"],))
+    op = next((o.get("payload") or {} for o in (_uj(rev["ops_json"], []) if rev is not None else []) or []
+               if o.get("op") == "entity.retire" and (o.get("payload") or {}).get("entity_id") == entity_id), {})
+    note = s.note_row(rev["note_id"]) if rev is not None and rev["note_id"] else None
+    title = (note["title"] or shapes.excerpt(note["text"], 80)) if note is not None else None
+    into = []
+    for x in op.get("read_as") or []:
+        b = s.entity_brief(s.canonical(x))
+        if b is not None and not b["retired"] and all(i["entity_id"] != b["entity_id"] for i in into):
+            into.append({"entity_id": b["entity_id"], "name": b["display_name"]})
+    when = rev["recorded_at"] if rev is not None else row["retired_at"]  # when the notebook withdrew it
+    day = long_day(when) if when else None
+    where = f"the note “{title}”" if title else "a note"
+    if into:
+        names = ", ".join(i["name"] for i in into[:-1]) + (" and " if len(into) > 1 else "") + into[-1]["name"]
+        sentence = f"Retired{f' on {day}' if day else ''}: {where} was understood again and now reads it as {names}."
+    else:
+        sentence = (f"Retired{f' on {day}' if day else ''}: only an earlier reading of {where} made it, and nothing"
+                    " refers to it any more.")
+    return {"at": row["retired_at"], "revision_id": row["retired_revision_id"],
+            "note_id": rev["note_id"] if rev is not None else None, "note_title": title,
+            "reason": op.get("reason"), "into": into, "sentence": sentence}
 
 
 def _archive_card(nb: Any, arch: Any, entity_id: str, at_n: Optional[str]) -> Dict[str, Any]:
@@ -117,9 +152,10 @@ def _archive_card(nb: Any, arch: Any, entity_id: str, at_n: Optional[str]) -> Di
     ref = at_n or "9999-12-31T23:59:59Z"
     q = ",".join("?" for _ in members)
     in_rev, p_rev = arch.revisions_in("revision_id")
-    in_note, p_note = arch.notes_in("en.note_id")
-    stats = s.q1(f"SELECT MIN(en.at), MAX(en.at), COUNT(DISTINCT en.note_id) FROM entity_notes en WHERE en.entity_id"
-                 f" IN ({q}) AND en.at<=? AND {in_note}", [*members, ref, *p_note])
+    # the mentions as the archive held them (ADR 0008: with those a later re-understanding soft-removed)
+    held_sql, p_held = arch.mentions_sql()
+    stats = s.q1(f"SELECT MIN(en.at), MAX(en.at), COUNT(DISTINCT en.note_id) FROM ({held_sql}) en WHERE en.entity_id"
+                 f" IN ({q}) AND en.at<=?", [*p_held, *members, ref])
     created = s.q1(f"SELECT MIN(created_at) FROM entities WHERE entity_id IN ({q}) AND"
                    f" {arch.revisions_in('created_revision_id')[0]}", [*members, arch.at])[0]
     first = min([x for x in (stats[0], created) if x], default=None)
@@ -134,23 +170,25 @@ def _archive_card(nb: Any, arch: Any, entity_id: str, at_n: Optional[str]) -> Di
             mrow = s.entity_row(m)
             names.append(mrow["display_name"] or arch.name(m, at_n) or mrow["name"])
     aliases = distinct_names(names, exclude=[name])
-    history = [{"at": r["at"], "summary": r["summary"], "note_id": r["note_id"], "revision_id": r["revision_id"]}
-               for r in s.q(f"SELECT * FROM entity_summaries WHERE entity_id IN ({q}) AND at<=? AND {in_rev}"
-                            " ORDER BY at, revision_id", [*members, ref, *p_rev])]
-    notes = s.q(f"SELECT DISTINCT n.* FROM entity_notes en JOIN notes n ON n.note_id=en.note_id WHERE en.entity_id IN"
-                f" ({q}) AND en.at<=? AND n.archived_at IS NULL AND {in_note} ORDER BY n.occurred_at DESC LIMIT ?",
-                [*members, ref, *p_note, CARD_NOTES])
+    in_srev, p_srev = arch.revisions_in("s.revision_id")
+    history = [{"at": r["at"], "summary": r["summary"], "note_id": r["note_id"], "revision_id": r["revision_id"],
+                "recorded_at": r["recorded_at"]}
+               for r in s.summary_rows(members, at=ref, where=in_srev, params=p_srev,
+                                       superseded_within=arch.revisions_in("r2.revision_id"))]
+    notes = s.q(f"SELECT DISTINCT n.* FROM ({held_sql}) en JOIN notes n ON n.note_id=en.note_id WHERE en.entity_id IN"
+                f" ({q}) AND en.at<=? AND n.archived_at IS NULL ORDER BY n.occurred_at DESC LIMIT ?",
+                [*p_held, *members, ref, CARD_NOTES])
     opened, p_open = arch.revisions_in("t.opened_revision_id")
     tasks = []
-    for r in s.q(f"SELECT t.* FROM tasks t WHERE t.note_id IN (SELECT en.note_id FROM entity_notes en WHERE"
+    for r in s.q(f"SELECT t.* FROM tasks t WHERE t.note_id IN (SELECT en.note_id FROM ({held_sql}) en WHERE"
                  f" en.entity_id IN ({q})) AND t.opened_at<=? AND {opened} ORDER BY t.opened_at",
-                 [*members, ref, *p_open]):
+                 [*p_held, *members, ref, *p_open]):
         closed = r["closed_at"] is not None and arch.has(r["closed_revision_id"]) and r["closed_at"] <= ref
         if not closed:
             tasks.append(shapes.task(r) | {"status": "open", "closed_at": None})
     months: Dict[str, int] = {}
-    for r in s.q(f"SELECT substr(en.at,1,7), COUNT(DISTINCT en.note_id) FROM entity_notes en WHERE en.entity_id IN"
-                 f" ({q}) AND en.at<=? AND {in_note} GROUP BY substr(en.at,1,7) ORDER BY 1", [*members, ref, *p_note]):
+    for r in s.q(f"SELECT substr(en.at,1,7), COUNT(DISTINCT en.note_id) FROM ({held_sql}) en WHERE en.entity_id IN"
+                 f" ({q}) AND en.at<=? GROUP BY substr(en.at,1,7) ORDER BY 1", [*p_held, *members, ref]):
         months[r[0]] = r[1]
     return {
         "entity_id": eid, "resolved_from": entity_id if entity_id != eid else None, "as_of": at_n,
@@ -355,9 +393,8 @@ def _entity_line(nb: Any, eid: str, at: Optional[str], focus: bool) -> Optional[
     ref = at or "9999-12-31T23:59:59Z"
     members = s.merged_members(eid)
     q = ",".join("?" for _ in members)
-    summary = s.q1(f"SELECT summary FROM entity_summaries WHERE entity_id IN ({q}) AND at<=? ORDER BY at DESC,"
-                   " revision_id DESC LIMIT 1", [*members, ref])
-    summary = summary[0] if summary else (row["summary"] if at is None else None)
+    srows = s.summary_rows(members, at=ref)
+    summary = srows[-1]["summary"] if srows else (row["summary"] if at is None else None)
     stats = s.q1(f"SELECT MIN(at), MAX(at), COUNT(DISTINCT note_id) FROM entity_notes WHERE entity_id IN ({q}) AND"
                  " at<=?", [*members, ref])
     every_alias = distinct_names([a for m in members for a in s.aliases(m, at)], exclude=[row["name"]])

@@ -77,6 +77,8 @@ def _close_matches(nb: Any) -> List[Dict[str, Any]]:
         a, b = s.canonical(r["subject_id"]), s.canonical(r["object_id"])
         if a == b:
             continue  # joined since: nothing left to decide
+        if any((s.entity_row(x) is not None and s.entity_row(x)["retired_revision_id"]) for x in (a, b)):
+            continue  # ADR 0008: an entry a re-understanding retired (its reading now uses the other one)
         rid = review_id("close_match", r["claim_id"])
         sides = [_entity_side(nb, a), _entity_side(nb, b)]
         out.append({

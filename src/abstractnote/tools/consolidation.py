@@ -38,3 +38,17 @@ def note_entities_set_summaries(ctx: ToolContext, items: Optional[List[Dict[str,
 
 def note_then_now_refresh(ctx: ToolContext) -> Dict[str, Any]:
     return _c.refresh_then_now(ctx.nb)
+
+
+def note_reinterpret_next(ctx: ToolContext, limit: int = _c.REINTERPRET_BATCH,
+                          failed: Optional[List[Any]] = None) -> Dict[str, Any]:
+    """ADR 0008: the next notes the consolidation's reinterpret stage understands again (see
+    :func:`abstractnote.recall.consolidation.reinterpret_next`)."""
+    return _c.reinterpret_next(ctx.nb, limit, failed or None)
+
+
+def note_mark_reinterpret(ctx: ToolContext, note_ids: List[str], reason: Optional[str] = None) -> Dict[str, Any]:
+    """ADR 0008: mark understood notes to be understood again (the next consolidation reads them)."""
+    if not isinstance(note_ids, (list, tuple)) or not note_ids:
+        raise ValueError("Give the notes to understand again as a list of note ids.")
+    return ctx.nb.mark_reinterpret([str(n) for n in note_ids], reason or "")

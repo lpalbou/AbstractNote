@@ -1,4 +1,4 @@
-"""``note_capture`` and ``note_file`` (docs/api.md, "Note tools").
+"""``note_capture``, ``note_file`` and ``note_filing_context`` (docs/api.md, "Note tools").
 
 Attachments are ``{"$artifact": id, "run_id"?: ...}`` gateway references,
 resolved through the injected ``artifact_reader(ref) -> (bytes, mime,
@@ -31,6 +31,8 @@ def resolve_attachments(ctx: ToolContext, attachments: Optional[List[Any]]) -> L
                 raise ValueError(f"The attachment {ref['$artifact']} could not be read.")
             out.append({"data": bytes(data), "mime": item.get("mime") or mime,
                         "filename": item.get("filename") or filename,
+                        # the file's modification time as the client knows it (web: File.lastModified, epoch ms)
+                        "last_modified": item.get("last_modified"),
                         "artifact_ref": {"artifact_id": ref["$artifact"], **({"run_id": ref["run_id"]}
                                                                              if "run_id" in ref else {})}})
         elif "path" in item:
@@ -46,7 +48,7 @@ def resolve_attachments(ctx: ToolContext, attachments: Optional[List[Any]]) -> L
             if not path.is_file():
                 raise ValueError(f"There is no file at {item['path']}.")
             out.append({"data": path.read_bytes(), "mime": item.get("mime"), "filename": item.get("filename") or path.name,
-                        "artifact_ref": None})
+                        "last_modified": item.get("last_modified"), "artifact_ref": None})
         else:
             raise ValueError(f"Attachment {i + 1} must have $artifact (or path when reading local files is allowed).")
     return out
@@ -56,7 +58,8 @@ def note_capture(ctx: ToolContext, text: str = "", idempotency_key: Optional[str
                  occurred_at: Optional[str] = None, location: Optional[Dict[str, Any]] = None,
                  source: Optional[Dict[str, Any]] = None, priority: Optional[int] = None,
                  attachments: Optional[List[Any]] = None, session_id: Optional[str] = None,
-                 about: Optional[Dict[str, Any]] = None, answer: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                 about: Optional[Dict[str, Any]] = None, answer: Optional[Dict[str, Any]] = None,
+                 process_inline: bool = False) -> Dict[str, Any]:
     def blank(v: Any) -> Any:  # flows pass "" / {} / [] for unset start pins
         return None if v in ("", {}, []) else v
 
@@ -68,11 +71,23 @@ def note_capture(ctx: ToolContext, text: str = "", idempotency_key: Optional[str
         priority=None if priority is None else int(priority), attachments=resolved,
         idempotency_key=blank(idempotency_key), session_id=blank(session_id), account=ctx.account, about=blank(about),
         default_client=ctx.default_client, vision=ctx.extractors.get("vision"), stt=ctx.extractors.get("stt"),
+        inline=bool(process_inline), inline_run_id=_current_run_id() if process_inline else None,
     )
     out = result.model_dump()
     if saved_answer is not None and result.status == "new":
         out["warnings"] = list(out.get("warnings") or []) + _file_answer(ctx.nb, result.note_id, saved_answer)
     return out
+
+
+def _current_run_id() -> Optional[str]:
+    """The id of the run whose tool call this is, when AbstractRuntime runs it (the inline claim names its run;
+    the claim's liveness is its time, so a capture outside a runtime is claimed under ``inline@<time>``)."""
+    try:
+        from abstractruntime.core.effect_cancellation import current_inflight_effect
+    except ImportError:
+        return None
+    effect = current_inflight_effect()
+    return getattr(effect, "run_id", None) if effect is not None else None
 
 
 def _answer(answer: Any) -> Optional[Dict[str, Any]]:
@@ -117,5 +132,13 @@ def note_file(ctx: ToolContext, note_id: str, title: Optional[str] = None, kind:
     row = ctx.nb.store.note_row(note_id)
     if row is not None and row["kind"] == "synthesis":
         kind = None  # a saved answer stays a synthesis whatever the quick filing proposes
+    ctx.nb.queue.heartbeat(note_id)  # an inline capture's claim runs from here into its note-process
     return ctx.nb.file_note(note_id, title=blank(title), kind=blank(kind), topics=topics or [],
                             urgency=blank(urgency), language=blank(language), one_line=blank(one_line))
+
+
+def note_filing_context(ctx: ToolContext, note_id: str) -> Dict[str, Any]:
+    """What the quick filing sees for a stored note without a kind (``ingest.capture.filing_context``)."""
+    from ..ingest.capture import filing_context
+
+    return filing_context(ctx.nb, note_id)

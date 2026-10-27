@@ -34,14 +34,20 @@ Every `source.origin` also carries `date_basis`: how `occurred_at` was found.
 | `xmp` | an XMP creation date in an image or a PDF (`xmp:CreateDate`, `photoshop:DateCreated`, `exif:DateTimeOriginal`) | no |
 | `pdf_created` | a PDF's Info `/CreationDate` | no |
 | `office_created` | an Office Open XML document's `docProps/core.xml` `dcterms:created` (docx, xlsx, pptx) | no |
-| `file_mtime` | the file's modification time | yes |
+| `file_mtime` | the file's modification time (a live capture: the `last_modified` the client sent with the file, the web's `File.lastModified`) | yes |
+| `upload`, `pasted_text`, `capture_time` | a live capture: the moment of an upload, of a paste, or of a capture that sent no date (data-model.md "Document dates") | yes |
+| `client` | a live note typed now: the client's time | no |
+| `content` / `stated_month`, `stated_year` | written after import: the date the text states itself (`note.redate` at processing) / only its month or year | no / yes |
+| `user` | written after import: a person set the date | no |
 
 Files and captures share one detector, `abstractnote.ingest.dates.detect_file_date(path or bytes, mime)`: images
 `exif` then `xmp`, PDFs `pdf_created` then `xmp`, Office documents `office_created`, then (for a path) `file_mtime`.
-A capture that gives no `occurred_at` takes the first attachment's metadata date and records its basis. Two bases
-are written after import (data-model.md "Time"): `content` when processing found the date the text states
-itself on a note whose date was approximate (`note.redate`), and `user` when a person set the date; a live note's
-basis is `client`, and an import from before date bases were recorded reads as `unrecorded` (approximate).
+An import that gives no `occurred_at` takes the first attachment's metadata date and records its basis; a live
+capture is dated by `ingest.dates.capture_date` (data-model.md "Document dates": typed now `client`; an upload or a
+paste is a stand-in; without a client time the file's metadata date, then the `last_modified` the client sent,
+then the moment of the capture). Bases written after import: `content` (or `stated_month` / `stated_year`) when
+processing found the date the text states itself on a note whose date was approximate (`note.redate`), and `user`
+when a person set the date; an import from before date bases were recorded reads as `unrecorded` (approximate).
 
 The order for a memory file is `origin_session`, `front_matter_modified`, `git_added`,
 `file_mtime`; for a Markdown file `front_matter`, `created_line` (or `git_added` when the first commit is
@@ -94,6 +100,13 @@ Rules shared by all importers:
   skipped by reason), the time range covered, and the `date_basis` histogram with
   `approximate_dates` (how many dates are a session start, a last edit, a commit or a file date), in
   a dry run too, so a user sees how many dates are approximate before writing anything.
+- Leave out a row with nothing to read, by name (ADR 0007): a Markdown file that is only its front matter
+  (at draft time, a dry run too) and a file whose content gives no readable text (the files importer's
+  title is the file name, not text, so the capture refuses it with `NoReadableText`, R4's rule for a live
+  upload; a dry run does not extract and counts it as new) are counted under `skipped.no_readable_text`
+  and listed in `left_out: [{source_key, reason, why}]` ("“pixel.png” has no readable text; it was not
+  imported."), never stored as a note made of its name and never counted as an error. An image without a
+  vision extractor is such a file: import it again with one.
 
 ## Re-imports after the 2026-10-19 date and outcome fixes
 
@@ -110,7 +123,9 @@ notebook pinned to an embedding server is opened with the same `--embed-base-url
 `--embed-model` that `capture` and `process` take
 ([troubleshooting.md](troubleshooting.md#this-notebooks-vectors-were-made-with-the-embedding-model-)).
 
-Processing an import runs through the same `note-process` flow as live notes. Expect roughly two
-model calls per note; with a small local model this is a few seconds per note, so a corpus of a
+Processing an import runs through the same `note-process` flow as live notes. An import skips the
+quick filing a live capture gets, so its processing files it first (one more small call: kind and up
+to 4 topics, thinking off; cognition.md "note-process" step 0); notes understood before that are filed
+with `abstractnote refile --missing --local` (or, on a gateway, `POST /note/refile` with `{"missing": true}`). Expect roughly three model calls per note; with a small local model this is a few seconds per note, so a corpus of a
 few thousand notes takes hours. Run `abstractnote process --local` on the machine that holds the
 model, or let the gateway's processor automation drain the queue over time.

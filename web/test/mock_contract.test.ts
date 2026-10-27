@@ -99,7 +99,14 @@ describe("mock gateway serves the pinned shapes", () => {
 
   it("list items and nested refs follow the pinned item shapes", async () => {
     const changes = (await call("/api/gateway/note/changes?since=2026-01-01T00:00:00Z")).body;
-    expect(Object.keys(changes.notes[0]).sort()).toEqual(topKeys(pinned("NoteRef")).sort());
+    // GET /note/changes notes are NoteRef + {how} (W24 D16)
+    expect(Object.keys(changes.notes[0]).sort()).toEqual([...topKeys(pinned("NoteRef")), "how"].sort());
+    expect(changes.notes.every((n: { how: string }) => n.how === "captured" || n.how === "understood")).toBe(true);
+    // GET /note/queue failed items carry their logged errors (W24 D15)
+    const queue = (await call("/api/gateway/note/queue")).body;
+    expect(queue.failed.length).toBeGreaterThan(0);
+    expect(Object.keys(queue.failed[0]).sort()).toEqual(itemKeys(pinned("GET /note/queue")).sort());
+    expect(Object.keys(queue.failed[0].errors[0]).sort()).toEqual(["at", "attempt", "error"]);
     expect(Object.keys(changes.insights[0]).sort()).toEqual(topKeys(pinned("Insight")).sort());
     const claimShape = shapeOf(pinned("GET /note/changes")).match(/superseded_claims: \[\{([^}]*)\}\]/);
     if (!claimShape) throw new Error("docs/api.md: the GET /note/changes row has no superseded_claims item shape");

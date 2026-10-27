@@ -47,6 +47,9 @@ export type Note = NoteRef & {
   /** Set on an insight note (`kind` = its insight_kind), null on every other note. */
   insight?: { kind: string; evidence_note_ids: string[]; entity_ids: string[]; acked_at: string | null } | null;
   error?: string | null;
+  /** Where the note's date came from (`client`, `content`, `pdf_created`, `file_mtime`, ...) and whether it is approximate (ADR 0008 §7). */
+  date_basis?: string;
+  date_approximate?: boolean;
 };
 
 /** Entity card relation (W1 entity_card). */
@@ -65,6 +68,8 @@ export type EntityCard = EntityRef & {
   open_tasks?: Task[];
   /** Ids of the entries merged into this one (W1 expand.entity_card). */
   merged_from?: string[];
+  /** Set when a note understood again withdrew this entry (ADR 0008): `into` = what the note now reads its words as. */
+  retired?: { at: string; revision_id: string; note_id: string | null; note_title: string | null; reason: string | null; into: Array<{ entity_id: string; name: string }>; sentence: string } | null;
   /** Echoed when the card was built from what the archive held on a date (`as_received`). */
   as_received?: string;
   /** The community the entity belongs to (W17); null when it is in none. */
@@ -117,7 +122,8 @@ export type Cue = { cue_id: string; text: string; kind: string; subject: { kind:
 /** Pinned: GET /note/changes. Absent lists mean empty. */
 export type Changes = {
   cursor: string;
-  notes?: NoteRef[];
+  /** `how`: "captured" (received since the cursor) or "understood" (its processing was recorded since; W24 D16). */
+  notes?: Array<NoteRef & { how?: "captured" | "understood" }>;
   entities?: Array<EntityRef & { first_seen: string }>;
   /** `kind` superseded (replaced by `superseded_by`) or retracted (withdrawn; `superseded_by` null); `text` is plain words. */
   superseded_claims?: Array<{ claim_id: string; kind: "superseded" | "retracted"; text: string; superseded_by: string | null; note_id: string }>;
@@ -143,7 +149,8 @@ export type QueueStats = { queued: number; processing: number; failed: number; d
 /** GET /note/queue (W1 Queue.summary + W2 automations). */
 export type QueueInfo = {
   stats: QueueStats;
-  failed: Array<{ note_id: string; title: string; occurred_at?: string; last_error: string | null; failed_at?: string; failures?: number }>;
+  /** `errors`: the note's last 3 logged failures, newest first (the queue_errors log, W24 D15). */
+  failed: Array<{ note_id: string; title: string; occurred_at?: string; last_error: string | null; failed_at?: string; failures?: number; errors?: Array<{ attempt: number; at: string; error: string }> }>;
   waiting: Array<{ note_id: string; title: string; priority: number; state: string; attempts: number }>;
   automations: Automations;
   /** The processor's throughput: up to `max_items` notes every `interval` ("2m"). */
@@ -263,14 +270,25 @@ export type Processing = {
   /** null: this server has no consolidation (contract "Consolidation"). */
   consolidation: Consolidation | null;
 };
-export type ConsolidationStage = "normalize" | "communities" | "labels" | "summaries" | "then_now" | "reflect" | "done";
+export type ConsolidationStage = "normalize" | "reinterpret" | "communities" | "labels" | "summaries" | "then_now" | "reflect" | "done";
 export type Consolidation = {
   automation: ProcessingAutomation & { schedule?: { every: string } | null };
-  run: { run_id: string; started_at: string; stage: ConsolidationStage | string; stage_done: number; stage_total: number; eta_s: number | null; elapsed_s: number } | null;
+  /** `propagated` (reinterpret stage only): of the notes this pass reads again, those read because an idea they rely on was understood differently, with those ideas' names (ADR 0008 §4a). */
+  run: { run_id: string; started_at: string; stage: ConsolidationStage | string; stage_done: number; stage_total: number; eta_s: number | null; elapsed_s: number; propagated?: ConsolidationPropagated | null } | null;
   /**
    * An interrupted run has no finish time and null counts (W20). `status` completed_with_gaps: the run left
-   * `left_out` for the next one and `notice` is its one-sentence end-user line (ADR 0007).
+   * `left_out` for the next one and `notice` is its one-sentence end-user line (ADR 0007). `reinterpreted` /
+   * `unchanged`: the notes the reinterpret stage understood again, or found unchanged (ADR 0008).
    */
-  last: { finished_at: string | null; status: string; merges: number | null; communities: number | null; labelled: number | null; summaries_refreshed: number | null; insights: number | null; left_out?: { summaries: number; labels: number; reasons: string[] } | null; budget_spent?: boolean; notice?: string | null } | null;
-  pending: { stale_labels: number; unlabelled: number; stale_summaries: number };
+  last: { finished_at: string | null; status: string; merges: number | null; communities: number | null; labelled: number | null; summaries_refreshed: number | null; insights: number | null; left_out?: { summaries: number; labels: number; reinterpret?: number; propagated?: number; propagated_from?: { entity_id: string; name: string; notes: number }[]; reasons: string[] } | null; budget_spent?: boolean; notice?: string | null; reinterpreted?: number | null; unchanged?: number | null } | null;
+  /** `reinterpret`: notes an earlier note changed, waiting to be understood again (ADR 0008). */
+  pending: { stale_labels: number; unlabelled: number; stale_summaries: number; reinterpret?: number };
+  /** What waits to be understood again and why, before the stage runs (ADR 0008 §5; `GET /note/consolidation`). */
+  reinterpret?: {
+    pending: number; by_entity: { entity_id: string; name: string; notes: number }[]; reasons: string[]; context_unknown: number; consumed_today: number; last_marked_at: string | null;
+    /** The notes waiting because an idea they rely on was understood differently, and the upper bound of how many more may follow (ADR 0008 §4a). */
+    propagated?: { pending: number; by_source: { entity_id: string; name: string; notes: number }[]; may_follow?: number; may_follow_from?: { entity_id: string; name: string; notes: number }[] };
+  };
 };
+/** The notes of a re-understanding pass read because an idea they rely on was understood differently (ADR 0008 §4a). */
+export type ConsolidationPropagated = { notes: number; names: string[]; sources: number };

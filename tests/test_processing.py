@@ -23,13 +23,20 @@ def _at(minutes_ago: float) -> str:
     return (base - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _fake_revision(nb, sql: str, params=()) -> None:
+    """These tests fabricate processing history (a revision recorded minutes ago, a user action): the store's
+    append-only trigger (ADR 0003, tested in test_propagation) is dropped for this scratch notebook first."""
+    nb.store.conn.execute("DROP TRIGGER IF EXISTS revisions_append_only")
+    nb.store.conn.execute(sql, params)
+
+
 def _processed(nb, text: str, minutes_ago: float, *, rid: str):
     """A captured note understood ``minutes_ago`` before NOW (one processing revision, recorded then)."""
     note_id = nb.capture(text, occurred_at=t(5), source={"client": "cli"}).note_id
     nb.apply_revision(rev(rid, t(5), create(f"ex:person-{rid}", f"P {rid}"),
                           {"op": "entity.mention", "payload": {"entity_id": f"ex:person-{rid}", "note_id": note_id}},
                           note_id=note_id, summary=f"Understood {rid}"))
-    nb.store.conn.execute("UPDATE revisions SET recorded_at=? WHERE revision_id=?", (_at(minutes_ago), rid))
+    _fake_revision(nb, "UPDATE revisions SET recorded_at=? WHERE revision_id=?", (_at(minutes_ago), rid))
     nb.store.conn.execute("UPDATE queue SET state='done' WHERE note_id=?", (note_id,))
     return note_id
 
@@ -44,7 +51,7 @@ def test_pace_series_eta_recent_and_failed_come_from_the_store(nb):
     nb.store.conn.execute("UPDATE queue SET state='failed', last_error='The model did not answer.', failures=3,"
                           " attempts=3, failed_at=? WHERE note_id=?", (_at(4), waiting[0]))
     # a user action is not processing: it never counts as understood
-    nb.store.conn.execute("UPDATE revisions SET action='claim.retract' WHERE revision_id='rv_2'")
+    _fake_revision(nb, "UPDATE revisions SET action='claim.retract' WHERE revision_id='rv_2'")
 
     out = nb.processing(now=NOW)
     pace = out["pace"]

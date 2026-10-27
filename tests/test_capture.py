@@ -83,7 +83,9 @@ def test_same_file_twice_stores_one_blob_and_links(nb, tmp_path):
 
 
 def test_unknown_attachment_type_is_kept_with_a_warning(nb):
-    r = nb.capture("", attachments=[{"data": b"\x00\x01binary", "filename": "x.bin", "mime": "application/x-thing"}])
+    # with a few words of its own (a note with nothing to read at all is refused: test_capture_dates.py)
+    r = nb.capture("the sensor dump", attachments=[{"data": b"\x00\x01binary", "filename": "x.bin",
+                                                    "mime": "application/x-thing"}])
     assert r.status == "new" and r.attachments[0]["extracted_by"] == "none"
     assert r.warnings and "Kept x.bin" in r.warnings[0]
     img = nb.capture("photo", attachments=[{"data": b"\x89PNG..", "filename": "p.png"}])

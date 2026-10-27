@@ -35,6 +35,9 @@ class NoteDraft:
     title: Optional[str] = None
     source: Dict[str, Any] = field(default_factory=dict)
     attachments: List[Dict[str, Any]] = field(default_factory=list)  # {"data": bytes, "mime"?, "filename"?}
+    # False when the title is a file name the importer gave (files), not words: a file whose text cannot be read
+    # is then skipped (``no_readable_text``), never stored as a note made of its name
+    title_is_text: bool = True
 
 
 @dataclass
@@ -50,6 +53,12 @@ class ImportReport:
     earliest: Optional[str] = None
     latest: Optional[str] = None
     errors: List[Dict[str, str]] = field(default_factory=list)
+    # ADR 0007: the rows left out because nothing in them can be read, each named with its reason
+    left_out: List[Dict[str, str]] = field(default_factory=list)
+
+    def leave_out(self, source_key: str, reason: str, why: str) -> None:
+        self.skip(reason)
+        self.left_out.append({"source_key": source_key, "reason": reason, "why": why})
 
     def skip(self, reason: str, n: int = 1) -> None:
         self.skipped[reason] = self.skipped.get(reason, 0) + n
@@ -70,7 +79,7 @@ class ImportReport:
             "date_basis": dict(sorted(self.date_basis.items())),
             "approximate_dates": sum(n for b, n in self.date_basis.items() if b in APPROXIMATE_BASES or b == "unrecorded"),
             "skipped": dict(sorted(self.skipped.items())), "range": {"earliest": self.earliest, "latest": self.latest},
-            "errors": list(self.errors),
+            "errors": list(self.errors), "left_out": list(self.left_out),
         }
 
 
@@ -102,6 +111,7 @@ def write_drafts(nb: Any, drafts: Iterable[NoteDraft], report: ImportReport, *, 
     ``nb`` may be None for a dry run on a notebook that does not exist yet (everything counts as new).
     """
     from abstractnote import ids  # core lane
+    from abstractnote.ingest.capture import NoReadableText
 
     report.dry_run = dry_run
     for draft in drafts:
@@ -119,8 +129,12 @@ def write_drafts(nb: Any, drafts: Iterable[NoteDraft], report: ImportReport, *, 
             result = nb.capture(
                 draft.text, title=draft.title, occurred_at=draft.occurred_at, source=draft.source,
                 priority=BULK_PRIORITY, attachments=draft.attachments, importer=draft.importer,
-                source_key=draft.source_key,
+                source_key=draft.source_key, title_is_text=draft.title_is_text,
             )
+        except NoReadableText:  # nothing in it can be read (R4's capture rule): left out, named, not an error
+            report.leave_out(draft.source_key, "no_readable_text",
+                             f"“{draft.title or draft.source_key}” has no readable text; it was not imported.")
+            continue
         except ValueError as e:
             report.errors.append({"source_key": draft.source_key, "error": str(e)})
             continue

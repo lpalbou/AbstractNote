@@ -593,7 +593,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "import time\nbudget = float(budget_s if budget_s is not None else 3600)\nif budget <= 0:\n    raise ValueError(\"budget_s must be above 0.\")\nreturn {\"updates\": {\"cons_deadline\": time.time() + budget, \"cons_error\": \"\",\n        \"labels_continue\": True, \"labels_done\": 0, \"labels_inflight\": False, \"labels_skipped\": [],\n        \"labels_left\": 0, \"labels_budget\": False, \"labels_answer\": [],\n        \"sum_continue\": True, \"sum_done\": 0, \"sum_inflight\": False, \"sum_skipped\": 0,\n        \"sum_left\": 0, \"sum_budget\": False, \"sum_answer\": []}}\n"
+        "codeBody": "import time\nbudget = float(budget_s if budget_s is not None else 3600)\nif budget <= 0:\n    raise ValueError(\"budget_s must be above 0.\")\nreturn {\"updates\": {\"cons_deadline\": time.time() + budget, \"cons_error\": \"\",\n        \"labels_continue\": True, \"labels_done\": 0, \"labels_inflight\": False, \"labels_skipped\": [],\n        \"labels_left\": 0, \"labels_budget\": False, \"labels_answer\": [],\n        \"sum_continue\": True, \"sum_done\": 0, \"sum_inflight\": False, \"sum_skipped\": 0,\n        \"sum_left\": 0, \"sum_budget\": False, \"sum_answer\": [],\n        \"re_continue\": True, \"re_inflight\": False, \"re_failed\": [], \"re_budget\": False}}\n"
       }
     },
     {
@@ -1429,11 +1429,2487 @@
       }
     },
     {
-      "id": "p_comm_start_args",
+      "id": "re_count_args",
       "type": "code",
       "position": {
         "x": 9120.0,
         "y": 320.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Notes to understand again: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "limit",
+            "label": "limit",
+            "type": "number"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox",
+          "limit": 0
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif limit is not None and limit != \"\":\n    arguments[\"limit\"] = limit\nreturn {\"tool_calls\": [{\"name\": \"note_reinterpret_next\", \"call_id\": \"re_count\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "re_count",
+      "type": "tool_calls",
+      "position": {
+        "x": 9600.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Notes to understand again",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_reinterpret_next"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_reinterpret_next"
+          ]
+        }
+      }
+    },
+    {
+      "id": "re_count_out",
+      "type": "code",
+      "position": {
+        "x": 10080.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Notes to understand again: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "done",
+            "label": "done",
+            "type": "number"
+          },
+          {
+            "id": "total",
+            "label": "total",
+            "type": "number"
+          },
+          {
+            "id": "pending",
+            "label": "pending",
+            "type": "number"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          },
+          {
+            "id": "failed",
+            "label": "failed",
+            "type": "boolean"
+          },
+          {
+            "id": "failure",
+            "label": "failure",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_reinterpret_next returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_reinterpret_next failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_reinterpret_next returned something other than an object.\"\nif failure is not None:\n    return {\"failed\": True, \"failure\": failure}\nreturn dict(out, tool_output=out, failed=False, failure=None)\n"
+      }
+    },
+    {
+      "id": "re_count_failed",
+      "type": "if",
+      "position": {
+        "x": 10560.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Notes to understand again: failed?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "re_count_failed_keep_error",
+      "type": "set_var",
+      "position": {
+        "x": 11040.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "set_var",
+        "label": "Remember the failure",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "cons_error",
+          "value": ""
+        }
+      }
+    },
+    {
+      "id": "p_re_start_args",
+      "type": "code",
+      "position": {
+        "x": 11040.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Progress: reinterpret: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "stage",
+            "label": "stage",
+            "type": "string"
+          },
+          {
+            "id": "done",
+            "label": "done",
+            "type": "number"
+          },
+          {
+            "id": "total",
+            "label": "total",
+            "type": "number"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox",
+          "stage": "reinterpret"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif stage is not None and stage != \"\":\n    arguments[\"stage\"] = stage\nif done is not None and done != \"\":\n    arguments[\"done\"] = done\nif total is not None and total != \"\":\n    arguments[\"total\"] = total\nreturn {\"tool_calls\": [{\"name\": \"note_consolidation_progress\", \"call_id\": \"p_re_start\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "p_re_start",
+      "type": "tool_calls",
+      "position": {
+        "x": 11520.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Progress: reinterpret",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_consolidation_progress"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_consolidation_progress"
+          ]
+        }
+      }
+    },
+    {
+      "id": "p_re_start_out",
+      "type": "code",
+      "position": {
+        "x": 12000.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Progress: reinterpret: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "eta_s",
+            "label": "eta_s",
+            "type": "number"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          },
+          {
+            "id": "failed",
+            "label": "failed",
+            "type": "boolean"
+          },
+          {
+            "id": "failure",
+            "label": "failure",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_consolidation_progress returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_consolidation_progress failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_consolidation_progress returned something other than an object.\"\nif failure is not None:\n    return {\"failed\": True, \"failure\": failure}\nreturn dict(out, tool_output=out, failed=False, failure=None)\n"
+      }
+    },
+    {
+      "id": "p_re_start_failed",
+      "type": "if",
+      "position": {
+        "x": 12480.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Progress: reinterpret: failed?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "p_re_start_failed_keep_error",
+      "type": "set_var",
+      "position": {
+        "x": 12960.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "set_var",
+        "label": "Remember the failure",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "cons_error",
+          "value": ""
+        }
+      }
+    },
+    {
+      "id": "re_go",
+      "type": "get_var",
+      "position": {
+        "x": 12480.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get re_continue",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "re_continue",
+          "default": false
+        }
+      }
+    },
+    {
+      "id": "re_loop",
+      "type": "while",
+      "position": {
+        "x": 12960.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "while",
+        "label": "While notes wait to be understood again",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "loop",
+            "label": "loop",
+            "type": "execution"
+          },
+          {
+            "id": "done",
+            "label": "done",
+            "type": "execution"
+          },
+          {
+            "id": "index",
+            "label": "index",
+            "type": "number"
+          },
+          {
+            "id": "item",
+            "label": "item",
+            "type": "any"
+          }
+        ]
+      }
+    },
+    {
+      "id": "re_begin_values",
+      "type": "code",
+      "position": {
+        "x": 13440.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "A re-understanding round",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "return {\"updates\": {'re_inflight': True, 're_continue': False}}\n"
+      }
+    },
+    {
+      "id": "re_begin",
+      "type": "set_vars",
+      "position": {
+        "x": 13920.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "set_vars",
+        "label": "A re-understanding round",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ]
+      }
+    },
+    {
+      "id": "re_deadline",
+      "type": "get_var",
+      "position": {
+        "x": 13920.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get cons_deadline",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "cons_deadline",
+          "default": 0
+        }
+      }
+    },
+    {
+      "id": "re_time",
+      "type": "code",
+      "position": {
+        "x": 14400.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Time left?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "deadline",
+            "label": "deadline",
+            "type": "number"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "in_time",
+            "label": "in_time",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "import time\nreturn {\"in_time\": time.time() < float(deadline or 0)}\n"
+      }
+    },
+    {
+      "id": "re_in_time",
+      "type": "if",
+      "position": {
+        "x": 14880.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Time left to understand a note again?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "re_spent_values",
+      "type": "code",
+      "position": {
+        "x": 15360.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "The time is spent",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "return {\"updates\": {'re_inflight': False, 're_continue': False, 're_budget': True}}\n"
+      }
+    },
+    {
+      "id": "re_spent",
+      "type": "set_vars",
+      "position": {
+        "x": 15840.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "set_vars",
+        "label": "The time is spent",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ]
+      }
+    },
+    {
+      "id": "re_failed_last",
+      "type": "get_var",
+      "position": {
+        "x": 14880.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get re_failed",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "re_failed",
+          "default": []
+        }
+      }
+    },
+    {
+      "id": "re_next_args",
+      "type": "code",
+      "position": {
+        "x": 15360.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Next note to understand again: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "limit",
+            "label": "limit",
+            "type": "number"
+          },
+          {
+            "id": "failed",
+            "label": "failed",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox",
+          "limit": 1
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif limit is not None and limit != \"\":\n    arguments[\"limit\"] = limit\nif failed is not None and failed != \"\":\n    arguments[\"failed\"] = failed\nreturn {\"tool_calls\": [{\"name\": \"note_reinterpret_next\", \"call_id\": \"re_next\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "re_next",
+      "type": "tool_calls",
+      "position": {
+        "x": 15840.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Next note to understand again",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_reinterpret_next"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_reinterpret_next"
+          ]
+        }
+      }
+    },
+    {
+      "id": "re_next_out",
+      "type": "code",
+      "position": {
+        "x": 16320.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Next note to understand again: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          },
+          {
+            "id": "done",
+            "label": "done",
+            "type": "number"
+          },
+          {
+            "id": "total",
+            "label": "total",
+            "type": "number"
+          },
+          {
+            "id": "pending",
+            "label": "pending",
+            "type": "number"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          },
+          {
+            "id": "failed",
+            "label": "failed",
+            "type": "boolean"
+          },
+          {
+            "id": "failure",
+            "label": "failure",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_reinterpret_next returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_reinterpret_next failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_reinterpret_next returned something other than an object.\"\nif failure is not None:\n    return {\"failed\": True, \"failure\": failure}\nreturn dict(out, tool_output=out, failed=False, failure=None)\n"
+      }
+    },
+    {
+      "id": "re_next_failed",
+      "type": "if",
+      "position": {
+        "x": 16800.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Next note to understand again: failed?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "re_next_failed_keep_error",
+      "type": "set_var",
+      "position": {
+        "x": 17280.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "set_var",
+        "label": "Remember the failure",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "cons_error",
+          "value": ""
+        }
+      }
+    },
+    {
+      "id": "re_pick",
+      "type": "code",
+      "position": {
+        "x": 17280.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "The note",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "items",
+            "label": "items",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "has_item",
+            "label": "has_item",
+            "type": "boolean"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "first = items[0] if isinstance(items, list) and items else None\nreturn {\"has_item\": isinstance(first, dict), \"note_id\": first.get(\"note_id\") if isinstance(first, dict) else None}\n"
+      }
+    },
+    {
+      "id": "re_has",
+      "type": "if",
+      "position": {
+        "x": 17760.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "A note to read again?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "re_none_values",
+      "type": "code",
+      "position": {
+        "x": 18240.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Nothing left to read again",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "return {\"updates\": {'re_inflight': False, 're_continue': False, 're_failed': []}}\n"
+      }
+    },
+    {
+      "id": "re_none",
+      "type": "set_vars",
+      "position": {
+        "x": 18720.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "set_vars",
+        "label": "Nothing left to read again",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ]
+      }
+    },
+    {
+      "id": "re_process",
+      "type": "subflow",
+      "position": {
+        "x": 18240.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "subflow",
+        "label": "Understand the note again",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "inherit_context",
+            "label": "inherit_context",
+            "type": "boolean"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          },
+          {
+            "id": "thinking",
+            "label": "thinking",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "output",
+            "label": "output",
+            "type": "object"
+          },
+          {
+            "id": "child_output",
+            "label": "child_output",
+            "type": "object"
+          },
+          {
+            "id": "revision_id",
+            "label": "revision_id",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "inherit_context": false
+        },
+        "subflowId": "note-process"
+      }
+    },
+    {
+      "id": "re_outcome",
+      "type": "code",
+      "position": {
+        "x": 18720.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Understood again?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "output",
+            "label": "output",
+            "type": "object"
+          },
+          {
+            "id": "child_output",
+            "label": "child_output",
+            "type": "object"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "done",
+            "label": "done",
+            "type": "number"
+          },
+          {
+            "id": "total",
+            "label": "total",
+            "type": "number"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "skipped",
+            "label": "skipped",
+            "type": "array"
+          },
+          {
+            "id": "done",
+            "label": "done",
+            "type": "number"
+          },
+          {
+            "id": "total",
+            "label": "total",
+            "type": "number"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "o = output if isinstance(output, dict) else {}\nc = child_output if isinstance(child_output, dict) else {}\nerr = str(c.get(\"error\") or o.get(\"error\") or \"\")\nfor prefix in (\"Runtime error: \", \"Execution error: \"):\n    if err.startswith(prefix):\n        err = err[len(prefix):]\nfailed = c.get(\"success\") is False or o.get(\"success\") is False or bool(err)\nskipped = [{\"id\": note_id, \"reason\": err or 'It could not be understood again this time.'}] if failed else []\nreturn {\"skipped\": skipped, \"done\": int(done or 0) + 1, \"total\": max(int(total or 0), int(done or 0) + 1),\n        \"updates\": {\"re_failed\": skipped, \"re_inflight\": False, \"re_continue\": True}}\n"
+      }
+    },
+    {
+      "id": "p_re_args",
+      "type": "code",
+      "position": {
+        "x": 19200.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Progress: reinterpret: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "stage",
+            "label": "stage",
+            "type": "string"
+          },
+          {
+            "id": "done",
+            "label": "done",
+            "type": "number"
+          },
+          {
+            "id": "total",
+            "label": "total",
+            "type": "number"
+          },
+          {
+            "id": "skipped",
+            "label": "skipped",
+            "type": "array"
+          },
+          {
+            "id": "reason",
+            "label": "reason",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox",
+          "stage": "reinterpret",
+          "reason": "It could not be understood again this time."
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif stage is not None and stage != \"\":\n    arguments[\"stage\"] = stage\nif done is not None and done != \"\":\n    arguments[\"done\"] = done\nif total is not None and total != \"\":\n    arguments[\"total\"] = total\nif skipped is not None and skipped != \"\":\n    arguments[\"skipped\"] = skipped\nif reason is not None and reason != \"\":\n    arguments[\"reason\"] = reason\nreturn {\"tool_calls\": [{\"name\": \"note_consolidation_progress\", \"call_id\": \"p_re\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "p_re",
+      "type": "tool_calls",
+      "position": {
+        "x": 19680.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Progress: reinterpret",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_consolidation_progress"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_consolidation_progress"
+          ]
+        }
+      }
+    },
+    {
+      "id": "p_re_out",
+      "type": "code",
+      "position": {
+        "x": 20160.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Progress: reinterpret: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "eta_s",
+            "label": "eta_s",
+            "type": "number"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          },
+          {
+            "id": "failed",
+            "label": "failed",
+            "type": "boolean"
+          },
+          {
+            "id": "failure",
+            "label": "failure",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_consolidation_progress returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_consolidation_progress failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_consolidation_progress returned something other than an object.\"\nif failure is not None:\n    return {\"failed\": True, \"failure\": failure}\nreturn dict(out, tool_output=out, failed=False, failure=None)\n"
+      }
+    },
+    {
+      "id": "p_re_failed",
+      "type": "if",
+      "position": {
+        "x": 20640.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Progress: reinterpret: failed?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "p_re_failed_keep_error",
+      "type": "set_var",
+      "position": {
+        "x": 21120.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "set_var",
+        "label": "Remember the failure",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "cons_error",
+          "value": ""
+        }
+      }
+    },
+    {
+      "id": "re_vars",
+      "type": "set_vars",
+      "position": {
+        "x": 21120.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "set_vars",
+        "label": "Remember the round",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "updates",
+            "label": "updates",
+            "type": "object"
+          }
+        ]
+      }
+    },
+    {
+      "id": "re_unfinished",
+      "type": "get_var",
+      "position": {
+        "x": 12960.0,
+        "y": 640.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get re_inflight",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "re_inflight",
+          "default": false
+        }
+      }
+    },
+    {
+      "id": "re_broke",
+      "type": "if",
+      "position": {
+        "x": 13440.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Did understanding again stop half-way?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "re_broke_msg",
+      "type": "code",
+      "position": {
+        "x": 13440.0,
+        "y": 640.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Understanding again failed",
+        "inputs": [
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "message",
+            "label": "message",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "return {\"message\": \"Understanding the notes again did not finish.\"}\n"
+      }
+    },
+    {
+      "id": "re_broke_keep_error",
+      "type": "set_var",
+      "position": {
+        "x": 13920.0,
+        "y": 640.0
+      },
+      "data": {
+        "nodeType": "set_var",
+        "label": "Remember the failure",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "cons_error",
+          "value": ""
+        }
+      }
+    },
+    {
+      "id": "re_failed_end",
+      "type": "get_var",
+      "position": {
+        "x": 13440.0,
+        "y": 960.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get re_failed",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "re_failed",
+          "default": []
+        }
+      }
+    },
+    {
+      "id": "re_final_args",
+      "type": "code",
+      "position": {
+        "x": 13920.0,
+        "y": 960.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Notes understood again: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "limit",
+            "label": "limit",
+            "type": "number"
+          },
+          {
+            "id": "failed",
+            "label": "failed",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox",
+          "limit": 0
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif limit is not None and limit != \"\":\n    arguments[\"limit\"] = limit\nif failed is not None and failed != \"\":\n    arguments[\"failed\"] = failed\nreturn {\"tool_calls\": [{\"name\": \"note_reinterpret_next\", \"call_id\": \"re_final\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "re_final",
+      "type": "tool_calls",
+      "position": {
+        "x": 14400.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Notes understood again",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_reinterpret_next"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_reinterpret_next"
+          ]
+        }
+      }
+    },
+    {
+      "id": "re_final_out",
+      "type": "code",
+      "position": {
+        "x": 14880.0,
+        "y": 640.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Notes understood again: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "done",
+            "label": "done",
+            "type": "number"
+          },
+          {
+            "id": "total",
+            "label": "total",
+            "type": "number"
+          },
+          {
+            "id": "pending",
+            "label": "pending",
+            "type": "number"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          },
+          {
+            "id": "failed",
+            "label": "failed",
+            "type": "boolean"
+          },
+          {
+            "id": "failure",
+            "label": "failure",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_reinterpret_next returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_reinterpret_next failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_reinterpret_next returned something other than an object.\"\nif failure is not None:\n    return {\"failed\": True, \"failure\": failure}\nreturn dict(out, tool_output=out, failed=False, failure=None)\n"
+      }
+    },
+    {
+      "id": "re_final_failed",
+      "type": "if",
+      "position": {
+        "x": 15360.0,
+        "y": 640.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Notes understood again: failed?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "re_final_failed_keep_error",
+      "type": "set_var",
+      "position": {
+        "x": 15840.0,
+        "y": 640.0
+      },
+      "data": {
+        "nodeType": "set_var",
+        "label": "Remember the failure",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "cons_error",
+          "value": ""
+        }
+      }
+    },
+    {
+      "id": "p_re_done_args",
+      "type": "code",
+      "position": {
+        "x": 15840.0,
+        "y": 960.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Progress: reinterpret: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "stage",
+            "label": "stage",
+            "type": "string"
+          },
+          {
+            "id": "done",
+            "label": "done",
+            "type": "number"
+          },
+          {
+            "id": "total",
+            "label": "total",
+            "type": "number"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox",
+          "stage": "reinterpret"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif stage is not None and stage != \"\":\n    arguments[\"stage\"] = stage\nif done is not None and done != \"\":\n    arguments[\"done\"] = done\nif total is not None and total != \"\":\n    arguments[\"total\"] = total\nreturn {\"tool_calls\": [{\"name\": \"note_consolidation_progress\", \"call_id\": \"p_re_done\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "p_re_done",
+      "type": "tool_calls",
+      "position": {
+        "x": 16320.0,
+        "y": 372.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Progress: reinterpret",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_consolidation_progress"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_consolidation_progress"
+          ]
+        }
+      }
+    },
+    {
+      "id": "p_re_done_out",
+      "type": "code",
+      "position": {
+        "x": 16800.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Progress: reinterpret: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "eta_s",
+            "label": "eta_s",
+            "type": "number"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          },
+          {
+            "id": "failed",
+            "label": "failed",
+            "type": "boolean"
+          },
+          {
+            "id": "failure",
+            "label": "failure",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_consolidation_progress returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_consolidation_progress failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_consolidation_progress returned something other than an object.\"\nif failure is not None:\n    return {\"failed\": True, \"failure\": failure}\nreturn dict(out, tool_output=out, failed=False, failure=None)\n"
+      }
+    },
+    {
+      "id": "p_re_done_failed",
+      "type": "if",
+      "position": {
+        "x": 17280.0,
+        "y": 640.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Progress: reinterpret: failed?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "p_re_done_failed_keep_error",
+      "type": "set_var",
+      "position": {
+        "x": 17760.0,
+        "y": 320.0
+      },
+      "data": {
+        "nodeType": "set_var",
+        "label": "Remember the failure",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "cons_error",
+          "value": ""
+        }
+      }
+    },
+    {
+      "id": "p_comm_start_args",
+      "type": "code",
+      "position": {
+        "x": 17760.0,
+        "y": 640.0
       },
       "data": {
         "nodeType": "code",
@@ -1491,8 +3967,8 @@
       "id": "p_comm_start",
       "type": "tool_calls",
       "position": {
-        "x": 9600.0,
-        "y": 0.0
+        "x": 18240.0,
+        "y": 640.0
       },
       "data": {
         "nodeType": "tool_calls",
@@ -1547,8 +4023,8 @@
       "id": "p_comm_start_out",
       "type": "code",
       "position": {
-        "x": 10080.0,
-        "y": 0.0
+        "x": 18720.0,
+        "y": 666.0
       },
       "data": {
         "nodeType": "code",
@@ -1608,8 +4084,8 @@
       "id": "p_comm_start_failed",
       "type": "if",
       "position": {
-        "x": 10560.0,
-        "y": 0.0
+        "x": 19200.0,
+        "y": 346.0
       },
       "data": {
         "nodeType": "if",
@@ -1644,8 +4120,8 @@
       "id": "p_comm_start_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 11040.0,
-        "y": 0.0
+        "x": 19680.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "set_var",
@@ -1689,8 +4165,8 @@
       "id": "communities_args",
       "type": "code",
       "position": {
-        "x": 11040.0,
-        "y": 320.0
+        "x": 19680.0,
+        "y": 640.0
       },
       "data": {
         "nodeType": "code",
@@ -1730,8 +4206,8 @@
       "id": "communities",
       "type": "tool_calls",
       "position": {
-        "x": 11520.0,
-        "y": 0.0
+        "x": 20160.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "tool_calls",
@@ -1786,8 +4262,8 @@
       "id": "communities_out",
       "type": "code",
       "position": {
-        "x": 12000.0,
-        "y": 0.0
+        "x": 20640.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "code",
@@ -1857,8 +4333,8 @@
       "id": "communities_failed",
       "type": "if",
       "position": {
-        "x": 12480.0,
-        "y": 0.0
+        "x": 21120.0,
+        "y": 640.0
       },
       "data": {
         "nodeType": "if",
@@ -1893,7 +4369,7 @@
       "id": "communities_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 12960.0,
+        "x": 21600.0,
         "y": 0.0
       },
       "data": {
@@ -1938,7 +4414,7 @@
       "id": "p_comm_done_args",
       "type": "code",
       "position": {
-        "x": 12960.0,
+        "x": 21600.0,
         "y": 320.0
       },
       "data": {
@@ -1997,7 +4473,7 @@
       "id": "p_comm_done",
       "type": "tool_calls",
       "position": {
-        "x": 13440.0,
+        "x": 22080.0,
         "y": 0.0
       },
       "data": {
@@ -2053,7 +4529,7 @@
       "id": "p_comm_done_out",
       "type": "code",
       "position": {
-        "x": 13920.0,
+        "x": 22560.0,
         "y": 0.0
       },
       "data": {
@@ -2114,7 +4590,7 @@
       "id": "p_comm_done_failed",
       "type": "if",
       "position": {
-        "x": 14400.0,
+        "x": 23040.0,
         "y": 0.0
       },
       "data": {
@@ -2150,7 +4626,7 @@
       "id": "p_comm_done_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 14880.0,
+        "x": 23520.0,
         "y": 0.0
       },
       "data": {
@@ -2195,7 +4671,7 @@
       "id": "labels_total",
       "type": "code",
       "position": {
-        "x": 14400.0,
+        "x": 23040.0,
         "y": 320.0
       },
       "data": {
@@ -2236,7 +4712,7 @@
       "id": "p_labels_start_args",
       "type": "code",
       "position": {
-        "x": 14880.0,
+        "x": 23520.0,
         "y": 320.0
       },
       "data": {
@@ -2294,7 +4770,7 @@
       "id": "p_labels_start",
       "type": "tool_calls",
       "position": {
-        "x": 15360.0,
+        "x": 24000.0,
         "y": 0.0
       },
       "data": {
@@ -2350,7 +4826,7 @@
       "id": "p_labels_start_out",
       "type": "code",
       "position": {
-        "x": 15840.0,
+        "x": 24480.0,
         "y": 0.0
       },
       "data": {
@@ -2411,7 +4887,7 @@
       "id": "p_labels_start_failed",
       "type": "if",
       "position": {
-        "x": 16320.0,
+        "x": 24960.0,
         "y": 0.0
       },
       "data": {
@@ -2447,7 +4923,7 @@
       "id": "p_labels_start_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 16800.0,
+        "x": 25440.0,
         "y": 0.0
       },
       "data": {
@@ -2492,7 +4968,7 @@
       "id": "labels_go",
       "type": "get_var",
       "position": {
-        "x": 16320.0,
+        "x": 24960.0,
         "y": 320.0
       },
       "data": {
@@ -2527,7 +5003,7 @@
       "id": "labels_loop",
       "type": "while",
       "position": {
-        "x": 16800.0,
+        "x": 25440.0,
         "y": 320.0
       },
       "data": {
@@ -2573,7 +5049,7 @@
       "id": "labels_begin_values",
       "type": "code",
       "position": {
-        "x": 17280.0,
+        "x": 25920.0,
         "y": 0.0
       },
       "data": {
@@ -2614,7 +5090,7 @@
       "id": "labels_begin",
       "type": "set_vars",
       "position": {
-        "x": 17760.0,
+        "x": 26400.0,
         "y": 0.0
       },
       "data": {
@@ -2650,7 +5126,7 @@
       "id": "labels_skip",
       "type": "get_var",
       "position": {
-        "x": 17760.0,
+        "x": 26400.0,
         "y": 320.0
       },
       "data": {
@@ -2685,7 +5161,7 @@
       "id": "communities_pending_args",
       "type": "code",
       "position": {
-        "x": 18240.0,
+        "x": 26880.0,
         "y": 0.0
       },
       "data": {
@@ -2737,7 +5213,7 @@
       "id": "communities_pending",
       "type": "tool_calls",
       "position": {
-        "x": 18720.0,
+        "x": 27360.0,
         "y": 0.0
       },
       "data": {
@@ -2793,7 +5269,7 @@
       "id": "communities_pending_out",
       "type": "code",
       "position": {
-        "x": 19200.0,
+        "x": 27840.0,
         "y": 0.0
       },
       "data": {
@@ -2859,7 +5335,7 @@
       "id": "communities_pending_failed",
       "type": "if",
       "position": {
-        "x": 19680.0,
+        "x": 28320.0,
         "y": 0.0
       },
       "data": {
@@ -2895,7 +5371,7 @@
       "id": "communities_pending_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 20160.0,
+        "x": 28800.0,
         "y": 0.0
       },
       "data": {
@@ -2940,7 +5416,7 @@
       "id": "communities_view",
       "type": "code",
       "position": {
-        "x": 20160.0,
+        "x": 28800.0,
         "y": 320.0
       },
       "data": {
@@ -2991,7 +5467,7 @@
       "id": "communities_any",
       "type": "if",
       "position": {
-        "x": 20640.0,
+        "x": 29280.0,
         "y": 0.0
       },
       "data": {
@@ -3027,7 +5503,7 @@
       "id": "labels_none_values",
       "type": "code",
       "position": {
-        "x": 21120.0,
+        "x": 29760.0,
         "y": 0.0
       },
       "data": {
@@ -3068,7 +5544,7 @@
       "id": "labels_none",
       "type": "set_vars",
       "position": {
-        "x": 21600.0,
+        "x": 30240.0,
         "y": 0.0
       },
       "data": {
@@ -3104,7 +5580,7 @@
       "id": "communities_prompt",
       "type": "string_template",
       "position": {
-        "x": 20640.0,
+        "x": 29280.0,
         "y": 320.0
       },
       "data": {
@@ -3138,7 +5614,7 @@
       "id": "communities_names",
       "type": "llm_call",
       "position": {
-        "x": 21120.0,
+        "x": 29760.0,
         "y": 320.0
       },
       "data": {
@@ -3286,7 +5762,7 @@
       "id": "communities_labels",
       "type": "code",
       "position": {
-        "x": 21600.0,
+        "x": 30240.0,
         "y": 320.0
       },
       "data": {
@@ -3342,7 +5818,7 @@
       "id": "labels_again",
       "type": "if",
       "position": {
-        "x": 22080.0,
+        "x": 30720.0,
         "y": 0.0
       },
       "data": {
@@ -3378,7 +5854,7 @@
       "id": "labels_first_values",
       "type": "code",
       "position": {
-        "x": 22560.0,
+        "x": 31200.0,
         "y": 0.0
       },
       "data": {
@@ -3424,7 +5900,7 @@
       "id": "labels_first_vars",
       "type": "set_vars",
       "position": {
-        "x": 23040.0,
+        "x": 31680.0,
         "y": 0.0
       },
       "data": {
@@ -3460,7 +5936,7 @@
       "id": "communities_names_again",
       "type": "llm_call",
       "position": {
-        "x": 22560.0,
+        "x": 31200.0,
         "y": 320.0
       },
       "data": {
@@ -3608,7 +6084,7 @@
       "id": "labels_retry",
       "type": "code",
       "position": {
-        "x": 23040.0,
+        "x": 31680.0,
         "y": 320.0
       },
       "data": {
@@ -3664,7 +6140,7 @@
       "id": "labels_retry_vars",
       "type": "set_vars",
       "position": {
-        "x": 23520.0,
+        "x": 32160.0,
         "y": 0.0
       },
       "data": {
@@ -3700,7 +6176,7 @@
       "id": "labels_answer",
       "type": "get_var",
       "position": {
-        "x": 23040.0,
+        "x": 31680.0,
         "y": 640.0
       },
       "data": {
@@ -3735,7 +6211,7 @@
       "id": "communities_label_args",
       "type": "code",
       "position": {
-        "x": 23520.0,
+        "x": 32160.0,
         "y": 320.0
       },
       "data": {
@@ -3781,7 +6257,7 @@
       "id": "communities_label",
       "type": "tool_calls",
       "position": {
-        "x": 24000.0,
+        "x": 32640.0,
         "y": 0.0
       },
       "data": {
@@ -3837,7 +6313,7 @@
       "id": "communities_label_out",
       "type": "code",
       "position": {
-        "x": 24480.0,
+        "x": 33120.0,
         "y": 0.0
       },
       "data": {
@@ -3903,7 +6379,7 @@
       "id": "communities_label_failed",
       "type": "if",
       "position": {
-        "x": 24960.0,
+        "x": 33600.0,
         "y": 0.0
       },
       "data": {
@@ -3939,7 +6415,7 @@
       "id": "communities_label_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 25440.0,
+        "x": 34080.0,
         "y": 0.0
       },
       "data": {
@@ -3984,7 +6460,7 @@
       "id": "labels_so_far",
       "type": "get_var",
       "position": {
-        "x": 24960.0,
+        "x": 33600.0,
         "y": 320.0
       },
       "data": {
@@ -4019,7 +6495,7 @@
       "id": "labels_deadline",
       "type": "get_var",
       "position": {
-        "x": 24960.0,
+        "x": 33600.0,
         "y": 640.0
       },
       "data": {
@@ -4054,7 +6530,7 @@
       "id": "labels_skipped_so_far",
       "type": "get_var",
       "position": {
-        "x": 24960.0,
+        "x": 33600.0,
         "y": 960.0
       },
       "data": {
@@ -4089,7 +6565,7 @@
       "id": "labels_count",
       "type": "code",
       "position": {
-        "x": 25440.0,
+        "x": 34080.0,
         "y": 320.0
       },
       "data": {
@@ -4180,7 +6656,7 @@
       "id": "p_labels_args",
       "type": "code",
       "position": {
-        "x": 25920.0,
+        "x": 34560.0,
         "y": 0.0
       },
       "data": {
@@ -4248,7 +6724,7 @@
       "id": "p_labels",
       "type": "tool_calls",
       "position": {
-        "x": 26400.0,
+        "x": 35040.0,
         "y": 0.0
       },
       "data": {
@@ -4304,7 +6780,7 @@
       "id": "p_labels_out",
       "type": "code",
       "position": {
-        "x": 26880.0,
+        "x": 35520.0,
         "y": 0.0
       },
       "data": {
@@ -4365,7 +6841,7 @@
       "id": "p_labels_failed",
       "type": "if",
       "position": {
-        "x": 27360.0,
+        "x": 36000.0,
         "y": 0.0
       },
       "data": {
@@ -4401,7 +6877,7 @@
       "id": "p_labels_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 27840.0,
+        "x": 36480.0,
         "y": 0.0
       },
       "data": {
@@ -4446,7 +6922,7 @@
       "id": "labels_vars",
       "type": "set_vars",
       "position": {
-        "x": 27840.0,
+        "x": 36480.0,
         "y": 320.0
       },
       "data": {
@@ -4482,7 +6958,7 @@
       "id": "labels_unfinished",
       "type": "get_var",
       "position": {
-        "x": 16800.0,
+        "x": 25440.0,
         "y": 640.0
       },
       "data": {
@@ -4517,7 +6993,7 @@
       "id": "labels_broke",
       "type": "if",
       "position": {
-        "x": 17280.0,
+        "x": 25920.0,
         "y": 320.0
       },
       "data": {
@@ -4553,7 +7029,7 @@
       "id": "labels_broke_keep_error",
       "type": "set_var",
       "position": {
-        "x": 17760.0,
+        "x": 26400.0,
         "y": 640.0
       },
       "data": {
@@ -4598,7 +7074,7 @@
       "id": "labels_broke_msg",
       "type": "code",
       "position": {
-        "x": 17280.0,
+        "x": 25920.0,
         "y": 640.0
       },
       "data": {
@@ -4629,7 +7105,7 @@
       "id": "stale_count_args",
       "type": "code",
       "position": {
-        "x": 17760.0,
+        "x": 26400.0,
         "y": 960.0
       },
       "data": {
@@ -4676,7 +7152,7 @@
       "id": "stale_count",
       "type": "tool_calls",
       "position": {
-        "x": 18240.0,
+        "x": 26880.0,
         "y": 320.0
       },
       "data": {
@@ -4732,7 +7208,7 @@
       "id": "stale_count_out",
       "type": "code",
       "position": {
-        "x": 18720.0,
+        "x": 27360.0,
         "y": 320.0
       },
       "data": {
@@ -4793,7 +7269,7 @@
       "id": "stale_count_failed",
       "type": "if",
       "position": {
-        "x": 19200.0,
+        "x": 27840.0,
         "y": 320.0
       },
       "data": {
@@ -4829,7 +7305,7 @@
       "id": "stale_count_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 19680.0,
+        "x": 28320.0,
         "y": 320.0
       },
       "data": {
@@ -4874,7 +7350,7 @@
       "id": "p_sum_start_args",
       "type": "code",
       "position": {
-        "x": 19680.0,
+        "x": 28320.0,
         "y": 640.0
       },
       "data": {
@@ -4932,7 +7408,7 @@
       "id": "p_sum_start",
       "type": "tool_calls",
       "position": {
-        "x": 20160.0,
+        "x": 28800.0,
         "y": 640.0
       },
       "data": {
@@ -4988,7 +7464,7 @@
       "id": "p_sum_start_out",
       "type": "code",
       "position": {
-        "x": 20640.0,
+        "x": 29280.0,
         "y": 640.0
       },
       "data": {
@@ -5049,7 +7525,7 @@
       "id": "p_sum_start_failed",
       "type": "if",
       "position": {
-        "x": 21120.0,
+        "x": 29760.0,
         "y": 744.0
       },
       "data": {
@@ -5085,7 +7561,7 @@
       "id": "p_sum_start_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 21600.0,
+        "x": 30240.0,
         "y": 640.0
       },
       "data": {
@@ -5130,7 +7606,7 @@
       "id": "sum_go",
       "type": "get_var",
       "position": {
-        "x": 21120.0,
+        "x": 29760.0,
         "y": 1064.0
       },
       "data": {
@@ -5165,7 +7641,7 @@
       "id": "sum_loop",
       "type": "while",
       "position": {
-        "x": 21600.0,
+        "x": 30240.0,
         "y": 960.0
       },
       "data": {
@@ -5211,7 +7687,7 @@
       "id": "sum_begin_values",
       "type": "code",
       "position": {
-        "x": 22080.0,
+        "x": 30720.0,
         "y": 320.0
       },
       "data": {
@@ -5252,7 +7728,7 @@
       "id": "sum_begin",
       "type": "set_vars",
       "position": {
-        "x": 22560.0,
+        "x": 31200.0,
         "y": 744.0
       },
       "data": {
@@ -5288,7 +7764,7 @@
       "id": "stale_args",
       "type": "code",
       "position": {
-        "x": 23040.0,
+        "x": 31680.0,
         "y": 960.0
       },
       "data": {
@@ -5335,7 +7811,7 @@
       "id": "stale",
       "type": "tool_calls",
       "position": {
-        "x": 23520.0,
+        "x": 32160.0,
         "y": 640.0
       },
       "data": {
@@ -5391,7 +7867,7 @@
       "id": "stale_out",
       "type": "code",
       "position": {
-        "x": 24000.0,
+        "x": 32640.0,
         "y": 320.0
       },
       "data": {
@@ -5457,7 +7933,7 @@
       "id": "stale_failed",
       "type": "if",
       "position": {
-        "x": 24480.0,
+        "x": 33120.0,
         "y": 320.0
       },
       "data": {
@@ -5493,7 +7969,7 @@
       "id": "stale_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 24960.0,
+        "x": 33600.0,
         "y": 1280.0
       },
       "data": {
@@ -5538,7 +8014,7 @@
       "id": "summary_view",
       "type": "code",
       "position": {
-        "x": 24960.0,
+        "x": 33600.0,
         "y": 1600.0
       },
       "data": {
@@ -5582,14 +8058,14 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "view = []\nfor i, p in enumerate(items or []):\n    if not isinstance(p, dict):\n        continue\n    view.append({\"index\": i, \"name\": p.get(\"name\"), \"kind\": p.get(\"kind\"), \"aliases\": p.get(\"aliases\") or [],\n                 \"summary\": p.get(\"summary\"), \"statements\": p.get(\"claims\") or [], \"notes\": p.get(\"notes\") or []})\nreturn {\"view\": view, \"any\": len(view) > 0}\n"
+        "codeBody": "view = []\nfor i, p in enumerate(items or []):\n    if not isinstance(p, dict):\n        continue\n    e = {\"index\": i, \"name\": p.get(\"name\"), \"kind\": p.get(\"kind\"), \"aliases\": p.get(\"aliases\") or [],\n         \"summary\": p.get(\"summary\"), \"as_of\": p.get(\"as_of\"), \"statements\": p.get(\"claims\") or [],\n         \"history\": p.get(\"history\") or [], \"earlier\": p.get(\"earlier\") or [], \"notes\": p.get(\"notes\") or []}\n    left = {k: v for k, v in (p.get(\"omitted\") or {}).items() if v}\n    if left:\n        e[\"omitted\"] = left\n    view.append(e)\nreturn {\"view\": view, \"any\": len(view) > 0}\n"
       }
     },
     {
       "id": "summary_any",
       "type": "if",
       "position": {
-        "x": 25440.0,
+        "x": 34080.0,
         "y": 744.0
       },
       "data": {
@@ -5625,7 +8101,7 @@
       "id": "sum_none_values",
       "type": "code",
       "position": {
-        "x": 25920.0,
+        "x": 34560.0,
         "y": 346.0
       },
       "data": {
@@ -5666,7 +8142,7 @@
       "id": "sum_none",
       "type": "set_vars",
       "position": {
-        "x": 26400.0,
+        "x": 35040.0,
         "y": 320.0
       },
       "data": {
@@ -5702,7 +8178,7 @@
       "id": "summary_prompt",
       "type": "string_template",
       "position": {
-        "x": 25440.0,
+        "x": 34080.0,
         "y": 1064.0
       },
       "data": {
@@ -5736,7 +8212,7 @@
       "id": "summaries",
       "type": "llm_call",
       "position": {
-        "x": 25920.0,
+        "x": 34560.0,
         "y": 666.0
       },
       "data": {
@@ -5828,7 +8304,7 @@
         ],
         "pinDefaults": {
           "tools": [],
-          "system": "You write the summary of entries in a person's notebook: the people, projects, places, tools and ideas their notes are about. Each entry in the message has an `index`, its `name`, `kind`, other names (`aliases`), its current `summary` (which may be empty, a placeholder or out of date), the statements the notebook holds about it (`statements`) and a few notes that mention it (`notes`, newest first).\n\nFor every entry, give:\n- `index`: the entry's index in the message;\n- `summary`: at most two sentences (at most about 240 characters) saying what the entry IS, in the third person and the present tense: what kind of thing it is, its role or what it is for, and who or what it belongs to, works with or is part of, with the facts that hold now; write a date in it only when a statement or a note gives that date for a fact.\n\nRules:\n- Use only the statements and notes in the message; never speculate, and never invent people, projects, dates or numbers.\n- Keep what the current summary says when the statements and notes still support it.\n- Write about the entry itself, never about the notes or one event (\"Dana is a colleague at Acme who leads the LUT budget\", not \"The notes mention Dana\" or \"Dana confirmed the schedule\").\n- Summarise every entry in the message, once.\n\nOutput JSON only, matching the schema, written compactly on one line (no indentation).\n",
+          "system": "You write the summary of entries in a person's notebook: the people, projects, places, tools and ideas their notes are about. Each entry in the message has an `index`, its `name`, `kind`, other names (`aliases`), its current `summary` (which may be empty, a placeholder or out of date), `as_of` (the date of the latest note about it), the statements that hold now (`statements`, with the date each started when known), its dated history earliest first (`history`: what the notebook understood of it as of each earlier date; `earlier`: statements that held from one date until another and then ended) and a few notes that mention it (`notes`, newest first; `new` marks a note the current summary does not account for yet, which may be dated earlier than the summary).\n\nFor every entry, give:\n- `index`: the entry's index in the message;\n- `ties`: first, read every note marked `new` and list each project, organisation and person it ties the entry to that the current summary does not name, with the entry's role in it and its date (\"adviser to Priya Natt on the Helix Atlas project at the Quill Institute, 2023-2024\"); an empty list when no note is marked `new` or the summary already names them all;\n- `summary`: at most two sentences (at most about 240 characters) saying what the entry IS, in the third person and the present tense: what kind of thing it is, its role or what it is for, and who or what it belongs to, works with or is part of, with the facts that hold now, as of `as_of`; when its history shows what it was before and that still explains what it is (an earlier role, owner or project it was part of), say so briefly with the date (\"head of research since 2024, after joining as an intern in 2022\"); write a date in it only when a statement, a summary of its history or a note gives that date for a fact.\n\nThe summary names every tie you listed in `ties`: a summary that leaves out a project, organisation or person a `new` note ties the entry to is wrong, even when the current summary reads well. It stays a description of what the entry is (its roles and the things it belongs to or works with), never a list of what the notes say happened: fold the ties into one clause (\"director of Zorn Labs since 2026, who also advised the Helix Atlas project at the Quill Institute in 2023-2024\"), and when two sentences are not enough, keep the current role and the new ties and leave out older detail (the history keeps it).\n\nRules:\n- Use only the statements, history and notes in the message; never speculate, and never invent people, projects, dates or numbers.\n- What `history` and `earlier` show is the past: never present an ended statement as holding now.\n- Keep what the current summary says when the statements and notes still support it, and add what the `new` notes and the statements show it is or does that the summary leaves out (another project, organisation or person it works with, with its date), within the two sentences.\n- Write about the entry itself, never about the notes or one event (\"Dana is a colleague at Acme who leads the LUT budget\", not \"The notes mention Dana\" or \"Dana confirmed the schedule\").\n- Summarise every entry in the message, once.\n\nThe answer has this shape (values are illustrations):\n{\"summaries\": [{\"index\": 0, \"ties\": [\"adviser to Priya Natt on the Helix Atlas project at the Quill Institute, 2023-2024\"], \"summary\": \"Mira Voss is the director of Zorn Labs (since 2026-03), who also advised the Helix Atlas project at the Quill Institute in 2023-2024.\"}, {\"index\": 1, \"ties\": [], \"summary\": \"CalibKit is a spectrometer calibration toolkit used at Zorn Labs.\"}]}\n\nOutput JSON only, matching the schema, written compactly on one line (no indentation).\n",
           "temperature": 0.2,
           "resp_schema": {
             "type": "object",
@@ -5842,13 +8318,24 @@
                       "type": "integer",
                       "description": "index of the entry in the list"
                     },
+                    "ties": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "each project, organisation or person a note marked new ties the entry to, with the entry's role in it and its date; empty when no note is new; null when empty"
+                    },
                     "summary": {
                       "type": "string",
-                      "description": "at most two sentences, third person, present tense"
+                      "description": "at most two sentences, third person, present tense, naming every tie listed in ties"
                     }
                   },
                   "required": [
                     "index",
+                    "ties",
                     "summary"
                   ]
                 }
@@ -5867,7 +8354,7 @@
       "id": "summary_items",
       "type": "code",
       "position": {
-        "x": 26400.0,
+        "x": 35040.0,
         "y": 640.0
       },
       "data": {
@@ -5923,7 +8410,7 @@
       "id": "sum_again",
       "type": "if",
       "position": {
-        "x": 26880.0,
+        "x": 35520.0,
         "y": 320.0
       },
       "data": {
@@ -5959,7 +8446,7 @@
       "id": "sum_first_values",
       "type": "code",
       "position": {
-        "x": 27360.0,
+        "x": 36000.0,
         "y": 320.0
       },
       "data": {
@@ -6005,7 +8492,7 @@
       "id": "sum_first_vars",
       "type": "set_vars",
       "position": {
-        "x": 27840.0,
+        "x": 36480.0,
         "y": 640.0
       },
       "data": {
@@ -6041,7 +8528,7 @@
       "id": "summaries_again",
       "type": "llm_call",
       "position": {
-        "x": 27360.0,
+        "x": 36000.0,
         "y": 640.0
       },
       "data": {
@@ -6133,7 +8620,7 @@
         ],
         "pinDefaults": {
           "tools": [],
-          "system": "You write the summary of entries in a person's notebook: the people, projects, places, tools and ideas their notes are about. Each entry in the message has an `index`, its `name`, `kind`, other names (`aliases`), its current `summary` (which may be empty, a placeholder or out of date), the statements the notebook holds about it (`statements`) and a few notes that mention it (`notes`, newest first).\n\nFor every entry, give:\n- `index`: the entry's index in the message;\n- `summary`: at most two sentences (at most about 240 characters) saying what the entry IS, in the third person and the present tense: what kind of thing it is, its role or what it is for, and who or what it belongs to, works with or is part of, with the facts that hold now; write a date in it only when a statement or a note gives that date for a fact.\n\nRules:\n- Use only the statements and notes in the message; never speculate, and never invent people, projects, dates or numbers.\n- Keep what the current summary says when the statements and notes still support it.\n- Write about the entry itself, never about the notes or one event (\"Dana is a colleague at Acme who leads the LUT budget\", not \"The notes mention Dana\" or \"Dana confirmed the schedule\").\n- Summarise every entry in the message, once.\n\nOutput JSON only, matching the schema, written compactly on one line (no indentation).\n",
+          "system": "You write the summary of entries in a person's notebook: the people, projects, places, tools and ideas their notes are about. Each entry in the message has an `index`, its `name`, `kind`, other names (`aliases`), its current `summary` (which may be empty, a placeholder or out of date), `as_of` (the date of the latest note about it), the statements that hold now (`statements`, with the date each started when known), its dated history earliest first (`history`: what the notebook understood of it as of each earlier date; `earlier`: statements that held from one date until another and then ended) and a few notes that mention it (`notes`, newest first; `new` marks a note the current summary does not account for yet, which may be dated earlier than the summary).\n\nFor every entry, give:\n- `index`: the entry's index in the message;\n- `ties`: first, read every note marked `new` and list each project, organisation and person it ties the entry to that the current summary does not name, with the entry's role in it and its date (\"adviser to Priya Natt on the Helix Atlas project at the Quill Institute, 2023-2024\"); an empty list when no note is marked `new` or the summary already names them all;\n- `summary`: at most two sentences (at most about 240 characters) saying what the entry IS, in the third person and the present tense: what kind of thing it is, its role or what it is for, and who or what it belongs to, works with or is part of, with the facts that hold now, as of `as_of`; when its history shows what it was before and that still explains what it is (an earlier role, owner or project it was part of), say so briefly with the date (\"head of research since 2024, after joining as an intern in 2022\"); write a date in it only when a statement, a summary of its history or a note gives that date for a fact.\n\nThe summary names every tie you listed in `ties`: a summary that leaves out a project, organisation or person a `new` note ties the entry to is wrong, even when the current summary reads well. It stays a description of what the entry is (its roles and the things it belongs to or works with), never a list of what the notes say happened: fold the ties into one clause (\"director of Zorn Labs since 2026, who also advised the Helix Atlas project at the Quill Institute in 2023-2024\"), and when two sentences are not enough, keep the current role and the new ties and leave out older detail (the history keeps it).\n\nRules:\n- Use only the statements, history and notes in the message; never speculate, and never invent people, projects, dates or numbers.\n- What `history` and `earlier` show is the past: never present an ended statement as holding now.\n- Keep what the current summary says when the statements and notes still support it, and add what the `new` notes and the statements show it is or does that the summary leaves out (another project, organisation or person it works with, with its date), within the two sentences.\n- Write about the entry itself, never about the notes or one event (\"Dana is a colleague at Acme who leads the LUT budget\", not \"The notes mention Dana\" or \"Dana confirmed the schedule\").\n- Summarise every entry in the message, once.\n\nThe answer has this shape (values are illustrations):\n{\"summaries\": [{\"index\": 0, \"ties\": [\"adviser to Priya Natt on the Helix Atlas project at the Quill Institute, 2023-2024\"], \"summary\": \"Mira Voss is the director of Zorn Labs (since 2026-03), who also advised the Helix Atlas project at the Quill Institute in 2023-2024.\"}, {\"index\": 1, \"ties\": [], \"summary\": \"CalibKit is a spectrometer calibration toolkit used at Zorn Labs.\"}]}\n\nOutput JSON only, matching the schema, written compactly on one line (no indentation).\n",
           "temperature": 0.2,
           "resp_schema": {
             "type": "object",
@@ -6147,13 +8634,24 @@
                       "type": "integer",
                       "description": "index of the entry in the list"
                     },
+                    "ties": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "each project, organisation or person a note marked new ties the entry to, with the entry's role in it and its date; empty when no note is new; null when empty"
+                    },
                     "summary": {
                       "type": "string",
-                      "description": "at most two sentences, third person, present tense"
+                      "description": "at most two sentences, third person, present tense, naming every tie listed in ties"
                     }
                   },
                   "required": [
                     "index",
+                    "ties",
                     "summary"
                   ]
                 }
@@ -6172,7 +8670,7 @@
       "id": "sum_retry",
       "type": "code",
       "position": {
-        "x": 27840.0,
+        "x": 36480.0,
         "y": 960.0
       },
       "data": {
@@ -6228,7 +8726,7 @@
       "id": "sum_retry_vars",
       "type": "set_vars",
       "position": {
-        "x": 28320.0,
+        "x": 36960.0,
         "y": 0.0
       },
       "data": {
@@ -6264,7 +8762,7 @@
       "id": "sum_answer",
       "type": "get_var",
       "position": {
-        "x": 27840.0,
+        "x": 36480.0,
         "y": 1280.0
       },
       "data": {
@@ -6299,7 +8797,7 @@
       "id": "set_summaries_args",
       "type": "code",
       "position": {
-        "x": 28320.0,
+        "x": 36960.0,
         "y": 320.0
       },
       "data": {
@@ -6345,7 +8843,7 @@
       "id": "set_summaries",
       "type": "tool_calls",
       "position": {
-        "x": 28800.0,
+        "x": 37440.0,
         "y": 0.0
       },
       "data": {
@@ -6401,7 +8899,7 @@
       "id": "set_summaries_out",
       "type": "code",
       "position": {
-        "x": 29280.0,
+        "x": 37920.0,
         "y": 0.0
       },
       "data": {
@@ -6467,7 +8965,7 @@
       "id": "set_summaries_failed",
       "type": "if",
       "position": {
-        "x": 29760.0,
+        "x": 38400.0,
         "y": 0.0
       },
       "data": {
@@ -6503,7 +9001,7 @@
       "id": "set_summaries_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 30240.0,
+        "x": 38880.0,
         "y": 0.0
       },
       "data": {
@@ -6548,7 +9046,7 @@
       "id": "sum_so_far",
       "type": "get_var",
       "position": {
-        "x": 29760.0,
+        "x": 38400.0,
         "y": 320.0
       },
       "data": {
@@ -6583,7 +9081,7 @@
       "id": "sum_deadline",
       "type": "get_var",
       "position": {
-        "x": 29760.0,
+        "x": 38400.0,
         "y": 640.0
       },
       "data": {
@@ -6618,7 +9116,7 @@
       "id": "sum_skipped_so_far",
       "type": "get_var",
       "position": {
-        "x": 29760.0,
+        "x": 38400.0,
         "y": 960.0
       },
       "data": {
@@ -6653,7 +9151,7 @@
       "id": "sum_count",
       "type": "code",
       "position": {
-        "x": 30240.0,
+        "x": 38880.0,
         "y": 320.0
       },
       "data": {
@@ -6749,7 +9247,7 @@
       "id": "p_sum_args",
       "type": "code",
       "position": {
-        "x": 30720.0,
+        "x": 39360.0,
         "y": 0.0
       },
       "data": {
@@ -6817,7 +9315,7 @@
       "id": "p_sum",
       "type": "tool_calls",
       "position": {
-        "x": 31200.0,
+        "x": 39840.0,
         "y": 0.0
       },
       "data": {
@@ -6873,7 +9371,7 @@
       "id": "p_sum_out",
       "type": "code",
       "position": {
-        "x": 31680.0,
+        "x": 40320.0,
         "y": 0.0
       },
       "data": {
@@ -6934,7 +9432,7 @@
       "id": "p_sum_failed",
       "type": "if",
       "position": {
-        "x": 32160.0,
+        "x": 40800.0,
         "y": 0.0
       },
       "data": {
@@ -6970,7 +9468,7 @@
       "id": "p_sum_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 32640.0,
+        "x": 41280.0,
         "y": 0.0
       },
       "data": {
@@ -7015,7 +9513,7 @@
       "id": "sum_vars",
       "type": "set_vars",
       "position": {
-        "x": 32640.0,
+        "x": 41280.0,
         "y": 320.0
       },
       "data": {
@@ -7051,7 +9549,7 @@
       "id": "sum_unfinished",
       "type": "get_var",
       "position": {
-        "x": 21600.0,
+        "x": 30240.0,
         "y": 1280.0
       },
       "data": {
@@ -7086,7 +9584,7 @@
       "id": "sum_broke",
       "type": "if",
       "position": {
-        "x": 22080.0,
+        "x": 30720.0,
         "y": 640.0
       },
       "data": {
@@ -7122,7 +9620,7 @@
       "id": "sum_broke_msg",
       "type": "code",
       "position": {
-        "x": 22080.0,
+        "x": 30720.0,
         "y": 960.0
       },
       "data": {
@@ -7153,7 +9651,7 @@
       "id": "sum_broke_keep_error",
       "type": "set_var",
       "position": {
-        "x": 22560.0,
+        "x": 31200.0,
         "y": 1064.0
       },
       "data": {
@@ -7198,7 +9696,7 @@
       "id": "p_tn_start_args",
       "type": "code",
       "position": {
-        "x": 22560.0,
+        "x": 31200.0,
         "y": 1384.0
       },
       "data": {
@@ -7257,7 +9755,7 @@
       "id": "p_tn_start",
       "type": "tool_calls",
       "position": {
-        "x": 23040.0,
+        "x": 31680.0,
         "y": 1280.0
       },
       "data": {
@@ -7313,7 +9811,7 @@
       "id": "p_tn_start_out",
       "type": "code",
       "position": {
-        "x": 23520.0,
+        "x": 32160.0,
         "y": 960.0
       },
       "data": {
@@ -7374,7 +9872,7 @@
       "id": "p_tn_start_failed",
       "type": "if",
       "position": {
-        "x": 24000.0,
+        "x": 32640.0,
         "y": 640.0
       },
       "data": {
@@ -7410,7 +9908,7 @@
       "id": "p_tn_start_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 24480.0,
+        "x": 33120.0,
         "y": 640.0
       },
       "data": {
@@ -7455,7 +9953,7 @@
       "id": "then_now_args",
       "type": "code",
       "position": {
-        "x": 24480.0,
+        "x": 33120.0,
         "y": 960.0
       },
       "data": {
@@ -7496,7 +9994,7 @@
       "id": "then_now",
       "type": "tool_calls",
       "position": {
-        "x": 24960.0,
+        "x": 33600.0,
         "y": 1920.0
       },
       "data": {
@@ -7552,7 +10050,7 @@
       "id": "then_now_out",
       "type": "code",
       "position": {
-        "x": 25440.0,
+        "x": 34080.0,
         "y": 1384.0
       },
       "data": {
@@ -7613,7 +10111,7 @@
       "id": "then_now_failed",
       "type": "if",
       "position": {
-        "x": 25920.0,
+        "x": 34560.0,
         "y": 1090.0
       },
       "data": {
@@ -7649,7 +10147,7 @@
       "id": "then_now_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 26400.0,
+        "x": 35040.0,
         "y": 960.0
       },
       "data": {
@@ -7694,7 +10192,7 @@
       "id": "p_tn_done_args",
       "type": "code",
       "position": {
-        "x": 26400.0,
+        "x": 35040.0,
         "y": 1280.0
       },
       "data": {
@@ -7751,7 +10249,7 @@
       "id": "p_tn_done",
       "type": "tool_calls",
       "position": {
-        "x": 26880.0,
+        "x": 35520.0,
         "y": 640.0
       },
       "data": {
@@ -7807,7 +10305,7 @@
       "id": "p_tn_done_out",
       "type": "code",
       "position": {
-        "x": 27360.0,
+        "x": 36000.0,
         "y": 1064.0
       },
       "data": {
@@ -7868,7 +10366,7 @@
       "id": "p_tn_done_failed",
       "type": "if",
       "position": {
-        "x": 27840.0,
+        "x": 36480.0,
         "y": 1600.0
       },
       "data": {
@@ -7904,7 +10402,7 @@
       "id": "p_tn_done_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 28320.0,
+        "x": 36960.0,
         "y": 640.0
       },
       "data": {
@@ -7949,7 +10447,7 @@
       "id": "p_reflect_start_args",
       "type": "code",
       "position": {
-        "x": 28320.0,
+        "x": 36960.0,
         "y": 960.0
       },
       "data": {
@@ -8008,7 +10506,7 @@
       "id": "p_reflect_start",
       "type": "tool_calls",
       "position": {
-        "x": 28800.0,
+        "x": 37440.0,
         "y": 320.0
       },
       "data": {
@@ -8064,7 +10562,7 @@
       "id": "p_reflect_start_out",
       "type": "code",
       "position": {
-        "x": 29280.0,
+        "x": 37920.0,
         "y": 320.0
       },
       "data": {
@@ -8125,7 +10623,7 @@
       "id": "p_reflect_start_failed",
       "type": "if",
       "position": {
-        "x": 29760.0,
+        "x": 38400.0,
         "y": 1280.0
       },
       "data": {
@@ -8161,7 +10659,7 @@
       "id": "p_reflect_start_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 30240.0,
+        "x": 38880.0,
         "y": 744.0
       },
       "data": {
@@ -8206,7 +10704,7 @@
       "id": "reflect",
       "type": "subflow",
       "position": {
-        "x": 30240.0,
+        "x": 38880.0,
         "y": 1064.0
       },
       "data": {
@@ -8271,7 +10769,7 @@
       "id": "reflect_outcome",
       "type": "code",
       "position": {
-        "x": 30720.0,
+        "x": 39360.0,
         "y": 346.0
       },
       "data": {
@@ -8332,7 +10830,7 @@
       "id": "reflect_failed",
       "type": "if",
       "position": {
-        "x": 31200.0,
+        "x": 39840.0,
         "y": 320.0
       },
       "data": {
@@ -8368,7 +10866,7 @@
       "id": "reflect_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 31680.0,
+        "x": 40320.0,
         "y": 320.0
       },
       "data": {
@@ -8413,7 +10911,7 @@
       "id": "p_reflect_done_args",
       "type": "code",
       "position": {
-        "x": 31680.0,
+        "x": 40320.0,
         "y": 640.0
       },
       "data": {
@@ -8472,7 +10970,7 @@
       "id": "p_reflect_done",
       "type": "tool_calls",
       "position": {
-        "x": 32160.0,
+        "x": 40800.0,
         "y": 320.0
       },
       "data": {
@@ -8528,7 +11026,7 @@
       "id": "p_reflect_done_out",
       "type": "code",
       "position": {
-        "x": 32640.0,
+        "x": 41280.0,
         "y": 640.0
       },
       "data": {
@@ -8589,7 +11087,7 @@
       "id": "p_reflect_done_failed",
       "type": "if",
       "position": {
-        "x": 33120.0,
+        "x": 41760.0,
         "y": 0.0
       },
       "data": {
@@ -8625,7 +11123,7 @@
       "id": "p_reflect_done_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 33600.0,
+        "x": 42240.0,
         "y": 0.0
       },
       "data": {
@@ -8670,7 +11168,7 @@
       "id": "end_sum_budget",
       "type": "get_var",
       "position": {
-        "x": 32640.0,
+        "x": 41280.0,
         "y": 960.0
       },
       "data": {
@@ -8705,7 +11203,7 @@
       "id": "end_sum_left",
       "type": "get_var",
       "position": {
-        "x": 32640.0,
+        "x": 41280.0,
         "y": 1280.0
       },
       "data": {
@@ -8740,7 +11238,7 @@
       "id": "end_labels_budget",
       "type": "get_var",
       "position": {
-        "x": 32640.0,
+        "x": 41280.0,
         "y": 1600.0
       },
       "data": {
@@ -8775,7 +11273,7 @@
       "id": "end_labels_left",
       "type": "get_var",
       "position": {
-        "x": 32640.0,
+        "x": 41280.0,
         "y": 1920.0
       },
       "data": {
@@ -8807,10 +11305,45 @@
       }
     },
     {
+      "id": "end_re_budget",
+      "type": "get_var",
+      "position": {
+        "x": 41280.0,
+        "y": 2240.0
+      },
+      "data": {
+        "nodeType": "get_var",
+        "label": "Get re_budget",
+        "inputs": [
+          {
+            "id": "name",
+            "label": "name",
+            "type": "string"
+          },
+          {
+            "id": "default",
+            "label": "default",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "value",
+            "label": "value",
+            "type": "any"
+          }
+        ],
+        "pinDefaults": {
+          "name": "re_budget",
+          "default": false
+        }
+      }
+    },
+    {
       "id": "results",
       "type": "code",
       "position": {
-        "x": 33120.0,
+        "x": 41760.0,
         "y": 320.0
       },
       "data": {
@@ -8848,6 +11381,16 @@
             "type": "number"
           },
           {
+            "id": "re_budget",
+            "label": "re_budget",
+            "type": "boolean"
+          },
+          {
+            "id": "re_left",
+            "label": "re_left",
+            "type": "number"
+          },
+          {
             "id": "permissions",
             "label": "permissions",
             "type": "string"
@@ -8864,14 +11407,14 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "sb, lb = bool(sum_budget), bool(labels_budget)\nreturn {\"results\": {\"communities\": int(communities or 0), \"insights\": int(insights or 0),\n        \"budget_spent\": sb or lb, \"not_reached\": {\"summaries\": int(sum_left or 0) if sb else 0,\n                                                \"labels\": int(labels_left or 0) if lb else 0}}}\n"
+        "codeBody": "sb, lb, rb = bool(sum_budget), bool(labels_budget), bool(re_budget)\nreturn {\"results\": {\"communities\": int(communities or 0), \"insights\": int(insights or 0),\n        \"budget_spent\": sb or lb or rb, \"not_reached\": {\"summaries\": int(sum_left or 0) if sb else 0,\n                                                \"labels\": int(labels_left or 0) if lb else 0,\n                                                \"reinterpret\": int(re_left or 0) if rb else 0}}}\n"
       }
     },
     {
       "id": "finish_args",
       "type": "code",
       "position": {
-        "x": 33600.0,
+        "x": 42240.0,
         "y": 320.0
       },
       "data": {
@@ -8923,7 +11466,7 @@
       "id": "finish",
       "type": "tool_calls",
       "position": {
-        "x": 34080.0,
+        "x": 42720.0,
         "y": 0.0
       },
       "data": {
@@ -8979,7 +11522,7 @@
       "id": "finish_out",
       "type": "code",
       "position": {
-        "x": 34560.0,
+        "x": 43200.0,
         "y": 0.0
       },
       "data": {
@@ -9044,6 +11587,16 @@
             "type": "string"
           },
           {
+            "id": "reinterpreted",
+            "label": "reinterpreted",
+            "type": "number"
+          },
+          {
+            "id": "unchanged",
+            "label": "unchanged",
+            "type": "number"
+          },
+          {
             "id": "tool_output",
             "label": "tool_output",
             "type": "object"
@@ -9070,7 +11623,7 @@
       "id": "finish_failed",
       "type": "if",
       "position": {
-        "x": 35040.0,
+        "x": 43680.0,
         "y": 0.0
       },
       "data": {
@@ -9106,7 +11659,7 @@
       "id": "finish_failed_keep_error",
       "type": "set_var",
       "position": {
-        "x": 35520.0,
+        "x": 44160.0,
         "y": 0.0
       },
       "data": {
@@ -9151,7 +11704,7 @@
       "id": "report",
       "type": "code",
       "position": {
-        "x": 35520.0,
+        "x": 44160.0,
         "y": 320.0
       },
       "data": {
@@ -9194,6 +11747,11 @@
             "type": "string"
           },
           {
+            "id": "reinterpreted",
+            "label": "reinterpreted",
+            "type": "number"
+          },
+          {
             "id": "permissions",
             "label": "permissions",
             "type": "string"
@@ -9215,14 +11773,14 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "def n(x, one, many):\n    x = int(x or 0)\n    return str(x) + \" \" + (one if x == 1 else many)\nhead = \"Consolidated with gaps: \" if status == \"completed_with_gaps\" else \"Consolidated: \"\nmsg = (head + n(merges, \"merge\", \"merges\") + \", \" + n(labelled, \"group named\", \"groups named\")\n       + \", \" + n(summaries, \"summary refreshed\", \"summaries refreshed\") + \", \"\n       + n(insights, \"insight\", \"insights\") + \".\")\nif notice:\n    msg += \" \" + str(notice)[0].upper() + str(notice)[1:]\nreturn {\"message\": msg}\n"
+        "codeBody": "def n(x, one, many):\n    x = int(x or 0)\n    return str(x) + \" \" + (one if x == 1 else many)\nhead = \"Consolidated with gaps: \" if status == \"completed_with_gaps\" else \"Consolidated: \"\nagain = (n(reinterpreted, \"note understood again\", \"notes understood again\") + \", \") if reinterpreted else \"\"\nmsg = (head + n(merges, \"merge\", \"merges\") + \", \" + again + n(labelled, \"group named\", \"groups named\")\n       + \", \" + n(summaries, \"summary refreshed\", \"summaries refreshed\") + \", \"\n       + n(insights, \"insight\", \"insights\") + \".\")\nif notice:\n    msg += \" \" + str(notice)[0].upper() + str(notice)[1:]\nreturn {\"message\": msg}\n"
       }
     },
     {
       "id": "end",
       "type": "on_flow_end",
       "position": {
-        "x": 36000.0,
+        "x": 44640.0,
         "y": 0.0
       },
       "data": {
@@ -9653,8 +12211,750 @@
       "targetHandle": "exec-in"
     },
     {
-      "id": "e-p_norm_done_failed-false-p_comm_start_args-exec-in",
+      "id": "e-p_norm_done_failed-false-re_count_args-exec-in",
       "source": "p_norm_done_failed",
+      "sourceHandle": "false",
+      "target": "re_count_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_count_args-tool_calls-re_count-tool_calls",
+      "source": "re_count_args",
+      "sourceHandle": "tool_calls",
+      "target": "re_count",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-re_count_args-exec-out-re_count-exec-in",
+      "source": "re_count_args",
+      "sourceHandle": "exec-out",
+      "target": "re_count",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_count-results-re_count_out-results",
+      "source": "re_count",
+      "sourceHandle": "results",
+      "target": "re_count_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-re_count-exec-out-re_count_out-exec-in",
+      "source": "re_count",
+      "sourceHandle": "exec-out",
+      "target": "re_count_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_count_out-failed-re_count_failed-condition",
+      "source": "re_count_out",
+      "sourceHandle": "failed",
+      "target": "re_count_failed",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-re_count_out-exec-out-re_count_failed-exec-in",
+      "source": "re_count_out",
+      "sourceHandle": "exec-out",
+      "target": "re_count_failed",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_count_out-failure-re_count_failed_keep_error-value",
+      "source": "re_count_out",
+      "sourceHandle": "failure",
+      "target": "re_count_failed_keep_error",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e-re_count_failed-true-re_count_failed_keep_error-exec-in",
+      "source": "re_count_failed",
+      "sourceHandle": "true",
+      "target": "re_count_failed_keep_error",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_count_failed_keep_error-exec-out-fail_results-exec-in",
+      "source": "re_count_failed_keep_error",
+      "sourceHandle": "exec-out",
+      "target": "fail_results",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_count_out-done-p_re_start_args-done",
+      "source": "re_count_out",
+      "sourceHandle": "done",
+      "target": "p_re_start_args",
+      "targetHandle": "done"
+    },
+    {
+      "id": "e-re_count_out-total-p_re_start_args-total",
+      "source": "re_count_out",
+      "sourceHandle": "total",
+      "target": "p_re_start_args",
+      "targetHandle": "total"
+    },
+    {
+      "id": "e-re_count_failed-false-p_re_start_args-exec-in",
+      "source": "re_count_failed",
+      "sourceHandle": "false",
+      "target": "p_re_start_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-p_re_start_args-tool_calls-p_re_start-tool_calls",
+      "source": "p_re_start_args",
+      "sourceHandle": "tool_calls",
+      "target": "p_re_start",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-p_re_start_args-exec-out-p_re_start-exec-in",
+      "source": "p_re_start_args",
+      "sourceHandle": "exec-out",
+      "target": "p_re_start",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-p_re_start-results-p_re_start_out-results",
+      "source": "p_re_start",
+      "sourceHandle": "results",
+      "target": "p_re_start_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-p_re_start-exec-out-p_re_start_out-exec-in",
+      "source": "p_re_start",
+      "sourceHandle": "exec-out",
+      "target": "p_re_start_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-p_re_start_out-failed-p_re_start_failed-condition",
+      "source": "p_re_start_out",
+      "sourceHandle": "failed",
+      "target": "p_re_start_failed",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-p_re_start_out-exec-out-p_re_start_failed-exec-in",
+      "source": "p_re_start_out",
+      "sourceHandle": "exec-out",
+      "target": "p_re_start_failed",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-p_re_start_out-failure-p_re_start_failed_keep_error-value",
+      "source": "p_re_start_out",
+      "sourceHandle": "failure",
+      "target": "p_re_start_failed_keep_error",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e-p_re_start_failed-true-p_re_start_failed_keep_error-exec-in",
+      "source": "p_re_start_failed",
+      "sourceHandle": "true",
+      "target": "p_re_start_failed_keep_error",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-p_re_start_failed_keep_error-exec-out-fail_results-exec-in",
+      "source": "p_re_start_failed_keep_error",
+      "sourceHandle": "exec-out",
+      "target": "fail_results",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_go-value-re_loop-condition",
+      "source": "re_go",
+      "sourceHandle": "value",
+      "target": "re_loop",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-p_re_start_failed-false-re_loop-exec-in",
+      "source": "p_re_start_failed",
+      "sourceHandle": "false",
+      "target": "re_loop",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_loop-loop-re_begin_values-exec-in",
+      "source": "re_loop",
+      "sourceHandle": "loop",
+      "target": "re_begin_values",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_begin_values-updates-re_begin-updates",
+      "source": "re_begin_values",
+      "sourceHandle": "updates",
+      "target": "re_begin",
+      "targetHandle": "updates"
+    },
+    {
+      "id": "e-re_begin_values-exec-out-re_begin-exec-in",
+      "source": "re_begin_values",
+      "sourceHandle": "exec-out",
+      "target": "re_begin",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_deadline-value-re_time-deadline",
+      "source": "re_deadline",
+      "sourceHandle": "value",
+      "target": "re_time",
+      "targetHandle": "deadline"
+    },
+    {
+      "id": "e-re_begin-exec-out-re_time-exec-in",
+      "source": "re_begin",
+      "sourceHandle": "exec-out",
+      "target": "re_time",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_time-in_time-re_in_time-condition",
+      "source": "re_time",
+      "sourceHandle": "in_time",
+      "target": "re_in_time",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-re_time-exec-out-re_in_time-exec-in",
+      "source": "re_time",
+      "sourceHandle": "exec-out",
+      "target": "re_in_time",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_in_time-false-re_spent_values-exec-in",
+      "source": "re_in_time",
+      "sourceHandle": "false",
+      "target": "re_spent_values",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_spent_values-updates-re_spent-updates",
+      "source": "re_spent_values",
+      "sourceHandle": "updates",
+      "target": "re_spent",
+      "targetHandle": "updates"
+    },
+    {
+      "id": "e-re_spent_values-exec-out-re_spent-exec-in",
+      "source": "re_spent_values",
+      "sourceHandle": "exec-out",
+      "target": "re_spent",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_failed_last-value-re_next_args-failed",
+      "source": "re_failed_last",
+      "sourceHandle": "value",
+      "target": "re_next_args",
+      "targetHandle": "failed"
+    },
+    {
+      "id": "e-re_in_time-true-re_next_args-exec-in",
+      "source": "re_in_time",
+      "sourceHandle": "true",
+      "target": "re_next_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_next_args-tool_calls-re_next-tool_calls",
+      "source": "re_next_args",
+      "sourceHandle": "tool_calls",
+      "target": "re_next",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-re_next_args-exec-out-re_next-exec-in",
+      "source": "re_next_args",
+      "sourceHandle": "exec-out",
+      "target": "re_next",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_next-results-re_next_out-results",
+      "source": "re_next",
+      "sourceHandle": "results",
+      "target": "re_next_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-re_next-exec-out-re_next_out-exec-in",
+      "source": "re_next",
+      "sourceHandle": "exec-out",
+      "target": "re_next_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_next_out-failed-re_next_failed-condition",
+      "source": "re_next_out",
+      "sourceHandle": "failed",
+      "target": "re_next_failed",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-re_next_out-exec-out-re_next_failed-exec-in",
+      "source": "re_next_out",
+      "sourceHandle": "exec-out",
+      "target": "re_next_failed",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_next_out-failure-re_next_failed_keep_error-value",
+      "source": "re_next_out",
+      "sourceHandle": "failure",
+      "target": "re_next_failed_keep_error",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e-re_next_failed-true-re_next_failed_keep_error-exec-in",
+      "source": "re_next_failed",
+      "sourceHandle": "true",
+      "target": "re_next_failed_keep_error",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_next_failed_keep_error-exec-out-fail_results-exec-in",
+      "source": "re_next_failed_keep_error",
+      "sourceHandle": "exec-out",
+      "target": "fail_results",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_next_out-items-re_pick-items",
+      "source": "re_next_out",
+      "sourceHandle": "items",
+      "target": "re_pick",
+      "targetHandle": "items"
+    },
+    {
+      "id": "e-re_next_failed-false-re_pick-exec-in",
+      "source": "re_next_failed",
+      "sourceHandle": "false",
+      "target": "re_pick",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_pick-has_item-re_has-condition",
+      "source": "re_pick",
+      "sourceHandle": "has_item",
+      "target": "re_has",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-re_pick-exec-out-re_has-exec-in",
+      "source": "re_pick",
+      "sourceHandle": "exec-out",
+      "target": "re_has",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_has-false-re_none_values-exec-in",
+      "source": "re_has",
+      "sourceHandle": "false",
+      "target": "re_none_values",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_none_values-updates-re_none-updates",
+      "source": "re_none_values",
+      "sourceHandle": "updates",
+      "target": "re_none",
+      "targetHandle": "updates"
+    },
+    {
+      "id": "e-re_none_values-exec-out-re_none-exec-in",
+      "source": "re_none_values",
+      "sourceHandle": "exec-out",
+      "target": "re_none",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_pick-note_id-re_process-note_id",
+      "source": "re_pick",
+      "sourceHandle": "note_id",
+      "target": "re_process",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-start-provider-re_process-provider",
+      "source": "start",
+      "sourceHandle": "provider",
+      "target": "re_process",
+      "targetHandle": "provider"
+    },
+    {
+      "id": "e-start-model-re_process-model",
+      "source": "start",
+      "sourceHandle": "model",
+      "target": "re_process",
+      "targetHandle": "model"
+    },
+    {
+      "id": "e-start-thinking-re_process-thinking",
+      "source": "start",
+      "sourceHandle": "thinking",
+      "target": "re_process",
+      "targetHandle": "thinking"
+    },
+    {
+      "id": "e-re_has-true-re_process-exec-in",
+      "source": "re_has",
+      "sourceHandle": "true",
+      "target": "re_process",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_process-output-re_outcome-output",
+      "source": "re_process",
+      "sourceHandle": "output",
+      "target": "re_outcome",
+      "targetHandle": "output"
+    },
+    {
+      "id": "e-re_process-child_output-re_outcome-child_output",
+      "source": "re_process",
+      "sourceHandle": "child_output",
+      "target": "re_outcome",
+      "targetHandle": "child_output"
+    },
+    {
+      "id": "e-re_pick-note_id-re_outcome-note_id",
+      "source": "re_pick",
+      "sourceHandle": "note_id",
+      "target": "re_outcome",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-re_next_out-done-re_outcome-done",
+      "source": "re_next_out",
+      "sourceHandle": "done",
+      "target": "re_outcome",
+      "targetHandle": "done"
+    },
+    {
+      "id": "e-re_next_out-total-re_outcome-total",
+      "source": "re_next_out",
+      "sourceHandle": "total",
+      "target": "re_outcome",
+      "targetHandle": "total"
+    },
+    {
+      "id": "e-re_process-exec-out-re_outcome-exec-in",
+      "source": "re_process",
+      "sourceHandle": "exec-out",
+      "target": "re_outcome",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_outcome-done-p_re_args-done",
+      "source": "re_outcome",
+      "sourceHandle": "done",
+      "target": "p_re_args",
+      "targetHandle": "done"
+    },
+    {
+      "id": "e-re_outcome-total-p_re_args-total",
+      "source": "re_outcome",
+      "sourceHandle": "total",
+      "target": "p_re_args",
+      "targetHandle": "total"
+    },
+    {
+      "id": "e-re_outcome-skipped-p_re_args-skipped",
+      "source": "re_outcome",
+      "sourceHandle": "skipped",
+      "target": "p_re_args",
+      "targetHandle": "skipped"
+    },
+    {
+      "id": "e-re_outcome-exec-out-p_re_args-exec-in",
+      "source": "re_outcome",
+      "sourceHandle": "exec-out",
+      "target": "p_re_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-p_re_args-tool_calls-p_re-tool_calls",
+      "source": "p_re_args",
+      "sourceHandle": "tool_calls",
+      "target": "p_re",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-p_re_args-exec-out-p_re-exec-in",
+      "source": "p_re_args",
+      "sourceHandle": "exec-out",
+      "target": "p_re",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-p_re-results-p_re_out-results",
+      "source": "p_re",
+      "sourceHandle": "results",
+      "target": "p_re_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-p_re-exec-out-p_re_out-exec-in",
+      "source": "p_re",
+      "sourceHandle": "exec-out",
+      "target": "p_re_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-p_re_out-failed-p_re_failed-condition",
+      "source": "p_re_out",
+      "sourceHandle": "failed",
+      "target": "p_re_failed",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-p_re_out-exec-out-p_re_failed-exec-in",
+      "source": "p_re_out",
+      "sourceHandle": "exec-out",
+      "target": "p_re_failed",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-p_re_out-failure-p_re_failed_keep_error-value",
+      "source": "p_re_out",
+      "sourceHandle": "failure",
+      "target": "p_re_failed_keep_error",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e-p_re_failed-true-p_re_failed_keep_error-exec-in",
+      "source": "p_re_failed",
+      "sourceHandle": "true",
+      "target": "p_re_failed_keep_error",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-p_re_failed_keep_error-exec-out-fail_results-exec-in",
+      "source": "p_re_failed_keep_error",
+      "sourceHandle": "exec-out",
+      "target": "fail_results",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_outcome-updates-re_vars-updates",
+      "source": "re_outcome",
+      "sourceHandle": "updates",
+      "target": "re_vars",
+      "targetHandle": "updates"
+    },
+    {
+      "id": "e-p_re_failed-false-re_vars-exec-in",
+      "source": "p_re_failed",
+      "sourceHandle": "false",
+      "target": "re_vars",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_unfinished-value-re_broke-condition",
+      "source": "re_unfinished",
+      "sourceHandle": "value",
+      "target": "re_broke",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-re_loop-done-re_broke-exec-in",
+      "source": "re_loop",
+      "sourceHandle": "done",
+      "target": "re_broke",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_broke_msg-message-re_broke_keep_error-value",
+      "source": "re_broke_msg",
+      "sourceHandle": "message",
+      "target": "re_broke_keep_error",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e-re_broke-true-re_broke_keep_error-exec-in",
+      "source": "re_broke",
+      "sourceHandle": "true",
+      "target": "re_broke_keep_error",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_broke_keep_error-exec-out-fail_results-exec-in",
+      "source": "re_broke_keep_error",
+      "sourceHandle": "exec-out",
+      "target": "fail_results",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_failed_end-value-re_final_args-failed",
+      "source": "re_failed_end",
+      "sourceHandle": "value",
+      "target": "re_final_args",
+      "targetHandle": "failed"
+    },
+    {
+      "id": "e-re_broke-false-re_final_args-exec-in",
+      "source": "re_broke",
+      "sourceHandle": "false",
+      "target": "re_final_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_final_args-tool_calls-re_final-tool_calls",
+      "source": "re_final_args",
+      "sourceHandle": "tool_calls",
+      "target": "re_final",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-re_final_args-exec-out-re_final-exec-in",
+      "source": "re_final_args",
+      "sourceHandle": "exec-out",
+      "target": "re_final",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_final-results-re_final_out-results",
+      "source": "re_final",
+      "sourceHandle": "results",
+      "target": "re_final_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-re_final-exec-out-re_final_out-exec-in",
+      "source": "re_final",
+      "sourceHandle": "exec-out",
+      "target": "re_final_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_final_out-failed-re_final_failed-condition",
+      "source": "re_final_out",
+      "sourceHandle": "failed",
+      "target": "re_final_failed",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-re_final_out-exec-out-re_final_failed-exec-in",
+      "source": "re_final_out",
+      "sourceHandle": "exec-out",
+      "target": "re_final_failed",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_final_out-failure-re_final_failed_keep_error-value",
+      "source": "re_final_out",
+      "sourceHandle": "failure",
+      "target": "re_final_failed_keep_error",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e-re_final_failed-true-re_final_failed_keep_error-exec-in",
+      "source": "re_final_failed",
+      "sourceHandle": "true",
+      "target": "re_final_failed_keep_error",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_final_failed_keep_error-exec-out-fail_results-exec-in",
+      "source": "re_final_failed_keep_error",
+      "sourceHandle": "exec-out",
+      "target": "fail_results",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-re_final_out-done-p_re_done_args-done",
+      "source": "re_final_out",
+      "sourceHandle": "done",
+      "target": "p_re_done_args",
+      "targetHandle": "done"
+    },
+    {
+      "id": "e-re_final_out-total-p_re_done_args-total",
+      "source": "re_final_out",
+      "sourceHandle": "total",
+      "target": "p_re_done_args",
+      "targetHandle": "total"
+    },
+    {
+      "id": "e-re_final_failed-false-p_re_done_args-exec-in",
+      "source": "re_final_failed",
+      "sourceHandle": "false",
+      "target": "p_re_done_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-p_re_done_args-tool_calls-p_re_done-tool_calls",
+      "source": "p_re_done_args",
+      "sourceHandle": "tool_calls",
+      "target": "p_re_done",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-p_re_done_args-exec-out-p_re_done-exec-in",
+      "source": "p_re_done_args",
+      "sourceHandle": "exec-out",
+      "target": "p_re_done",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-p_re_done-results-p_re_done_out-results",
+      "source": "p_re_done",
+      "sourceHandle": "results",
+      "target": "p_re_done_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-p_re_done-exec-out-p_re_done_out-exec-in",
+      "source": "p_re_done",
+      "sourceHandle": "exec-out",
+      "target": "p_re_done_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-p_re_done_out-failed-p_re_done_failed-condition",
+      "source": "p_re_done_out",
+      "sourceHandle": "failed",
+      "target": "p_re_done_failed",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-p_re_done_out-exec-out-p_re_done_failed-exec-in",
+      "source": "p_re_done_out",
+      "sourceHandle": "exec-out",
+      "target": "p_re_done_failed",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-p_re_done_out-failure-p_re_done_failed_keep_error-value",
+      "source": "p_re_done_out",
+      "sourceHandle": "failure",
+      "target": "p_re_done_failed_keep_error",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e-p_re_done_failed-true-p_re_done_failed_keep_error-exec-in",
+      "source": "p_re_done_failed",
+      "sourceHandle": "true",
+      "target": "p_re_done_failed_keep_error",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-p_re_done_failed_keep_error-exec-out-fail_results-exec-in",
+      "source": "p_re_done_failed_keep_error",
+      "sourceHandle": "exec-out",
+      "target": "fail_results",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-p_re_done_failed-false-p_comm_start_args-exec-in",
+      "source": "p_re_done_failed",
       "sourceHandle": "false",
       "target": "p_comm_start_args",
       "targetHandle": "exec-in"
@@ -11844,6 +15144,20 @@
       "targetHandle": "labels_left"
     },
     {
+      "id": "e-end_re_budget-value-results-re_budget",
+      "source": "end_re_budget",
+      "sourceHandle": "value",
+      "target": "results",
+      "targetHandle": "re_budget"
+    },
+    {
+      "id": "e-re_final_out-pending-results-re_left",
+      "source": "re_final_out",
+      "sourceHandle": "pending",
+      "target": "results",
+      "targetHandle": "re_left"
+    },
+    {
       "id": "e-results-results-finish_args-results",
       "source": "results",
       "sourceHandle": "results",
@@ -11963,6 +15277,13 @@
       "targetHandle": "notice"
     },
     {
+      "id": "e-finish_out-reinterpreted-report-reinterpreted",
+      "source": "finish_out",
+      "sourceHandle": "reinterpreted",
+      "target": "report",
+      "targetHandle": "reinterpreted"
+    },
+    {
       "id": "e-finish_failed-false-report-exec-in",
       "source": "finish_failed",
       "sourceHandle": "false",
@@ -12052,7 +15373,10 @@
           "note_entities_normalize",
           "note_entities_stale_summaries",
           "note_entities_set_summaries",
-          "note_then_now_refresh"
+          "note_then_now_refresh",
+          "note_reinterpret_next",
+          "note_mark_reinterpret",
+          "note_filing_context"
         ]
       }
     }

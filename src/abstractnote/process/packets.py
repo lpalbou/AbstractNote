@@ -29,6 +29,21 @@ TOPICS = 50  # the most used existing topics (eval2 D13), the note's own first
 #: Predicates of the known entities' current statements listed for extraction (eval2 D6: the same fact keeps
 #: the same predicate, so a later value can replace it), the most used first.
 KNOWN_PREDICATES = 15
+#: Statement slots (subject, predicate spelling, value) of the known entities listed for extraction, so a note
+#: about the same slot reuses its spelling (the linking then names the statement by index, never by string).
+KNOWN_SLOTS = 30
+#: Claims recorded LATER than the note shown per candidate (ADR 0008 §2), the earliest later first: never the
+#: CLAIMS_PER_CANDIDATE cut; what the budget leaves out is said on the card and recorded in the digest.
+LATER_CLAIMS_PER_CANDIDATE = 12
+#: Summaries of a later day shown per candidate, the latest ones.
+LATER_SUMMARIES_PER_CANDIDATE = 2
+#: The LATER block's label (ADR 0008 §2): what the model may do with what was recorded after the note.
+LATER_LABEL = ("LATER (recorded after this note's date — do not restate; say if a statement is an earlier state of"
+               " one of these):")
+#: The block of a note read again because an idea it relies on was understood differently (ADR 0008 §4a): what
+#: changed about that idea since the note was read, as known on the note's date (no impact number is ever shown).
+CHANGED_LABEL = ("Understood differently since this note was read (ideas this note relies on, as known on its date;"
+                 " read the note again in their light, and answer as before where its meaning does not change):")
 #: Characters kept of a summary, an evidence excerpt or a role in a packet line.
 SUMMARY_CHARS = 240
 EVIDENCE_CHARS = 200
@@ -41,6 +56,49 @@ def clip(text: Any, limit: int) -> str:
         return s
     cut = s[:limit].rsplit(" ", 1)[0]
     return (cut or s[:limit]).rstrip(" ,;:") + "…"
+
+
+def later_than(when: Any, as_of: Any) -> bool:
+    """Whether a date falls on a later DAY than ``as_of`` (the note's date): what was recorded after the note.
+    Live notes minutes apart are the same day, never later. False when either date is missing."""
+    a = str(when or "")[:10]
+    b = str(as_of or "")[:10]
+    return bool(a and b and a > b)
+
+
+def predicate_terms(predicate: Any) -> set:
+    """The words of a predicate's local name (``ex:annual_budget`` -> {annual, budget}; ``schema:worksFor`` ->
+    {works, for}): used only to RANK which existing statements a packet shows first, never to decide that two
+    statements are the same fact (the model names that by index, ADR 0004)."""
+    raw = str(predicate or "")
+    local = raw.split(":", 1)[1] if ":" in raw else raw
+    out = []
+    word = ""
+    for ch in local:
+        if ch.isalnum() and not (ch.isupper() and word and word[-1].islower()):
+            word += ch.lower()
+        else:
+            if word:
+                out.append(word)
+            word = ch.lower() if ch.isalnum() else ""
+    if word:
+        out.append(word)
+    return set(w for w in out if len(w) > 2)
+
+
+def slot_first(claims: List[Any], prefer: Any, limit: int) -> List[Any]:
+    """The statements a packet shows of one entity: EVERY one whose predicate the note itself uses (the note's
+    slots: never cut, retro-design-review 2.1), then the others, those whose predicate shares a word with the
+    note's first, up to ``limit`` in all; each group keeps the order it was given in."""
+    wanted = set(prefer or ())
+    terms = set()
+    for x in wanted:
+        terms |= predicate_terms(x)
+    own = [c for c in claims if c.get("predicate") in wanted]
+    rest = [c for c in claims if c.get("predicate") not in wanted]
+    near = [c for c in rest if terms & predicate_terms(c.get("predicate"))]
+    far = [c for c in rest if not (terms & predicate_terms(c.get("predicate")))]
+    return own + (near + far)[:max(0, int(limit) - len(own))]
 
 
 def note_envelope() -> str:
@@ -97,14 +155,38 @@ def extraction_packet(note: Dict[str, Any], section: Dict[str, Any], parts: int,
     if names:
         lines.append("Names already in the notebook that this text may use: " + "; ".join(names) + ".")
     counts = {}
+    slots = {}
+    order = []
     for e in (candidate_entities or [])[:KNOWN_NAMES]:
-        for cl in ((e.get("active_claims") or []) if isinstance(e, dict) else []):
+        if not isinstance(e, dict):
+            continue
+        for cl in (e.get("active_claims") or []) + (e.get("later_claims") or []):
             pred = str(cl.get("predicate") or "").strip() if isinstance(cl, dict) else ""
-            if pred and pred != "schema:mentions":  # the prompt never asks for a mentions statement
-                counts[pred] = counts.get(pred, 0) + 1
+            if not pred or pred == "schema:mentions":  # the prompt never asks for a mentions statement
+                continue
+            counts[pred] = counts.get(pred, 0) + 1
+            key = (str(cl.get("subject") or ""), pred, bool(cl.get("later")))
+            if key not in slots:
+                order.append(key)
+                slots[key] = cl
+            elif str(cl.get("observed_at") or "") > str(slots[key].get("observed_at") or ""):
+                slots[key] = cl  # the latest value of the slot
     if counts:
         preds = [k for neg, k in sorted([(-n, k) for k, n in counts.items()])][:KNOWN_PREDICATES]
         lines.append("Predicates the notebook already uses about these names: " + ", ".join(preds) + ".")
+    if order:
+        shown = []
+        for key in order[:KNOWN_SLOTS]:
+            cl = slots[key]
+            obj = cl.get("object")
+            obj = ("“" + clip(obj, 60) + "”") if cl.get("object_is_literal") else clip(obj, 60)
+            when = str(cl.get("observed_at") or "")[:10]
+            tail = (when + ", recorded later than this note") if key[2] else when
+            shown.append("- " + clip(key[0], 60) + " " + key[1] + " " + obj + (" (" + tail + ")" if tail else ""))
+        if len(order) > KNOWN_SLOTS:
+            shown.append("(" + str(len(order) - KNOWN_SLOTS) + " more statements not shown)")
+        lines.append("Statements the notebook already has about these names (write the same kind of fact with the"
+                     " same predicate):\n" + "\n".join(shown))
     own = [str(t) for t in (n.get("topics") or []) if str(t).strip()]
     rest = [str(t) for t in (topics or []) if str(t).strip() and str(t) not in own]
     shown = (own + rest)[:TOPICS]
@@ -144,39 +226,65 @@ def extraction_packet(note: Dict[str, Any], section: Dict[str, Any], parts: int,
 
 
 def claim_line(c: Dict[str, Any], now: Any = "") -> str:
-    """An existing claim as one line: ``#index subject predicate object (since date)``; a claim first seen on a
-    later day than the note's own date (``now``) says ``LATER than this note`` (eval2 D4)."""
+    """An existing claim as one line: ``#index subject predicate object (since date)``, or ``(from date to date)``
+    for a closed window. A claim first seen on a later day than the note's own date (``now``) that is shown
+    outside the LATER block says ``LATER than this note``."""
     obj = c.get("object")
     obj = ("“" + clip(obj, 80) + "”") if c.get("object_is_literal") else clip(obj, 80)
     text = str(c.get("line") or "").strip() or (clip(c.get("subject"), 60) + " " + str(c.get("predicate") or "") + " " + obj)
     when = str(c.get("observed_at") or "")[:10]
-    day = str(now or "")[:10]
+    start = str(c.get("valid_from") or "")[:10] or when
+    until = str(c.get("valid_until") or "")[:10]
     suffix = ""
-    if when:
-        suffix = " (since " + when + (", LATER than this note" if day and when > day else "") + ")"
+    if until and start:
+        suffix = " (from " + start + " to " + until + ")"
+    elif until:
+        suffix = " (until " + until + ")"
+    elif when and later_than(when, now) and start and not later_than(start, now):
+        suffix = " (stated later, said to hold since " + start + ")"  # known then by what a later note says
+    elif when:
+        suffix = " (since " + start + (", LATER than this note" if later_than(when, now) else "") + ")"
     return "#" + str(c.get("index")) + " " + text + suffix
 
 
 def candidate_card(c: Dict[str, Any], prefer: Any = (), now: Any = "") -> List[str]:
-    """An existing entity as at most 1 + CLAIMS_PER_CANDIDATE lines: its current statements with a
-    predicate the note also uses first (the ones a supersession or contradiction can be about),
-    then the most recent. A summary written on a later day than the note's own date (``now``) is
-    marked ``[LATER]``, and so are such statements (eval2 D4: an earlier note never uses later knowledge)."""
+    """An existing entity as the linking sees it on the note's date (``now``, ADR 0008 §2): its name, kind and
+    aliases, its summary as known then, at most CLAIMS_PER_CANDIDATE statements believed then (those with a
+    predicate the note also uses first), then a labelled LATER block with what was recorded after the note's
+    date: every later statement within LATER_CLAIMS_PER_CANDIDATE (indexed, so a statement can be said to be an
+    earlier state of one) and the latest later summaries; what the budget left out is said in a line."""
     aliases = [clip(a, 40) for a in (c.get("aliases") or []) if str(a).strip()][:5]
     head = "[" + str(c.get("index")) + "] " + clip(c.get("name"), 80) + " — " + str(c.get("kind") or "thing")
     head += ("; also " + ", ".join(aliases)) if aliases else ""
     day = str(now or "")[:10]
+    later_summaries = [x for x in (c.get("later_summaries") or []) if isinstance(x, dict)]
+    later_claims = [x for x in (c.get("later_claims") or []) if isinstance(x, dict)]
     if str(c.get("summary") or "").strip():
         written = str(c.get("summary_at") or "")[:10]
-        head += " — " + ("[LATER] " if written and day and written > day else "") + clip(c.get("summary"), SUMMARY_CHARS)
-    if c.get("last_seen"):
+        head += " — " + ("[LATER] " if later_than(written, day) else "") + clip(c.get("summary"), SUMMARY_CHARS)
+    elif later_summaries or later_claims:
+        head += " — nothing was recorded about it by this note's date"
+    if c.get("last_seen") and not later_than(c.get("last_seen"), day):
         head += " Last seen " + str(c.get("last_seen"))[:10] + "."
     out = [head]
     claims = [cl for cl in (c.get("active_claims") or []) if isinstance(cl, dict)]
-    wanted = set(prefer or ())
-    ranked = [cl for cl in claims if cl.get("predicate") in wanted] + [cl for cl in claims if cl.get("predicate") not in wanted]
-    for cl in ranked[:CLAIMS_PER_CANDIDATE]:
+    shown = slot_first(claims, prefer, CLAIMS_PER_CANDIDATE)
+    for cl in shown:
         out.append("    " + claim_line(cl, now))
+    left = int(c.get("known_claims_omitted") or 0) + len(claims) - len(shown)
+    if left:
+        out.append("    (+" + str(left) + " more not shown)")
+    if later_claims or later_summaries:
+        out.append("    " + LATER_LABEL)
+        shown_later = slot_first(later_claims, prefer, LATER_CLAIMS_PER_CANDIDATE)
+        for cl in [x for x in later_claims if x in shown_later]:  # in date order
+            out.append("      " + claim_line(cl))
+        for x in later_summaries[-LATER_SUMMARIES_PER_CANDIDATE:]:
+            out.append("      summary as of " + str(x.get("at") or "")[:10] + ": " + clip(x.get("summary"), SUMMARY_CHARS))
+        left_c = int(c.get("later_claims_omitted") or 0) + len(later_claims) - len(shown_later)
+        left_s = int(c.get("later_summaries_omitted") or 0) + max(0, len(later_summaries) - LATER_SUMMARIES_PER_CANDIDATE)
+        if left_c or left_s:
+            out.append("      (+" + str(left_c) + " later statements and +" + str(left_s) + " later summaries not shown)")
     return out
 
 
@@ -216,6 +324,24 @@ def link_batches(note: Dict[str, Any], extraction: Dict[str, Any], resolved: Lis
         by_group[owner.get(str(c.get("subject")), 0)].append((i, c))
     envelope = note_envelope()
     summary = clip(ext.get("summary"), 600)
+    changed_lines = []
+    for b in [x for x in (n.get("understood_differently") or []) if isinstance(x, dict)]:
+        if b.get("more_sources"):
+            changed_lines.append("  (" + str(b.get("more_sources")) + " more ideas not shown)")
+            continue
+        head = "- " + clip(b.get("name"), 80) + " — " + str(b.get("kind") or "thing")
+        if str(b.get("summary_now") or "").strip():
+            head += ": now “" + clip(b.get("summary_now"), SUMMARY_CHARS) + "”"
+        changed_lines.append(head)
+        if str(b.get("summary_before") or "").strip():
+            changed_lines.append("    before: “" + clip(b.get("summary_before"), SUMMARY_CHARS) + "”")
+        for x in b.get("no_longer") or []:
+            changed_lines.append("    no longer read as: " + clip(x, 160))
+        for x in b.get("now") or []:
+            changed_lines.append("    now read as: " + clip(x, 160))
+        if int(b.get("omitted") or 0):
+            changed_lines.append("    (" + str(int(b.get("omitted"))) + " more changed statements not shown)")
+    changed = (CHANGED_LABEL + "\n" + "\n".join(changed_lines)) if changed_lines else ""
     out = []
     for gi, group in enumerate(groups):
         mlines = []
@@ -259,6 +385,7 @@ def link_batches(note: Dict[str, Any], extraction: Dict[str, Any], resolved: Lis
                     olines.append("#" + str(t.get("index")) + " " + clip(t.get("text"), 140)
                                   + " (opened " + str(t.get("opened_at") or "")[:10] + ")")
         header = note_header(n)
+        day = str(n.get("occurred_at") or "")[:10]
         if len(groups) > 1:
             header += " [linking part " + str(gi + 1) + " of " + str(len(groups)) + "]"
         out.append({
@@ -269,6 +396,10 @@ def link_batches(note: Dict[str, Any], extraction: Dict[str, Any], resolved: Lis
             "claims": "\n".join(clines) if clines else "(none in this part)",
             "tasks": "\n".join(tlines) if tlines else "(none)",
             "open_tasks": "\n".join(olines) if olines else "(none)",
+            "changed": changed,
+            "as_of": ("Write every summary as of " + day + ", this note's date: what the entity was then, from this"
+                      " note and what was known then; never use what was recorded later.") if day else
+                     "Write every summary from this note and what was known when it was written.",
         })
     return out
 

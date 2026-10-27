@@ -72,7 +72,9 @@ def test_stats_counts_what_the_notebook_holds(nb):
     assert top[0] == {"entity_id": "ex:person-dana", "name": "dana", "display_name": "Dana", "kind": "person",
                       "note_count": 3, "first_seen": t(5), "last_seen": t(2, 3)}
     assert s["communities"] == 0
-    assert s["span"] == {"first_note_at": t(5), "last_note_at": t(2, 3)}
+    span = s["span"]
+    assert (span["first_note_at"], span["last_note_at"]) == (t(5), t(2, 3))  # happened
+    assert span["first_received_at"] and span["first_received_at"] <= span["last_received_at"]  # recorded
 
 
 def test_weekly_activity_covers_the_whole_span_with_empty_weeks(nb):
@@ -126,6 +128,8 @@ def test_stats_count_communities_and_read_only_notebooks_answer(tmp_path):
 def test_an_empty_notebook_has_empty_stats(nb):
     s = nb.stats(now=NOW)
     assert s["activity_weekly"] == [] and s["growth_monthly"] == [] and s["top_entities"] == []
-    assert s["span"] == {"first_note_at": None, "last_note_at": None} and s["totals"]["notes"] == 0
+    assert s["span"] == {"first_note_at": None, "last_note_at": None, "first_received_at": None,
+                         "last_received_at": None} and s["totals"]["notes"] == 0
+    assert s["recorded_weekly"] == []
     with pytest.raises(ValueError):
         nb.stats(now="not a date")

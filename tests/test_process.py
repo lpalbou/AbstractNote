@@ -235,23 +235,43 @@ def test_references_outside_the_packet_are_rejected(nb):
                      [{"text": "Call Zed", "status": "open", "due": "next week"}])
 
     def link(packet, cands):
-        return {"mentions": [ml("m1", "reuse", 4), ml("m2", "merge", merge=[0, 7], name="Zed", kind="person"),
-                             ml("m5", "reuse", 0)],
+        return {"mentions": [ml("m1", "create", name="Dana", kind="person"), ml("m2", "create", name="Zed",
+                                                                                  kind="person")],
                 "claims": [{"index": 0, "relation_to_existing": "supersedes", "existing": 99, "reason": ""}],
                 "tasks": [{"index": 0, "closes_open_task": 42}], "revision_summary": "?"}
 
     _, _, _, out = run(nb, "Dana and Zed.", "2026-01-12T10:00:00Z", ext, link)
-    created = set(out["entities_created"])
-    # Candidate 4 does not exist: never guessed, created as new, and the new "Dana" is filed under the
-    # entity that already has that canonical name (one canonical name per entity, store.names).
-    assert "ex:person-dana-2" not in created and nb.store.entity_row("ex:person-dana-2") is None
+    # The new "Dana" is filed under the entity that already has that canonical name (store.names).
+    assert nb.store.entity_row("ex:person-dana-2") is None
     assert any("has the canonical name dana" in w for w in out["warnings"])
     assert out["claims_superseded"] == [] and len(out["claims_added"]) == 1
     assert out["tasks_closed"] == [] and len(out["tasks_opened"]) == 1
     text = " ".join(out["warnings"])
-    for needle in ("not in its list", "merge did not name", "m5", "outside the context", "not a mention",
-                   "not a date"):
+    for needle in ("outside the context", "not a mention", "not a date"):
         assert needle in text, needle
+
+
+def test_a_decision_naming_no_candidate_is_invalid_and_nothing_is_applied(nb):
+    """ADR 0008 §8 (process/validate.py): a reuse of a candidate that is not in the mention's list, a merge that
+    does not name two of its candidates and a decision for a mention the note does not have make the linking
+    answer invalid at apply time: nothing of it is written. (Until 2026-10-20 they were applied in part: the
+    mention was created as new with a warning.) MUTATION: drop validate.check_apply from apply_note_revision."""
+    from abstractnote.process.validate import InvalidAnswer
+
+    seed(nb)
+    ext = extraction([mention("m1", "Dana", "person"), mention("m2", "Zed", "person")])
+    before = nb.store.q1("SELECT COUNT(*) FROM revisions")[0]
+    for bad in ([ml("m1", "reuse", 4), ml("m2", "create", name="Zed", kind="person")],
+                [ml("m1", "create", name="Dana", kind="person"), ml("m2", "merge", merge=[0, 7], name="Zed",
+                                                                     kind="person")],
+                [ml("m1", "create", name="Dana", kind="person"), ml("m2", "create", name="Zed", kind="person"),
+                 ml("m5", "reuse", 0)]):
+        with pytest.raises(InvalidAnswer) as err:
+            run(nb, "Dana and Zed.", "2026-01-12T10:00:00Z", ext,
+                lambda p, c, bad=bad: {"mentions": bad, "claims": [], "tasks": [], "revision_summary": "?"})
+        assert str(err.value).startswith("The model's linking answer was malformed (")
+        assert str(err.value).endswith("); nothing from it was applied.")
+    assert nb.store.q1("SELECT COUNT(*) FROM revisions")[0] == before
 
 
 def test_unsure_creates_and_records_close_match(nb):

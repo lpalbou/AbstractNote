@@ -1,0 +1,1146 @@
+{
+  "id": "note-file",
+  "name": "File a stored note",
+  "description": "Give a stored note without a kind its kind and topics.",
+  "interfaces": [],
+  "nodes": [
+    {
+      "id": "start",
+      "type": "on_flow_start",
+      "position": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "on_flow_start",
+        "label": "Start",
+        "inputs": [],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          }
+        ],
+        "pinDefaults": {
+          "note_id": "",
+          "provider": "",
+          "model": ""
+        }
+      }
+    },
+    {
+      "id": "filing_context_args",
+      "type": "code",
+      "position": {
+        "x": 480.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Does it need filing?: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif note_id is not None and note_id != \"\":\n    arguments[\"note_id\"] = note_id\nreturn {\"tool_calls\": [{\"name\": \"note_filing_context\", \"call_id\": \"filing_context\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "filing_context",
+      "type": "tool_calls",
+      "position": {
+        "x": 960.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Does it need filing?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_filing_context"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_filing_context"
+          ]
+        }
+      }
+    },
+    {
+      "id": "filing_context_out",
+      "type": "code",
+      "position": {
+        "x": 1440.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Does it need filing?: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "needed",
+            "label": "needed",
+            "type": "boolean"
+          },
+          {
+            "id": "occurred_at",
+            "label": "occurred_at",
+            "type": "string"
+          },
+          {
+            "id": "title",
+            "label": "title",
+            "type": "string"
+          },
+          {
+            "id": "text",
+            "label": "text",
+            "type": "string"
+          },
+          {
+            "id": "similar",
+            "label": "similar",
+            "type": "array"
+          },
+          {
+            "id": "revisits",
+            "label": "revisits",
+            "type": "array"
+          },
+          {
+            "id": "topics",
+            "label": "topics",
+            "type": "array"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_filing_context returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_filing_context failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_filing_context returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "needs_filing",
+      "type": "if",
+      "position": {
+        "x": 1920.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "No kind yet?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "filing_packet",
+      "type": "code",
+      "position": {
+        "x": 2400.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "What filing sees",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "occurred_at",
+            "label": "occurred_at",
+            "type": "string"
+          },
+          {
+            "id": "title",
+            "label": "title",
+            "type": "string"
+          },
+          {
+            "id": "text",
+            "label": "text",
+            "type": "string"
+          },
+          {
+            "id": "similar",
+            "label": "similar",
+            "type": "array"
+          },
+          {
+            "id": "revisits",
+            "label": "revisits",
+            "type": "array"
+          },
+          {
+            "id": "topics",
+            "label": "topics",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "packet",
+            "label": "packet",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "CANDIDATES_PER_MENTION = 3\nCHANGED_LABEL = 'Understood differently since this note was read (ideas this note relies on, as known on its date; read the note again in their light, and answer as before where its meaning does not change):'\nCLAIMS_PER_CANDIDATE = 3\nEVIDENCE_CHARS = 200\nKNOWN_NAMES = 15\nKNOWN_PREDICATES = 15\nKNOWN_SLOTS = 30\nLATER_CLAIMS_PER_CANDIDATE = 12\nLATER_LABEL = \"LATER (recorded after this note's date — do not restate; say if a statement is an earlier state of one of these):\"\nLATER_SUMMARIES_PER_CANDIDATE = 2\nLINK_MENTIONS_PER_CALL = 15\nOPEN_TASKS = 8\nSIMILAR_NOTES = 5\nSUMMARY_CHARS = 240\nTOPICS = 50\ndef clip(text, limit):\n    \"\"\"One line of at most ``limit`` characters, cut at a word boundary (packet views only).\"\"\"\n    s = ' '.join(str(text or '').split())\n    if len(s) <= limit:\n        return s\n    cut = s[:limit].rsplit(' ', 1)[0]\n    return (cut or s[:limit]).rstrip(' ,;:') + '…'\ndef note_envelope():\n    \"\"\"The user message's head ``<runtime_metadata>`` envelope: the SAME bytes for every call.\n\n    The runtime keeps an envelope that is already at the head of a message byte for byte and\n    stamps a fresh per-second one only on a message without one; a per-call timestamp there would\n    end the shared prefix after a few tokens. The note's own time and id go at the END of the\n    message (``note_header``), where they cannot break the cached prefix.\"\"\"\n    return '<runtime_metadata>{\"time\": \"the note\\'s own date is on the last line of this message\"}</runtime_metadata>'\ndef filing_packet(note_id, occurred_at, title, text, similar, revisits, topics):\n    \"\"\"The dynamic half of the quick filing prompt: ``{envelope, title, text, context, header}``.\"\"\"\n    lines = []\n    sims = []\n    for s in (similar or [])[:SIMILAR_NOTES]:\n        if isinstance(s, dict) and (s.get('title') or s.get('note_id')):\n            sims.append('“' + clip(s.get('title') or 'untitled', 100) + '” (' + str(s.get('occurred_at') or '')[:10] + ')')\n    if sims:\n        lines.append('Similar earlier notes: ' + '; '.join(sims) + '.')\n    days = [str(r.get('occurred_at') or '')[:10] for r in revisits or [] if isinstance(r, dict) and r.get('occurred_at')]\n    if days:\n        lines.append('Earlier notes with the same words: ' + ', '.join(days[:5]) + '.')\n    shown = [str(t) for t in topics or [] if str(t).strip()][:TOPICS]\n    if shown:\n        lines.append('Existing topics: ' + ', '.join(shown) + '.')\n    when = str(occurred_at or '')[:16].replace('T', ' ')\n    return {'envelope': note_envelope(), 'header': 'About this note (not part of its text): ' + str(note_id or '') + (', written ' + when + ' (now, for this note)' if when else '') + '.', 'title': clip(title, 200) if str(title or '').strip() else '(none)', 'text': str(text or '').rstrip(), 'context': '\\n'.join(lines) if lines else 'Nothing related is saved yet.'}\nreturn {\"packet\": filing_packet(note_id, occurred_at, title, text, similar, revisits, topics)}\n"
+      }
+    },
+    {
+      "id": "filing_prompt",
+      "type": "string_template",
+      "position": {
+        "x": 2400.0,
+        "y": 398.0
+      },
+      "data": {
+        "nodeType": "string_template",
+        "label": "Filing prompt",
+        "inputs": [
+          {
+            "id": "template",
+            "label": "template",
+            "type": "string"
+          },
+          {
+            "id": "packet",
+            "label": "packet",
+            "type": "any"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "result",
+            "label": "result",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "template": "{{packet.envelope}}\nNote title: {{packet.title}}\n\nNote text:\n{{packet.text}}\n\n{{packet.context}}\n\n{{packet.header}}"
+        }
+      }
+    },
+    {
+      "id": "filing",
+      "type": "llm_call",
+      "position": {
+        "x": 2880.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "llm_call",
+        "label": "File it quickly",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider_text"
+          },
+          {
+            "id": "model",
+            "label": "model",
+            "type": "model"
+          },
+          {
+            "id": "system",
+            "label": "system",
+            "type": "string"
+          },
+          {
+            "id": "prompt",
+            "label": "prompt",
+            "type": "string"
+          },
+          {
+            "id": "tools",
+            "label": "tools",
+            "type": "tools"
+          },
+          {
+            "id": "temperature",
+            "label": "temperature",
+            "type": "number"
+          },
+          {
+            "id": "thinking",
+            "label": "thinking",
+            "type": "string"
+          },
+          {
+            "id": "max_output_tokens",
+            "label": "max_output_tokens",
+            "type": "number"
+          },
+          {
+            "id": "resp_schema",
+            "label": "resp_schema",
+            "type": "json_schema"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "data",
+            "label": "data",
+            "type": "object"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          },
+          {
+            "id": "meta",
+            "label": "meta",
+            "type": "object"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "tools": [],
+          "system": "You file one note the moment it arrives. Be quick and literal. The message gives the note's title (may be empty), its text, what is already saved, and on its last line which note this is and when it was written (that line is not content).\n\nReturn one JSON object with:\n- `title`: a short title of at most 80 characters, in the note's own words where possible;\n- `kind`: idea, task, decision, fact, event, question, reflection, reference, log, conversation or personal;\n- `topics`: one to three topics the note is about; reuse an existing topic only when it names exactly that;\n- `urgency`: urgent or high only for deadlines, warnings, or anything the author marks as urgent; normal otherwise (never bulk for a note written now);\n- `language`: the note's language as a BCP-47 tag (for example `en`, `fr`);\n- `one_line`: the note in one plain sentence.\n\nRules:\n- Use only the note and the context given; never invent people, dates or facts.\n- Keep names as the author wrote them.\n\nThe answer has this shape (values are illustrations):\n{\"title\": \"Dana wants the LUT Pareto by Friday\", \"kind\": \"task\", \"topics\": [\"lut\"], \"urgency\": \"high\", \"language\": \"en\", \"one_line\": \"Dana asked for the LUT Pareto chart by Friday.\"}\n\nOutput JSON only, matching the schema, written compactly on one line (no indentation).\n",
+          "temperature": 0.2,
+          "resp_schema": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "maxLength": 80,
+                "description": "short title, at most 80 characters"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "idea",
+                  "task",
+                  "decision",
+                  "fact",
+                  "event",
+                  "question",
+                  "reflection",
+                  "reference",
+                  "log",
+                  "conversation",
+                  "personal"
+                ]
+              },
+              "topics": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "prefer existing topics, at most 4",
+                "maxItems": 4
+              },
+              "urgency": {
+                "type": "string",
+                "enum": [
+                  "bulk",
+                  "normal",
+                  "high",
+                  "urgent"
+                ]
+              },
+              "language": {
+                "type": "string",
+                "description": "BCP-47 language tag"
+              },
+              "one_line": {
+                "type": "string",
+                "description": "the note in one line"
+              }
+            },
+            "required": [
+              "title",
+              "kind",
+              "topics",
+              "urgency",
+              "language",
+              "one_line"
+            ]
+          },
+          "thinking": "off",
+          "max_output_tokens": 400
+        }
+      }
+    },
+    {
+      "id": "filing_fields",
+      "type": "break_object",
+      "position": {
+        "x": 2880.0,
+        "y": 424.0
+      },
+      "data": {
+        "nodeType": "break_object",
+        "label": "Filing",
+        "inputs": [
+          {
+            "id": "object",
+            "label": "object",
+            "type": "object"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "title",
+            "label": "title",
+            "type": "string"
+          },
+          {
+            "id": "kind",
+            "label": "kind",
+            "type": "string"
+          },
+          {
+            "id": "topics",
+            "label": "topics",
+            "type": "array"
+          },
+          {
+            "id": "language",
+            "label": "language",
+            "type": "string"
+          },
+          {
+            "id": "one_line",
+            "label": "one_line",
+            "type": "string"
+          }
+        ],
+        "breakConfig": {
+          "selectedPaths": [
+            "title",
+            "kind",
+            "topics",
+            "language",
+            "one_line"
+          ]
+        }
+      }
+    },
+    {
+      "id": "file_args",
+      "type": "code",
+      "position": {
+        "x": 3360.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "File the note: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "title",
+            "label": "title",
+            "type": "string"
+          },
+          {
+            "id": "kind",
+            "label": "kind",
+            "type": "string"
+          },
+          {
+            "id": "topics",
+            "label": "topics",
+            "type": "array"
+          },
+          {
+            "id": "language",
+            "label": "language",
+            "type": "string"
+          },
+          {
+            "id": "one_line",
+            "label": "one_line",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif note_id is not None and note_id != \"\":\n    arguments[\"note_id\"] = note_id\nif title is not None and title != \"\":\n    arguments[\"title\"] = title\nif kind is not None and kind != \"\":\n    arguments[\"kind\"] = kind\nif topics is not None and topics != \"\":\n    arguments[\"topics\"] = topics\nif language is not None and language != \"\":\n    arguments[\"language\"] = language\nif one_line is not None and one_line != \"\":\n    arguments[\"one_line\"] = one_line\nreturn {\"tool_calls\": [{\"name\": \"note_file\", \"call_id\": \"file\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "file",
+      "type": "tool_calls",
+      "position": {
+        "x": 3840.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "File the note",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_file"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_file"
+          ]
+        }
+      }
+    },
+    {
+      "id": "file_out",
+      "type": "code",
+      "position": {
+        "x": 4320.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "File the note: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "priority",
+            "label": "priority",
+            "type": "number"
+          },
+          {
+            "id": "status",
+            "label": "status",
+            "type": "string"
+          },
+          {
+            "id": "topics_not_assigned",
+            "label": "topics_not_assigned",
+            "type": "array"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_file returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_file failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_file returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "end",
+      "type": "on_flow_end",
+      "position": {
+        "x": 4800.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "on_flow_end",
+        "label": "Filed",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "filed",
+            "label": "filed",
+            "type": "boolean"
+          },
+          {
+            "id": "kind",
+            "label": "kind",
+            "type": "string"
+          },
+          {
+            "id": "topics",
+            "label": "topics",
+            "type": "array"
+          }
+        ],
+        "outputs": [],
+        "pinDefaults": {
+          "response": "Filed.",
+          "filed": true
+        }
+      }
+    },
+    {
+      "id": "end_not_needed",
+      "type": "on_flow_end",
+      "position": {
+        "x": 2400.0,
+        "y": 718.0
+      },
+      "data": {
+        "nodeType": "on_flow_end",
+        "label": "Already filed",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "response",
+            "label": "response",
+            "type": "string"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "filed",
+            "label": "filed",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [],
+        "pinDefaults": {
+          "response": "It already has a kind.",
+          "filed": false
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-start-note_id-filing_context_args-note_id",
+      "source": "start",
+      "sourceHandle": "note_id",
+      "target": "filing_context_args",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-start-exec-out-filing_context_args-exec-in",
+      "source": "start",
+      "sourceHandle": "exec-out",
+      "target": "filing_context_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-filing_context_args-tool_calls-filing_context-tool_calls",
+      "source": "filing_context_args",
+      "sourceHandle": "tool_calls",
+      "target": "filing_context",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-filing_context_args-exec-out-filing_context-exec-in",
+      "source": "filing_context_args",
+      "sourceHandle": "exec-out",
+      "target": "filing_context",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-filing_context-results-filing_context_out-results",
+      "source": "filing_context",
+      "sourceHandle": "results",
+      "target": "filing_context_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-filing_context-exec-out-filing_context_out-exec-in",
+      "source": "filing_context",
+      "sourceHandle": "exec-out",
+      "target": "filing_context_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-filing_context_out-needed-needs_filing-condition",
+      "source": "filing_context_out",
+      "sourceHandle": "needed",
+      "target": "needs_filing",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-filing_context_out-exec-out-needs_filing-exec-in",
+      "source": "filing_context_out",
+      "sourceHandle": "exec-out",
+      "target": "needs_filing",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-start-note_id-filing_packet-note_id",
+      "source": "start",
+      "sourceHandle": "note_id",
+      "target": "filing_packet",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-filing_context_out-occurred_at-filing_packet-occurred_at",
+      "source": "filing_context_out",
+      "sourceHandle": "occurred_at",
+      "target": "filing_packet",
+      "targetHandle": "occurred_at"
+    },
+    {
+      "id": "e-filing_context_out-title-filing_packet-title",
+      "source": "filing_context_out",
+      "sourceHandle": "title",
+      "target": "filing_packet",
+      "targetHandle": "title"
+    },
+    {
+      "id": "e-filing_context_out-text-filing_packet-text",
+      "source": "filing_context_out",
+      "sourceHandle": "text",
+      "target": "filing_packet",
+      "targetHandle": "text"
+    },
+    {
+      "id": "e-filing_context_out-similar-filing_packet-similar",
+      "source": "filing_context_out",
+      "sourceHandle": "similar",
+      "target": "filing_packet",
+      "targetHandle": "similar"
+    },
+    {
+      "id": "e-filing_context_out-revisits-filing_packet-revisits",
+      "source": "filing_context_out",
+      "sourceHandle": "revisits",
+      "target": "filing_packet",
+      "targetHandle": "revisits"
+    },
+    {
+      "id": "e-filing_context_out-topics-filing_packet-topics",
+      "source": "filing_context_out",
+      "sourceHandle": "topics",
+      "target": "filing_packet",
+      "targetHandle": "topics"
+    },
+    {
+      "id": "e-needs_filing-true-filing_packet-exec-in",
+      "source": "needs_filing",
+      "sourceHandle": "true",
+      "target": "filing_packet",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-filing_packet-packet-filing_prompt-packet",
+      "source": "filing_packet",
+      "sourceHandle": "packet",
+      "target": "filing_prompt",
+      "targetHandle": "packet"
+    },
+    {
+      "id": "e-filing_prompt-result-filing-prompt",
+      "source": "filing_prompt",
+      "sourceHandle": "result",
+      "target": "filing",
+      "targetHandle": "prompt"
+    },
+    {
+      "id": "e-start-provider-filing-provider",
+      "source": "start",
+      "sourceHandle": "provider",
+      "target": "filing",
+      "targetHandle": "provider"
+    },
+    {
+      "id": "e-start-model-filing-model",
+      "source": "start",
+      "sourceHandle": "model",
+      "target": "filing",
+      "targetHandle": "model"
+    },
+    {
+      "id": "e-filing_packet-exec-out-filing-exec-in",
+      "source": "filing_packet",
+      "sourceHandle": "exec-out",
+      "target": "filing",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-filing-data-filing_fields-object",
+      "source": "filing",
+      "sourceHandle": "data",
+      "target": "filing_fields",
+      "targetHandle": "object"
+    },
+    {
+      "id": "e-start-note_id-file_args-note_id",
+      "source": "start",
+      "sourceHandle": "note_id",
+      "target": "file_args",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-filing_fields-title-file_args-title",
+      "source": "filing_fields",
+      "sourceHandle": "title",
+      "target": "file_args",
+      "targetHandle": "title"
+    },
+    {
+      "id": "e-filing_fields-kind-file_args-kind",
+      "source": "filing_fields",
+      "sourceHandle": "kind",
+      "target": "file_args",
+      "targetHandle": "kind"
+    },
+    {
+      "id": "e-filing_fields-topics-file_args-topics",
+      "source": "filing_fields",
+      "sourceHandle": "topics",
+      "target": "file_args",
+      "targetHandle": "topics"
+    },
+    {
+      "id": "e-filing_fields-language-file_args-language",
+      "source": "filing_fields",
+      "sourceHandle": "language",
+      "target": "file_args",
+      "targetHandle": "language"
+    },
+    {
+      "id": "e-filing_fields-one_line-file_args-one_line",
+      "source": "filing_fields",
+      "sourceHandle": "one_line",
+      "target": "file_args",
+      "targetHandle": "one_line"
+    },
+    {
+      "id": "e-filing-exec-out-file_args-exec-in",
+      "source": "filing",
+      "sourceHandle": "exec-out",
+      "target": "file_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-file_args-tool_calls-file-tool_calls",
+      "source": "file_args",
+      "sourceHandle": "tool_calls",
+      "target": "file",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-file_args-exec-out-file-exec-in",
+      "source": "file_args",
+      "sourceHandle": "exec-out",
+      "target": "file",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-file-results-file_out-results",
+      "source": "file",
+      "sourceHandle": "results",
+      "target": "file_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-file-exec-out-file_out-exec-in",
+      "source": "file",
+      "sourceHandle": "exec-out",
+      "target": "file_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-start-note_id-end-note_id",
+      "source": "start",
+      "sourceHandle": "note_id",
+      "target": "end",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-filing_fields-kind-end-kind",
+      "source": "filing_fields",
+      "sourceHandle": "kind",
+      "target": "end",
+      "targetHandle": "kind"
+    },
+    {
+      "id": "e-filing_fields-topics-end-topics",
+      "source": "filing_fields",
+      "sourceHandle": "topics",
+      "target": "end",
+      "targetHandle": "topics"
+    },
+    {
+      "id": "e-file_out-exec-out-end-exec-in",
+      "source": "file_out",
+      "sourceHandle": "exec-out",
+      "target": "end",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-start-note_id-end_not_needed-note_id",
+      "source": "start",
+      "sourceHandle": "note_id",
+      "target": "end_not_needed",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-needs_filing-false-end_not_needed-exec-in",
+      "source": "needs_filing",
+      "sourceHandle": "false",
+      "target": "end_not_needed",
+      "targetHandle": "exec-in"
+    }
+  ],
+  "entryNode": "start"
+}

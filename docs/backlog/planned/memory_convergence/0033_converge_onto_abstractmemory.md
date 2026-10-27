@@ -38,7 +38,8 @@ AbstractMemory and is reachable by the plane's other applications; the generic m
   `store/archive.py`, `store/embeddings.py` (`VectorCache`), `store/vector_index.py` → AM 0052;
 - self-organisation: `recall/communities.py`, `store/topics.py`, `recall/consolidation.py`, `recall/reflect.py`,
   `recall/insights.py` → AM 0053;
-- ripple (`retro/integration` only): see 0035 → AM 0054.
+- ripple (`recall/propagation.py`, in the package since the schema-4 baseline merge; `recall/activation.py` on
+  `retro/integration` only): see 0035 → AM 0054.
 Stays here: `ingest/`, `importers/`, `flows/` (note-specific framing), `tools/` (note tools, calling
 AbstractMemory), `gateway/` (routes, per 0036), `cli.py`, the web and Apple apps.
 
