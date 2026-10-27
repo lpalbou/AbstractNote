@@ -376,3 +376,46 @@ def test_capture_and_inline_processing_on_a_runtime_point_at_their_ledger_rows(t
         f"step:{r['ledger_run_id']}#{r['ledger_seq']}", f"step:{capture_run}#{note['ledger_seq']}",
         f"artifact:{body['artifact_id']}"]
     assert prov.extra["note_id"] == out["note_id"] and prov.extra["evidence_quote"]
+
+
+def test_a_note_tool_approved_by_a_person_points_at_the_step_that_waited(tmp_path):
+    """Review N1: on the approval path the tool runs inside ``runtime.resume()``, not inside
+    ``_execute_effect_with_retry``. AbstractRuntime publishes the step context there too (feat/memory-graph-facade
+    5b57d35): the tool is stamped with the TOOL_CALLS step that waited (its STARTED row), never a guess. Against
+    an AbstractRuntime without that change this test fails (the note names no run)."""
+    from abstractruntime.core.models import RunStatus
+    from abstractruntime.integrations.abstractcore.tool_executor import (
+        ApprovalToolExecutor,
+        MappingToolExecutor,
+        ToolApprovalPolicy,
+    )
+    from test_flows_headless import SCRIPT
+
+    from abstractnote.flows.runner import NoteRunner, ScriptedLLM
+    from abstractnote.tools import bind, bound_notebook
+
+    store = FileArtifactStore(tmp_path / "artifacts")
+    tools = bind(tmp_path / "nb", artifact_store=store)
+    gated = ApprovalToolExecutor(delegate=MappingToolExecutor(tools), policy=ToolApprovalPolicy(auto_approve_tools=set()))
+    runner = NoteRunner.with_llm(ScriptedLLM(SCRIPT), tools, tool_executor=gated, artifact_store=store)
+    runner.runtime.set_tool_executor_for_resume(gated)
+    run_id = runner.start("note-capture", {"text": "Met Dana about the LUT budget.", "idempotency_key": "k1"})
+    wf = runner.registry.get_or_raise(runner.runtime.get_state(run_id).workflow_id)
+    state = runner.runtime.tick(workflow=wf, run_id=run_id, max_steps=200)
+    approvals = 0
+    while state.status == RunStatus.WAITING and (state.waiting.details or {}).get("mode") == "approval_required":
+        approvals += 1
+        assert approvals <= 10
+        state = runner.runtime.resume(workflow=wf, run_id=run_id, wait_key=state.waiting.wait_key,
+                                      payload={"approved": True}, max_steps=200)
+    assert approvals >= 1  # the capture really went through a person's approval
+    nb = bound_notebook(runner.tools)
+    [note] = nb.store.q("SELECT * FROM notes")
+    assert note["run_id"] == run_id and note["ledger_seq"] is not None
+    rec = runner.runtime.ledger_store.get_record(run_id, note["ledger_seq"])
+    assert str(getattr(rec["status"], "value", rec["status"])) == "started"
+    assert rec["effect"]["type"] == "tool_calls" and rec["step_id"] == note["ledger_step_id"]
+    assert "note_capture" in [c["name"] for c in rec["effect"]["payload"]["tool_calls"]]
+    body = nb.store.note_sources(note["note_id"])[1]
+    assert body["run_id"] == run_id and store.load_text(body["artifact_id"]) == "Met Dana about the LUT budget."
+    nb.close()
