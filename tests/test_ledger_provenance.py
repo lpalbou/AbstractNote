@@ -175,6 +175,7 @@ def test_a_notebook_without_the_ledger_columns_opens_unchanged_at_the_same_schem
         old_prov = nb.kg.query(assertion_ids=("cl_old",))[0].provenance
     conn = sqlite3.connect(str(root / "note.sqlite3"))
     conn.execute("DROP INDEX idx_revisions_ledger_run")
+    conn.execute("DROP TRIGGER revisions_append_only")  # it names the columns; open creates it again
     for table, cols in {"notes": ("ledger_seq", "ledger_step_id", "body_artifact_json"),
                         "revisions": ("ledger_run_id", "ledger_seq", "ledger_step_id", "sources_json")}.items():
         for col in cols:
@@ -487,3 +488,35 @@ def test_a_copy_of_a_live_schema_4_notebook_projects_null_safe_provenance(tmp_pa
             assert prov.actor == "abstractnote" and prov.sources == () and prov.extra["revision_id"]
         closures = [c for a in assertions for c in nb.kg.journal.closures(assertion_id=a.assertion_id)]
         assert closures and all(Provenance.from_dict(c.provenance).sources == () for c in closures)
+
+
+def test_the_append_only_trigger_guards_the_ledger_columns_also_on_a_notebook_made_with_the_older_trigger(tmp_path):
+    """Review T1: where a revision came from is part of what it is. Opening a notebook created with the serve line's
+    trigger (a COPY of the live retro2) replaces it with the widened one: a ledger UPDATE is refused, while the
+    INSERT of a new revision and the bookkeeping UPDATEs still go through."""
+    import shutil
+
+    copy = tmp_path / "retro2"
+    shutil.copytree(_live_retro2(), copy)
+    conn = sqlite3.connect(str(copy / "note.sqlite3"))
+    old_sql = conn.execute("SELECT sql FROM sqlite_master WHERE name='revisions_append_only'").fetchone()[0]
+    conn.close()
+    assert "ledger_seq" not in old_sql  # the copy really carries the older body
+    with Notebook.open(copy) as nb:
+        sql = nb.store.q1("SELECT sql FROM sqlite_master WHERE name='revisions_append_only'")[0]
+        assert "ledger_seq" in sql and "sources_json" in sql
+        rid = nb.store.q1("SELECT revision_id FROM revisions WHERE applied_index=1 AND abandoned=0 LIMIT 1")[0]
+        for col, value in (("ledger_seq", 999), ("ledger_run_id", "run-x"), ("ledger_step_id", "st-x"),
+                           ("sources_json", "[]")):
+            with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+                with nb.store.tx() as c:
+                    c.execute(f"UPDATE revisions SET {col}=? WHERE revision_id=?", (value, rid))
+        with nb.store.tx() as c:  # the bookkeeping of an application still moves
+            c.execute("UPDATE revisions SET applied_index=1, applied_kg=1, result_json=result_json, abandoned=0,"
+                      " error=NULL WHERE revision_id=?", (rid,))
+        assert nb.store.insert_revision({"revision_id": "rv_t1", "at": t(1), "recorded_at": t(1), "ops": [],
+                                         "summary": "s", "ledger": STEP, "sources": [{"kind": "run", "run_id": "r"}]})
+        with nb.store.tx() as c:  # an unapplied revision's own apply completes its summary and warnings
+            c.execute("UPDATE revisions SET summary='done', warnings_json='[]' WHERE revision_id='rv_t1'")
+        row = nb.store.revision_row("rv_t1")
+        assert (row["ledger_run_id"], row["ledger_seq"], row["summary"]) == ("run-apply", 7, "done")

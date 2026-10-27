@@ -22,8 +22,9 @@ AbstractMemory `proposed/ripple_wave/0001` and planned 0054. Operator decision p
 push `retro/integration` and `retro/w32` to the remote as a backup until the handover is done.
 
 ## Expected outcomes
-`main` gains no generic ripple code; AbstractMemory 0054 cites this branch as prior art; once AbstractMemory
-ships the ripple, AbstractNote triggers and displays it.
+`main` gains no further generic ripple code; `recall/propagation.py` (in the package since the schema-4 baseline
+merge) leaves with the AbstractMemory 0054 handover; AbstractMemory 0054 cites this branch as prior art; once
+AbstractMemory ships the ripple, AbstractNote triggers and displays it.
 
 ## Current code reality
 `retro/integration` (local only, 28 commits ahead of `main` on 2026-10-27) adds `src/abstractnote/recall/

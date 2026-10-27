@@ -518,15 +518,23 @@ TRIGGERS = """
 -- ADR 0003: the revision log is append-only. What a revision IS (its identity, ops, source and dependency record)
 -- never changes once written; only the bookkeeping of its application (applied_index, applied_kg, result_json,
 -- abandoned, error) moves, and its summary/warnings are completed by its own apply, never after it was applied.
-CREATE TRIGGER IF NOT EXISTS revisions_append_only BEFORE UPDATE ON revisions
+-- Backlog 0037 (review T1): where a revision came from (its ledger address and the note's sources) is part of what
+-- it is: written on INSERT, never updated. The trigger is dropped and created again in one transaction on every
+-- open (``ensure_schema``), so a notebook created with an earlier body of it gets this one.
+BEGIN IMMEDIATE;
+DROP TRIGGER IF EXISTS revisions_append_only;
+CREATE TRIGGER revisions_append_only BEFORE UPDATE ON revisions
 WHEN OLD.revision_id IS NOT NEW.revision_id OR OLD.note_id IS NOT NEW.note_id OR OLD.attempt IS NOT NEW.attempt
   OR OLD.action IS NOT NEW.action OR OLD.target IS NOT NEW.target OR OLD.at IS NOT NEW.at
   OR OLD.recorded_at IS NOT NEW.recorded_at OR OLD.run_id IS NOT NEW.run_id OR OLD.ops_json IS NOT NEW.ops_json
   OR OLD.source_json IS NOT NEW.source_json OR OLD.context_json IS NOT NEW.context_json
+  OR OLD.ledger_run_id IS NOT NEW.ledger_run_id OR OLD.ledger_seq IS NOT NEW.ledger_seq
+  OR OLD.ledger_step_id IS NOT NEW.ledger_step_id OR OLD.sources_json IS NOT NEW.sources_json
   OR (OLD.applied_index = 1 AND (OLD.summary IS NOT NEW.summary OR OLD.warnings_json IS NOT NEW.warnings_json))
 BEGIN
   SELECT RAISE(ABORT, 'The revision log is append-only (ADR 0003): a written revision is never changed.');
 END;
+COMMIT;
 """
 
 
@@ -686,7 +694,12 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ROLLBACK")
         raise
     conn.executescript(POST_DDL)
-    conn.executescript(TRIGGERS)
+    try:
+        conn.executescript(TRIGGERS)  # one transaction: the trigger is never absent for another connection
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
     try:
         conn.executescript(FTS_DDL)
     except sqlite3.OperationalError as exc:  # pragma: no cover - every supported Python ships FTS5

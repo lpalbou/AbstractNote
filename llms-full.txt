@@ -2006,8 +2006,10 @@ the same way with `ClosureRecord(kind="retract")`; an undone merge closes its `s
 Schema: the notebook format stays at version 4 (the baseline, operator decision 1 of the memory transition); the
 ledger columns (`notes.ledger_seq`, `notes.ledger_step_id`, `notes.body_artifact_json`, `revisions.ledger_run_id`,
 `revisions.ledger_seq`, `revisions.ledger_step_id`, `revisions.sources_json`) are added to an existing notebook when
-it opens, NULL on its rows, and written once, when a note or a revision is inserted (the revision log's
-append-only trigger guards what a revision is; nothing updates these columns), and `rebuild()` copies them.
+it opens, NULL on its rows, and written once, when a note or a revision is inserted, and `rebuild()` copies them.
+The revision log's append-only trigger (`revisions_append_only`) refuses an UPDATE of a revision's ledger columns
+like one of its ops; it is dropped and created again on every open, so a notebook made with its earlier body gets
+this one.
 
 Every projected assertion (claims, names, aliases, merges) and every journal closure carries the provenance shape
 of AbstractMemory ADR 0003 (decisions 8-11), so `abstractmemory.graph.Provenance.from_dict` reads it unchanged:

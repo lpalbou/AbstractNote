@@ -18,7 +18,9 @@ or ``new`` (claims) with a warning. Mapping:
   ``supersedes`` -> ``claim.add`` + ``claim.supersede`` (``valid_until`` = the
   note's ``occurred_at``; ``claim.retract`` when the note's stance is retract);
   ``contradicts`` -> ``claim.add`` marked disputed against the existing claim;
-  both only against a statement on the same subject and predicate (eval2 D2);
+  both only against a statement on the same subject (eval2 D2): the model's ``existing`` index names the
+  statement, and a differing predicate adopts the existing one when both are the same kind of value
+  (``predicate_adopted``) or is kept, linked across, with a warning (a text against an entity);
   an identical active statement (same subject, predicate and object after
   resolution) is always reinforced rather than duplicated;
 - time (ADR 0008 §2): a note OLDER than the statement it supersedes (or contradicts, unless the
