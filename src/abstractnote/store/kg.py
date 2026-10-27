@@ -192,8 +192,9 @@ class ClaimStore:
                 assertion_id=c["assertion_id"], kind=c["kind"], reason=c["reason"],
                 replacement_ids=tuple(c["replacement_ids"]), observed_at=_journal_time(rev["recorded_at"]),
                 actor="abstractnote",
-                # the contract's shape plus the closing revision at the top (contract §2, §7)
-                provenance={**provenance(rev, valid_until=c["valid_until"]), "revision_id": rev["revision_id"]},
+                # the contract's shape (contract §2, §7): the closing revision, its note and the new end of the
+                # window in ``extra``; nothing outside the six keys, so AbstractMemory's Provenance.from_dict reads it
+                provenance=provenance(rev, valid_until=c["valid_until"]),
                 closure_id=ids.closure_id(rev["revision_id"], c["assertion_id"], c["kind"]),
             ))
         return {"added": len(adds), "closed": closed}

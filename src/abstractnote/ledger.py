@@ -15,7 +15,7 @@ memory facade (backlog 0033 phase 2), the facade's ``stamp`` takes it over.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
 
 ACTOR = "abstractnote"
 
@@ -50,6 +50,46 @@ def step_address(run_id: Any = None, seq: Any = None, step_id: Any = None) -> Op
     if step_id is not None:
         out["step_id"] = str(step_id).strip()
     return out
+
+
+def coerce_address(address: Any) -> Optional[Dict[str, Any]]:
+    """A ledger address given as a dict (``{run_id, seq?, step_id?}``) checked by :func:`step_address`; None
+    stays None. Anything else is refused (ValueError)."""
+    if address is None:
+        return None
+    if not isinstance(address, Mapping):
+        raise ValueError("A ledger address is {run_id, seq?, step_id?}.")
+    return step_address(address.get("run_id"), address.get("seq"), address.get("step_id"))
+
+
+def note_columns(run_id: Any = None, ledger: Any = None) -> Dict[str, Any]:
+    """The ledger columns of a note row (``run_id``, ``ledger_seq``, ``ledger_step_id``) from the run id a caller
+    passed and/or the address of the step writing it. Both name the same run or the call is refused: a note is
+    never filed under a run its step does not belong to (ValueError)."""
+    run_id = _blank(run_id)
+    address = coerce_address(ledger)
+    if address is None:
+        return {"run_id": None if run_id is None else str(run_id), "ledger_seq": None, "ledger_step_id": None}
+    if run_id is not None and str(run_id).strip() != address["run_id"]:
+        raise ValueError(f"The run id {run_id} is not the run this step belongs to ({address['run_id']}).")
+    return {"run_id": address["run_id"], "ledger_seq": address.get("seq"), "ledger_step_id": address.get("step_id")}
+
+
+def runtime_step_reader() -> Callable[[], Optional[Dict[str, Any]]]:
+    """A reader of the AbstractRuntime step executing now: ``{run_id, seq?, step_id}`` from
+    ``abstractruntime.core.step_context.current_step_context()`` (the runtime installs it around each effect
+    handler invocation, its ADR 0009), or None outside a runtime step. ``seq`` is the ledger row of the step's
+    STARTED record and is kept only when the runtime reported it. An AbstractRuntime without the step context
+    fails here, at bind time (ImportError), never by stamping nothing in silence."""
+    from abstractruntime.core.step_context import current_step_context
+
+    def read() -> Optional[Dict[str, Any]]:
+        ctx = current_step_context()
+        if ctx is None:
+            return None
+        return step_address(ctx.run_id, ctx.seq, ctx.step_id)
+
+    return read
 
 
 def step_ref(address: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:

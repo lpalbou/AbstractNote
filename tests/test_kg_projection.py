@@ -61,7 +61,7 @@ def test_projection_fields_follow_the_data_model(nb):
     assert (a.scope, a.owner_id) == ("global", "abstractnote")
     assert a.observed_at == t(1) and a.valid_from == t(1)
     assert a.confidence == 0.9
-    assert a.provenance["source"] == "abstractnote" and a.provenance["revision_id"] == "rv_1"
+    assert a.provenance["actor"] == "abstractnote" and a.provenance["extra"]["revision_id"] == "rv_1"
     assert a.attributes["subject_type"] == "person" and a.attributes["object_type"] == "org"
     assert a.attributes["certainty"] == "stated" and a.attributes["stance"] == "assert"
     [lit] = nb.kg.query(assertion_ids=("cl_3",))

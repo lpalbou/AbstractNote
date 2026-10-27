@@ -67,6 +67,7 @@ def bound_tool_map(data_root: Path, embedder: Any, artifact_store: Any, account:
 
     tools = dict(bind(
         notebook_dir(data_root), embedder=embedder, artifact_reader=ArtifactReader(artifact_store), account=account,
+        artifact_store=artifact_store,  # a captured note's body becomes an artifact of the capture run (0037)
     ))
     missing = sorted(set(AUTO_APPROVE_TOOL_NAMES) - set(tools))
     if missing:

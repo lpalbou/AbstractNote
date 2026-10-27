@@ -215,10 +215,12 @@ class NoteRunner:
 
     @classmethod
     def with_llm(cls, llm: Any, tools: Mapping[str, Callable[..., Any]], *, run_dir: Optional[Path] = None,
-                 flows: Optional[Mapping[str, Mapping[str, Any]]] = None, tool_executor: Any = None) -> "NoteRunner":
+                 flows: Optional[Mapping[str, Mapping[str, Any]]] = None, tool_executor: Any = None,
+                 artifact_store: Any = None) -> "NoteRunner":
         """Any object with AbstractRuntime's ``generate(**kwargs)`` contract (e.g. ``ScriptedLLM``).
 
-        ``tool_executor`` replaces the plain ``MappingToolExecutor`` (tests use an approval-gated one)."""
+        ``tool_executor`` replaces the plain ``MappingToolExecutor`` (tests use an approval-gated one);
+        ``artifact_store`` is the runtime's artifact store (default: in memory)."""
         from abstractruntime import Runtime
         from abstractruntime.integrations.abstractcore.effect_handlers import build_effect_handlers
         from abstractruntime.integrations.abstractcore.tool_executor import MappingToolExecutor
@@ -226,7 +228,7 @@ class NoteRunner:
 
         registry = build_registry(flows)
         run_store, ledger_store = cls._stores(run_dir)
-        artifacts = InMemoryArtifactStore()
+        artifacts = artifact_store if artifact_store is not None else InMemoryArtifactStore()
         handlers = build_effect_handlers(
             llm=llm, tools=tool_executor or MappingToolExecutor(dict(tools)), artifact_store=artifacts,
             run_store=run_store,
@@ -239,7 +241,8 @@ class NoteRunner:
 
     @classmethod
     def with_model(cls, provider: str, model: str, tools: Mapping[str, Callable[..., Any]], *,
-                   run_dir: Optional[Path] = None, llm_kwargs: Optional[Dict[str, Any]] = None) -> "NoteRunner":
+                   run_dir: Optional[Path] = None, llm_kwargs: Optional[Dict[str, Any]] = None,
+                   artifact_store: Any = None) -> "NoteRunner":
         """A real model through AbstractCore (``create_local_runtime(provider, model)``)."""
         from abstractruntime.integrations.abstractcore.factory import create_local_runtime
         from abstractruntime.integrations.abstractcore.tool_executor import MappingToolExecutor
@@ -250,7 +253,7 @@ class NoteRunner:
         run_store, ledger_store = cls._stores(run_dir)
         runtime = create_local_runtime(
             provider=provider, model=model, llm_kwargs=llm_kwargs, run_store=run_store, ledger_store=ledger_store,
-            tool_executor=MappingToolExecutor(dict(tools)),
+            tool_executor=MappingToolExecutor(dict(tools)), artifact_store=artifact_store,
         )
         runtime.set_workflow_registry(registry)
         return cls(runtime, registry, tools)
@@ -262,11 +265,15 @@ class NoteRunner:
         """Bind the note tools to ``notebook_dir`` and pick the model path (``llm`` wins).
 
         ``llm_kwargs`` go to AbstractCore's provider (for example ``base_url``); the rest to
-        ``abstractnote.tools.bind`` (``embedder``, ``allow_paths_under``, ``extractors``, ...)."""
+        ``abstractnote.tools.bind`` (``embedder``, ``allow_paths_under``, ``extractors``, ``artifact_store``, ...).
+        An ``artifact_store`` is shared by the runtime and the note tools, as in the gateway: a captured note's
+        body is stored there as an artifact of the capture run (backlog 0037)."""
         tools = _bind_note_tools(Path(notebook_dir), **bind_kwargs)
+        artifacts = bind_kwargs.get("artifact_store")
         if llm is not None:
-            return cls.with_llm(llm, tools, run_dir=run_dir)
-        return cls.with_model(str(provider or ""), str(model or ""), tools, run_dir=run_dir, llm_kwargs=llm_kwargs)
+            return cls.with_llm(llm, tools, run_dir=run_dir, artifact_store=artifacts)
+        return cls.with_model(str(provider or ""), str(model or ""), tools, run_dir=run_dir, llm_kwargs=llm_kwargs,
+                              artifact_store=artifacts)
 
     # -- running
 

@@ -51,6 +51,10 @@ class _LazyContext(ToolContext):
                         nb = Notebook.open(object.__getattribute__(self, "_dir"),
                                            embedder=object.__getattribute__(self, "_embedder"))
                         nb.extractors.update(object.__getattribute__(self, "extractors"))
+                        # where a write came from (backlog 0037): the runtime step executing the tool, and the
+                        # artifact store a captured note's body goes to
+                        nb.step_reader = object.__getattribute__(self, "step_reader")
+                        nb.artifact_store = object.__getattribute__(self, "artifact_store")
                         object.__getattribute__(self, "__dict__")["nb"] = nb
             return nb
         return object.__getattribute__(self, name)
@@ -58,7 +62,8 @@ class _LazyContext(ToolContext):
 
 def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: Optional[ArtifactReader] = None,
          extractors: Optional[Dict[str, Any]] = None, allow_paths_under: "str | Path | None" = None,
-         account: Optional[str] = None, default_client: str = "agent") -> Dict[str, Callable[..., Any]]:
+         account: Optional[str] = None, default_client: str = "agent",
+         artifact_store: Any = None) -> Dict[str, Callable[..., Any]]:
     """The note tools bound to one notebook directory.
 
     - ``embedder``: the notebook's embedding model (None keeps the notebook's own pin).
@@ -66,8 +71,16 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
     - ``extractors``: ``{"vision": fn, "stt": fn}`` for image descriptions and transcripts.
     - ``allow_paths_under``: accept ``{"path": ...}`` attachments inside this folder (headless only).
     - ``account``: stamped as ``source.account`` on every captured note.
+    - ``artifact_store``: AbstractRuntime's artifact store; a captured note's body is stored there as an
+      artifact of the capture run (None: no body artifact).
+
+    Every tool runs inside an AbstractRuntime step when a flow or an agent calls it: the notebook reads that
+    step (``abstractruntime.core.step_context``) and stamps it on the notes it captures and the revisions it
+    applies (backlog 0037). The flows pass nothing for it, and neither does a model.
     """
     from abstractcore.tools.core import tool
+
+    from ..ledger import runtime_step_reader
 
     from . import capture as cap
     from . import consolidation as cons
@@ -77,7 +90,8 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
 
     ctx = _LazyContext(Path(notebook_dir).expanduser(), embedder, artifact_reader=artifact_reader,
                        allow_paths_under=Path(allow_paths_under).expanduser() if allow_paths_under else None,
-                       account=account, default_client=default_client, extractors=dict(extractors or {}))
+                       account=account, default_client=default_client, extractors=dict(extractors or {}),
+                       artifact_store=artifact_store, step_reader=runtime_step_reader())
 
     @tool(name="note_capture", description="Save a note (text, time, place, attachments) to the notebook now.",
           when_to_use="Whenever something should be remembered; returns the note id, revisits and similar notes.")

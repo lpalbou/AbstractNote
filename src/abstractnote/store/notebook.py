@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 from .. import __version__, ids
-from ..ledger import step_address
+from ..ledger import coerce_address
 from ..model import Revision, RevisionOp
 from .embeddings import (
     HashingEmbedder,
@@ -129,6 +129,10 @@ class Notebook:
         # The ledger address of the runtime step executing now ({run_id, seq?, step_id?} or None), injected by
         # abstractnote.tools.bind: a revision applied with no address of its own is stamped with it (0037).
         self.step_reader: Optional[Callable[[], Optional[Dict[str, Any]]]] = None
+        # AbstractRuntime's artifact store (the gateway's, bound by abstractnote.tools.bind): a captured note's body
+        # is stored there as an artifact of the capture run (ADR 0003 decision 11, backlog 0037). None: no body
+        # artifact (the CLI, importers).
+        self.artifact_store: Any = None
 
     # ------------------------------------------------------------------ open / close
 
@@ -267,10 +271,7 @@ class Notebook:
         if not data.get("revision_id"):
             raise ValueError("A revision needs a revision_id.")
         if data.get("ledger") is not None:
-            led = data["ledger"]
-            if not isinstance(led, dict):
-                raise ValueError("A revision's ledger address is {run_id, seq?, step_id?}.")
-            data["ledger"] = step_address(led.get("run_id"), led.get("seq"), led.get("step_id"))
+            data["ledger"] = coerce_address(data["ledger"])
         return data
 
     def _finish(self, rev: Dict[str, Any], *, _fail_after_index: bool = False) -> Dict[str, Any]:
@@ -498,6 +499,9 @@ class Notebook:
 
         kwargs.setdefault("vision", self.extractors.get("vision"))
         kwargs.setdefault("stt", self.extractors.get("stt"))
+        kwargs.setdefault("artifact_store", self.artifact_store)
+        if kwargs.get("ledger") is None and self.step_reader is not None:
+            kwargs["ledger"] = self.step_reader()  # the runtime step capturing it (backlog 0037)
         self.recover_pending()
         return capture(self, text, **kwargs)
 
@@ -787,6 +791,8 @@ class Notebook:
                       ledger: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         from ..recall.insights import write_insight
 
+        if ledger is None and self.step_reader is not None:
+            ledger = self.step_reader()  # the runtime step writing it (backlog 0037)
         return write_insight(self, kind, title, body, evidence_note_ids, entity_ids, run_id, ledger=ledger)
 
     def open_loops(self, limit: int = 20, since: Optional[str] = None, *, now: Optional[str] = None) -> Dict[str, Any]:
