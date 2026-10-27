@@ -1,6 +1,7 @@
 # ADR 0008: Interpretation is a derived view; nothing understood is final
 
-**Status**: Proposed (operator ruling of 2026-10-20 pending the build and its gate)  
+**Status**: Proposed (operator ruling of 2026-10-20 pending the build and its gate). Amended 2026-10-27
+(operator ruling): the mechanism belongs to AbstractMemory; see "Amendment" below.  
 **Date**: 2026-10-20
 
 ## Context
@@ -94,3 +95,20 @@ arrives; a later note that created its own entity for something defined earlier;
 that an earlier note shows was another task), all graded on a separate collection against the live
 gateway, plus no-model proofs for placement, invalidation and convergence (a pass terminates and a
 second pass without new earlier notes changes nothing).
+
+## Amendment (2026-10-27, operator ruling)
+
+The behaviour this ADR asks for stays the requirement for AbstractNote's users: an earlier note arriving late
+changes how later notes are understood, bounded, visible, resumable and never silent. Its mechanism, however,
+is a property of memory, not of notes: an altered memory ripples through the memories connected to it
+(AbstractMemory ADR 0001), and AbstractMemory owns that process end to end (AbstractMemory ADR 0002).
+
+- The dependency record, the forward-only invalidation, the propagation and activation lane (R6, on the
+  unmerged branch `retro/integration`: `recall/propagation.py`, `recall/activation.py`) and the
+  `reinterpreted` closure handling are a **prototype to be absorbed into AbstractMemory**
+  (`abstractmemory/docs/backlog/planned/knowledge_graph_convergence/0054_ripple_propagation_and_activation.md`),
+  not an implementation to keep in this package.
+- AbstractNote keeps what is note-specific: dates and their basis (decision 7), the "as of the note's date"
+  framing of its prompts (decision 2), and the views of a re-understanding stage. The model that re-reads is
+  supplied to AbstractMemory as an injected reader.
+- `retro/integration` is not merged as-is; backlog 0035 records what to hand over and how.

@@ -1,19 +1,22 @@
 # AbstractNote backlog overview
 
-Last reconciled: 2026-10-20 (afternoon)
+Last reconciled: 2026-10-27 (memory convergence track added; proposed 0015 deprecated)
 
 ## Counts
 | State | Count |
 |---|---|
-| planned | 1 (track `planned/v1/`: 0029) |
-| proposed | 10 |
+| planned | 5 (track `planned/v1/`: 0029; track `planned/memory_convergence/`: 0033-0036) |
+| proposed | 9 |
 | completed | 21 (track `completed/v1/`) |
-| deprecated | 0 |
+| deprecated | 1 (0015) |
 | recurrent | 1 (0901) |
 
-Next free id: 0033.
+Next free id: 0037.
 
 ## Priorities and recommended order
+0. Operator ruling 2026-10-27: AbstractMemory owns the memory graph (AbstractMemory ADR 0002; ADRs 0003 and 0008
+   here amended). No new generic memory-graph logic in this package; the `planned/memory_convergence/` track
+   (0034 → 0035 → 0033, with 0036 alongside) migrates onto AbstractMemory as its capabilities land.
 1. The global data check of the 1,000-note pass (untracked/eval2/REPORT.md): apply-time guards and the false-cue chain landed (W23, W24); prompt-level quality (summaries, predicates, seats vs packages) and the retrospective-ingestion gate are in flight
 2. 0029 Resume the ingest only after the quality lanes are graded (the one-liner stays the resume path)
 3. Release preparation (proposed 0023): release abstractmemory `close-assertion`, the gateway seam, then abstractnote 0.1.0 and `@abstractframework/note`; name the versions in README/getting-started/pyproject
@@ -23,9 +26,13 @@ Next free id: 0033.
 ### Planned
 - [0029 Ingest the rest of the framework's history into the operator's notebook](planned/v1/0029_ingest_the_rest_of_the_framework_history.md)
 
+- [0033 Converge the notebook's knowledge graph onto AbstractMemory](planned/memory_convergence/0033_converge_onto_abstractmemory.md)
+- [0034 Remove the write to AbstractMemory's private table](planned/memory_convergence/0034_remove_private_abstractmemory_access.md)
+- [0035 Hand the ripple prototype (`retro/integration`) to AbstractMemory](planned/memory_convergence/0035_hand_the_ripple_prototype_to_abstractmemory.md)
+- [0036 Depend on the layer below; no private gateway functions](planned/memory_convergence/0036_depend_on_the_layer_below.md)
+
 ### Proposed
 - [0014 iPhone app](proposed/0014_iphone_app.md)
-- [0015 Upstream entity resolution to AbstractMemory](proposed/0015_upstream_entity_resolution_to_abstractmemory.md)
 - [0016 Shared Swift gateway client package](proposed/0016_shared_swift_gateway_client_package.md)
 - [0017 Operator rulings: credentials and priorities](proposed/0017_operator_rulings_credentials_and_priorities.md)
 - [0018 Location capture and map view](proposed/0018_location_capture_and_map_view.md)
@@ -66,3 +73,6 @@ Next free id: 0033.
 - Every planned item carries `Current code reality` and `Validation`.
 - Completion moves the file to `completed/` with a report and updates this overview in the same pass.
 - Durable policy lives in [../adr/README.md](../adr/README.md), not here.
+
+### Deprecated
+- [0015 Upstream entity resolution to AbstractMemory](deprecated/0015_upstream_entity_resolution_to_abstractmemory.md) — deprecated 2026-10-27, superseded by 0033 and AbstractMemory 0050
