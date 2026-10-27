@@ -393,8 +393,12 @@ def test_pinned_shapes_of_note_tasks_overview(nb):
     assert set(note) == {"note_id", "title", "text", "kind", "occurred_at", "date_basis", "date_approximate",
                          "received_at", "status", "topics",
                          "summary", "source", "location", "attachments", "revision", "entities", "claims", "revisits",
-                         "insight"}
+                         "insight", "interpretations", "reinterpret_pending"}
     assert note["revision"]["note_id"] == h["n1"] and note["revisits"] == [] and note["insight"] is None
+    # ADR 0008: the interpretation history (one understanding so far) and why it waits to be read again (it does not)
+    assert [i["action"] for i in note["interpretations"]] == [None] and note["reinterpret_pending"] == []
+    assert set(note["interpretations"][0]) == {"revision_id", "at", "recorded_at", "action", "summary", "context",
+                                               "context_unknown", "superseded_by", "changes"}
     assert nb.note(nb.capture("unprocessed").note_id)["revision"] is None
     [task] = nb.tasks()["items"]
     assert set(task) == {"task_id", "note_id", "text", "status", "due", "closed_at", "age_days", "stale"}

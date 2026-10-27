@@ -8,11 +8,14 @@ schema: entities, existing claims and open tasks are referred to by their
 INDEX in the context packet, and decisions are enumerations (ADR 0004).
 
 The flow generator (``abstractnote.flows.build``) checks that its own copy of
-these schemas has the same structure and refuses to build otherwise.
+these schemas has the same structure and refuses to build otherwise, then hands
+every model :func:`strict` of them: every property required, an optional one
+nullable (FIX1).
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -24,7 +27,9 @@ URGENCIES = ["bulk", "normal", "high", "urgent"]
 CERTAINTIES = ["stated", "probable", "possible", "reported", "disputed"]
 STANCES = ["assert", "revise", "retract"]
 MENTION_DECISIONS = ["reuse", "create", "merge", "unsure"]
-CLAIM_RELATIONS = ["new", "restates", "refines", "supersedes", "contradicts"]
+#: ``earlier_state_of`` (appended, ADR 0008 §2): the statement is an earlier state of a LATER existing statement
+#: about the same subject; it is placed before it (``claim.insert_before``), never closing it.
+CLAIM_RELATIONS = ["new", "restates", "refines", "supersedes", "contradicts", "earlier_state_of"]
 REFLECTION_KINDS = ["warning", "reminder", "connection", "contradiction", "evolution"]
 
 
@@ -51,12 +56,99 @@ def _a(items: Dict[str, Any], description: str = "") -> Dict[str, Any]:
 
 
 def _o(properties: Dict[str, Any], defaults: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """An object schema. Every property is required unless ``defaults`` gives it a default: the
-    model may then leave it out (backlog 0024: default-valued fields were a quarter of the output
-    tokens), and the runtime's model fills the default."""
+    """An object schema. Every property is required unless ``defaults`` gives it a default. What a model is
+    handed is :func:`strict` of it: a defaulted property is required there too, nullable, and null stands for
+    its default (backlog 0024 let the model leave such fields out to save output tokens; R4/FIX1 measured that
+    a remote decoder then skips them, a reuse's ``candidate`` included)."""
     defaults = defaults or {}
     props = {k: (dict(v, default=defaults[k]) if k in defaults else v) for k, v in properties.items()}
     return {"type": "object", "properties": props, "required": [k for k in properties if k not in defaults]}
+
+
+#: A model writes every property of a strict schema; one it could leave out before reads null when not applicable.
+NULL_WHEN = "null when not applicable"
+
+
+def _null_note(default: Any, has_default: bool) -> str:
+    if not has_default or default is None:
+        return NULL_WHEN
+    if default in ([], "", {}):
+        return "null when empty"
+    return "null means " + json.dumps(default)
+
+
+def _nullable(prop: Dict[str, Any], default: Any, has_default: bool) -> Dict[str, Any]:
+    """``prop`` accepting null too, its description saying when to write null."""
+    out = dict(prop)
+    t = out.get("type")
+    if isinstance(t, str) and t != "null":
+        out["type"] = [t, "null"]
+    elif isinstance(t, list) and "null" not in t:
+        out["type"] = [*t, "null"]
+    elif "anyOf" in out and not any(isinstance(x, dict) and x.get("type") == "null" for x in out["anyOf"]):
+        out["anyOf"] = [*out["anyOf"], {"type": "null"}]
+    if isinstance(out.get("enum"), list) and None not in out["enum"]:
+        # AbstractRuntime builds a Literal from the enum before it reads the type: null must be one of its values
+        out["enum"] = [*out["enum"], None]
+    note = _null_note(default, has_default)
+    desc = str(out.get("description") or "").strip()
+    if "null" not in desc:
+        out["description"] = f"{desc}; {note}" if desc else note
+    return out
+
+
+def strict(schema: Any) -> Any:
+    """The schema a model is handed (FIX1): every property of every object, nested objects and array items
+    included, is listed in ``required``; a property that was optional (left out of ``required``, usually with a
+    ``default``) becomes nullable, its description saying "null when not applicable" (or which default null
+    stands for), and its ``default`` is dropped. A remote structured-output decoder (OVH's) writes the properties
+    of an object in alphabetical order and skips the optional ones, so a ``reuse`` lost its ``candidate`` and a
+    ``reason`` written after ``summary`` could only land inside the summary string (R4); with every property
+    required, the model writes each one, null when it has nothing to say. The answer parsing reads null as
+    absent (the pydantic mirrors' ``_null_means_default``). Applied in ONE place: the flow generator's
+    :func:`abstractnote.flows.build.load_schemas`, which every ``llm_call`` node's ``resp_schema`` comes from."""
+    if isinstance(schema, list):
+        return [strict(x) for x in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out = {k: (strict(v) if k in ("items", "anyOf", "oneOf", "allOf") else v) for k, v in schema.items()}
+    props = out.get("properties")
+    if isinstance(props, dict):
+        required = set(out.get("required") or [])
+        new_props: Dict[str, Any] = {}
+        for name, prop in props.items():
+            sub = strict(prop)
+            if name not in required and isinstance(sub, dict):
+                has_default = "default" in sub
+                default = sub.pop("default", None)
+                sub = _nullable(sub, default, has_default)
+            new_props[name] = sub
+        out["properties"] = new_props
+        out["required"] = list(new_props)
+    return out
+
+
+def optional_properties(schema: Any, path: str = "$") -> List[str]:
+    """Every property of ``schema`` (nested objects and array items included) that is not in its object's
+    ``required`` list, as JSON paths; empty for a strict schema (the check a test runs on every sent schema)."""
+    found: List[str] = []
+    if isinstance(schema, list):
+        for i, x in enumerate(schema):
+            found += optional_properties(x, f"{path}[{i}]")
+        return found
+    if not isinstance(schema, dict):
+        return found
+    props = schema.get("properties")
+    if isinstance(props, dict):
+        required = set(schema.get("required") or [])
+        for name, prop in props.items():
+            if name not in required:
+                found.append(f"{path}.{name}")
+            found += optional_properties(prop, f"{path}.{name}")
+    for key in ("items", "anyOf", "oneOf", "allOf"):
+        if key in schema:
+            found += optional_properties(schema[key], f"{path}.{key}")
+    return found
 
 
 QUICK_FILING: Dict[str, Any] = _o({
@@ -125,7 +217,8 @@ LINKING: Dict[str, Any] = _o({
     "claims": _a(_o({
         "index": {"type": "integer", "description": "index of the claim in the extraction"},
         "relation_to_existing": _e(CLAIM_RELATIONS),
-        "existing": {"type": ["integer", "null"], "description": "index of the existing claim in the packet"},
+        "existing": {"type": ["integer", "null"], "description": "the # number of the existing statement in the "
+                     "packet (for earlier_state_of: a statement of the LATER block)"},
         "reason": _s("short"),
     }, {"existing": None, "reason": ""})),
     "tasks": _a(_o({
@@ -192,8 +285,12 @@ REFLECTIONS: Dict[str, Any] = _o({
 ENTITY_SUMMARIES: Dict[str, Any] = _o({
     "summaries": _a(_o({
         "index": {"type": "integer", "description": "index of the entry in the list"},
-        "summary": _s("at most two sentences, third person, present tense"),
-    })),
+        # Before the summary (written first): the ties the notes marked ``new`` add, which the summary must account
+        # for (R1, live S4: the model kept the old sentence and left the new project out). Not stored.
+        "ties": _a(_s(), "each project, organisation or person a note marked new ties the entry to, with the "
+                         "entry's role in it and its date; empty when no note is new"),
+        "summary": _s("at most two sentences, third person, present tense, naming every tie listed in ties"),
+    }, {"ties": []})),
 })
 
 SCHEMAS: Dict[str, Dict[str, Any]] = {
@@ -400,6 +497,7 @@ class Reflections(_M):
 
 class EntitySummary(_M):
     index: int
+    ties: List[str] = Field(default_factory=list)
     summary: str
 
 

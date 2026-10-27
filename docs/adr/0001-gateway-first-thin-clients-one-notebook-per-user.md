@@ -19,8 +19,9 @@ AbstractMemory ADR 0003 (`abstractmemory/docs/adr/0003-one-graph-ledger-provenan
 plane's applications learn, reached by hosts through AbstractRuntime's memory facade and by applications through
 the gateway's `/api/gateway/memory/*` routes. The thin-client rule above is unchanged and extends to knowledge:
 the notebook's graph converges into the plane's mind (backlog 0033 phase 2), and `<plane>/abstractnote/` keeps
-the notes, their attachments and the app's own state. Folding the notebook's knowledge into the plane mind makes
-it readable by the plane's other applications under the plane's access rules: the operator confirms this (and
-whether an `owner_id` rule is wanted) before phase 2 (memory transition, decision 5). Every write from a note
+the notes, their attachments and the app's own state. What the notebook learns belongs to its owner (AbstractMemory
+ADR 0003 decision 2, amended 2026-10-27, operator ruling): inside the plane's mind it is partitioned by
+`owner_id`, readable by the owner's other applications and by nobody else by default; the plane is not a sharing
+scope, and every read surface (runtime facade, gateway routes, memory tools) filters by owner. Every write from a note
 names its ledger sources (the capture and processing steps, the note body as an artifact of the capture run;
 backlog 0037).

@@ -100,7 +100,8 @@ is missing, or call `POST /api/gateway/note/processor/ensure` with your account 
 ### A note failed to process
 
 The queue retries a failed note after one minute and then after ten minutes; the third failure
-marks it `failed` with the error. "Processing stopped before it finished." means a run ended
+marks it `failed` with the error. A note with no text to read ("The note has no text to read.") is marked
+`failed` at its first failure: no retry can give it text; add words to it or capture it again. "Processing stopped before it finished." means a run ended
 while it held the note (the lease expired). Fix the cause the error names (most often the model
 or provider), then press **Retry** in the web app's queue panel or call
 `POST /api/gateway/note/queue/{note_id}/retry`.

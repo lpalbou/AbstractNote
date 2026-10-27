@@ -46,10 +46,12 @@ AbstractMemory ADR 0003 (`abstractmemory/docs/adr/0003-one-graph-ledger-provenan
 target this ADR converges to:
 
 - **One graph, several minds.** The notebook's graph converges into the plane's one mind (decisions 1-3): the
-  notebook's `kg.sqlite3`, the plane's KG store and the note index's knowledge become one SQLite home under
-  `<plane>/abstractmemory/`. "The notebook's triple store is not the plane's shared KG store" (Decision above) is
-  superseded; the operator confirms the consequence (the plane's other applications read what the notebook
-  learned, and whether an `owner_id` rule applies) before phase 2 (memory transition, decision 5).
+  notebook's `kg.sqlite3`, the plane's KG store and the note index's knowledge become one home under
+  `<plane>/abstractmemory/` (which store backs it, SQLite or LanceDB, is AbstractMemory's decision 3, pending).
+  "The notebook's triple store is not the plane's shared KG store" (Decision above) is superseded on where the
+  knowledge lives, not on who reads it: visibility is strict ownership (decision 2, amended 2026-10-27, operator
+  ruling): the notebook's knowledge is its owner's, readable by the owner's other applications and by nobody else
+  by default; the plane is not a sharing scope.
 - **A revision is the unit of change there too** (decisions 6-7): AbstractMemory's `MemoryGraph.apply_revision`
   (ops `assert`, `close` with kind and successor, `narrow`) is where this ADR's revision log moves (backlog 0033
   phase 2); `NoteStore.project` becomes its client.

@@ -85,7 +85,7 @@ def test_migration_backfills_keys_and_marks_later_duplicates(tmp_path):
             "ex:software-gw": ("gateway", "gateway", "Gateway", None),
         }
         assert nb.store.q1("SELECT alias_key FROM entity_aliases WHERE entity_id='ex:software-gw'")[0] == "gw"
-        assert nb.store.meta_get("schema_version") == 2
+        assert nb.store.meta_get("schema_version") == 4  # schema 4 (ADR 0008 §4a) since; the name keys came with 2
         assert nb.store.meta_get("name_key_repair") == "pending"
         # The unique index holds for live, unmarked entities.
         with pytest.raises(sqlite3.IntegrityError):

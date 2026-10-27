@@ -41,13 +41,18 @@ class ScriptedLLM:
     callable ``(prompt: str) -> dict``. Each answer is validated against the call's response model
     so a test can never feed the flow something a real model's repaired output could not be. An
     unscripted schema or an unstructured call raises.
+
+    The schemas the flows send are strict (every property required, FIX1): a property the script leaves out
+    whose schema accepts null is answered null, as a model constrained by that schema writes it
+    (:func:`null_filled`); a left-out property that does not accept null still fails the validation.
     """
 
     def __init__(self, script: Mapping[str, Any]) -> None:
         self.script = dict(script)
         self.calls: List[Dict[str, Any]] = []
         self._cursor: Dict[str, int] = {}
-        self._fields = {name: frozenset(schema["properties"]) for name, schema in load_schemas().items()}
+        self._schemas = load_schemas()
+        self._fields = {name: frozenset(schema["properties"]) for name, schema in self._schemas.items()}
 
     def schema_name(self, response_model: Any) -> str:
         fields = frozenset(getattr(response_model, "model_fields", {}) or {})
@@ -74,9 +79,34 @@ class ScriptedLLM:
             value = entry[i]
         else:
             value = entry
-        validated = model.model_validate(value).model_dump(mode="json")
+        validated = model.model_validate(null_filled(value, self._schemas[name])).model_dump(mode="json")
         self.calls.append({"schema": name, "prompt": prompt, "system": kwargs.get("system_prompt"), "data": validated})
         return {"data": validated, "content": json.dumps(validated), "metadata": {}, "finish_reason": "stop"}
+
+
+def _accepts_null(schema: Any) -> bool:
+    if not isinstance(schema, dict):
+        return False
+    t = schema.get("type")
+    return t == "null" or (isinstance(t, list) and "null" in t) or None in (schema.get("enum") or [1]) or any(
+        _accepts_null(x) for x in schema.get("anyOf") or [])
+
+
+def null_filled(value: Any, schema: Any) -> Any:
+    """``value`` with every property its (strict) ``schema`` lists, accepts null for and ``value`` leaves out set
+    to null, in nested objects and array items too: what a model constrained by the strict schema writes."""
+    if not isinstance(schema, dict):
+        return value
+    if isinstance(value, list) and isinstance(schema.get("items"), dict):
+        return [null_filled(x, schema["items"]) for x in value]
+    props = schema.get("properties")
+    if not (isinstance(value, dict) and isinstance(props, dict)):
+        return value
+    out = {k: (null_filled(v, props[k]) if k in props else v) for k, v in value.items()}
+    for k, sub in props.items():
+        if k not in out and _accepts_null(sub):
+            out[k] = None
+    return out
 
 
 # --------------------------------------------------------------------------- registry

@@ -14,9 +14,16 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
   (retract, redate, undo a merge, confirm a match, close a task) do not run as steps of the ledger yet: they
   name the revision and its account, but no ledger source. A run id typed by a caller or a model is kept as a
   label, never as a source. The shape is AbstractMemory's (its ADR 0003), so the notebook's knowledge can
-  move into the plane's shared memory with its sources. Inside the gateway a captured note's text is also
+  move into the plane's memory with its sources, where it stays yours (readable by your own other
+  applications, by nobody else by default). Inside the gateway a captured note's text is also
   stored as an artifact of the capture run; captures from the command line and importers are unchanged.
   Nothing is filled in for notes written before this version.
+- **Ideas understood differently reach what relies on them** (ADR 0008 §4a): when an earlier note changes what
+  an idea is (its statements, its relations, what it is, or deeply its description), the later notes about the
+  ideas that rest on it are understood again too, strongest first and in the order things happened, and each
+  one is shown what changed. The Processing page says why: "Re-understanding 12 notes (5 because Zorn changed)",
+  and before a consolidation runs it says how many more may follow. A wave of changes always ends; a second
+  consolidation with nothing new changes nothing.
 
 ### Changed
 - **Requires AbstractRuntime 0.14.0** (its step context and `LedgerStore.get_record`, ADR 0009): a note
@@ -24,7 +31,8 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
   it. The floor is `abstractruntime>=0.14.0`. This release waits until AbstractRuntime 0.14.0 and
   AbstractMemory 0.4.0 are on PyPI (root ADR-0034: never released above an unpublished floor).
 - **Notebooks open as before**: the new fields are added to an existing notebook when it opens, empty
-  for what it already holds; the notebook's format version does not change.
+  for what it already holds; the notebook's format version stays 4 (the live notebooks' version, now the
+  baseline of this package).
 - **Requires AbstractMemory 0.4.0**: a statement placed between two earlier beliefs now moves the
   older belief's end date through AbstractMemory's public `narrow_assertion`; AbstractNote no longer
   writes AbstractMemory's private table (backlog 0034). The floor is `abstractmemory>=0.4.0`, the
@@ -54,6 +62,30 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
   still waiting. A pass that could not refresh everything is marked as having gaps, and the
   Processing page says so in one quiet line ("12 summaries could not be refreshed this time; they
   will be tried again next time.").
+- **Imported notes are filed too**: an imported note now gets the same quick filing as a note you
+  send (its kind and up to four topics) when it is understood, and `abstractnote refile --missing
+  --local` files the notes that were understood before, a batch at a time, saying how many are left.
+  The same repair runs through the server (`POST /note/refile` with `{"missing": true}`), each note
+  filed on your own runtime, and `GET /note/refile` says how far it got.
+- **A note found unchanged is not read again for the same reason**: when a note read again because
+  an idea it relies on changed comes out the same, the notebook remembers what it was read against,
+  so the next change wave from that idea passes it by without a model call.
+- **A note read while the notebook changed is read again**: when a statement a note builds on is
+  withdrawn while the note is being understood, nothing of that reading is kept and the note goes
+  back to the queue once, at its place, with the reason shown in the queue; the next reading is made
+  on what holds now.
+- **Imports leave out what cannot be read**: a file the notebook cannot read (an image without a
+  description model, for example) and a Markdown file that is only its header are no longer stored
+  as notes made of their names; the import report counts them and names each one with the reason.
+- **Web app, developer mock**: the mock server answers a note's date basis, a failed note's recent
+  errors and how each changed note changed, as the server does, so the screens built on it read the
+  same answers.
+- **Withdrawn entries stay out of sight**: an entry that only an earlier reading of a note made,
+  and that the note no longer names once it is understood again, is no longer counted in the
+  numbers, the timeline, the day view or the overview, and is in no theme, cue or description
+  refresh. Its own page says when and why it was withdrawn and what the note now reads it as
+  ("…was understood again and now reads it as Helix calibration plan."); looking at the notebook
+  as it was received before that still shows it.
 
 ## [0.1.1] - 2026-10-19
 

@@ -8,6 +8,14 @@ Two things live here:
   the file's modification time. These are fixed metadata fields read by position, never the meaning of the text.
 - :func:`date_basis` / :func:`is_approximate`: how a stored note's ``occurred_at`` was found, and whether it is an
   approximation that the note's own text may correct (``note.redate``).
+- :func:`capture_date`: the date and basis of a live capture (ADR 0008 §7): the caller's time for a note typed now
+  (``client``, never moved by its text), else the attachment's own metadata date, else the file date the client
+  sent (``last_modified``), else the moment of the upload, the paste or the capture (stand-ins the text may correct).
+- :func:`document_date`: the stated document date of an extraction as a time and a basis (``content``, or
+  ``stated_month`` / ``stated_year`` when the text gives only a month or a year).
+- :func:`redate_note`: a person's re-date. A note not understood yet just moves; an understood note moves, keeps its
+  statements where its interpretation placed them (the note index and AbstractMemory stay in agreement, no belief
+  overlaps another) and is marked, with the notes that depend on it, for re-understanding (ADR 0008 §4).
 """
 
 from __future__ import annotations
@@ -20,14 +28,24 @@ import zipfile
 from pathlib import Path
 from typing import Any, Optional, Tuple, Union
 
+#: Stand-in dates of a live capture (ADR 0008 §7): the moment a file was uploaded, a text pasted, or a note captured
+#: without any date (an API call that sent none). The note's own text may correct them (``note.redate``, basis
+#: ``content``); the extraction header reads "this date is approximate, from the upload" (the basis, underscores as
+#: spaces), which is the only case in which the model gives a ``document_date``.
+UPLOAD, PASTED, CAPTURE_TIME = "upload", "pasted_text", "capture_time"
+#: A stated document date that names only a month or a year (``2019-03``, ``2019``): placed on its first day and
+#: still approximate.
+STATED_MONTH, STATED_YEAR = "stated_month", "stated_year"
 #: ``date_basis`` values whose ``occurred_at`` is an approximation of when the thing happened (importers.md):
 #: a session start, a last edit, a commit, a bulk import commit, a file date, a store update, a session's last
-#: record.
+#: record; a live capture's upload, paste or capture moment; a stated month or year.
 APPROXIMATE_BASES = frozenset({"origin_session", "front_matter_modified", "git_added", "bulk_commit", "file_mtime",
-                               "store_updated", "last_record"})
+                               "store_updated", "last_record", UPLOAD, PASTED, CAPTURE_TIME, STATED_MONTH,
+                               STATED_YEAR})
 #: An imported note written before date bases were recorded: how its date was found is not known.
 UNRECORDED = "unrecorded"
-#: A live capture: the client's clock (or the moment it was received). Never moved by the note's content.
+#: A note a person typed now: the client's clock. Never moved by the note's content (a typed "the notes of 14 March
+#: 2019 were useful" stays dated today).
 CLIENT = "client"
 #: The note's own text stated its date (``note.redate`` at processing).
 CONTENT = "content"
@@ -201,5 +219,180 @@ def is_approximate(basis: str) -> bool:
     return basis in APPROXIMATE_BASES or basis == UNRECORDED
 
 
-__all__ = ["APPROXIMATE_BASES", "CLIENT", "CONTENT", "UNRECORDED", "USER", "date_basis", "detect_file_date",
-           "is_approximate"]
+# ----------------------------------------------------------------------------- a live capture's date
+
+def _attachment_mtime(value: Any) -> Optional[str]:
+    """The ``last_modified`` a client sent with an attachment (ISO 8601, or epoch milliseconds as the web's
+    ``File.lastModified`` gives), as UTC; anything else is refused with a sentence."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        raise ValueError("A file's last_modified must be a date or epoch milliseconds.")
+    if isinstance(value, (int, float)):
+        try:
+            return _iso(_dt.datetime.fromtimestamp(float(value) / 1000.0, tz=_dt.timezone.utc))
+        except (OverflowError, OSError, ValueError):
+            raise ValueError("A file's last_modified is not a date.") from None
+    found = _iso_text(str(value))
+    if found is None:
+        raise ValueError(f"A file's last_modified {value!r} is not an ISO 8601 date.")
+    return found
+
+
+#: Clients whose attachments are made at the moment of the capture (the watch's recordings), never uploaded
+#: documents: their time stays the client's (``client``).
+RECORDING_CLIENTS = frozenset({"watch"})
+
+
+def capture_date(occurred_at: Optional[str], attachments: Any, *, pasted: bool, now: str,
+                 client: Optional[str] = None) -> Tuple[str, str]:
+    """``(occurred_at, date_basis)`` of a live capture (ADR 0008 §7, docs/importers.md "Dates").
+
+    ``occurred_at`` is the caller's (already normalised) time or None. A note with no attachment and no pasted text
+    keeps the caller's time as ``client``; the caller's time on an upload or a paste is the moment of the upload
+    (``upload``) or the paste (``pasted_text``). Without a caller's time: the first attachment's own metadata date
+    (``exif``, ``xmp``, ``pdf_created``, ``office_created``), else the first ``last_modified`` a client sent with a
+    file (``file_mtime``), else the moment of the upload, the paste or the capture (``capture_time``). A watch's
+    attachment is a recording made now (:data:`RECORDING_CLIENTS`): with the watch's time it stays ``client``."""
+    atts = list(attachments or [])
+    if occurred_at:
+        if atts and client not in RECORDING_CLIENTS:
+            return occurred_at, UPLOAD
+        return occurred_at, (PASTED if pasted else CLIENT)
+    for a in atts:
+        found = detect_file_date(a["data"], a.get("mime"), a.get("filename"))
+        if found:
+            return found
+    for a in atts:
+        mtime = _attachment_mtime(a.get("last_modified"))
+        if mtime:
+            return mtime, "file_mtime"
+    if atts:
+        return now, UPLOAD
+    return now, (PASTED if pasted else CAPTURE_TIME)
+
+
+_FROM_FILE = {"exif": "the photo", "xmp": "the file", "pdf_created": "the document", "office_created": "the document",
+              "file_mtime": "the file's last change"}
+
+
+def long_day(ts: str) -> str:
+    """``2019-03-14T...`` as "14 March 2019" (a date in a capture answer)."""
+    d = _dt.datetime.strptime(str(ts)[:10], "%Y-%m-%d")
+    return f"{d.day} {d.strftime('%B')} {d.year}"
+
+
+def date_sentence(occurred_at: str, basis: str) -> Optional[str]:
+    """What the capture answer says about the note's date when it did not come from the person's clock:
+    "Dated 2 July 2019 from the document." (a file's own metadata date or its last change). The stand-ins
+    (``upload``, ``pasted_text``, ``capture_time``) say nothing at capture: the text may still state the date, and
+    the answer of the understanding says it then (:func:`redate_sentence`)."""
+    where = _FROM_FILE.get(basis)
+    return f"Dated {long_day(occurred_at)} from {where}." if where else None
+
+
+# ----------------------------------------------------------------------------- a stated document date
+
+_ISO_MONTH = re.compile(r"^(\d{4})-(\d{2})$")
+_ISO_YEAR = re.compile(r"^(\d{4})$")
+
+
+def document_date(iso: str) -> Tuple[str, str]:
+    """``(occurred_at, basis)`` of an extraction's ``document_date.iso``: a full date or time is exact
+    (``content``); ``YYYY-MM`` is its month's first day (``stated_month``) and ``YYYY`` its year's (``stated_year``),
+    both approximate. These are ISO forms read by position, never words. Raises ValueError otherwise."""
+    from .. import ids
+
+    raw = str(iso or "").strip()
+    m = _ISO_MONTH.match(raw)
+    if m and 1 <= int(m.group(2)) <= 12:
+        return f"{m.group(1)}-{m.group(2)}-01T00:00:00Z", STATED_MONTH
+    m = _ISO_YEAR.match(raw)
+    if m:
+        return f"{m.group(1)}-01-01T00:00:00Z", STATED_YEAR
+    return ids.normalize_time(raw, field="document date"), CONTENT
+
+
+def redate_sentence(ops: Any) -> Optional[str]:
+    """The sentence an understanding adds to its answer when the note's text dated it (a ``note.redate`` op with
+    basis ``content``, ``stated_month`` or ``stated_year``): "Dated 14 March 2019 from the document."."""
+    for op in ops or []:
+        if not isinstance(op, dict) or op.get("op") != "note.redate":
+            continue
+        p = op.get("payload") or {}
+        basis, to = p.get("basis"), str(p.get("to") or "")
+        if not to:
+            continue
+        if basis == CONTENT:
+            return f"Dated {long_day(to)} from the document."
+        if basis == STATED_MONTH:
+            d = _dt.datetime.strptime(to[:10], "%Y-%m-%d")
+            return f"Dated {d.strftime('%B')} {d.year} from the document."
+        if basis == STATED_YEAR:
+            return f"Dated {to[:4]} from the document."
+    return None
+
+
+# ----------------------------------------------------------------------------- a person's re-date
+
+class RedateRefused(ValueError):
+    """A re-date that cannot be done safely in this build (the reason is one sentence for the person)."""
+
+
+#: Why a re-date of an understood note waits for re-understanding (the seam to the re-understanding lane).
+NEEDS_REUNDERSTANDING = ("This note was already understood, and its date can only change once the notebook can "
+                         "understand it again.")
+
+
+def understood(nb: Any, note_id: str) -> bool:
+    """True when the note has an applied processing revision (its statements are in both stores)."""
+    return nb.store.q1("SELECT 1 FROM revisions WHERE note_id=? AND action IS NULL AND applied_index=1"
+                       " AND abandoned=0 LIMIT 1", (note_id,)) is not None
+
+
+def redate_note(nb: Any, note_id: str, occurred_at: Any, account: Optional[str], reason: str = "", *,
+                client: str = "web") -> dict:
+    """A person sets when a note happened (``POST /note/notes/{id}/redate``, basis ``user``; ADR 0008 §4, §7).
+
+    - A note not understood yet: one ``note.redate`` user revision (``Notebook._redate_op``); it is understood
+      later at its new date.
+    - An understood note: its statements stay where its interpretation placed them, in the note index AND in
+      AbstractMemory (``note.redate`` with ``keep_statements``: no belief is moved in one store only, none overlaps
+      another), and the note is marked for re-understanding together with the notes that depend on it, forward from
+      the earlier of the old and the new date: the ``note.redate`` revision's own projection writes those marks in
+      the same transaction (``store.notes`` ``MARKING_ACTIONS``, ADR 0008 §4); the re-understanding re-places the
+      statements at the new date in both stores. When the notebook cannot understand a note again (the installed
+      AbstractMemory has no closure kind ``reinterpreted``) the re-date is refused (:data:`NEEDS_REUNDERSTANDING`)
+      and nothing is written: re-placing windows in the note index alone would leave the two stores disagreeing
+      (AbstractMemory cannot reopen a closed window).
+    """
+    from .. import ids
+
+    row = nb.store.note_row(note_id)
+    if row is None:
+        raise ValueError("That note is not in this notebook.")
+    if not understood(nb, note_id):
+        return nb._redate_op(note_id, occurred_at, account, reason, client=client)  # noqa: SLF001
+    if occurred_at in (None, ""):
+        raise ValueError("Give the date the note was written.")
+    new = ids.normalize_time(occurred_at, field="occurred_at")
+    old = row["occurred_at"]
+    if new == old:
+        raise ValueError("The note already has that date.")
+    from ..store.kg import supports_reinterpreted
+
+    if not supports_reinterpreted():
+        raise RedateRefused(NEEDS_REUNDERSTANDING)
+    out = nb._redate_op(note_id, new, account, reason, client=client, keep_statements=True)  # noqa: SLF001
+    marked = out.get("reinterpret_marked") or {}
+    if note_id not in (marked.get("notes") or []) and note_id not in {m["note_id"] for m in nb.store.pending_marks()}:
+        raise RuntimeError("The re-dated note was not marked to be understood again; its statements would stay at"
+                           " the old date (ADR 0008 §4).")
+    out["reinterpret"] = marked
+    return out
+
+
+__all__ = ["APPROXIMATE_BASES", "CAPTURE_TIME", "CLIENT", "CONTENT", "NEEDS_REUNDERSTANDING", "PASTED",
+           "RedateRefused", "STATED_MONTH", "STATED_YEAR", "UNRECORDED", "UPLOAD", "USER", "capture_date",
+           "date_basis", "date_sentence", "detect_file_date", "document_date", "is_approximate", "long_day",
+           "redate_note", "redate_sentence", "understood"]

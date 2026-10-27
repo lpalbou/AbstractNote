@@ -55,6 +55,7 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
   const fileInput = useRef<HTMLInputElement>(null);
   const stream = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  const pastedText = useRef(false);
   const alive = useRef(true);
   const inlineRef = useRef(processInline);
   inlineRef.current = processInline;
@@ -157,13 +158,15 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
       id: randomId(),
       key: randomId(),
       text: body,
-      files: files.map((f) => ({ name: f.name, size: f.size, type: f.type })),
+      files: files.map((f) => ({ name: f.name, size: f.size, type: f.type, lastModified: f.lastModified })),
       artifacts: [],
       occurred_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
       location: place,
       about,
+      pasted: pastedText.current,
       state: files.length ? "uploading" : "saving",
     };
+    pastedText.current = false;
     filesFor.current.set(item.id, files);
     // The composer's previews move to the note (not revoked: the stream shows them now).
     previewsFor.current.set(item.id, files.map(previewOf));
@@ -244,6 +247,8 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
               if (pasted.length) {
                 e.preventDefault();
                 addFiles(pasted);
+              } else if (e.clipboardData?.getData("text")) {
+                pastedText.current = true; // a pasted document may carry its own date
               }
             }}
             leading={

@@ -69,7 +69,12 @@ def note_insight_write(ctx: ToolContext, kind: str, title: str, body: str,
     return ctx.nb.write_insight(kind, title, body, evidence_note_ids or [], entity_ids or [], _blank(run_id))
 
 
-def note_communities_recompute(ctx: ToolContext, resolution: Optional[float] = None) -> Dict[str, Any]:
+def note_communities_recompute(ctx: ToolContext, resolution: Optional[float] = None,
+                               only_if_due: Optional[bool] = None) -> Dict[str, Any]:
+    """Recompute now, or with ``only_if_due`` only when the batch made it due (the end of a drain, ADR 0008 §5):
+    then the answer is :func:`abstractnote.recall.communities.refresh_if_due`'s."""
+    if only_if_due:
+        return _communities.refresh_if_due(ctx.nb, _blank(resolution))
     return _communities.recompute(ctx.nb, _blank(resolution))
 
 

@@ -9,6 +9,7 @@ end-to-end runs the real flows on a real Runtime and checks the ledger row the p
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -165,7 +166,8 @@ def test_a_rebuild_projects_the_same_provenance(nb):
 
 
 def test_a_notebook_without_the_ledger_columns_opens_unchanged_at_the_same_schema(tmp_path):
-    """Lead decision (a): no SCHEMA_VERSION bump; the columns arrive through ``_ADDED_COLUMNS``, NULL on old rows."""
+    """Lead decision (a): no SCHEMA_VERSION bump (the baseline's 4 stays); the columns arrive through
+    ``_ADDED_COLUMNS``, NULL on old rows."""
     root = tmp_path / "nb"
     with Notebook.open(root) as nb:
         nb.apply_revision(rev("rv_old", t(1), create("ex:person-dana", "Dana"),
@@ -180,7 +182,7 @@ def test_a_notebook_without_the_ledger_columns_opens_unchanged_at_the_same_schem
     conn.commit()
     conn.close()
     with Notebook.open(root) as nb:
-        assert SCHEMA_VERSION == 2 and nb.store.meta_get("schema_version") == 2
+        assert SCHEMA_VERSION == 4 and nb.store.meta_get("schema_version") == 4  # the baseline's; 0037 adds none
         row = nb.store.revision_row("rv_old")
         assert all(row[c] is None for c in ("ledger_run_id", "ledger_seq", "ledger_step_id", "sources_json"))
         assert nb.revision("rv_old")["ledger"] is None and nb.revision("rv_old")["sources"] == []
@@ -419,3 +421,69 @@ def test_a_note_tool_approved_by_a_person_points_at_the_step_that_waited(tmp_pat
     body = nb.store.note_sources(note["note_id"])[1]
     assert body["run_id"] == run_id and store.load_text(body["artifact_id"]) == "Met Dana about the LUT budget."
     nb.close()
+
+
+# ---------------------------------------------------------------------------- 6. on the schema-4 baseline
+
+
+def test_the_append_only_revision_log_takes_the_ledger_columns_at_insert_and_rebuild_copies_them(nb):
+    """The baseline's ``revisions_append_only`` trigger guards UPDATEs only: the ledger columns and the note's
+    sources are written on INSERT (never updated afterwards) and ``rebuild()`` copies them with the truth tables."""
+    assert nb.store.q1("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='revisions_append_only'")
+    _history(nb)
+    cols = "revision_id, ledger_run_id, ledger_seq, ledger_step_id, sources_json"
+    before = [tuple(r) for r in nb.store.q(f"SELECT {cols} FROM revisions ORDER BY revision_id")]
+    assert ("rv_1", "run-apply", 7, "st-apply", None) in before
+    with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+        with nb.store.tx() as c:  # what a revision IS still never changes
+            c.execute("UPDATE revisions SET ops_json='[]' WHERE revision_id='rv_1'")
+    nb.rebuild()
+    assert [tuple(r) for r in nb.store.q(f"SELECT {cols} FROM revisions ORDER BY revision_id")] == before
+
+
+LIVE_RETRO2 = (Path(__file__).resolve().parents[1] / "untracked" / "local" / "gw18080" / "users" / "default"
+               / "retro2" / "runtime" / "abstractnote")
+
+
+def _live_retro2() -> Path:
+    # the operator's live schema-4 notebook (written by the serve line); only on the operator's machine. The main
+    # checkout holds it; a worktree under untracked/wt/<name> reaches it four levels up.
+    for root in (LIVE_RETRO2, Path(__file__).resolve().parents[4] / "untracked" / "local" / "gw18080" / "users"
+                 / "default" / "retro2" / "runtime" / "abstractnote"):
+        if (root / "note.sqlite3").is_file():
+            return root
+    pytest.skip("the live schema-4 notebook retro2 is not on this machine (untracked/local/gw18080/...)")
+
+
+def test_a_copy_of_a_live_schema_4_notebook_projects_null_safe_provenance(tmp_path):
+    """Serve-line rows (written before 0037) have NULL ledger columns: they open, read no sources, and a rebuild
+    projects every assertion and closure in AbstractMemory's shape with nothing invented. Works on a COPY; the
+    original is never opened."""
+    import shutil
+
+    from test_store_support import CountingEmbedder
+
+    src = _live_retro2()
+    copy = tmp_path / "retro2"
+    shutil.copytree(src, copy)
+    with Notebook.open(copy) as ro:  # no embedder: read-only, as the gateway would refuse writes
+        pin = ro.store.meta_get("embedding_pin")
+        assert ro.store.meta_get("schema_version") == 4
+        notes = [r["note_id"] for r in ro.store.q("SELECT note_id FROM notes")]
+        assert notes and all(ro.store.note_sources(n) == [] for n in notes)
+        assert ro.store.q1("SELECT COUNT(*) FROM revisions WHERE ledger_run_id IS NOT NULL OR sources_json IS NOT"
+                           " NULL")[0] == 0
+        revs = [r["revision_id"] for r in ro.store.q("SELECT revision_id FROM revisions WHERE abandoned=0")]
+        assert all(ro.revision(r)["ledger"] is None and ro.revision(r)["sources"] == [] for r in revs)
+    # a stand-in carrying the pin (no model download): the copy's own vectors are reused, and the few texts the
+    # live index holds no vector for get hashing vectors, in the copy only; provenance does not depend on them
+    emb = CountingEmbedder(dimension=int(pin["dimension"]), model_id=pin["model_id"])
+    with Notebook.open(copy, embedder=emb) as nb:
+        nb.rebuild()
+        assertions = nb.kg.query()
+        assert assertions
+        for a in assertions:
+            prov = Provenance.from_dict(a.provenance)  # strict: the six keys only
+            assert prov.actor == "abstractnote" and prov.sources == () and prov.extra["revision_id"]
+        closures = [c for a in assertions for c in nb.kg.journal.closures(assertion_id=a.assertion_id)]
+        assert closures and all(Provenance.from_dict(c.provenance).sources == () for c in closures)

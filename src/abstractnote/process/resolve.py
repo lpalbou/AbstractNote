@@ -4,6 +4,11 @@ Candidates come from three deterministic lookups: the same canonical name
 (``ids.name_key``) as an entity's name or alias, the entity holding the mention's
 own canonical name always first, full-text over entity names, aliases and summaries (BM25), and vector
 neighbours of the mention. The model decides which, if any, is the same thing.
+
+A candidate found by the exact name or alias key (``match: alias``) is ALWAYS listed, even past
+:data:`MAX_CANDIDATES` (ADR 0008 §6); the packet records those matches (``alias_matches``) so that a decision
+not to reuse one lands in review as a close match. Each candidate is shown as known on the note's date with its
+LATER block (``context.dated_view``), every claim on the predicates the note writes about the mention kept.
 """
 
 from __future__ import annotations
@@ -13,7 +18,8 @@ from typing import Any, Dict, List, Sequence
 from .. import ids
 from ..store.embeddings import top_k
 from ..store.notes import entity_text, fts_terms
-from .context import attach_claims, empty_packet, entity_view, load_packet, save_packet
+from .context import dated_view, empty_digest, empty_packet, load_packet, save_packet
+from .vocabulary import normalize_predicate
 from .packets import CANDIDATES_PER_MENTION
 
 MAX_CANDIDATES = CANDIDATES_PER_MENTION
@@ -65,7 +71,11 @@ def resolve_candidates(nb: Any, note_id: str, mentions: Sequence[Dict[str, Any]]
         raise ValueError("That note is not in this notebook.")
     if not isinstance(mentions, (list, tuple)):
         raise ValueError("The mentions must be a list of {ref, name, kind, aliases}.")
-    packet = load_packet(nb, note_id) or empty_packet()
+    note = nb.store.note_row(note_id)
+    packet = load_packet(nb, note_id) or empty_packet(note["occurred_at"])
+    packet.setdefault("digest", empty_digest(note["occurred_at"]))
+    packet.setdefault("alias_matches", {})
+    as_of = packet["digest"].get("as_of") or note["occurred_at"]
     entity_rows = nb.store.q("SELECT e.entity_id, v.vector FROM entities e JOIN vectors v ON v.vector_key=e.vector_key"
                              " WHERE e.merged_into IS NULL")
     vectors_in = [(r[0], r[1]) for r in entity_rows]
@@ -95,19 +105,22 @@ def resolve_candidates(nb: Any, note_id: str, mentions: Sequence[Dict[str, Any]]
         # The entity with the mention's own canonical name always comes first (deterministic normalisation,
         # not an identity judgement: Notebook.apply_revision would file a new entity of that name under it anyway).
         own = nb.store.name_key_holder(ids.name_key(m["name"]))
-        ordered = sorted(scores, key=lambda e: (0 if e == own else 1, 0 if "alias" in matched[e] else 1,
-                                                -scores[e], e))[:MAX_CANDIDATES]
+        ranked = sorted(scores, key=lambda e: (0 if e == own else 1, 0 if "alias" in matched[e] else 1,
+                                               -scores[e], e))
+        # an exact name or alias match is always a candidate, past the cut if need be (ADR 0008 §6)
+        ordered = ranked[:MAX_CANDIDATES] + [e for e in ranked[MAX_CANDIDATES:] if "alias" in matched[e]]
+        preds = [normalize_predicate(x)[0] for x in (m.get("predicates") or []) if str(x or "").strip()]
         cands = []
         for i, eid in enumerate(ordered):
             if nb.store.entity_row(eid) is None:
                 continue
-            view = entity_view(nb, eid)
+            view = dated_view(nb, packet, eid, added_claims, as_of, CLAIMS_PER_CANDIDATE_RETURNED, preds)
             score = 1.0 if "alias" in matched[eid] else round(vec_score.get(eid, scores[eid]), 4)
             view.update({"index": len(cands), "score": score, "matched_by": matched[eid],
-                         "active_claims": attach_claims(nb, packet, eid, added_claims,
-                                                           CLAIMS_PER_CANDIDATE_RETURNED)})
+                         "match": "alias" if "alias" in matched[eid] else matched[eid][0]})
             cands.append(view)
         packet["mentions"][str(m["ref"])] = [c["entity_id"] for c in cands]
+        packet["alias_matches"][str(m["ref"])] = [c["entity_id"] for c in cands if c["match"] == "alias"]
         out.append({"ref": str(m["ref"]), "candidates": cands})
     save_packet(nb, note_id, packet)
-    return {"mentions": out, "existing_claims": added_claims}
+    return {"mentions": out, "existing_claims": added_claims, "context": packet["digest"]}

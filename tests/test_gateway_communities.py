@@ -53,7 +53,7 @@ def test_stats_over_http(gw):
     assert empty.json()["totals"]["notes"] == 0
     stats_world(notebook_for(_plane(gw, "alice")))
     body = c.get("/api/gateway/note/stats", headers=h).json()
-    assert set(body) == {"generated_at", "span", "totals", "activity_weekly", "entities_by_kind", "top_entities",
+    assert set(body) == {"generated_at", "span", "totals", "activity_weekly", "recorded_weekly", "entities_by_kind", "top_entities",
                          "claims_by_predicate", "tasks", "insights_by_kind", "communities", "processing",
                          "growth_monthly", "quiet_entities", "omitted"}
     assert body["omitted"] == {"top_entities": 0, "claims_by_predicate": 0, "quiet_entities": 0}

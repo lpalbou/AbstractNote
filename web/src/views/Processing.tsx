@@ -34,6 +34,7 @@ import {
   paceWords,
   pendingConsolidationLine,
   queueSegments,
+  reinterpretWords,
   revisionChips,
   stateLine,
   stepIndex,
@@ -460,7 +461,7 @@ function ConsolidationCard({ c, now, api, settings, onSave, busy, act }: { c: Co
   const current = c["run"];
   const idx = current ? consolidationStageIndex(current.stage) : -1;
   const stage = idx >= 0 && idx < CONSOLIDATION_STAGES.length ? CONSOLIDATION_STAGES[idx].label : "";
-  const pending = pendingConsolidationLine(c.pending);
+  const pending = pendingConsolidationLine(c.pending, c.reinterpret);
   const elapsed = current ? Math.max(current.elapsed_s * 1000, elapsedOf(current.started_at, now)) : 0;
   const consolidateNow = () =>
     act(
@@ -487,7 +488,7 @@ function ConsolidationCard({ c, now, api, settings, onSave, busy, act }: { c: Co
       <Stepper steps={CONSOLIDATION_STAGES.map((s) => s.label)} current={current ? idx : -1} label="Stages of consolidation" />
       {current ? (
         <div className="nt-proc-cons__run">
-          <Meter done={current.stage_done} total={current.stage_total} label={`${stage} · ${current.stage_done} of ${current.stage_total}`} />
+          <Meter done={current.stage_done} total={current.stage_total} label={current.stage === "reinterpret" ? reinterpretWords(current.stage_done, current.stage_total, current.propagated) : `${stage} · ${current.stage_done} of ${current.stage_total}`} />
           <p className="nt-proc-cons__time">
             <span>{clockWords(elapsed)} so far</span>
             {etaWords(current.eta_s) ? <span>{etaWords(current.eta_s)}</span> : null}

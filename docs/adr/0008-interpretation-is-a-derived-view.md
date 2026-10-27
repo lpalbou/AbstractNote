@@ -55,6 +55,22 @@ a drain is understood twice, and the structured-output lane corrupts one link an
    re-understands marked notes in ascending date, each once; a re-interpretation may mark later notes
    again, never earlier ones, so the pass terminates, and a second pass without new earlier notes makes
    no model call (the unchanged check is a structural comparison of the ops, not a model answer).
+4a. **Deep changes reach the ideas that relied on them.** When a re-understanding changes an entity deeply (the
+   entity was retired, merged or separated, or its summary moved by at least `DEEP_SUMMARY_DISTANCE` in embedding
+   distance, or at least `DEEP_CLAIM_SHARE` of its statements or `DEEP_RELATION_SHARE` of its relations were
+   replaced; constants in data-model.md, each measured by comparing the note's old and new reading), the later notes
+   that used a proximal entity are marked for re-understanding too. A proximal entity is one whose statements rest on
+   the changed one: its reliance is its statements with that entity over all its relations, weighted by recency. The
+   impact carried to it is the change's magnitude times `PROPAGATION_DECAY` times that reliance, and nothing under
+   `PROPAGATION_FLOOR` is marked; what is cut is counted. A mark is raised only when the change is visible at the
+   marked note's date, carries its source and impact, and is read in history order (stronger marks first, in two
+   tiers). The model decides at each re-reading. A propagated re-reading that changes nothing, or that the no-call
+   check settles, stops the spread through that entity. A re-reading never passes on more impact than it was given,
+   and each entity spreads at most once per pass, so cycles damp out within a bounded number of hops and a second
+   pass without new earlier notes still makes no model call. The count that may follow is shown before the run as an
+   upper bound, and propagated marks a budget stop leaves are in `left_out`. Validation adds the propagation
+   scenarios (a foundation reaching a neighbour, a cycle, a hub, noise, a budget stop) and the calibration run that
+   sets the thresholds above the model's own noise.
 5. **Re-understanding is a visible consolidation stage** ("Re-understanding 12 notes", with progress,
    ETA, what changed and what did not), scheduled like the rest of the consolidation and triggerable.
    The count and the reasons are readable before the run; the stage runs under the consolidation's
@@ -81,7 +97,8 @@ of that project, bounded by dependency, in history order, with progress shown. E
 graph can change after an ingest, and the then-and-now, themes and summaries must be read as views
 over the dated history, which is what makes "how the notebook understood this over time" answerable.
 The revision log grows (one revision per re-interpretation); the as-received axis makes the growth
-useful. The schema gains the dependency record and the re-understanding marks (a migration flag marks
+useful. A deep change can cost re-readings beyond the notes that used the changed entity, bounded by reliance,
+decay and the floor; the thresholds are tuned on stored change records (`idea_changes`). The schema gains the dependency record and the re-understanding marks (a migration flag marks
 revisions written before the record existed: they are re-understood on their first mark). AbstractMemory
 gains the additive closure kind `reinterpreted` (a change and release of abstractmemory that precedes the
 AbstractNote release depending on it); closures of that kind are not turning points in then-and-now.
@@ -103,8 +120,9 @@ changes how later notes are understood, bounded, visible, resumable and never si
 is a property of memory, not of notes: an altered memory ripples through the memories connected to it
 (AbstractMemory ADR 0001), and AbstractMemory owns that process end to end (AbstractMemory ADR 0002).
 
-- The dependency record, the forward-only invalidation, the propagation and activation lane (R6, on the
-  unmerged branch `retro/integration`: `recall/propagation.py`, `recall/activation.py`) and the
+- The dependency record, the forward-only invalidation, the propagation and activation lane (R6:
+  `recall/propagation.py`, in this package since the schema-4 baseline merge of 2026-10-27, operator decision 1
+  of the memory transition; `recall/activation.py`, on the unmerged branch `retro/integration` only) and the
   `reinterpreted` closure handling are a **prototype to be absorbed into AbstractMemory**
   (`abstractmemory/docs/backlog/planned/knowledge_graph_convergence/0054_ripple_propagation_and_activation.md`),
   not an implementation to keep in this package.

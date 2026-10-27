@@ -154,9 +154,11 @@ def _process_prompt_flows():
 def test_model_nodes_carry_static_system_prompts_thinking_and_caps():
     _, nodes = _process_prompt_flows()
     llm = {k: n for k, n in nodes.items() if n["data"]["nodeType"] == "llm_call"}
-    steps = {("note-capture", "filing"): "quick_filing", ("note-process", "extract"): "extract",
+    steps = {("note-capture", "filing"): "quick_filing", ("note-file", "filing"): "quick_filing",
+             ("note-process", "extract"): "extract",
              ("note-process", "extract_again"): "extract",
-             ("note-process", "link"): "link", ("note-recall", "synthesize"): "synthesize",
+             ("note-process", "link"): "link", ("note-process", "link_again"): "link",
+             ("note-recall", "synthesize"): "synthesize",
              ("note-mine", "plan"): "mine_plan", ("note-mine", "findings"): "mine_findings",
              ("note-mine", "dossier"): "mine_dossier", ("note-reflect", "reflect"): "reflect"}
     # the community naming step carries its own static system prompt (abstractnote.recall.communities, 0030)
@@ -182,7 +184,7 @@ def test_model_nodes_carry_static_system_prompts_thinking_and_caps():
         assert d.get("thinking") == build.STEP_SETTINGS[step]["thinking"], key
     assert llm[("note-capture", "filing")]["data"]["pinDefaults"]["thinking"] == "off"
     caps = {k[1]: llm[k]["data"]["pinDefaults"]["max_output_tokens"] for k in llm if k[0] in ("note-capture", "note-process")}
-    assert caps == {"filing": 400, "extract": 4000, "extract_again": 4000, "link": 6000}
+    assert caps == {"filing": 400, "extract": 4000, "extract_again": 4000, "link": 6000, "link_again": 6000}
 
 
 def test_notes_share_one_prompt_cache_key_per_step():

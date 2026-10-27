@@ -13,16 +13,21 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 2  # 2: entities.name_key/display_name/key_clash_with, entity_aliases.alias_key
+SCHEMA_VERSION = 4  # 2: entities.name_key/display_name/key_clash_with, entity_aliases.alias_key;
+#                    3: ADR 0008 (revisions.context_json, reinterpret_marks, note_dependencies, soft-removed mentions,
+#                    topics and tasks of a superseded interpretation, retired entities);
+#                    4: ADR 0008 §4a (idea_changes, the propagated fields of reinterpret_marks)
 # Not bumped for backlog 0037 (the ledger address of a note and of a revision, the note's sources, the body
 # artifact): those are nullable columns added on open (``_ADDED_COLUMNS``), NULL on older rows, read by nothing
-# that changes the behaviour of existing data. The version lineage (live notebooks at 4 from the serve worktree,
-# ``retro/integration`` at 5) is the operator's decision (memory transition, decision 1).
+# that changes the behaviour of existing data (memory transition: the baseline is this schema-4 line, operator
+# decision 1).
 
-TRUTH_TABLES = ("meta", "notes", "attachments", "note_links", "queue", "revisions", "vectors", "context_packets")
+TRUTH_TABLES = ("meta", "notes", "attachments", "note_links", "queue", "revisions", "vectors", "context_packets",
+                "reinterpret_marks", "idea_changes", "reading_confirmations")
 #: Derived tables a rebuild copies (entity ids are stable, and the community labels are the model's work), and the
-#: consolidation bookkeeping (its progress rows and the measured seconds per item the next ETA starts from).
-KEPT_TABLES = ("communities", "entity_communities", "consolidation_runs")
+#: consolidation bookkeeping (its progress rows and the measured seconds per item the next ETA starts from), and the
+#: ``refile --missing`` repairs' progress rows.
+KEPT_TABLES = ("communities", "entity_communities", "consolidation_runs", "refile_runs")
 
 DDL = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -112,7 +117,11 @@ CREATE TABLE IF NOT EXISTS queue (
   next_attempt_at TEXT,
   last_error TEXT,
   failed_at TEXT,
-  done_at TEXT
+  done_at TEXT,
+  inline_run_id TEXT,
+  inline_until TEXT,
+  reinterpret_run_id TEXT,
+  reinterpret_until TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_queue_order ON queue(state, priority DESC, occurred_at ASC, size ASC);
 
@@ -153,6 +162,76 @@ CREATE TABLE IF NOT EXISTS revisions (
 CREATE INDEX IF NOT EXISTS idx_revisions_note ON revisions(note_id);
 CREATE INDEX IF NOT EXISTS idx_revisions_at ON revisions(at);
 CREATE INDEX IF NOT EXISTS idx_revisions_recorded ON revisions(recorded_at);
+
+-- ADR 0008: notes marked for re-understanding (truth: an "unchanged" outcome writes no revision, so only this table
+-- says it was consumed). One untaken pending mark per note; a mark arriving while one is taken by a pass is a new row
+-- for the next pass. ``pass_id`` = the consolidation that took it, ``outcome`` reinterpreted | unchanged.
+CREATE TABLE IF NOT EXISTS reinterpret_marks (
+  mark_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  note_id TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  by_note_id TEXT,
+  by_revision_id TEXT,
+  entities_json TEXT NOT NULL DEFAULT '[]',
+  from_at TEXT,
+  marked_at TEXT NOT NULL,
+  pass_id TEXT,
+  taken_at TEXT,
+  consumed_at TEXT,
+  outcome TEXT,
+  consumed_revision_id TEXT,
+  calls INTEGER,
+  error TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reinterpret_marks_untaken ON reinterpret_marks(note_id)
+  WHERE consumed_at IS NULL AND pass_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_reinterpret_marks_note ON reinterpret_marks(note_id, consumed_at);
+
+-- ADR 0008 §4a: how deeply one re-understanding (``revision_id``, a ``note.reinterpret``) changed each entity it
+-- touched, measured by comparing the note's old and new reading (recall/propagation.py), and where a deep change
+-- spread (``spread_json``). Truth: written once when the re-understanding is applied, copied by a rebuild, never
+-- recomputed by a replay (the embedder or the graph may have moved since). ``pass_id`` = the consolidation pass
+-- whose mark the re-understanding consumed (each entity spreads at most once per pass).
+CREATE TABLE IF NOT EXISTS idea_changes (
+  revision_id TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  note_id TEXT NOT NULL,
+  as_of TEXT NOT NULL,
+  pass_id TEXT,
+  kind_change REAL NOT NULL DEFAULT 0,
+  summary_distance REAL,
+  summary_basis TEXT NOT NULL DEFAULT 'none',
+  claim_share REAL NOT NULL DEFAULT 0,
+  relation_share REAL NOT NULL DEFAULT 0,
+  support_claims INTEGER NOT NULL DEFAULT 0,
+  support_relations INTEGER NOT NULL DEFAULT 0,
+  magnitude REAL NOT NULL DEFAULT 0,
+  deep INTEGER NOT NULL DEFAULT 0,
+  summary_only INTEGER NOT NULL DEFAULT 0,
+  carried REAL NOT NULL DEFAULT 1.0,
+  hops INTEGER NOT NULL DEFAULT 0,
+  embedder_model TEXT,
+  spread INTEGER NOT NULL DEFAULT 0,
+  spread_json TEXT,
+  recorded_at TEXT NOT NULL,
+  PRIMARY KEY (revision_id, entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_idea_changes_pass ON idea_changes(pass_id, entity_id);
+
+-- ADR 0008 §4a with ADR 0003 (INT2): a re-reading that came out unchanged writes no revision; what it was read
+-- against (the stored packet's dependency record, ``related`` included) is appended here for the reading it confirmed
+-- (``revision_id``). The no-call check and the next wave read the newest row of the CURRENT reading, else the
+-- revision's own ``context_json``, which stays exactly as written at apply time. Truth: append-only, copied by a
+-- rebuild.
+CREATE TABLE IF NOT EXISTS reading_confirmations (
+  confirmation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  note_id TEXT NOT NULL,
+  revision_id TEXT NOT NULL,
+  context_json TEXT NOT NULL,
+  pass_id TEXT,
+  recorded_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reading_confirmations_note ON reading_confirmations(note_id, revision_id);
 
 CREATE TABLE IF NOT EXISTS vectors (
   vector_key TEXT PRIMARY KEY,
@@ -228,6 +307,18 @@ CREATE TABLE IF NOT EXISTS entity_notes (
   PRIMARY KEY (entity_id, note_id)
 );
 CREATE INDEX IF NOT EXISTS idx_entity_notes_note ON entity_notes(note_id);
+
+-- the mentions of a superseded interpretation (ADR 0008 soft removal: the live reads never see them, the archive as
+-- received before the re-understanding does)
+CREATE TABLE IF NOT EXISTS entity_notes_removed (
+  entity_id TEXT NOT NULL,
+  note_id TEXT NOT NULL,
+  at TEXT NOT NULL,
+  revision_id TEXT NOT NULL,
+  removed_revision_id TEXT NOT NULL,
+  PRIMARY KEY (entity_id, note_id, revision_id)
+);
+CREATE INDEX IF NOT EXISTS idx_entity_notes_removed_note ON entity_notes_removed(note_id);
 
 CREATE TABLE IF NOT EXISTS merges (
   from_id TEXT NOT NULL,
@@ -308,6 +399,37 @@ CREATE TABLE IF NOT EXISTS note_topics (
 );
 CREATE INDEX IF NOT EXISTS idx_note_topics_topic ON note_topics(topic);
 
+-- the topics a superseded interpretation assigned (ADR 0008 soft removal)
+CREATE TABLE IF NOT EXISTS note_topics_removed (
+  note_id TEXT NOT NULL,
+  topic TEXT NOT NULL,
+  assigned_by TEXT NOT NULL,
+  revision_id TEXT,
+  at TEXT NOT NULL,
+  removed_revision_id TEXT NOT NULL,
+  PRIMARY KEY (note_id, topic, removed_revision_id)
+);
+
+-- what each note's CURRENT interpretation used (ADR 0008 §4, the invalidation key: entities it reused, created or
+-- made the subject or object of a statement, statements it related to, tasks it opened or closed); kind entity |
+-- claim | task_opened | task_closed. Derived from the revision's ops (a rebuild recomputes it).
+CREATE TABLE IF NOT EXISTS note_dependencies (
+  note_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  key TEXT NOT NULL,
+  revision_id TEXT NOT NULL,
+  PRIMARY KEY (note_id, kind, key)
+);
+CREATE INDEX IF NOT EXISTS idx_note_dependencies_key ON note_dependencies(kind, key);
+
+-- interpretation revisions a later note.reinterpret superseded (ADR 0008 §1)
+CREATE TABLE IF NOT EXISTS revision_supersessions (
+  revision_id TEXT PRIMARY KEY,
+  superseded_by TEXT NOT NULL,
+  note_id TEXT,
+  recorded_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
   task_id TEXT PRIMARY KEY,
   note_id TEXT,
@@ -366,12 +488,47 @@ CREATE TABLE IF NOT EXISTS consolidation_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_consolidation_runs_started ON consolidation_runs(started_ts);
 
+-- one row per ``refile --missing`` repair (abstractnote.ingest.refile): updated after every note, closed with its status
+CREATE TABLE IF NOT EXISTS refile_runs (
+  refile_id TEXT PRIMARY KEY,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  status TEXT NOT NULL DEFAULT 'running',
+  total INTEGER NOT NULL DEFAULT 0,
+  done INTEGER NOT NULL DEFAULT 0,
+  filed_json TEXT NOT NULL DEFAULT '[]',
+  skipped_json TEXT NOT NULL DEFAULT '[]',
+  kinds_json TEXT NOT NULL DEFAULT '{}',
+  not_reached INTEGER NOT NULL DEFAULT 0,
+  max_items INTEGER,
+  budget_s REAL,
+  seconds REAL,
+  model TEXT
+);
+
 CREATE TABLE IF NOT EXISTS then_now_cache (
   key TEXT PRIMARY KEY,
   revision_count INTEGER NOT NULL,
   payload_json TEXT NOT NULL
 );
 """
+
+#: Created after the added columns exist (an old notebook gains ``context_json`` in ensure_schema).
+TRIGGERS = """
+-- ADR 0003: the revision log is append-only. What a revision IS (its identity, ops, source and dependency record)
+-- never changes once written; only the bookkeeping of its application (applied_index, applied_kg, result_json,
+-- abandoned, error) moves, and its summary/warnings are completed by its own apply, never after it was applied.
+CREATE TRIGGER IF NOT EXISTS revisions_append_only BEFORE UPDATE ON revisions
+WHEN OLD.revision_id IS NOT NEW.revision_id OR OLD.note_id IS NOT NEW.note_id OR OLD.attempt IS NOT NEW.attempt
+  OR OLD.action IS NOT NEW.action OR OLD.target IS NOT NEW.target OR OLD.at IS NOT NEW.at
+  OR OLD.recorded_at IS NOT NEW.recorded_at OR OLD.run_id IS NOT NEW.run_id OR OLD.ops_json IS NOT NEW.ops_json
+  OR OLD.source_json IS NOT NEW.source_json OR OLD.context_json IS NOT NEW.context_json
+  OR (OLD.applied_index = 1 AND (OLD.summary IS NOT NEW.summary OR OLD.warnings_json IS NOT NEW.warnings_json))
+BEGIN
+  SELECT RAISE(ABORT, 'The revision log is append-only (ADR 0003): a written revision is never changed.');
+END;
+"""
+
 
 FTS_DDL = """
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(note_id UNINDEXED, title, body, summary, attachments);
@@ -382,7 +539,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS claims_fts USING fts5(claim_id UNINDEXED, tex
 PROJECTION_TABLES = (
     "entities", "entity_aliases", "entity_names", "entity_summaries", "entity_notes", "merges", "claims",
     "claim_reinforcements", "relations", "topics", "note_topics", "tasks", "then_now_cache",
-    "entities_fts", "claims_fts",
+    "entities_fts", "claims_fts", "entity_notes_removed", "note_topics_removed", "note_dependencies",
+    "revision_supersessions",
 )
 
 
@@ -399,17 +557,30 @@ def connect(path: str) -> sqlite3.Connection:
 # Columns added after the first notebooks were created (in-place upgrade on open).
 _ADDED_COLUMNS = {
     # backlog 0037, no version bump (see SCHEMA_VERSION; precedent ``notes.about_json``): where a note and a
-    # revision came from in AbstractRuntime's ledger. On a note: the capture step (``run_id`` is the run; ``ledger_seq`` the ledger row when the runtime gave it,
-    # ``ledger_step_id`` the step) and the note body stored as an artifact of that run (``{artifact_id,
-    # run_id?}``). On a revision: the tool step that applied it (``ledger_run_id``, ``ledger_seq``,
-    # ``ledger_step_id``; ``run_id`` keeps its own meaning, e.g. a consolidation id) and the note's sources
-    # at that time (``sources_json``: AbstractMemory ``SourceRef`` dicts). NULL on rows written before.
+    # revision came from in AbstractRuntime's ledger. On a note: the capture step (``run_id`` is the run;
+    # ``ledger_seq`` the ledger row when the runtime gave it, ``ledger_step_id`` the step) and the note body stored
+    # as an artifact of that run (``{artifact_id, run_id?}``). On a revision: the tool step that applied it
+    # (``ledger_run_id``, ``ledger_seq``, ``ledger_step_id``; ``run_id`` keeps its own meaning, e.g. a
+    # consolidation id) and the note's sources at that time (``sources_json``: AbstractMemory ``SourceRef``
+    # dicts). NULL on rows written before; set on INSERT only (the revision log stays append-only).
     "notes": [("about_json", "TEXT"), ("ledger_seq", "INTEGER"), ("ledger_step_id", "TEXT"),
               ("body_artifact_json", "TEXT")],
-    "revisions": [("ledger_run_id", "TEXT"), ("ledger_seq", "INTEGER"), ("ledger_step_id", "TEXT"),
-                  ("sources_json", "TEXT")],
-    "entities": [("name_key", "TEXT"), ("display_name", "TEXT"), ("key_clash_with", "TEXT")],
+    # schema 3 (ADR 0008): a retired entity (``entity.retire``), a task a re-understanding withdrew, the
+    # dependency record of a revision (``context_json``)
+    "entities": [("name_key", "TEXT"), ("display_name", "TEXT"), ("key_clash_with", "TEXT"),
+                 ("retired_revision_id", "TEXT"), ("retired_at", "TEXT")],
+    "tasks": [("removed_revision_id", "TEXT")],
     "entity_aliases": [("alias_key", "TEXT")],
+    "revisions": [("context_json", "TEXT"), ("ledger_run_id", "TEXT"), ("ledger_seq", "INTEGER"),
+                  ("ledger_step_id", "TEXT"), ("sources_json", "TEXT")],
+    # schema 4 (ADR 0008 §4a): a mark raised because an idea the note relies on was understood differently
+    # (``reason_code`` direct | propagated, its source entity and re-understanding, the impact carried, the hops)
+    "reinterpret_marks": [("reason_code", "TEXT NOT NULL DEFAULT 'direct'"), ("source_entity_id", "TEXT"),
+                          ("source_revision_id", "TEXT"), ("impact", "REAL NOT NULL DEFAULT 1.0"),
+                          ("hops", "INTEGER NOT NULL DEFAULT 0")],
+    # the claims of an understanding outside a drain (store/queue.py, ADR 0008 §8; R4)
+    "queue": [("inline_run_id", "TEXT"), ("inline_until", "TEXT"), ("reinterpret_run_id", "TEXT"),
+              ("reinterpret_until", "TEXT")],
 }
 
 #: Created after the added columns exist. One live entity per canonical name: ``name_key`` is unique among
@@ -426,6 +597,16 @@ CREATE INDEX IF NOT EXISTS idx_revisions_ledger_run ON revisions(ledger_run_id);
 #: Meta key set when a migration found entities written before canonical names: the next write
 #: (``Notebook.recover_pending``) merges the groups that share a canonical name (``normalize_entities``).
 NAME_KEY_REPAIR_META = "name_key_repair"
+
+#: Meta entry (ADR 0008 migration flag): ``{schema, since_seq, upgraded_at}``. Revisions with ``seq <= since_seq``
+#: were written before the dependency record existed (``context_json`` null: ``context_unknown``); a mark on such a
+#: note is always re-understood with the model (no stored digest to compare), and invalidation reaches it through
+#: its mentions (``entity_notes``) and the name and alias match only.
+DEPENDENCY_RECORD_META = "dependency_record"
+
+#: Meta entry (ADR 0008 §4a migration flag): ``{schema, since_seq, upgraded_at}``. Re-understandings with ``seq <=
+#: since_seq`` were applied before change records existed: they have no ``idea_changes`` rows and spread nothing.
+PROPAGATION_RECORD_META = "propagation_record"
 
 
 def _backfill_name_keys(conn: sqlite3.Connection) -> None:
@@ -462,6 +643,34 @@ def _backfill_name_keys(conn: sqlite3.Connection) -> None:
         conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (NAME_KEY_REPAIR_META, '"pending"'))
 
 
+def _flag_dependency_record(conn: sqlite3.Connection, *, fresh: bool) -> None:
+    """Schema 2 -> 3 (ADR 0008): record from which revision on every processing revision carries its dependency
+    record (:data:`DEPENDENCY_RECORD_META`); the revisions before it are ``context_unknown``. Written once."""
+    import json
+    import time
+
+    if conn.execute("SELECT 1 FROM meta WHERE key=?", (DEPENDENCY_RECORD_META,)).fetchone() is not None:
+        return
+    since = 0 if fresh else int(conn.execute("SELECT COALESCE(MAX(seq), 0) FROM revisions").fetchone()[0])
+    value = {"schema": 3, "since_seq": since, "upgraded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                 (DEPENDENCY_RECORD_META, json.dumps(value, sort_keys=True, separators=(",", ":"))))
+
+
+def _flag_propagation_record(conn: sqlite3.Connection, *, fresh: bool) -> None:
+    """Schema 3 -> 4 (ADR 0008 §4a): record from which revision on re-understandings carry change records
+    (:data:`PROPAGATION_RECORD_META`). Written once."""
+    import json
+    import time
+
+    if conn.execute("SELECT 1 FROM meta WHERE key=?", (PROPAGATION_RECORD_META,)).fetchone() is not None:
+        return
+    since = 0 if fresh else int(conn.execute("SELECT COALESCE(MAX(seq), 0) FROM revisions").fetchone()[0])
+    value = {"schema": 4, "since_seq": since, "upgraded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                 (PROPAGATION_RECORD_META, json.dumps(value, sort_keys=True, separators=(",", ":"))))
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(DDL)
     for table, cols in _ADDED_COLUMNS.items():
@@ -477,11 +686,16 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ROLLBACK")
         raise
     conn.executescript(POST_DDL)
+    conn.executescript(TRIGGERS)
     try:
         conn.executescript(FTS_DDL)
     except sqlite3.OperationalError as exc:  # pragma: no cover - every supported Python ships FTS5
         raise RuntimeError("AbstractNote needs SQLite with FTS5; this Python's sqlite3 lacks it.") from exc
     row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+    if row is None or int(row[0]) < 3:
+        _flag_dependency_record(conn, fresh=row is None)
+    if row is None or int(row[0]) < 4:
+        _flag_propagation_record(conn, fresh=row is None)
     if row is None:
         conn.execute("INSERT INTO meta(key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
     elif int(row[0]) > SCHEMA_VERSION:

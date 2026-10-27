@@ -9,7 +9,7 @@
 import { randomId } from "@abstractframework/ui-kit";
 import type { Api } from "./api";
 import { niceMax } from "./progression";
-import type { ActiveWork, Consolidation, Processing, RecentRevision } from "./types";
+import type { ActiveWork, Consolidation, ConsolidationPropagated, Processing, RecentRevision } from "./types";
 
 export const POLL_MS = 3000;
 /** The queued notes the page lists (the queue's own order). */
@@ -213,7 +213,8 @@ export function stateLine(p: Processing): { tone: StateTone; text: string } {
   if (run && run.stage !== "done") {
     const i = consolidationStageIndex(run.stage);
     const stage = i >= 0 && i < CONSOLIDATION_STAGES.length ? CONSOLIDATION_STAGES[i].label : "";
-    return { tone: "live", text: ["Consolidating your notebook", stage && run.stage_total ? `${stage} ${run.stage_done} of ${run.stage_total}` : stage, etaWords(run.eta_s)].filter(Boolean).join(" · ") };
+    const progress = run.stage === "reinterpret" ? reinterpretWords(run.stage_done, run.stage_total, run.propagated) : stage && run.stage_total ? `${stage} ${run.stage_done} of ${run.stage_total}` : stage;
+    return { tone: "live", text: ["Consolidating your notebook", progress, etaWords(run.eta_s)].filter(Boolean).join(" · ") };
   }
   const other = groupActive(p.active)[0];
   if (other) return { tone: "live", text: [flowWords(other.item.flow), queued ? waitingWords(queued) : ""].filter(Boolean).join(" · ") };
@@ -226,13 +227,38 @@ export function stateLine(p: Processing): { tone: StateTone; text: string } {
   return { tone: "idle", text: "Up to date · everything you sent is understood" };
 }
 
+/**
+ * The reinterpret stage in words (ADR 0008): "Re-understanding 12 notes", then "Re-understanding 3 of 12 notes";
+ * with the notes read because an idea they rely on changed (§4a): "Re-understanding 12 notes (5 because Zorn changed)".
+ */
+export function reinterpretWords(done: number, total: number, propagated?: ConsolidationPropagated | null): string {
+  const t = Math.max(0, Number(total) || 0);
+  const d = Math.max(0, Math.min(t, Number(done) || 0));
+  if (!t) return "Re-understanding";
+  const head = d ? `Re-understanding ${d} of ${plural(t, "note", "notes")}` : `Re-understanding ${plural(t, "note", "notes")}`;
+  const why = becauseWords(propagated, t);
+  return why ? `${head} (${why})` : head;
+}
+
+/** "5 because Zorn changed", "5 because Zorn and 2 other ideas changed"; "" when no note waits because of an idea. */
+export function becauseWords(p: { notes?: number; names?: string[]; sources?: number } | null | undefined, cap?: number): string {
+  const n = Math.max(0, Math.min(cap ?? Infinity, Number(p?.notes) || 0));
+  const names = (p?.names ?? []).filter((x) => typeof x === "string" && x.trim());
+  if (!n || !names.length) return "";
+  const others = Math.max(0, (Number(p?.sources) || names.length) - 1);
+  const who = others ? `${names[0]} and ${plural(others, "other idea", "other ideas")}` : names[0];
+  return `${n} because ${who} changed`;
+}
+
 /** What the last consolidation left for the next one, in words ("12 summaries to try again next time"); "" when nothing. */
 export function consolidationGapsWords(last: Consolidation["last"] | null | undefined): string {
   if (!last || last.status !== "completed_with_gaps") return "";
   const s = Math.max(0, Number(last.left_out?.summaries) || 0);
   const g = Math.max(0, Number(last.left_out?.labels) || 0);
+  const r = Math.max(0, Number(last.left_out?.reinterpret) || 0);
   const parts = [s ? plural(s, "summary", "summaries") : "", g ? plural(g, "theme name", "theme names") : ""].filter(Boolean);
-  return parts.length ? `${parts.join(" and ")} to try again next time` : "some work to try again next time";
+  const words = [parts.length ? `${parts.join(" and ")} to try again next time` : "", r ? `${plural(r, "note", "notes")} to understand again next time` : ""].filter(Boolean);
+  return words.length ? words.join(" and ") : "some work to try again next time";
 }
 
 /** The last consolidation's end-user notice (only a run that left something out has one). */
@@ -245,6 +271,7 @@ export function consolidationNotice(last: Consolidation["last"] | null | undefin
 /** The stages of a consolidation, in order, as the stepper names them. */
 export const CONSOLIDATION_STAGES: Array<{ stage: string; label: string }> = [
   { stage: "normalize", label: "Normalize" },
+  { stage: "reinterpret", label: "Re-understanding" },
   { stage: "communities", label: "Themes" },
   { stage: "labels", label: "Labels" },
   { stage: "summaries", label: "Summaries" },
@@ -284,6 +311,7 @@ export function lastConsolidationLine(last: Consolidation["last"], nowMs: number
   if (!last) return "Not consolidated yet.";
   const parts = [
     last.merges ? `${plural(last.merges, "entity", "entities")} joined` : "",
+    last.reinterpreted ? `${plural(last.reinterpreted, "note", "notes")} understood again` : "",
     last.communities ? plural(last.communities, "theme", "themes") : "",
     last.labelled ? `${last.labelled} named` : "",
     last.summaries_refreshed ? `${plural(last.summaries_refreshed, "summary", "summaries")} refreshed` : "",
@@ -294,13 +322,19 @@ export function lastConsolidationLine(last: Consolidation["last"], nowMs: number
   return `${head}: ${parts.length ? parts.join(", ") : "nothing needed changing"}.`;
 }
 
-/** What the next consolidation has waiting: "3 themes to name · 2 themes changed since named · 88 summaries to refresh". */
-export function pendingConsolidationLine(p: Consolidation["pending"] | null | undefined): string {
+/**
+ * What the next consolidation has waiting: "3 themes to name · 2 themes changed since named · 88 summaries to refresh";
+ * with `reinterpret` (ADR 0008 §4a): "12 notes to understand again (5 because Zorn changed)".
+ */
+export function pendingConsolidationLine(p: Consolidation["pending"] | null | undefined, r?: Consolidation["reinterpret"] | null): string {
   if (!p) return "";
+  const prop = r?.propagated;
+  const why = p.reinterpret && prop ? becauseWords({ notes: prop.pending, names: prop.by_source.map((x) => x.name), sources: prop.by_source.length }, p.reinterpret) : "";
   return [
     p.unlabelled ? `${plural(p.unlabelled, "theme", "themes")} to name` : "",
     p.stale_labels ? `${plural(p.stale_labels, "theme", "themes")} changed since named` : "",
     p.stale_summaries ? `${plural(p.stale_summaries, "summary", "summaries")} to refresh` : "",
+    p.reinterpret ? `${plural(p.reinterpret, "note", "notes")} to understand again${why ? ` (${why})` : ""}` : "",
   ].filter(Boolean).join(" · ");
 }
 

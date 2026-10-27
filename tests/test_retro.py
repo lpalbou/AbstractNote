@@ -365,21 +365,33 @@ def test_a_document_date_never_moves_a_live_note_or_an_unquoted_or_near_date(nb)
     assert "note.redate" not in ops_of(nb, near[3]) and nb.note(near[0])["date_basis"] == "file_mtime"
 
 
-def test_a_person_sets_the_date_of_a_note(nb):
-    nid, out = castor(nb, "2026-10-01T10:00:00Z", "Llama")
-    res = nb.redate_note(nid, "2020-05-05", "alice", "the letter's date")
-    rev = nb.revision(res["revision_id"])
-    assert rev["source"] == {"client": "web", "account": "alice"} and rev["action"] == "note.redate"
-    note = nb.note(nid)
-    assert (note["occurred_at"], note["date_basis"], note["date_approximate"]) == ("2020-05-05T00:00:00Z", "user",
-                                                                                  False)
-    [c] = note["claims"]
-    assert c["observed_at"] == c["valid_from"] == "2020-05-05T00:00:00Z"
-    assert nb.store.entity_row(CASTOR)["first_seen"] == "2020-05-05T00:00:00Z"
+def test_a_person_sets_the_date_of_a_note(nb, monkeypatch):
+    """A note not understood yet moves whole; an understood one is refused while the notebook cannot understand it
+    again (ADR 0008 §4, §7: its statements are never moved in the note index alone). The re-placement path itself:
+    test_capture_dates.py."""
     import pytest
 
+    from abstractnote.ingest.dates import NEEDS_REUNDERSTANDING, RedateRefused
+
+    waiting = nb.capture("A letter about Castor, not understood yet.", occurred_at="2026-10-01T10:00:00Z").note_id
+    res = nb.redate_note(waiting, "2020-05-05", "alice", "the letter's date")
+    rev = nb.revision(res["revision_id"])
+    assert rev["source"] == {"client": "web", "account": "alice"} and rev["action"] == "note.redate"
+    note = nb.note(waiting)
+    assert (note["occurred_at"], note["date_basis"], note["date_approximate"]) == ("2020-05-05T00:00:00Z", "user",
+                                                                                  False)
+    assert nb.queue.item(waiting)["occurred_at"] == "2020-05-05T00:00:00Z"  # its place in the queue moves too
+    nid, out = castor(nb, "2026-10-01T10:00:00Z", "Llama")
+    revisions = nb.store.q1("SELECT COUNT(*) FROM revisions")[0]
+    from abstractnote.store import kg
+
+    monkeypatch.setattr(kg, "supports_reinterpreted", lambda: False)  # a notebook that cannot understand it again
+    with pytest.raises(RedateRefused, match=NEEDS_REUNDERSTANDING):
+        nb.redate_note(nid, "2020-05-05", "alice", "the letter's date")
+    assert nb.store.q1("SELECT COUNT(*) FROM revisions")[0] == revisions  # nothing written
+    assert nb.note(nid)["occurred_at"] == "2026-10-01T10:00:00Z"
     with pytest.raises(ValueError):
-        nb.redate_note(nid, "2020-05-05", "alice")
+        nb.redate_note(waiting, "2020-05-05", "alice")
     with pytest.raises(ValueError):
         nb.redate_note("nt_nope", "2020-05-05", "alice")
 
@@ -463,7 +475,7 @@ def test_a_model_merge_with_a_shared_key_applies_once_per_note(nb):
 
 # --------------------------------------------------------------------------- D2 unrelated supersessions
 
-def test_a_supersession_of_another_subject_or_predicate_is_a_new_statement(nb):
+def test_a_supersession_of_another_subject_is_new_and_another_spelling_adopts_the_predicate(nb):
     _, o = castor(nb, T22, "Llama")
     [c22] = o["claims_added"]
     ext = extraction([mention("m1", "Pollux", "project")],
@@ -477,14 +489,19 @@ def test_a_supersession_of_another_subject_or_predicate_is_a_new_statement(nb):
 
     out = run(nb, "Pollux runs on Qwen, unlike Castor.", T26, ext, link)[3]
     assert out["claims_superseded"] == [] and row(nb, c22)["status"] == "active"
-    assert any("another subject or relation" in w for w in out["warnings"])
+    assert any("about another subject" in w for w in out["warnings"])
+    # The same subject under another predicate spelling: the model's index decides that it is the same fact, and
+    # the statement adopts the existing predicate (retro-design-review 2.6; R1, 2026-10-20), never a second slot.
     ext2 = extraction([mention("m1", "Castor", "project")],
-                      [stmt("m1", "ex:hosted_by", "OVH", literal=True, evidence="Castor is hosted by OVH")])
-    out2 = run(nb, "Castor is hosted by OVH.", T26, ext2, lambda p, c: {
+                      [stmt("m1", "ex:model", "Qwen", literal=True, evidence="Castor's model is Qwen")])
+    out2 = run(nb, "Castor's model is Qwen.", T26, ext2, lambda p, c: {
         "mentions": [ml("m1", "reuse", cand_index(c, "m1", CASTOR))],
         "claims": [{"index": 0, "relation_to_existing": "supersedes", "existing": claim_index(p, c, c22),
-                    "reason": "?"}], "tasks": [], "revision_summary": "Host."})[3]
-    assert out2["claims_superseded"] == [] and row(nb, c22)["status"] == "active"
+                    "reason": "?"}], "tasks": [], "revision_summary": "Model."})[3]
+    assert out2["claims_superseded"] == [c22] and row(nb, c22)["status"] == "superseded"
+    [new] = out2["claims_added"]
+    assert nb.store.claim_row(new)["predicate"] == "ex:runs_on" and out2["predicates_adopted"] == 1
+    assert any(w.startswith("predicate_adopted: ex:model -> ex:runs_on") for w in out2["warnings"])
 
 
 def test_no_window_ever_ends_before_it_starts(nb):

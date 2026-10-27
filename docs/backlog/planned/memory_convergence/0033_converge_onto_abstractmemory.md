@@ -36,8 +36,9 @@ three named time axes. Stronger designs built here are generalised into Abstract
 - `NoteStore.project` becomes a client of `MemoryGraph.apply_revision` through the gateway: its ops expressed
   as graph ops (`assert`, `close` with kind and successor, `narrow`; entity and alias ops arrive with AbstractMemory
   0050); the provenance 0037 writes is already in the shape the graph requires.
-- The notebook's `kg.sqlite3` and the plane's KG store fold into one plane mind
-  (`<plane>/abstractmemory/memory.sqlite3`); the gateway's plane default moves from LanceDB to that SQLite home.
+- The notebook's `kg.sqlite3` and the plane's KG store fold into one plane mind (`<plane>/abstractmemory/`),
+  the notebook's knowledge under its owner's `owner_id`; which store backs that home (SQLite, or LanceDB behind
+  `MemoryGraph`) is AbstractMemory ADR 0003 decision 3, pending.
 - A one-time projection of existing notebooks from their revision log (cause `migration`, ids kept). It also
   adopts the assertions an existing `kg.sqlite3` holds with the earlier flat provenance (or, after a
   `rebuild()`, with empty `sources`), naming the import/migration revision that grounds them.
@@ -58,7 +59,9 @@ local module:
   `store/archive.py`, `store/embeddings.py` (`VectorCache`), `store/vector_index.py` → AM 0052;
 - self-organisation: `recall/communities.py`, `store/topics.py`, `recall/consolidation.py`, `recall/reflect.py`,
   `recall/insights.py` → AM 0053 (and the runtime's `identity/communities.py` with them);
-- ripple (`retro/integration` only): `propagation.py`, `activation.py` handed to AM 0054 (0035), never merged here.
+- ripple: `recall/propagation.py` (in the package since the schema-4 baseline merge, operator decision 1) and
+  `recall/activation.py` (on `retro/integration` only) handed to AM 0054 (0035), then removed from the package;
+  until then the merged code is a prototype kept working, not extended.
 
 ### Phase 4: thin client
 What stays: `ingest/` (capture, dates and basis, normalise, blobs), `importers/`, `flows/` (the cognition prompts
@@ -68,29 +71,33 @@ routes, `cli.py`, the web and Apple apps. Dependencies on the layer below only a
 (0036; a public gateway extension API replaces the five private imports).
 
 ## Dependencies
-AbstractMemory 0056 (provenance, revision log, `narrow_assertion`) → 0057 (one SQLite home per plane) → 0050
+AbstractMemory 0056 (provenance, revision log, `narrow_assertion`) → 0057 (one home per plane; store pending) → 0050
 (identity) → 0052 (retrieval) → ripple_wave/0001 + 0054 (ripple) → 0053 (self-organisation) → 0055 (notes/diary
 layer); AbstractRuntime's memory facade (its ADR 0009) and AbstractGateway's memory routes. Each phase's consumer
 PRs merge only after the releases they pin are on PyPI (root ADR-0034). Supersedes proposed 0015 (moved to
 `deprecated/`).
 
-Operator decisions phase 2 waits on (memory transition report, "Decisions needed"):
-1. Which AbstractNote baseline is the migration source: the live plane notebooks are schema 4 (the
-   `abstractnote-serve` worktree), `main` is schema 2 and refuses them, `retro/integration` is schema 5. The
-   one-time projection reads the schema the data actually has. (Phase 1 does not bump the schema version.)
-2. The gateway's plane store default (LanceDB → the SQLite home) and the import of existing plane KG data.
+Operator decisions (memory transition report, "Decisions needed"):
+1. TAKEN 2026-10-27: the AbstractNote baseline is the serve worktree's schema-4 line (cd6227c) merged into `main`
+   (branch `feat/memory-graph-note-baseline`); phase 1 rides on it at schema 4 (0037 adds nullable columns, no
+   version change). The one-time projection reads schema 4. That line brought R6's `recall/propagation.py` into
+   the package (see 0035).
+2. PENDING: the plane's home store (AbstractMemory ADR 0003 decision 3: SQLite as written, a SQLite graph with
+   LanceDB vectors, or LanceDB behind `MemoryGraph`) and the import of existing plane KG data.
 4. Writing the bodies of EXISTING notes into the plane's artifact store during the one-time projection (new
    captures already do it, 0037), which gives every historical statement an `artifact` source.
-5. That the notebook's knowledge becomes readable by the plane's other applications once folded into the plane
-   mind, and whether an `owner_id` rule is wanted.
+5. TAKEN 2026-10-27: visibility is strict ownership (AbstractMemory ADR 0003 decision 2, amended): the notebook's
+   knowledge is readable by its owner's other applications and by nobody else by default; the plane is not a
+   sharing scope; every read surface filters by `owner_id`.
 
 ## Expected outcomes
 AbstractNote's `note.sqlite3` holds notes, attachments, links and app state only; knowledge lives in the plane's
-AbstractMemory mind, every statement names its ledger sources, and the plane's other applications reach it
-through the gateway; the generic modules listed above are gone.
+AbstractMemory mind under its owner, every statement names its ledger sources, and the owner's other applications
+reach it through the gateway; the generic modules listed above are gone.
 
 ## Current code reality
-Phase 1 is on branch `feat/memory-graph-thin-client-1` (0034 completed, 0037 landed there; see each item).
+Phase 1 is on branch `feat/memory-graph-thin-client-1` (0034 completed, 0037 landed there; see each item), merged
+on top of the schema-4 baseline (`feat/memory-graph-note-baseline`).
 Everything listed under phases 2-4 is still local: the projection writes the notebook's own `kg.sqlite3`
 (`store/kg.py`), nothing reads it back but `status()` and the tests, and the note index answers every read.
 

@@ -26,7 +26,7 @@ TOOL_NAMES: List[str] = [
     "note_resurface", "note_anniversaries", "note_insight_write", "note_communities_recompute",
     "note_communities_pending", "note_communities_label", "note_consolidation_begin", "note_consolidation_progress",
     "note_consolidation_end", "note_entities_normalize", "note_entities_stale_summaries", "note_entities_set_summaries",
-    "note_then_now_refresh",
+    "note_then_now_refresh", "note_reinterpret_next", "note_mark_reinterpret", "note_filing_context",
 ]
 
 
@@ -99,10 +99,12 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
                      occurred_at: Optional[str] = None, location: Optional[Dict[str, Any]] = None,
                      source: Optional[Dict[str, Any]] = None, priority: Optional[int] = None,
                      attachments: Optional[List[Dict[str, Any]]] = None, session_id: Optional[str] = None,
-                     about: Optional[Dict[str, Any]] = None, answer: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Save a note to the notebook now (``answer`` = {question, evidence_note_ids}: a saved answer)."""
+                     about: Optional[Dict[str, Any]] = None, answer: Optional[Dict[str, Any]] = None,
+                     process_inline: bool = False) -> Dict[str, Any]:
+        """Save a note to the notebook now (``answer`` = {question, evidence_note_ids}: a saved answer;
+        ``process_inline``: this capture understands it right away, so no drain takes it meanwhile)."""
         return cap.note_capture(ctx, text, idempotency_key, title, occurred_at, location, source, priority,
-                                attachments, session_id, about, answer)
+                                attachments, session_id, about, answer, process_inline)
 
     @tool(name="note_file", description="Store the quick filing of a note: title, kind, topics, urgency, language.")
     def note_file(note_id: str, title: Optional[str] = None, kind: Optional[str] = None,
@@ -110,6 +112,12 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
                   one_line: Optional[str] = None) -> Dict[str, Any]:
         """Store the quick filing of a note."""
         return cap.note_file(ctx, note_id, title, kind, topics, urgency, language, one_line)
+
+    @tool(name="note_filing_context", description="What the quick filing sees for a stored note, and whether it"
+                                                   " still needs one (no kind yet).")
+    def note_filing_context(note_id: str) -> Dict[str, Any]:
+        """What the quick filing sees for a stored note without a kind."""
+        return cap.note_filing_context(ctx, note_id)
 
     @tool(name="note_context", description="What the notebook already knows that is relevant to one note.",
           when_to_use="First step of processing a note: sections, similar notes, candidate entities, open tasks.")
@@ -123,16 +131,19 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
         return proc.note_resolve_candidates(ctx, note_id, mentions)
 
     @tool(name="note_apply_revision", description="Apply the extraction and linking decisions of a note to the graph.")
-    def note_apply_revision(note_id: str, extraction: Dict[str, Any], linking: Dict[str, Any]) -> Dict[str, Any]:
-        """Apply the extraction and linking decisions of a note to the graph."""
-        return proc.note_apply_revision(ctx, note_id, extraction, linking)
+    def note_apply_revision(note_id: str, extraction: Dict[str, Any], linking: Dict[str, Any],
+                            reinterpret: bool = False) -> Dict[str, Any]:
+        """Apply the extraction and linking decisions of a note to the graph (reinterpret: the note was understood
+        before and is read again; a note whose re-understanding a consolidation took is read again anyway)."""
+        return proc.note_apply_revision(ctx, note_id, extraction, linking, reinterpret=bool(reinterpret))
 
     @tool(name="note_queue_lease", description="Take the next notes to process from the queue, by priority.")
     def note_queue_lease(worker_id: str, max_items: int = 1) -> Dict[str, Any]:
         """Take the next notes to process from the queue."""
         return que.note_queue_lease(ctx, worker_id, max_items)
 
-    @tool(name="note_queue_ack", description="Report how processing a leased note went (ok or error).")
+    @tool(name="note_queue_ack", description="Report how processing a leased note went (ok, error, or requeue"
+                                                 " when the notebook changed while it was read).")
     def note_queue_ack(note_id: str, outcome: str, error: Optional[str] = None,
                        revision_id: Optional[str] = None) -> Dict[str, Any]:
         """Report how processing a leased note went."""
@@ -206,9 +217,11 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
 
     @tool(name="note_communities_recompute",
           description="Find the groups of entities the notes keep together (no model); returns counts.")
-    def note_communities_recompute(resolution: Optional[float] = None) -> Dict[str, Any]:
-        """Run community detection over the entity graph and store it (resolution: above 1 for smaller groups)."""
-        return rec.note_communities_recompute(ctx, resolution)
+    def note_communities_recompute(resolution: Optional[float] = None, only_if_due: Optional[bool] = None
+                                   ) -> Dict[str, Any]:
+        """Run community detection over the entity graph and store it (resolution: above 1 for smaller groups;
+        only_if_due: only when the notes applied since the last time made it due, the end of a drain)."""
+        return rec.note_communities_recompute(ctx, resolution, only_if_due)
 
     @tool(name="note_communities_pending", description="Groups of entities that still need a name, with evidence.")
     def note_communities_pending(limit: int = 5, exclude: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -230,7 +243,7 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
     def note_consolidation_progress(stage: str, done: int, total: int, note: Optional[str] = None,
                                     skipped: Optional[List[Any]] = None, reason: Optional[str] = None
                                     ) -> Dict[str, Any]:
-        """stage: normalize, communities, labels, summaries, then_now or reflect; done of total items; skipped: the
+        """stage: normalize, reinterpret, communities, labels, summaries, then_now or reflect; done of total items; skipped: the
         ids (or {id, reason}) this stage leaves out for this run, reason: why."""
         return cons.note_consolidation_progress(ctx, stage, done, total, note, skipped, reason)
 
@@ -261,6 +274,18 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
         """Recompute the then-versus-now caches of the touched entries."""
         return cons.note_then_now_refresh(ctx)
 
+    @tool(name="note_reinterpret_next",
+          description="The next notes the consolidation understands again (earlier notes changed what they meant).")
+    def note_reinterpret_next(limit: int = 1, failed: Optional[List[Any]] = None) -> Dict[str, Any]:
+        """Take the next marked notes in history order (an unchanged one is settled without a model); failed: the
+        notes the last round could not understand again ({id, reason}); limit 0 only counts."""
+        return cons.note_reinterpret_next(ctx, limit, failed)
+
+    @tool(name="note_mark_reinterpret", description="Mark notes to be understood again by the next consolidation.")
+    def note_mark_reinterpret(note_ids: List[str], reason: Optional[str] = None) -> Dict[str, Any]:
+        """Mark understood notes to be understood again (reason: why, one sentence)."""
+        return cons.note_mark_reinterpret(ctx, note_ids, reason)
+
     tools = {
         "note_capture": note_capture, "note_file": note_file, "note_context": note_context,
         "note_resolve_candidates": note_resolve_candidates, "note_apply_revision": note_apply_revision,
@@ -276,6 +301,8 @@ def bind(notebook_dir: "str | Path", *, embedder: Any = None, artifact_reader: O
         "note_consolidation_end": note_consolidation_end, "note_entities_normalize": note_entities_normalize,
         "note_entities_stale_summaries": note_entities_stale_summaries,
         "note_entities_set_summaries": note_entities_set_summaries, "note_then_now_refresh": note_then_now_refresh,
+        "note_reinterpret_next": note_reinterpret_next, "note_mark_reinterpret": note_mark_reinterpret,
+        "note_filing_context": note_filing_context,
     }
     assert list(tools) == TOOL_NAMES
     return tools

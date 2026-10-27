@@ -21,6 +21,14 @@ describe("capture input", () => {
     expect("location" in captureInput(base, false, "note-web-s")).toBe(false);
   });
 
+  it("dates a note of files only by its files and says when the text was pasted (ADR 0008 §7)", () => {
+    const files = [{ name: "minutes.pdf", size: 10, type: "application/pdf", lastModified: 1541412000000 }];
+    expect(captureInput({ ...base, text: "", files }, false, "s").occurred_at).toBeNull();
+    expect(captureInput({ ...base, files }, false, "s").occurred_at).toBe("2026-10-19T09:12:00Z");
+    expect(captureInput({ ...base, pasted: true }, false, "s").source).toEqual({ client: "web", origin: { pasted: true } });
+    expect(captureInput(base, false, "s").source).toEqual({ client: "web" });
+  });
+
   it("backs off 2 s, 4 s, 8 s ... up to a minute", () => {
     expect([0, 1, 2, 3, 4, 5, 9].map(noteBackoff)).toEqual([2000, 4000, 8000, 15000, 30000, 60000, 60000]);
   });
@@ -59,10 +67,11 @@ describe("runCapture", () => {
   it("uploads, starts with the idempotency key, shows the streamed answer, and re-reads the note until processed (M8)", async () => {
     const h = harness(["queued", "queued", "processed"]);
     const file = new File(["hello"], "a.txt", { type: "text/plain" });
-    await runCapture({ ...base, files: [{ name: "a.txt", size: 5, type: "text/plain" }], state: "uploading" }, [file], h.deps);
+    await runCapture({ ...base, files: [{ name: "a.txt", size: 5, type: "text/plain", lastModified: 1541412000000 }], state: "uploading" }, [file], h.deps);
     const start = h.bodies.find((b) => b.url.endsWith("runs/start"))!.body as { input_data: Record<string, unknown>; flow_id: string; bundle_id: string; session_id: string };
     expect(start).toMatchObject({ bundle_id: "abstractnote", flow_id: "note-capture", session_id: "note-web-s" });
-    expect(start.input_data).toMatchObject({ session_id: "note-web-s", idempotency_key: "k-123", context: { attachments: [{ $artifact: "art-1" }] } });
+    // the file's last change travels with its reference (dates an upload without a date of its own)
+    expect(start.input_data).toMatchObject({ session_id: "note-web-s", idempotency_key: "k-123", context: { attachments: [{ $artifact: "art-1", last_modified: 1541412000000 }] } });
     expect(h.states.find((s) => s.answer)).toMatchObject({ answerSource: "stream" });
     expect(h.bodies.filter((b) => b.url.includes("note/notes/nt_x"))).toHaveLength(3);
     const last = h.states[h.states.length - 1];

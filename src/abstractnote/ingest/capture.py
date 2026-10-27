@@ -4,7 +4,16 @@
 note id (import source key, idempotency key, or the fallback hash), store the
 attachment bytes once per content, extract their text, embed, find revisits
 and similar notes, and enqueue. A repeated key returns ``duplicate`` and writes
-nothing. ``file_note`` stores the quick-filing answer.
+nothing. ``file_note`` stores the quick-filing answer. ``filing_context`` is what the same quick filing sees for a
+note already stored without a kind (an imported note: imports skip the filing a live capture gets), for the filing
+step of note-process and the ``refile --missing`` repair.
+
+A live capture is dated by :func:`abstractnote.ingest.dates.capture_date` (ADR 0008 §7) and answers its
+``occurred_at``, ``date_basis`` and, when the date came from a file, the sentence that says so. A note with no
+words of its own whose files give no readable text is refused here, before anything is written
+(:data:`NO_READABLE_TEXT`), never failed later by processing. ``inline=True`` (note-capture with
+``process_inline``) claims the queue row for the capture's own understanding in the same transaction as the
+enqueue, so no drain leases it meanwhile (``Queue.claim``).
 """
 
 from __future__ import annotations
@@ -21,7 +30,7 @@ from ..ledger import note_columns
 from ..store.notes import _j, note_vector_text
 from ..store.queue import PRIORITY_NORMAL
 from .blobs import BlobStore
-from .dates import detect_file_date
+from .dates import capture_date, date_basis, date_sentence, detect_file_date
 from .extract import extract, guess_mime
 from .normalise import normalize_topic, text_norm
 
@@ -29,8 +38,16 @@ NEAR_DUPLICATE_COSINE = 0.92  # data-model.md: near-duplicate notes are linked w
 SIMILAR_MIN_COSINE = 0.35     # floor for the "similar notes" list returned to the filing step
 SIMILAR_LIMIT = 5
 MAX_FILING_TOPICS = 4
+#: The refusal of a note that has nothing to read (no words, no title, and no text in any of its files).
+NO_READABLE_TEXT = "The file “{name}” has no readable text, so the note was not saved; add a few words about it and send it again."
+NO_READABLE_TEXT_MANY = "None of these files has readable text, so the note was not saved; add a few words about them and send them again."
 
 _log = logging.getLogger("abstractnote.capture")
+
+
+class NoReadableText(ValueError):
+    """The refusal of a note with nothing to read (:data:`NO_READABLE_TEXT`): an importer skips such a row with its
+    reason instead of counting an error."""
 
 
 def _source(source: Optional[Dict[str, Any]], default_client: str, account: Optional[str]) -> Dict[str, Any]:
@@ -86,8 +103,12 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
             importer: Optional[str] = None, source_key: Optional[str] = None, account: Optional[str] = None,
             about: Optional[Dict[str, Any]] = None,
             default_client: str = "cli", vision: Any = None, stt: Any = None, now: Optional[str] = None,
+            inline: bool = False, inline_run_id: Optional[str] = None, title_is_text: bool = True,
             ledger: Optional[Dict[str, Any]] = None, artifact_store: Any = None) -> CaptureResult:
-    """Store one note. ``attachments`` are resolved inputs: ``{"data": bytes, "mime"?, "filename"?, "artifact_ref"?}``.
+    """Store one note. ``attachments`` are resolved inputs: ``{"data": bytes, "mime"?, "filename"?, "artifact_ref"?,
+    "last_modified"?}`` (``last_modified``: the file's modification time as the client knows it, ISO 8601 or epoch
+    milliseconds; the web sends ``File.lastModified``). ``source.origin.pasted`` (a live client's flag that the text
+    was pasted) makes the client's time a stand-in the text may correct (basis ``pasted_text``).
 
     ``ledger`` is the address of the runtime step capturing it (``{run_id, seq?, step_id?}``; ``run_id``, when
     also given, must name the same run) and ``artifact_store`` AbstractRuntime's artifact store: with one, the
@@ -110,15 +131,24 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
     src = _source(source, "importer" if importer else default_client, account)
     if importer:
         src["importer"] = importer
-    if not occurred_at and atts:
-        # No date from the caller: the first attachment that carries one in its own metadata dates the note
-        # (EXIF, XMP, PDF or Office creation date; the same detect_file_date as ``abstractnote import files``).
-        for a in atts:
-            found = detect_file_date(a["data"], a.get("mime"), a.get("filename"))
-            if found:
-                occurred = found[0]
-                src.setdefault("origin", {})["date_basis"] = found[1]
-                break
+    origin = src.get("origin") if isinstance(src.get("origin"), dict) else {}
+    if importer or origin.get("date_basis"):
+        if not occurred_at and atts:
+            # An import that gives no date: the first attachment that carries one in its own metadata dates it
+            # (EXIF, XMP, PDF or Office creation date; the same detect_file_date as ``abstractnote import files``).
+            for a in atts:
+                found = detect_file_date(a["data"], a.get("mime"), a.get("filename"))
+                if found:
+                    occurred = found[0]
+                    src.setdefault("origin", {})["date_basis"] = found[1]
+                    break
+    else:
+        # A live capture (ADR 0008 §7): typed now = the client's time; an upload or a paste = a stand-in the
+        # document's own date may correct; without a caller's time, the file's date, else the capture moment.
+        occurred, basis = capture_date(ids.normalize_time(occurred_at, field="occurred_at") if occurred_at else None,
+                                       atts, pasted=bool(origin.get("pasted")), now=now, client=src.get("client"))
+        if basis != "client":
+            src.setdefault("origin", {})["date_basis"] = basis
     loc = _location(location)
     about_ref = _about(nb, about)
     norm = text_norm(text)
@@ -138,32 +168,42 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
             note_id=note_id, status="duplicate", duplicate_of=note_id, first_saved_at=existing["received_at"],
             received_at=existing["received_at"], topics=nb.store.topic_names(),
             attachments=[_att_out(a) for a in nb.store.attachments_of(note_id)],
+            occurred_at=existing["occurred_at"], date_basis=date_basis(existing),
         )
 
     warnings: List[str] = []
     att_rows: List[Dict[str, Any]] = []
     same_bytes: List[Dict[str, Any]] = []
     extracted_texts: List[str] = []
-    for pos, a in enumerate(atts):
+    # Read every file first: a note with nothing to read is refused before anything is written.
+    readings = []
+    for a, sha in zip(atts, hashes):
+        mime = guess_mime(a.get("filename"), a.get("mime"))
+        out_path = nb.root / "extracted" / f"{sha}.txt"
+        if out_path.exists():
+            prev = nb.store.q1("SELECT extracted_by FROM attachments WHERE sha256=? LIMIT 1", (sha,))
+            readings.append((mime, out_path.read_text(encoding="utf-8"), prev[0] if prev else "plain", [], False))
+        else:
+            res = extract(a["data"], mime, a.get("filename"), vision=vision, stt=stt)
+            readings.append((mime, res.text, res.extracted_by, list(res.warnings), True))
+    # ``title_is_text=False``: the title is a file name an importer gave (files), not words someone wrote
+    worded_title = bool((title or "").strip()) and title_is_text
+    if atts and not text.strip() and not worded_title and not any(r[1].strip() for r in readings):
+        if len(atts) == 1:
+            raise NoReadableText(NO_READABLE_TEXT.format(name=atts[0].get("filename") or "file"))
+        raise NoReadableText(NO_READABLE_TEXT_MANY)
+    for pos, (a, (mime, ext_text, ext_by, ext_warnings, fresh)) in enumerate(zip(atts, readings)):
         data: bytes = a["data"]
         filename = a.get("filename")
-        mime = guess_mime(filename, a.get("mime"))
         sha, rel, present = blobs.put(data)
         aid = ids.attachment_id(note_id, sha)
         if present:
             for r in nb.store.q("SELECT attachment_id, note_id FROM attachments WHERE sha256=? AND note_id!=?",
                                 (sha, note_id)):
                 same_bytes.append({"note_id": r["note_id"], "attachment_id": r["attachment_id"], "this": aid})
-        out_path = nb.root / "extracted" / f"{sha}.txt"
-        if out_path.exists():
-            prev = nb.store.q1("SELECT extracted_by FROM attachments WHERE sha256=? LIMIT 1", (sha,))
-            ext_text, ext_by = out_path.read_text(encoding="utf-8"), (prev[0] if prev else "plain")
-        else:
-            res = extract(data, mime, filename, vision=vision, stt=stt)
-            warnings.extend(res.warnings)
-            ext_text, ext_by = res.text, res.extracted_by
-            if ext_text:
-                out_path.write_text(ext_text, encoding="utf-8")
+        warnings.extend(ext_warnings)
+        if fresh and ext_text:
+            (nb.root / "extracted" / f"{sha}.txt").write_text(ext_text, encoding="utf-8")
         if ext_text:
             extracted_texts.append(ext_text)
         att_rows.append({
@@ -241,11 +281,17 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
                        _j({"attachment_id": sb["this"], "earlier_attachment_id": sb["attachment_id"]}), now))
         nb.store.refresh_note_fts(c, note_id, extracted_texts)
         nb.queue.enqueue(c, note_id, prio, occurred, size, now=now)
+        if inline:
+            # Claimed for this capture's own understanding in the enqueue's transaction (ADR 0008 §8): no drain
+            # leases it between the enqueue and the inline note-process (B's S5: one understanding per note).
+            nb.queue.claim(note_id, "inline", inline_run_id, conn=c, now=now)
 
+    basis = date_basis({"source_json": src})
     return CaptureResult(
         note_id=note_id, status="new", received_at=now, revisits=revisits, similar=similar,
         topics=nb.store.topic_names(),
         attachments=[_att_out({**r, "artifact_ref": None}) for r in att_rows], warnings=warnings,
+        occurred_at=occurred, date_basis=basis, date_sentence=date_sentence(occurred, basis),
     )
 
 
@@ -284,6 +330,50 @@ def _att_out(a: Dict[str, Any]) -> Dict[str, Any]:
     return {"attachment_id": a["attachment_id"], "sha256": a["sha256"], "mime": a["mime"], "size": a["size"],
             "filename": a.get("filename"), "extracted_by": a["extracted_by"],
             "extracted_chars": a["extracted_chars"]}
+
+
+def filing_context(nb: Any, note_id: str) -> Dict[str, Any]:
+    """What the quick filing sees for a stored note: ``{needed, note_id, occurred_at, title, text, similar, revisits,
+    topics}``. ``needed`` is true when the note has no kind yet, is not an insight or archived and has something to
+    read (a note with no text fails its processing at once, never a filing call); ``text`` is the note's own
+    text (its files' extracted text when it has none of its own: an imported file note), whole; ``similar`` are the
+    nearest earlier notes by its stored vector (the capture's floor and count), ``revisits`` its recorded ex:revisits
+    links, ``topics`` the notebook's topic names (as the capture answers them)."""
+    row = nb.store.note_row(note_id)
+    if row is None:
+        raise ValueError("That note is not in this notebook.")
+    needed = row["kind"] is None and row["insight_kind"] is None and row["archived_at"] is None
+    if needed:  # a note with nothing to read is not filed: its processing fails at once with that reason
+        from ..process.context import note_sections
+
+        needed = bool(note_sections(nb, note_id)[0])
+    out: Dict[str, Any] = {"needed": needed, "note_id": note_id, "occurred_at": row["occurred_at"],
+                           "title": row["title"], "text": row["text"] or "", "similar": [], "revisits": [],
+                           "topics": []}
+    if not needed:
+        return out
+    if not str(row["text"] or "").strip():
+        parts = []
+        for a in nb.store.attachments_of(note_id):
+            path = nb.root / "extracted" / f"{a['sha256']}.txt"
+            if a["extracted_chars"] and path.exists():
+                parts.append(path.read_text(encoding="utf-8"))
+        out["text"] = "\n\n".join(parts)
+    vector = nb.cache.get(row["vector_key"]) if row["vector_key"] else None
+    if vector is not None:
+        hits = nb.note_vectors.nearest(vector, SIMILAR_LIMIT, SIMILAR_MIN_COSINE, exclude=[note_id], notes_only=True)
+        if hits:
+            marks = ",".join("?" for _ in hits)
+            info = {r["note_id"]: r for r in nb.store.q(
+                f"SELECT note_id, title, occurred_at FROM notes WHERE note_id IN ({marks})", [h[0] for h in hits])}
+            out["similar"] = [{"note_id": nid, "title": info[nid]["title"], "occurred_at": info[nid]["occurred_at"],
+                               "score": round(score, 4)} for nid, score in hits if nid in info]
+    out["revisits"] = [{"note_id": r["dst_note_id"], "occurred_at": r["occurred_at"], "matched_by": r["matched_by"]}
+                       for r in nb.store.q("SELECT l.dst_note_id, l.matched_by, n.occurred_at FROM note_links l JOIN"
+                                           " notes n ON n.note_id=l.dst_note_id WHERE l.src_note_id=? AND"
+                                           " l.predicate='ex:revisits' ORDER BY n.occurred_at", (note_id,))]
+    out["topics"] = nb.store.topic_names()
+    return out
 
 
 def file_note(nb: Any, note_id: str, *, title: Optional[str] = None, kind: Optional[str] = None,
