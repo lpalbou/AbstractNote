@@ -170,6 +170,10 @@ class Revision(_Model):
     warnings: List[str] = Field(default_factory=list)
     applied_index: bool = False
     applied_kg: bool = False
+    # backlog 0037: the ledger address of the step that applied it ({run_id, seq?, step_id?}) and the note's
+    # sources at that time (AbstractMemory SourceRef dicts); None = stamped by Notebook.apply_revision
+    ledger: Optional[Dict[str, Any]] = None
+    sources: Optional[List[Dict[str, Any]]] = None
 
 
 class QueueItem(_Model):

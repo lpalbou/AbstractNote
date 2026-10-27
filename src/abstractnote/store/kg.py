@@ -27,6 +27,7 @@ from abstractmemory import ClosureRecord, SQLiteJournal, SQLiteTripleStore, Trip
 from abstractmemory.canonical_text import canonical_text
 
 from .. import ids
+from ..ledger import provenance
 from ..model import CERTAINTY_CONFIDENCE
 from .embeddings import VectorCache, vector_key
 
@@ -53,8 +54,9 @@ class _LookupEmbedder:
 
 
 def claim_assertion(payload: Dict[str, Any], rev: Dict[str, Any], subject_kind: Optional[str],
-                    object_kind: Optional[str], *, run_id: Optional[str] = None) -> TripleAssertion:
-    """The ``TripleAssertion`` of one ``claim.add`` payload (docs/data-model.md, projection table)."""
+                    object_kind: Optional[str]) -> TripleAssertion:
+    """The ``TripleAssertion`` of one ``claim.add`` payload (docs/data-model.md, projection table). Its
+    provenance names the revision's ledger sources (:func:`abstractnote.ledger.provenance`, backlog 0037)."""
     literal = payload.get("object_id") is None
     attrs: Dict[str, Any] = {
         KIND_ATTR: "claim", "certainty": payload["certainty"], "stance": payload.get("stance") or "assert",
@@ -67,19 +69,15 @@ def claim_assertion(payload: Dict[str, Any], rev: Dict[str, Any], subject_kind: 
         attrs["literal"] = True
     if payload.get("evidence"):
         attrs["evidence_quote"] = payload["evidence"]
-    prov = {
-        "source": "abstractnote", "note_id": payload.get("note_id") or rev.get("note_id"),
-        "revision_id": rev["revision_id"], "run_id": run_id or rev.get("run_id"),
-        "evidence_quote": payload.get("evidence"), "recorded_at": rev["recorded_at"],
-    }
+    prov = provenance(rev, note_id=payload.get("note_id") or rev.get("note_id"),
+                      evidence_quote=payload.get("evidence"))
     return TripleAssertion(
         subject=payload["subject_id"], predicate=payload["predicate"],
         object=payload["object_literal"] if literal else payload["object_id"],
         scope=SCOPE, owner_id=OWNER_ID, observed_at=payload["observed_at"],
         valid_from=payload.get("valid_from"), valid_until=payload.get("valid_until"),
         confidence=CERTAINTY_CONFIDENCE.get(payload["certainty"], 0.5),
-        provenance={k: v for k, v in prov.items() if v is not None}, attributes=attrs,
-        assertion_id=payload["claim_id"],
+        provenance=prov, attributes=attrs, assertion_id=payload["claim_id"],
     )
 
 
@@ -91,8 +89,7 @@ def label_assertion(entity_id: str, predicate: str, value: str, kind: str, rev: 
     return TripleAssertion(
         subject=entity_id, predicate=predicate, object=value, scope=SCOPE, owner_id=OWNER_ID,
         observed_at=rev["at"], valid_from=rev["at"] if kind == "same_as" else None,
-        provenance={"source": "abstractnote", "revision_id": rev["revision_id"], "recorded_at": rev["recorded_at"],
-                    **({"note_id": rev["note_id"]} if rev.get("note_id") else {})},
+        provenance=provenance(rev),
         attributes=attrs, assertion_id=ids.kg_assertion_id(entity_id, predicate, value),
     )
 
@@ -195,8 +192,8 @@ class ClaimStore:
                 assertion_id=c["assertion_id"], kind=c["kind"], reason=c["reason"],
                 replacement_ids=tuple(c["replacement_ids"]), observed_at=_journal_time(rev["recorded_at"]),
                 actor="abstractnote",
-                provenance={"revision_id": rev["revision_id"], "note_id": rev.get("note_id"),
-                            "valid_until": c["valid_until"]},
+                # the contract's shape plus the closing revision at the top (contract §2, §7)
+                provenance={**provenance(rev, valid_until=c["valid_until"]), "revision_id": rev["revision_id"]},
                 closure_id=ids.closure_id(rev["revision_id"], c["assertion_id"], c["kind"]),
             ))
         return {"added": len(adds), "closed": closed}

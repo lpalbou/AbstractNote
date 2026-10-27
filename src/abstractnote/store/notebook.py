@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 from .. import __version__, ids
+from ..ledger import step_address
 from ..model import Revision, RevisionOp
 from .embeddings import (
     HashingEmbedder,
@@ -125,6 +126,9 @@ class Notebook:
         self.note_vectors = NoteVectorIndex(store)
         # Injected processing helpers (bound by abstractnote.tools.bind or by callers)
         self.extractors: Dict[str, Callable[..., Any]] = {}
+        # The ledger address of the runtime step executing now ({run_id, seq?, step_id?} or None), injected by
+        # abstractnote.tools.bind: a revision applied with no address of its own is stamped with it (0037).
+        self.step_reader: Optional[Callable[[], Optional[Dict[str, Any]]]] = None
 
     # ------------------------------------------------------------------ open / close
 
@@ -237,6 +241,13 @@ class Notebook:
             # One canonical name per entity: a create of a taken canonical name becomes a reuse, whatever
             # the model decided (store.names); the stored revision is the rewritten one, so a replay agrees.
             rev = reuse_taken_names(self.store, rev)
+            # Where it came from (backlog 0037), fixed on the intent row so a replay or a rebuild projects the
+            # same provenance: the step applying it (given, or the runtime step this call runs in), the note's
+            # own sources (capture step, body and attachment artifacts).
+            if rev.get("ledger") is None and self.step_reader is not None:
+                rev["ledger"] = self.step_reader()
+            if rev.get("sources") is None:
+                rev["sources"] = self.store.note_sources(rev.get("note_id"))
             self.store.insert_revision(rev)
             return self._finish(rev, _fail_after_index=_fail_after_index)
 
@@ -255,6 +266,11 @@ class Notebook:
         data["ops"] = ops
         if not data.get("revision_id"):
             raise ValueError("A revision needs a revision_id.")
+        if data.get("ledger") is not None:
+            led = data["ledger"]
+            if not isinstance(led, dict):
+                raise ValueError("A revision's ledger address is {run_id, seq?, step_id?}.")
+            data["ledger"] = step_address(led.get("run_id"), led.get("seq"), led.get("step_id"))
         return data
 
     def _finish(self, rev: Dict[str, Any], *, _fail_after_index: bool = False) -> Dict[str, Any]:
@@ -767,10 +783,11 @@ class Notebook:
         return expand(self, note_ids or [], entity_ids or [], as_of, query=query, budget_chars=budget_chars)
 
     def write_insight(self, kind: str, title: str, body: str, evidence_note_ids: Optional[Sequence[str]] = None,
-                      entity_ids: Optional[Sequence[str]] = None, run_id: Optional[str] = None) -> Dict[str, Any]:
+                      entity_ids: Optional[Sequence[str]] = None, run_id: Optional[str] = None, *,
+                      ledger: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         from ..recall.insights import write_insight
 
-        return write_insight(self, kind, title, body, evidence_note_ids, entity_ids, run_id)
+        return write_insight(self, kind, title, body, evidence_note_ids, entity_ids, run_id, ledger=ledger)
 
     def open_loops(self, limit: int = 20, since: Optional[str] = None, *, now: Optional[str] = None) -> Dict[str, Any]:
         from ..recall.reflect import open_loops

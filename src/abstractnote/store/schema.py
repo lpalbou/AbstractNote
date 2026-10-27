@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 2  # 2: entities.name_key/display_name/key_clash_with, entity_aliases.alias_key
+SCHEMA_VERSION = 3  # 2: entities.name_key/display_name/key_clash_with, entity_aliases.alias_key;
+#                     3: the ledger address of a revision and of a note, the note's sources (backlog 0037)
 
 TRUTH_TABLES = ("meta", "notes", "attachments", "note_links", "queue", "revisions", "vectors", "context_packets")
 #: Derived tables a rebuild copies (entity ids are stable, and the community labels are the model's work), and the
@@ -55,7 +56,10 @@ CREATE TABLE IF NOT EXISTS notes (
   entity_ids_json TEXT,
   acked_at TEXT,
   about_json TEXT,
-  seq INTEGER
+  seq INTEGER,
+  ledger_seq INTEGER,
+  ledger_step_id TEXT,
+  body_artifact_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_notes_occurred ON notes(occurred_at);
 CREATE INDEX IF NOT EXISTS idx_notes_received ON notes(received_at);
@@ -137,7 +141,11 @@ CREATE TABLE IF NOT EXISTS revisions (
   applied_index INTEGER NOT NULL DEFAULT 0,
   applied_kg INTEGER NOT NULL DEFAULT 0,
   abandoned INTEGER NOT NULL DEFAULT 0,
-  error TEXT
+  error TEXT,
+  ledger_run_id TEXT,
+  ledger_seq INTEGER,
+  ledger_step_id TEXT,
+  sources_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_revisions_note ON revisions(note_id);
 CREATE INDEX IF NOT EXISTS idx_revisions_at ON revisions(at);
@@ -387,7 +395,16 @@ def connect(path: str) -> sqlite3.Connection:
 
 # Columns added after the first notebooks were created (in-place upgrade on open).
 _ADDED_COLUMNS = {
-    "notes": [("about_json", "TEXT")],
+    # schema 3 (backlog 0037): where a note and a revision came from in AbstractRuntime's ledger. On a note:
+    # the capture step (``run_id`` is the run; ``ledger_seq`` the ledger row when the runtime gave it,
+    # ``ledger_step_id`` the step) and the note body stored as an artifact of that run (``{artifact_id,
+    # run_id?}``). On a revision: the tool step that applied it (``ledger_run_id``, ``ledger_seq``,
+    # ``ledger_step_id``; ``run_id`` keeps its own meaning, e.g. a consolidation id) and the note's sources
+    # at that time (``sources_json``: AbstractMemory ``SourceRef`` dicts). NULL on rows written before.
+    "notes": [("about_json", "TEXT"), ("ledger_seq", "INTEGER"), ("ledger_step_id", "TEXT"),
+              ("body_artifact_json", "TEXT")],
+    "revisions": [("ledger_run_id", "TEXT"), ("ledger_seq", "INTEGER"), ("ledger_step_id", "TEXT"),
+                  ("sources_json", "TEXT")],
     "entities": [("name_key", "TEXT"), ("display_name", "TEXT"), ("key_clash_with", "TEXT")],
     "entity_aliases": [("alias_key", "TEXT")],
 }
@@ -400,6 +417,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_name_key ON entities(name_key)
   WHERE merged_into IS NULL AND key_clash_with IS NULL;
 CREATE INDEX IF NOT EXISTS idx_entities_name_key_all ON entities(name_key);
 CREATE INDEX IF NOT EXISTS idx_alias_key ON entity_aliases(alias_key);
+CREATE INDEX IF NOT EXISTS idx_revisions_ledger_run ON revisions(ledger_run_id);
 """
 
 #: Meta key set when a migration found entities written before canonical names: the next write

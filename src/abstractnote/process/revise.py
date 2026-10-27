@@ -666,12 +666,13 @@ def build_revision(nb: Any, note_id: str, extraction: Any, linking: Any, *, atte
             "warnings": b.warnings}
 
 
-def apply_note_revision(nb: Any, note_id: str, extraction: Any, linking: Any, *, run_id: Optional[str] = None
-                        ) -> Dict[str, Any]:
+def apply_note_revision(nb: Any, note_id: str, extraction: Any, linking: Any, *, run_id: Optional[str] = None,
+                        ledger: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Build and apply the revision of a processed note (``note_apply_revision``).
 
-    A note is revised once: when it already has an applied revision, that one is
-    finished if needed and returned unchanged (``already_applied``)."""
+    ``ledger`` is the address of the step applying it (``{run_id, seq?, step_id?}``, backlog 0037); None lets
+    :meth:`Notebook.apply_revision` stamp the runtime step it runs in. A note is revised once: when it already
+    has an applied revision, that one is finished if needed and returned unchanged (``already_applied``)."""
     if nb.store.note_row(note_id) is None:
         raise ValueError("That note is not in this notebook.")
     nb.recover()
@@ -690,4 +691,6 @@ def apply_note_revision(nb: Any, note_id: str, extraction: Any, linking: Any, *,
             break
         attempt += 1
     rev = build_revision(nb, note_id, extraction, linking, attempt=attempt, run_id=run_id)
+    if ledger is not None:
+        rev["ledger"] = ledger
     return nb.apply_revision(rev)
