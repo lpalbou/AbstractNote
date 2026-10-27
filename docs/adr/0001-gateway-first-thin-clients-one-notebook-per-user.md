@@ -1,6 +1,6 @@
 # ADR 0001: Gateway-first thin clients, one notebook per user plane
 
-**Status**: Accepted  
+**Status**: Accepted. Amended 2026-10-27: one graph per plane (AbstractMemory ADR 0003); see "Amendment" below.  
 **Date**: 2026-10-19
 
 ## Context
@@ -11,3 +11,16 @@ Every client is a thin client of AbstractGateway. AbstractNote runs no server of
 
 ## Consequences
 A gateway is required; isolation and auth are inherited rather than reimplemented; the gateway integration is a small explicit change (tool binding, router include, app catalog row) tracked as backlog 0007.
+
+## Amendment (2026-10-27): one graph per plane
+
+AbstractMemory ADR 0003 (`abstractmemory/docs/adr/0003-one-graph-ledger-provenance-and-revisions.md`, decisions
+1-3 and 13) makes the plane one *mind*: one AbstractMemory home (`<plane>/abstractmemory/`) that holds what the
+plane's applications learn, reached by hosts through AbstractRuntime's memory facade and by applications through
+the gateway's `/api/gateway/memory/*` routes. The thin-client rule above is unchanged and extends to knowledge:
+the notebook's graph converges into the plane's mind (backlog 0033 phase 2), and `<plane>/abstractnote/` keeps
+the notes, their attachments and the app's own state. Folding the notebook's knowledge into the plane mind makes
+it readable by the plane's other applications under the plane's access rules: the operator confirms this (and
+whether an `owner_id` rule is wanted) before phase 2 (memory transition, decision 5). Every write from a note
+names its ledger sources (the capture and processing steps, the note body as an artifact of the capture run;
+backlog 0037).

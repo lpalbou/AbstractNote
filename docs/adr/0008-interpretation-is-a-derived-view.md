@@ -112,3 +112,8 @@ is a property of memory, not of notes: an altered memory ripples through the mem
   framing of its prompts (decision 2), and the views of a re-understanding stage. The model that re-reads is
   supplied to AbstractMemory as an injected reader.
 - `retro/integration` is not merged as-is; backlog 0035 records what to hand over and how.
+- The AbstractMemory side of a re-interpretation is fixed by AbstractMemory ADR 0003 (decisions 6-7): a
+  `close` op of kind `reinterpreted` naming its successor and, for a ripple, its cause (`ripple_source`,
+  `ripple_hops`), inside a revision that carries ledger provenance like every other (backlog 0037). Until the
+  projection moves onto `MemoryGraph.apply_revision` (backlog 0033 phase 2), AbstractNote's own projection writes
+  journal closures in that provenance shape.
