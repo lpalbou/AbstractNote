@@ -13,8 +13,11 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 3  # 2: entities.name_key/display_name/key_clash_with, entity_aliases.alias_key;
-#                     3: the ledger address of a revision and of a note, the note's sources (backlog 0037)
+SCHEMA_VERSION = 2  # 2: entities.name_key/display_name/key_clash_with, entity_aliases.alias_key
+# Not bumped for backlog 0037 (the ledger address of a note and of a revision, the note's sources, the body
+# artifact): those are nullable columns added on open (``_ADDED_COLUMNS``), NULL on older rows, read by nothing
+# that changes the behaviour of existing data. The version lineage (live notebooks at 4 from the serve worktree,
+# ``retro/integration`` at 5) is the operator's decision (memory transition, decision 1).
 
 TRUTH_TABLES = ("meta", "notes", "attachments", "note_links", "queue", "revisions", "vectors", "context_packets")
 #: Derived tables a rebuild copies (entity ids are stable, and the community labels are the model's work), and the
@@ -395,8 +398,8 @@ def connect(path: str) -> sqlite3.Connection:
 
 # Columns added after the first notebooks were created (in-place upgrade on open).
 _ADDED_COLUMNS = {
-    # schema 3 (backlog 0037): where a note and a revision came from in AbstractRuntime's ledger. On a note:
-    # the capture step (``run_id`` is the run; ``ledger_seq`` the ledger row when the runtime gave it,
+    # backlog 0037, no version bump (see SCHEMA_VERSION; precedent ``notes.about_json``): where a note and a
+    # revision came from in AbstractRuntime's ledger. On a note: the capture step (``run_id`` is the run; ``ledger_seq`` the ledger row when the runtime gave it,
     # ``ledger_step_id`` the step) and the note body stored as an artifact of that run (``{artifact_id,
     # run_id?}``). On a revision: the tool step that applied it (``ledger_run_id``, ``ledger_seq``,
     # ``ledger_step_id``; ``run_id`` keeps its own meaning, e.g. a consolidation id) and the note's sources
