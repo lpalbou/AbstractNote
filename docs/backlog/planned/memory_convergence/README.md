@@ -15,9 +15,11 @@ Items:
   Completed 2026-10-27: [../../completed/memory_convergence/](../../completed/memory_convergence/0034_remove_private_abstractmemory_access.md).
 - `0035_hand_the_ripple_prototype_to_abstractmemory.md`: `retro/integration`'s propagation and activation go to
   AbstractMemory, not into `main` as they are.
+- `0037_ledger_provenance_on_every_revision.md`: every projected statement and closure names its ledger
+  sources (tool step, capture run, note body and attachment artifacts); AbstractMemory ADR 0003.
 - `0036_depend_on_the_layer_below.md`: package dependencies and imports follow the framework convention (the
   layer below only; no private gateway functions).
 
-Order: 0034 → 0035 → 0033 (capability by capability) ; 0036 alongside, before the first release.
+Order: 0034 → 0037 → 0035 → 0033 (capability by capability) ; 0036 alongside, before the first release.
 
 Rule while the track is open: no new generic memory-graph logic is added to this package.

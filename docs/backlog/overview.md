@@ -5,13 +5,13 @@ Last reconciled: 2026-10-27 (memory convergence track added; proposed 0015 depre
 ## Counts
 | State | Count |
 |---|---|
-| planned | 4 (track `planned/v1/`: 0029; track `planned/memory_convergence/`: 0033, 0035, 0036) |
+| planned | 5 (track `planned/v1/`: 0029; track `planned/memory_convergence/`: 0033, 0035, 0036, 0037) |
 | proposed | 9 |
 | completed | 22 (track `completed/v1/`: 21; track `completed/memory_convergence/`: 0034) |
 | deprecated | 1 (0015) |
 | recurrent | 1 (0901) |
 
-Next free id: 0037.
+Next free id: 0038.
 
 ## Priorities and recommended order
 0. Operator ruling 2026-10-27: AbstractMemory owns the memory graph (AbstractMemory ADR 0002; ADRs 0003 and 0008
@@ -29,6 +29,7 @@ Next free id: 0037.
 - [0033 Converge the notebook's knowledge graph onto AbstractMemory](planned/memory_convergence/0033_converge_onto_abstractmemory.md)
 - [0035 Hand the ripple prototype (`retro/integration`) to AbstractMemory](planned/memory_convergence/0035_hand_the_ripple_prototype_to_abstractmemory.md)
 - [0036 Depend on the layer below; no private gateway functions](planned/memory_convergence/0036_depend_on_the_layer_below.md)
+- [0037 Ledger provenance on every revision, projected assertion and closure](planned/memory_convergence/0037_ledger_provenance_on_every_revision.md)
 
 ### Proposed
 - [0014 iPhone app](proposed/0014_iphone_app.md)
