@@ -258,9 +258,18 @@ def _store_body(artifact_store: Any, text: str, note_id: str, run_id: Optional[s
     text, or a store that failed: then a warning and a log line, never a lost note)."""
     if artifact_store is None or not text.strip():
         return None
+    from abstractruntime.storage.artifacts import compute_artifact_id
+
+    data = text.encode("utf-8")
+    # The id is the run-namespaced content address, computed here and passed explicitly so the id checked is the
+    # id written. The same words captured twice in one run (two idempotency keys) are one artifact: the second
+    # note points at it and never rewrites its tags (the first note keeps its ``note_id`` tag; review N6).
+    artifact_id = compute_artifact_id(data, run_id=run_id)
     try:
-        meta = artifact_store.store_text(text, content_type="text/plain", run_id=run_id,
-                                         tags={"kind": NOTE_BODY_KIND, "note_id": note_id})
+        meta = artifact_store.get_metadata(artifact_id)
+        if meta is None:
+            meta = artifact_store.store(data, content_type="text/plain", run_id=run_id, artifact_id=artifact_id,
+                                        tags={"kind": NOTE_BODY_KIND, "note_id": note_id})
     except Exception as exc:  # noqa: BLE001 - the note is the user's; the artifact is its ledger copy
         _log.warning("capture %s: the note body could not be stored as an artifact: %s", note_id, exc)
         warnings.append(f"The note was saved, but its text could not be stored as an artifact ({exc}).")

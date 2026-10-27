@@ -213,6 +213,19 @@ def test_a_capture_with_an_artifact_store_keeps_the_body_as_an_artifact_of_the_c
         assert len(store.list_by_run("run-cap")) == n
 
 
+def test_the_same_words_twice_in_one_run_share_one_artifact_whose_tags_stay_the_first_notes(tmp_path):
+    """Review N6: a second note with the same body in the same run reuses the artifact, never retags it."""
+    store = FileArtifactStore(tmp_path / "artifacts")
+    with Notebook.open(tmp_path / "nb") as nb:
+        a = nb.capture("Same words.", ledger={"run_id": "run-1", "seq": 3}, artifact_store=store, idempotency_key="a")
+        b = nb.capture("Same words.", ledger={"run_id": "run-1", "seq": 5}, artifact_store=store, idempotency_key="b")
+        assert a.status == b.status == "new" and a.note_id != b.note_id
+        ref_a, ref_b = nb.store.note_sources(a.note_id)[1], nb.store.note_sources(b.note_id)[1]
+        assert ref_a == ref_b
+        assert store.get_metadata(ref_a["artifact_id"]).tags["note_id"] == a.note_id
+        assert len(store.list_by_run("run-1")) == 1
+
+
 def test_without_an_artifact_store_a_capture_has_no_body_artifact(tmp_path):
     with Notebook.open(tmp_path / "nb") as nb:
         res = nb.capture("A note from the command line.")
