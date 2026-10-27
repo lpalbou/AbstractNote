@@ -248,16 +248,27 @@ def test_a_step_context_without_its_row_is_kept_without_one(tmp_path):
 # ---------------------------------------------------------------------------- 5. end to end on a real Runtime
 
 
-def test_capture_and_inline_processing_on_a_runtime_point_at_their_ledger_rows(tmp_path):
+@pytest.mark.parametrize("tool_timeout_s", [None, 600.0], ids=["same-thread", "timeout-thread"])
+def test_capture_and_inline_processing_on_a_runtime_point_at_their_ledger_rows(tmp_path, tool_timeout_s):
     """The real flows (note-capture runs note-process inline) on a real Runtime with ScriptedLLM: no argument is
-    passed by the flow; the tools read the step the runtime installed around the TOOL_CALLS handler."""
+    passed by the flow; the tools read the step the runtime installed around the TOOL_CALLS handler.
+
+    ``timeout-thread``: a tool timeout makes AbstractRuntime's ``MappingToolExecutor`` run each tool on a bare
+    ``threading.Thread`` (``_call_with_timeout``); the step context must cross it (the executor copies the
+    context into that thread)."""
+    from abstractruntime.integrations.abstractcore.tool_executor import MappingToolExecutor
     from test_flows_headless import SCRIPT
 
     from abstractnote.flows.runner import NoteRunner, ScriptedLLM
-    from abstractnote.tools import bound_notebook
+    from abstractnote.tools import bind, bound_notebook
 
     store = FileArtifactStore(tmp_path / "artifacts")
-    runner = NoteRunner.local(tmp_path / "nb", llm=ScriptedLLM(SCRIPT), artifact_store=store)
+    if tool_timeout_s is None:
+        runner = NoteRunner.local(tmp_path / "nb", llm=ScriptedLLM(SCRIPT), artifact_store=store)
+    else:
+        tools = bind(tmp_path / "nb", artifact_store=store)
+        runner = NoteRunner.with_llm(ScriptedLLM(SCRIPT), tools, artifact_store=store,
+                                     tool_executor=MappingToolExecutor(tools, timeout_s=tool_timeout_s))
     text = "Met Dana about the LUT budget; she wants the Pareto by Friday."
     out = runner.run_capture(text, idempotency_key="k-1", source={"client": "cli"},
                              occurred_at="2026-10-19T09:12:00Z", process_inline=True)
