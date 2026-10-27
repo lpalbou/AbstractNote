@@ -3,10 +3,13 @@
 Every claim becomes a ``TripleAssertion`` (``assertion_id = claim_id``); entity
 names, aliases and merges become ``schema:name``, ``skos:altLabel`` and
 ``schema:sameAs`` assertions. The triple store is append-only: the only
-in-place change is ``close_assertion(assertion_id, valid_until)`` (an additive
-AbstractMemory method), always paired with a journal ``ClosureRecord`` so that
+in-place changes are ``close_assertion(assertion_id, valid_until)`` and
+``narrow_assertion`` (both public AbstractMemory methods), always paired with a journal ``ClosureRecord`` so that
 ``TripleQuery(active_at=...)`` and ranked retrieval both agree with the note
-index. Every query passes ``owner_id="abstractnote"``.
+index. Every query passes ``owner_id="abstractnote"``. A window already closed
+later is moved earlier with AbstractMemory's public ``narrow_assertion`` (the
+``after_claim_id`` of ``claim.insert_before``); nothing here touches the
+store's private attributes (backlog 0034).
 
 Vectors are never computed here: the note index embeds each canonical text
 once (``VectorCache``) and the triple store reads them through
@@ -184,7 +187,9 @@ class ClaimStore:
                 c = dict(c, kind="retract")
             if self.store.close_assertion(c["assertion_id"], c["valid_until"]):
                 closed += 1
-            elif c.get("narrow") and self.narrow_assertion(c["assertion_id"], c["valid_until"]):
+            elif c.get("narrow") and self.store.narrow_assertion(c["assertion_id"], c["valid_until"]):
+                # AbstractMemory's public narrow (its ADR 0003 decision 7): moves an already-closed window
+                # earlier, refuses to widen one; an AbstractMemory without it fails here, loudly (backlog 0034).
                 closed += 1
             self.journal.append_closure(ClosureRecord(
                 assertion_id=c["assertion_id"], kind=c["kind"], reason=c["reason"],
@@ -195,27 +200,6 @@ class ClaimStore:
                 closure_id=ids.closure_id(rev["revision_id"], c["assertion_id"], c["kind"]),
             ))
         return {"added": len(adds), "closed": closed}
-
-    def narrow_assertion(self, assertion_id: str, valid_until: str) -> bool:
-        """Move an already-closed window EARLIER (a retrospective note placed between two beliefs). The only
-        in-place change besides ``close_assertion``, and like it limited to ``valid_until``: the content, provenance,
-        FTS row and vector are untouched. AbstractMemory has no public method for it (``close_assertion`` only
-        closes open windows), so this writes the store's own table through its connection; a store without them
-        fails loudly (seam: an additive ``narrow_assertion`` in AbstractMemory should replace this)."""
-        store = self.store
-        table, conn, lock = store._table, store._conn, store._lock  # noqa: SLF001 - see the docstring
-        with lock:
-            cur = conn.cursor()
-            cur.execute("BEGIN IMMEDIATE")
-            try:
-                cur.execute(f"UPDATE {table} SET valid_until=? WHERE assertion_id=? AND valid_until IS NOT NULL AND"
-                            " valid_until>?", (valid_until, assertion_id, valid_until))
-                changed = int(cur.rowcount or 0) > 0
-                cur.execute("COMMIT")
-            except BaseException:
-                cur.execute("ROLLBACK")
-                raise
-        return changed
 
     # ------------------------------------------------------------------ reads
 

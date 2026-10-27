@@ -1,13 +1,13 @@
 # AbstractNote backlog overview
 
-Last reconciled: 2026-10-27 (memory convergence track added; proposed 0015 deprecated)
+Last reconciled: 2026-10-27 (memory convergence track added; proposed 0015 deprecated; 0034 completed)
 
 ## Counts
 | State | Count |
 |---|---|
-| planned | 5 (track `planned/v1/`: 0029; track `planned/memory_convergence/`: 0033-0036) |
+| planned | 4 (track `planned/v1/`: 0029; track `planned/memory_convergence/`: 0033, 0035, 0036) |
 | proposed | 9 |
-| completed | 21 (track `completed/v1/`) |
+| completed | 22 (track `completed/v1/`: 21; track `completed/memory_convergence/`: 0034) |
 | deprecated | 1 (0015) |
 | recurrent | 1 (0901) |
 
@@ -27,7 +27,6 @@ Next free id: 0037.
 - [0029 Ingest the rest of the framework's history into the operator's notebook](planned/v1/0029_ingest_the_rest_of_the_framework_history.md)
 
 - [0033 Converge the notebook's knowledge graph onto AbstractMemory](planned/memory_convergence/0033_converge_onto_abstractmemory.md)
-- [0034 Remove the write to AbstractMemory's private table](planned/memory_convergence/0034_remove_private_abstractmemory_access.md)
 - [0035 Hand the ripple prototype (`retro/integration`) to AbstractMemory](planned/memory_convergence/0035_hand_the_ripple_prototype_to_abstractmemory.md)
 - [0036 Depend on the layer below; no private gateway functions](planned/memory_convergence/0036_depend_on_the_layer_below.md)
 
@@ -64,6 +63,7 @@ Next free id: 0037.
 - [0030 Graph communities, their labels, and statistics](completed/v1/0030_graph_communities_labels_and_statistics.md) — completed 2026-10-19
 - [0031 Processing page backend](completed/v1/0031_processing_page_backend.md) — completed 2026-10-20
 - [0032 Memory consolidation: a scheduled, triggerable, observable pass over the notebook](completed/v1/0032_memory_consolidation.md) — completed 2026-10-20
+- [0034 Remove the write to AbstractMemory's private table](completed/memory_convergence/0034_remove_private_abstractmemory_access.md) — completed 2026-10-27
 
 ### Recurrent
 - [0901 Backlog and docs hygiene](recurrent/0901_backlog_and_docs_hygiene.md)

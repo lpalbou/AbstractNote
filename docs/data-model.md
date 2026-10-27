@@ -415,9 +415,9 @@ AbstractMemory store method introduced for this purpose (it updates `valid_until
 still open and leaves everything else untouched), and records a journal
 `ClosureRecord(kind="supersede")` so both `TripleQuery(active_at=...)` and ranked retrieval agree
 with the note index. A `claim.insert_before` closes the OLDER copy the same way (never the later belief), and moves
-the window of the belief before it back with `ClaimStore.narrow_assertion` (`valid_until` only, earlier only, with
-its own closure record): AbstractMemory has no public method for an already-closed window yet, so AbstractNote
-writes that one column of its own triple store's table (a seam: an additive AbstractMemory method should replace it). AbstractMemory lowercases subjects, predicates and objects that are not
+the window of the belief before it back with AbstractMemory's public `narrow_assertion(assertion_id, valid_until)`
+(`valid_until` only, earlier only, refusing an open window or a widening; with its own closure record;
+AbstractMemory 0.4.0, backlog 0034). AbstractMemory lowercases subjects, predicates and objects that are not
 literals; the note index keeps the original case, and every AbstractMemory query from AbstractNote
 passes `owner_id="abstractnote"`.
 

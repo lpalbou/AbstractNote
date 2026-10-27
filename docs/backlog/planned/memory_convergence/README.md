@@ -12,6 +12,7 @@ Items:
 - `0033_converge_onto_abstractmemory.md`: the umbrella: migrate each parallel-graph capability, in
   AbstractMemory's order, and delete the local copy.
 - `0034_remove_private_abstractmemory_access.md`: stop writing AbstractMemory's private table (first, smallest).
+  Completed 2026-10-27: [../../completed/memory_convergence/](../../completed/memory_convergence/0034_remove_private_abstractmemory_access.md).
 - `0035_hand_the_ripple_prototype_to_abstractmemory.md`: `retro/integration`'s propagation and activation go to
   AbstractMemory, not into `main` as they are.
 - `0036_depend_on_the_layer_below.md`: package dependencies and imports follow the framework convention (the

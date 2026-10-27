@@ -7,6 +7,10 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 ## [Unreleased]
 
 ### Changed
+- **Requires AbstractMemory 0.4.0**: a statement placed between two earlier beliefs now moves the
+  older belief's end date through AbstractMemory's public `narrow_assertion`; AbstractNote no longer
+  writes AbstractMemory's private table (backlog 0034). The floor is `abstractmemory>=0.4.0`, the
+  release that carries it.
 - **What a thing is**: the description of a person, project or tool now says what it is (its kind,
   its role or purpose, and what it belongs to or works with), instead of the latest thing
   that happened to it. It is rewritten only when a note changes
