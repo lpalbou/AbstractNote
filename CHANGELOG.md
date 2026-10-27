@@ -28,7 +28,7 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 ### Changed
 - **Requires AbstractRuntime 0.14.0** (its step context and `LedgerStore.get_record`, ADR 0009): a note
   tool reads the run and ledger row of the step it runs in from the runtime; neither a flow nor a model passes
-  it. The floor is `abstractruntime>=0.14.0`. This release waits until AbstractRuntime 0.14.0 and
+  it. The floor is `abstractruntime>=0.15.0` (0.14.0 was released without the facade; the facade ships as 0.15.0). This release waits until AbstractRuntime 0.15.0 and
   AbstractMemory 0.4.0 are on PyPI (root ADR-0034: never released above an unpublished floor).
 - **Notebooks open as before**: the new fields are added to an existing notebook when it opens, empty
   for what it already holds; the notebook's format version stays 4 (the live notebooks' version, now the

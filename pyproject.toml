@@ -23,7 +23,7 @@ classifiers = [
 dependencies = [
     "abstractmemory>=0.4.0",
     "abstractsemantics>=0.0.5",
-    "abstractruntime>=0.14.0",
+    "abstractruntime>=0.15.0",
     "abstractcore>=2.26.3",
     "pydantic>=2.0",
     # Louvain community detection over the entity graph (backlog 0030); pure Python, no compiled parts.
