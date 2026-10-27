@@ -38,7 +38,15 @@ three named time axes. Stronger designs built here are generalised into Abstract
   0050); the provenance 0037 writes is already in the shape the graph requires.
 - The notebook's `kg.sqlite3` and the plane's KG store fold into one plane mind
   (`<plane>/abstractmemory/memory.sqlite3`); the gateway's plane default moves from LanceDB to that SQLite home.
-- A one-time projection of existing notebooks from their revision log (cause `migration`, ids kept).
+- A one-time projection of existing notebooks from their revision log (cause `migration`, ids kept). It also
+  adopts the assertions an existing `kg.sqlite3` holds with the earlier flat provenance (or, after a
+  `rebuild()`, with empty `sources`), naming the import/migration revision that grounds them.
+- Person corrections from the web (retract, redate, unmerge, confirm a match, close a task; `gateway/router.py`
+  writes the notebook directly through `Notebook._user_revision`, outside any runtime step) carry no ledger
+  address and no note, so their assertions and closures are ungrounded. Before the graph can accept them they
+  become gateway runs (each correction a run, its tool step the source) or `person`-cause revisions with an
+  `event`/`message` source. The same holds for captures and imports outside a runtime without an artifact store
+  (the CLI, importers): their ground is decided here (an import run, or the imported file as an artifact).
 - AbstractNote deletes `store/kg.py` and the projection parts of `store/notebook.py`.
 
 ### Phase 3: capabilities (AbstractMemory 0050 identity, 0052 reads, 0053 self-organisation, 0054 ripple, 0055 notes/diary layer)

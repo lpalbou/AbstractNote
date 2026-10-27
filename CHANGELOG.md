@@ -9,8 +9,11 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 ### Added
 - **Every statement says where it came from** (backlog 0037): what the notebook learns from a note now
   names the steps of AbstractRuntime's ledger that captured the note and that understood it (the run and
-  the ledger row), and the note's text and attachments as stored files of the capture run. Corrections and
-  supersessions carry the same. The shape is AbstractMemory's (its ADR 0003), so the notebook's knowledge can
+  the ledger row), and the note's text and attachments as stored files of the capture run. When a later note
+  supersedes or retracts a statement, the closing carries the same. Corrections a person makes on the web page
+  (retract, redate, undo a merge, confirm a match, close a task) do not run as steps of the ledger yet: they
+  name the revision and its account, but no ledger source. A run id typed by a caller or a model is kept as a
+  label, never as a source. The shape is AbstractMemory's (its ADR 0003), so the notebook's knowledge can
   move into the plane's shared memory with its sources. Inside the gateway a captured note's text is also
   stored as an artifact of the capture run; captures from the command line and importers are unchanged.
   Nothing is filled in for notes written before this version.

@@ -28,7 +28,8 @@ Processing page re-discovers the run that applied a revision by scanning 300 run
 ## Dependencies
 AbstractMemory ADR 0003 and its contract (`abstractframework/untracked/memory-transition/contract.md` §1, §2,
 §7). AbstractRuntime's step context and `LedgerStore.get_record` (branch `feat/memory-graph-facade`, 76b1319 +
-7b0d031, its ADR 0009 and item 0853), to be released as 0.14.0; AbstractMemory 0.4.0 for the parity shape.
+7b0d031 + 5b57d35 for the approval path, its ADR 0009 and item 0853), to be released as 0.14.0; AbstractMemory
+0.4.0 for the parity shape.
 
 ## Expected outcomes
 A statement learned from a note captured and processed inside a runtime carries
@@ -64,10 +65,18 @@ After (branch `feat/memory-graph-thin-client-1`):
 - Schema: no version change (lead decision, memory transition decision 1 is the operator's): the seven columns
   are nullable, added on open through `_ADDED_COLUMNS`, NULL on older rows.
 - The tools take no `run_id`/`seq`/`step_id` arguments: a ledger address a model could pass is one it could
-  invent. `note_insight_write` keeps its optional `run_id`, which must name the step's own run when both exist.
+  invent. `note_insight_write` keeps its optional `run_id`: inside a step it must be the step's own run (else
+  refused); outside any step it is kept on the note as a label only.
+- A bare run id is never a source (review N2/N4): `step_ref` emits a `step` ref when the row is known, a `run`
+  ref when only the step id is (an address read from a step), and nothing for a bare run id (a model-given
+  `run_id`, an older `capture(run_id=...)`, notes written before); those travel as labels in `extra.run_id` /
+  `extra.note_run_id` (`NoteStore.note_run_label`).
+- The same body captured twice in one run shares one artifact, whose tags stay the first note's (review N6).
+- A journal closure's `observed_at` is the closing revision's `at` (observation time), as `MemoryGraph` stamps
+  it, not its record time (review N8).
 
 How a tool learns its run and step (the open question of this item), verified 2026-10-27 on AbstractRuntime
-`feat/memory-graph-facade` 7b0d031 and AbstractGateway `main` 227c689:
+`feat/memory-graph-facade` 7b0d031 (approval path: 5b57d35) and AbstractGateway `main` 227c689:
 - `Runtime._execute_effect_with_retry` (`core/runtime.py` ~3792-3856) keeps the `seq` that
   `LedgerStore.append` returns for the attempt's STARTED record and installs
   `effect_step_context(StepContext(run_id, step_id, seq, node_id, attempt, effect_type))` around the handler
@@ -81,12 +90,18 @@ How a tool learns its run and step (the open question of this item), verified 20
   `contextvars.copy_context()`, and the parallel batch (`tool_executor.py` ~595-606, `ThreadPoolExecutor`)
   submits `copy_context().run` per call (and the note tools are not in `_PARALLEL_SAFE_TOOL_NAMES`, so they run
   sequentially anyway). No process hop exists on this path.
-- Finding: the tool sees the full step context, `seq` included; nothing is lost between the runtime and the tool.
-  Before 7b0d031 (the step context defined but not installed) the tool saw nothing, and the end-to-end test fails
-  there (`notes.run_id` None), which is the check that it depends on the runtime and not on a guess.
+- The approval path was the gap (review N1): a tool a person approves runs inside `runtime.resume()`, not inside
+  `_execute_effect_with_retry`, and saw no step context at f7f7add. AbstractRuntime 5b57d35 publishes the step
+  context there too (the TOOL_CALLS step that waited, its STARTED row found with `find_started_record`).
+- Finding: on the direct path (7b0d031) and on the approval-resume path (5b57d35) the tool sees the full step
+  context, `seq` included. Before 7b0d031 the tool saw nothing on either path, and before 5b57d35 nothing on the
+  approval path; the end-to-end tests fail there (`notes.run_id` None), which is the check that they depend on
+  the runtime and not on a guess.
+- Outside any runtime step (the web correction routes, the CLI, importers) there is no step context and nothing
+  is stamped; those writes name no ledger source (0033 phase 2 decides their ground).
 
 ## Validation
-- `tests/test_ledger_provenance.py` (16 tests): the projected claim, name and closure in the contract shape and
+- `tests/test_ledger_provenance.py` (21 tests): the projected claim, name and closure in the contract shape and
   read by `abstractmemory.graph.Provenance.from_dict` (parity); a step without its row is a `run` ref with the
   step id in `extra`; a revision outside any run names no source; the address is checked; the runtime step is
   stamped and kept on the revision row; a given address wins; `rebuild()` projects the same provenance; a
@@ -98,11 +113,17 @@ How a tool learns its run and step (the open question of this item), verified 20
   `note_capture` STARTED row, the revision row names the child run's `note_apply_revision` STARTED row (both
   read back with `runtime.ledger_store.get_record(run_id, seq)`), the body artifact is the capture run's, and the
   projected claim's `sources` are exactly `[step:<process run>#<seq>, step:<capture run>#<seq>,
-  artifact:<body>]`.
+  artifact:<body>]`; on the approval path (a person approves `note_capture`, the tool runs in `resume()`), the
+  note names the STARTED row of the TOOL_CALLS step that waited. Review additions: a bare run id on a revision
+  or a note is a label, not a source; a model-given `run_id` is refused inside another run's step and never a
+  source outside one; one body twice in a run keeps its first tags; a closure's observation time is the
+  revision's `at`.
 - Mutants (each turns the file red): `bind` without the step reader (3 failed), `provenance` without the
-  applying step (6 failed), capture without the body artifact (4 failed); the end-to-end against AbstractRuntime
-  76b1319 (no step context installed) fails.
-- Full suite: 440 passed, 24 skipped (main in the same interpreter: 424 passed, 24 skipped).
+  applying step (6 failed), capture without the body artifact (4 failed), `step_ref` turning a bare run id into
+  a `run` ref (3 failed), the shared body artifact retagged (1 failed), the closure stamped with `recorded_at`
+  (1 failed); the end-to-end against AbstractRuntime 76b1319 (no step context installed) fails, the
+  approval-path test against f7f7add (before 5b57d35) fails.
+- Full suite: 445 passed, 24 skipped (main in the same interpreter: 424 passed, 24 skipped).
 
 ## Metadata
 - Created: 2026-10-27
@@ -117,9 +138,10 @@ How a tool learns its run and step (the open question of this item), verified 20
   - The floors `abstractmemory>=0.4.0` and `abstractruntime>=0.14.0` are written ahead of those releases; a
     release of this branch waits for both on PyPI (root ADR-0034). Until then it resolves only against the
     editable feature branches.
-  - Statements from notes captured outside a runtime without an artifact store (the CLI, importers, tests) name
-    no source and would be refused by `MemoryGraph.apply_revision` (`ProvenanceRequired`): phase 2 (0033) must
-    decide their ground (for importers: an import run, or the imported file as an artifact).
+  - Statements from notes captured outside a runtime without an artifact store (the CLI, importers, tests), and
+    a person's corrections from the web, name no source and would be refused by `MemoryGraph.apply_revision`
+    (`ProvenanceRequired`): phase 2 (0033) decides their ground.
+  - An existing `kg.sqlite3` keeps flat provenance until `rebuild()` (then empty `sources`); phase 2 adopts it.
   - Existing notebooks keep NULL ledger columns; their bodies are not artifacts (operator decision 4).
   - The extraction and linking `llm_call` steps (and the reader model) are not named; the applying step's
     STARTED row holds the extraction and linking verbatim as the tool's arguments, which is what a

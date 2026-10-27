@@ -468,10 +468,17 @@ the step that captured the note, the note body's artifact and each attachment's 
 runtime's step context always does) is a source: a bare run id, given by a caller or written before, is a label,
 carried in `extra.run_id` (the revision's) or `extra.note_run_id` (its note's) and never in `sources`. A
 revision written outside any run, about a note captured outside any run without an artifact store (the CLI, an
-importer, a test), names no source; nothing is invented for it. Revisions and notes written
+importer, a test), names no source; nothing is invented for it. Neither does a person's correction from the web
+(retract, redate, unmerge, confirm, task close: `POST /note/...` routes that write the notebook directly, outside
+any runtime step): its assertions and closures carry `actor: "abstractnote"` and `extra.revision_id`, whose
+revision row names the action and `source = {client, account}`, and no source (backlog 0033 phase 2). Revisions and notes written
 before this change carry none either (their grounding is the operator's one-time projection, backlog 0033).
 In AbstractMemory's terms `sources[*].key()` is `step:<run_id>#<seq>`, `run:<run_id>` or `artifact:<id>`; the
 runtime's `LedgerStore.get_record(run_id, seq)` returns the row a `step` ref names.
+
+An existing `kg.sqlite3` keeps the earlier flat provenance (`{source: "abstractnote", note_id, revision_id, ...}`)
+on the assertions it already holds until `rebuild()`, which rewrites them in this shape with empty `sources`
+(their revisions named no step); phase 2 adopts them with an `import`/`migration` revision (backlog 0033).
 
 Transitional (backlog 0033): AbstractNote still writes this projection to its own `kg.sqlite3`. Phase 2 moves it
 onto AbstractMemory's `MemoryGraph.apply_revision` through the gateway, into the plane's one mind (AbstractMemory
