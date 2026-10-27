@@ -276,10 +276,22 @@ class NoteStore:
             )
             return cur.rowcount > 0
 
+    def note_run_label(self, note_id: Optional[str]) -> Optional[str]:
+        """The note's ``run_id`` when it is a bare label rather than a captured step (no ``ledger_seq`` and no
+        ``ledger_step_id``): a run id given by a caller or a model, or written before backlog 0037. Never a
+        source (:func:`abstractnote.ledger.step_ref`); the projection carries it in ``extra.note_run_id``."""
+        if not note_id:
+            return None
+        r = self.q1("SELECT run_id, ledger_seq, ledger_step_id FROM notes WHERE note_id=?", (note_id,))
+        if r is None or not r["run_id"] or r["ledger_seq"] is not None or r["ledger_step_id"]:
+            return None
+        return str(r["run_id"])
+
     def note_sources(self, note_id: Optional[str]) -> List[Dict[str, Any]]:
-        """A note's ledger sources as AbstractMemory ``SourceRef`` dicts (backlog 0037): the step (or run) that
-        captured it, its body stored as an artifact, its attachments' artifacts in their order. Empty for a note
-        captured outside a run without an artifact store (the CLI, importers) and for no note."""
+        """A note's ledger sources as AbstractMemory ``SourceRef`` dicts (backlog 0037): the step that captured it
+        (only when the row names that step: a bare ``run_id`` is a label, see :meth:`note_run_label`), its body
+        stored as an artifact, its attachments' artifacts in their order. Empty for a note captured outside a run
+        without an artifact store (the CLI, importers) and for no note."""
         from ..ledger import artifact_ref, step_address, step_ref, unique_refs
 
         if not note_id:

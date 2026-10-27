@@ -84,6 +84,10 @@ def runtime_step_reader() -> Callable[[], Optional[Dict[str, Any]]]:
     from abstractruntime.core.step_context import current_step_context
 
     def read() -> Optional[Dict[str, Any]]:
+        # Reviewer's observation (2026-10-27): ``current_step_context(run_id)`` returns the context only when it
+        # belongs to the given run, which shields a writer from an enclosing step of ANOTHER run. A note tool does
+        # not know its run (nothing passes it one), so it reads the context unfiltered: the innermost step
+        # executing now, which is the tool's own step (a nested runtime shadows, never clobbers, the context).
         ctx = current_step_context()
         if ctx is None:
             return None
@@ -93,8 +97,16 @@ def runtime_step_reader() -> Callable[[], Optional[Dict[str, Any]]]:
 
 
 def step_ref(address: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
-    """The source ref of a ledger address: ``step`` when the row is known, else ``run``."""
+    """The source ref of a ledger address: ``step`` when the row is known; ``run`` when only the step id is (an
+    address read from a runtime step whose ledger did not report the row); None for a bare run id.
+
+    A bare run id is never a source: it may have been typed by a model (``note_insight_write``'s ``run_id``) or
+    written by an older capture (``capture(run_id=...)``) with nothing checking it against a ledger. Only an
+    address that names its step came from the runtime's step context (or from code that knows the step); a bare
+    run id travels in the provenance's ``extra`` as a label (:func:`provenance`)."""
     if not address or not address.get("run_id"):
+        return None
+    if address.get("seq") is None and not address.get("step_id"):
         return None
     if address.get("seq") is not None:
         ref: Dict[str, Any] = {"kind": "step", "run_id": address["run_id"], "seq": int(address["seq"])}
@@ -157,9 +169,10 @@ def provenance(rev: Mapping[str, Any], **extra: Any) -> Dict[str, Any]:
     """The provenance of an assertion or closure projected from revision ``rev`` (contract §2).
 
     ``sources`` = the ledger address of the step that applied the revision (``rev["ledger"]``), then the
-    note's own sources recorded on the revision (``rev["sources"]``: the capture run or step, the body and
-    attachment artifacts). ``extra`` always names the revision and its record time; the keyword arguments
-    add to it (None values are left out)."""
+    note's own sources recorded on the revision (``rev["sources"]``: the capture step, the body and
+    attachment artifacts). ``extra`` always names the revision and its record time, and carries the bare run
+    ids that are labels, not sources (``run_id`` of the revision, ``note_run_id`` of its note); the keyword
+    arguments add to it (None values are left out)."""
     ledger = rev.get("ledger") or None
     sources = unique_refs([step_ref(ledger), *(rev.get("sources") or [])])
     ext: Dict[str, Any] = {"revision_id": rev["revision_id"], "recorded_at": rev["recorded_at"]}
@@ -167,6 +180,10 @@ def provenance(rev: Mapping[str, Any], **extra: Any) -> Dict[str, Any]:
         ext["note_id"] = rev["note_id"]
     if ledger and ledger.get("seq") is None and ledger.get("step_id"):
         ext["step_id"] = ledger["step_id"]  # a run ref has no step: the step id waits here for its seq
+    if ledger and step_ref(ledger) is None:
+        ext["run_id"] = ledger["run_id"]  # a bare run id: a label, not a source (see step_ref)
+    if rev.get("note_run_id"):
+        ext["note_run_id"] = rev["note_run_id"]  # the note's bare run id (a label: NoteStore.note_run_label)
     ext.update({k: v for k, v in extra.items() if v is not None})
     return {"sources": sources, "derived_from": [], "actor": ACTOR, "reader": reader_of(rev), "reason": None,
             "extra": ext}

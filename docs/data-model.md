@@ -48,7 +48,7 @@ revision points back to the note(s) that caused it.
 | `priority` | int 0..3 | 3 urgent, 2 high, 1 normal, 0 bulk. |
 | `status` | enum | `received`, `queued`, `processing`, `processed`, `failed`, `duplicate`, `archived`. |
 | `duplicate_of` | note id or null | Set only when the same idempotency key or import source key arrives again (a retry), never for the same words on another occasion. |
-| `session_id`, `run_id` | text | The gateway session and the AbstractRuntime run that captured it, when applicable (a capture inside a runtime step: the run of that step, read from the runtime, never passed by a flow or a model). |
+| `session_id`, `run_id` | text | The gateway session and the AbstractRuntime run that captured it, when applicable (a capture inside a runtime step: the run of that step, read from the runtime, never passed by a flow or a model). A run id given by a caller with no step behind it (`capture(run_id=...)`, the optional `run_id` of `note_insight_write`, notes written before backlog 0037) is kept as a label only: it is never a source of what the note teaches (`ledger_seq` and `ledger_step_id` are null for it). Inside a runtime step a given run id must be the step's own run, or the write is refused. |
 | `ledger_seq`, `ledger_step_id` | int, text, or null | The ledger row (`seq` of the step's STARTED record) and the step id of the `note_capture` tool step that captured it, when the runtime reported them; never invented (backlog 0037). Null for notes captured outside a run and for notes written before. |
 | `body_artifact` | `{artifact_id, run_id?}` or null | The note body stored as an AbstractRuntime artifact of the capture run (tags `kind=note_body`, `note_id`), when the capture had an artifact store (inside the gateway, or `NoteRunner.local(..., artifact_store=...)`). Null for the CLI and importers, and for notes captured before (writing their bodies is the operator's one-time projection decision). Column `body_artifact_json`. |
 | `archived_at` | ISO or null | Notes are archived, never deleted. |
@@ -456,15 +456,19 @@ of AbstractMemory ADR 0003 (decisions 8-11), so `abstractmemory.graph.Provenance
  "actor": "abstractnote",
  "reader": "<provider/model>" | null,   # when the revision's source names the model; no flow passes it yet
  "reason": null,
- "extra": {"revision_id", "recorded_at", "note_id"?, "evidence_quote"?, "step_id"?, "valid_until"?}}
+ "extra": {"revision_id", "recorded_at", "note_id"?, "evidence_quote"?, "step_id"?, "valid_until"?,
+           "run_id"?, "note_run_id"?}}       # the last two: bare run ids, labels only
 ```
 
 `sources` lists, without repeats: the step that applied the revision (`{"kind": "step", run_id, seq, step_id}`
 when the runtime reported the ledger row, else `{"kind": "run", run_id}` with the step id in `extra.step_id`),
-the step (or run) that captured the note, the note body's artifact and each attachment's artifact (`{"kind":
+the step that captured the note, the note body's artifact and each attachment's artifact (`{"kind":
 "artifact", artifact_id, run_id?}`). A closure's `extra` names the closing revision and the window's new end
-(`valid_until`). A revision written outside any run, about a note captured outside any run without an artifact
-store (the CLI, an importer, a test), names no source; nothing is invented for it. Revisions and notes written
+(`valid_until`). Only an address that names its step (a `seq` or a `step_id`, as the
+runtime's step context always does) is a source: a bare run id, given by a caller or written before, is a label,
+carried in `extra.run_id` (the revision's) or `extra.note_run_id` (its note's) and never in `sources`. A
+revision written outside any run, about a note captured outside any run without an artifact store (the CLI, an
+importer, a test), names no source; nothing is invented for it. Revisions and notes written
 before this change carry none either (their grounding is the operator's one-time projection, backlog 0033).
 In AbstractMemory's terms `sources[*].key()` is `step:<run_id>#<seq>`, `run:<run_id>` or `artifact:<id>`; the
 runtime's `LedgerStore.get_record(run_id, seq)` returns the row a `step` ref names.

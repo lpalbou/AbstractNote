@@ -89,6 +89,31 @@ def test_a_revision_written_outside_any_run_names_no_source(nb):
     assert a.provenance["sources"] == [] and not Provenance.from_dict(a.provenance).is_grounded()
 
 
+def test_a_bare_run_id_on_a_revision_is_a_label_not_a_source(nb):
+    """Review N2/N4: only an address that names its step (seq or step id) is a source."""
+    _history(nb, ledger={"run_id": "run-told"})
+    [a] = nb.kg.query(assertion_ids=("cl_1",))
+    assert a.provenance["sources"] == [] and a.provenance["extra"]["run_id"] == "run-told"
+    assert not Provenance.from_dict(a.provenance).is_grounded()
+
+
+def test_a_note_run_id_without_its_step_is_a_label_not_a_source(nb):
+    """Review N4: ``capture(run_id=...)`` (the CLI, importers, notes written before 0037) stores a run id nothing
+    checked against a ledger; it never becomes a ``run`` source of the note's statements."""
+    res = nb.capture("Met Dana at Acme.", run_id="run-old")
+    assert nb.store.note_row(res.note_id)["run_id"] == "run-old"
+    assert nb.store.note_sources(res.note_id) == [] and nb.store.note_run_label(res.note_id) == "run-old"
+    nb.apply_revision(dict(rev("rv_1", t(1), create("ex:person-dana", "Dana"),
+                               claim("cl_1", "ex:person-dana", "schema:name", literal="Dana", at=t(1),
+                                     note_id=res.note_id), note_id=res.note_id), ledger=STEP))
+    prov = nb.kg.query(assertion_ids=("cl_1",))[0].provenance
+    assert prov["sources"] == [{"kind": "step", "run_id": "run-apply", "seq": 7, "step_id": "st-apply"}]
+    assert prov["extra"]["note_run_id"] == "run-old"
+    before = {a.assertion_id: a.provenance for a in nb.kg.query()}
+    nb.rebuild()
+    assert {a.assertion_id: a.provenance for a in nb.kg.query()} == before
+
+
 def test_a_ledger_address_is_checked_never_guessed():
     assert step_address("r", 0, "s") == {"run_id": "r", "seq": 0, "step_id": "s"}
     assert step_address("r", "", "") == {"run_id": "r"}
@@ -229,6 +254,28 @@ def test_the_bound_tools_read_abstractruntimes_step_context(tmp_path):
     assert nb.store.note_sources(inside["note_id"])[1]["run_id"] == "run-cap"
     r = nb.store.note_row(ins["note_id"])
     assert (r["run_id"], r["ledger_seq"], r["ledger_step_id"]) == ("run-cap", 5, "st-cap")
+    nb.close()
+
+
+def test_a_model_given_run_id_is_never_a_source(tmp_path):
+    """Review N2: ``note_insight_write`` takes an optional ``run_id`` from its caller (a model, in an agent).
+    Outside a runtime step it is kept as a label only; inside one it must be the step's own run, else refused."""
+    from abstractnote.tools import bind, bound_notebook
+
+    tools = bind(tmp_path / "nb")
+    out = tools["note_insight_write"](kind="reminder", title="Pareto", body="Still open.", run_id="model-invented")
+    nb = bound_notebook(tools)
+    assert nb.store.note_row(out["note_id"])["run_id"] == "model-invented"
+    assert nb.store.note_sources(out["note_id"]) == []
+    assert not Provenance.from_dict({"sources": nb.store.note_sources(out["note_id"]), "actor": "abstractnote"}
+                                    ).is_grounded()
+    with effect_step_context(_step("run-cap", 5, "st-cap")):
+        with pytest.raises(ValueError, match="not the run this step belongs to"):
+            tools["note_insight_write"](kind="warning", title="Other", body="Elsewhere.", run_id="model-invented")
+        same = tools["note_insight_write"](kind="warning", title="Same", body="Here.", run_id="run-cap")
+    assert nb.store.note_sources(same["note_id"]) == [{"kind": "step", "run_id": "run-cap", "seq": 5,
+                                                       "step_id": "st-cap"}]
+    assert nb.store.q1("SELECT COUNT(*) FROM notes WHERE title='Other'")[0] == 0
     nb.close()
 
 

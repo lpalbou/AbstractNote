@@ -297,7 +297,10 @@ class Notebook:
         if not row["applied_kg"]:
             with self.store.lock:
                 kinds = kinds_from_index(self.store.conn, rev)
-            self.kg.project(rev, kinds)
+            # the note's bare run id, a label for the provenance's extra (never a source; backlog 0037). Read
+            # from the note row, which never changes it, so a replay or a rebuild writes the same.
+            label = self.store.note_run_label(rev.get("note_id"))
+            self.kg.project({**rev, "note_run_id": label} if label else rev, kinds)
             self.store.set_applied_kg(rev["revision_id"])
         return self._result(self.store.revision_row(rev["revision_id"]))
 
