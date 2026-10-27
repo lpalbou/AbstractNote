@@ -71,6 +71,15 @@ def test_a_closure_names_the_step_that_closed_it_in_the_same_shape(nb):
     assert [s.key() for s in prov.sources] == ["step:run-apply#9"]
     assert prov.actor == "abstractnote"
     assert prov.extra["revision_id"] == "rv_2" and prov.extra["valid_until"] == t(10)
+    # observation time is the closing revision's date (as MemoryGraph stamps it), never its record time (N8)
+    rv2 = nb.revision("rv_2")
+    assert rv2["at"] != rv2["recorded_at"]
+    from datetime import datetime
+
+    def when(ts):
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+    assert when(closure.observed_at) == when(rv2["at"])
 
 
 def test_without_its_row_a_step_is_a_run_ref_and_its_step_id_waits_in_extra(nb):

@@ -190,7 +190,11 @@ class ClaimStore:
                 closed += 1
             self.journal.append_closure(ClosureRecord(
                 assertion_id=c["assertion_id"], kind=c["kind"], reason=c["reason"],
-                replacement_ids=tuple(c["replacement_ids"]), observed_at=_journal_time(rev["recorded_at"]),
+                replacement_ids=tuple(c["replacement_ids"]),
+                # observation time = the revision's ``at`` (the note's date, or the person's correction time), as
+                # AbstractMemory's MemoryGraph stamps a closure (its ADR 0003 decision 5; review N8); the record
+                # time stays in ``extra.recorded_at``
+                observed_at=_journal_time(rev["at"]),
                 actor="abstractnote",
                 # the contract's shape (contract §2, §7): the closing revision, its note and the new end of the
                 # window in ``extra``; nothing outside the six keys, so AbstractMemory's Provenance.from_dict reads it
