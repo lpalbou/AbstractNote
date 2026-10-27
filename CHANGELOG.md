@@ -6,7 +6,22 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 
 ## [Unreleased]
 
+### Added
+- **Every statement says where it came from** (backlog 0037): what the notebook learns from a note now
+  names the steps of AbstractRuntime's ledger that captured the note and that understood it (the run and
+  the ledger row), and the note's text and attachments as stored files of the capture run. Corrections and
+  supersessions carry the same. The shape is AbstractMemory's (its ADR 0003), so the notebook's knowledge can
+  move into the plane's shared memory with its sources. Inside the gateway a captured note's text is also
+  stored as an artifact of the capture run; captures from the command line and importers are unchanged.
+  Nothing is filled in for notes written before this version.
+
 ### Changed
+- **Requires AbstractRuntime 0.14.0** (its step context and `LedgerStore.get_record`, ADR 0009): a note
+  tool reads the run and ledger row of the step it runs in from the runtime; neither a flow nor a model passes
+  it. The floor is `abstractruntime>=0.14.0`. This release waits until AbstractRuntime 0.14.0 and
+  AbstractMemory 0.4.0 are on PyPI (root ADR-0034: never released above an unpublished floor).
+- **Notebooks open as before**: the new fields are added to an existing notebook when it opens, empty
+  for what it already holds; the notebook's format version does not change.
 - **Requires AbstractMemory 0.4.0**: a statement placed between two earlier beliefs now moves the
   older belief's end date through AbstractMemory's public `narrow_assertion`; AbstractNote no longer
   writes AbstractMemory's private table (backlog 0034). The floor is `abstractmemory>=0.4.0`, the

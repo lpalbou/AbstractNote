@@ -1,13 +1,13 @@
 # AbstractNote backlog overview
 
-Last reconciled: 2026-10-27 (memory convergence track added; proposed 0015 deprecated; 0034 completed)
+Last reconciled: 2026-10-27 (memory convergence track added; proposed 0015 deprecated; 0034 and 0037 completed; 0033 rewritten as the phased plan)
 
 ## Counts
 | State | Count |
 |---|---|
-| planned | 5 (track `planned/v1/`: 0029; track `planned/memory_convergence/`: 0033, 0035, 0036, 0037) |
+| planned | 4 (track `planned/v1/`: 0029; track `planned/memory_convergence/`: 0033, 0035, 0036) |
 | proposed | 9 |
-| completed | 22 (track `completed/v1/`: 21; track `completed/memory_convergence/`: 0034) |
+| completed | 23 (track `completed/v1/`: 21; track `completed/memory_convergence/`: 0034, 0037) |
 | deprecated | 1 (0015) |
 | recurrent | 1 (0901) |
 
@@ -16,7 +16,7 @@ Next free id: 0038.
 ## Priorities and recommended order
 0. Operator ruling 2026-10-27: AbstractMemory owns the memory graph (AbstractMemory ADR 0002; ADRs 0003 and 0008
    here amended). No new generic memory-graph logic in this package; the `planned/memory_convergence/` track
-   (0034 → 0035 → 0033, with 0036 alongside) migrates onto AbstractMemory as its capabilities land.
+   (0034 → 0037 → 0035 → 0033, with 0036 alongside) migrates onto AbstractMemory as its capabilities land.
 1. The global data check of the 1,000-note pass (untracked/eval2/REPORT.md): apply-time guards and the false-cue chain landed (W23, W24); prompt-level quality (summaries, predicates, seats vs packages) and the retrospective-ingestion gate are in flight
 2. 0029 Resume the ingest only after the quality lanes are graded (the one-liner stays the resume path)
 3. Release preparation (proposed 0023): release abstractmemory `close-assertion`, the gateway seam, then abstractnote 0.1.0 and `@abstractframework/note`; name the versions in README/getting-started/pyproject
@@ -29,7 +29,6 @@ Next free id: 0038.
 - [0033 Converge the notebook's knowledge graph onto AbstractMemory](planned/memory_convergence/0033_converge_onto_abstractmemory.md)
 - [0035 Hand the ripple prototype (`retro/integration`) to AbstractMemory](planned/memory_convergence/0035_hand_the_ripple_prototype_to_abstractmemory.md)
 - [0036 Depend on the layer below; no private gateway functions](planned/memory_convergence/0036_depend_on_the_layer_below.md)
-- [0037 Ledger provenance on every revision, projected assertion and closure](planned/memory_convergence/0037_ledger_provenance_on_every_revision.md)
 
 ### Proposed
 - [0014 iPhone app](proposed/0014_iphone_app.md)
@@ -65,6 +64,7 @@ Next free id: 0038.
 - [0031 Processing page backend](completed/v1/0031_processing_page_backend.md) — completed 2026-10-20
 - [0032 Memory consolidation: a scheduled, triggerable, observable pass over the notebook](completed/v1/0032_memory_consolidation.md) — completed 2026-10-20
 - [0034 Remove the write to AbstractMemory's private table](completed/memory_convergence/0034_remove_private_abstractmemory_access.md) — completed 2026-10-27
+- [0037 Ledger provenance on every revision, projected assertion and closure](completed/memory_convergence/0037_ledger_provenance_on_every_revision.md) — completed 2026-10-27
 
 ### Recurrent
 - [0901 Backlog and docs hygiene](recurrent/0901_backlog_and_docs_hygiene.md)
