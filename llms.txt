@@ -1,6 +1,6 @@
 # AbstractNote
 
-> One endpoint for everything you want to remember: notes, files, photos, recordings and logs are filed with their time, place and provenance and grow a temporal semantic knowledge graph you can search by effort (quick, standard, deep) and revisit through time. Part of the AbstractFramework; runs on AbstractGateway, AbstractRuntime, AbstractFlow, AbstractMemory and AbstractCore. Version 0.1.1: `pip install "abstractnote[gateway]"` (AbstractGateway 0.15.11 or later) and the web app `@abstractframework/note` on npm.
+> One endpoint for everything you want to remember: notes, files, photos, recordings and logs are filed with their time, place and provenance and grow a temporal semantic knowledge graph you can search by effort (quick, standard, deep) and revisit through time. Part of the AbstractFramework; runs on AbstractGateway, AbstractRuntime, AbstractFlow, AbstractMemory and AbstractCore. Version 0.2.0: `pip install "abstractnote[gateway]"` (AbstractGateway 0.17.0 or later, AbstractRuntime 0.15.0, AbstractMemory 0.4.0) and the web app `@abstractframework/note` on npm.
 
 Start with README.md and docs/getting-started.md. docs/api.md is the reference for the runs API usage, the note read API under /api/gateway/note, the note tools, the Python API and the abstractnote CLI. docs/faq.md lists the limits of this version; docs/troubleshooting.md maps messages to fixes.
 

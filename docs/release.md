@@ -37,7 +37,7 @@ so a passing rehearsal proves that npm accepts this repository, workflow and env
 is tagged, uploaded or released.
 
 ```sh
-gh workflow run release.yml --repo lpalbou/AbstractNote --ref main -f version=0.1.1 -f dry_run=true
+gh workflow run release.yml --repo lpalbou/AbstractNote --ref main -f version=0.2.0 -f dry_run=true
 gh run watch --repo lpalbou/AbstractNote "$(gh run list --repo lpalbou/AbstractNote --workflow release.yml --limit 1 --json databaseId -q '.[0].databaseId')"
 ```
 
@@ -51,15 +51,15 @@ environment `npm`.
 Tag the commit on `main` and push the tag:
 
 ```sh
-git tag -a v0.1.1 -m "AbstractNote v0.1.1"
-git push origin v0.1.1
+git tag -a v0.2.0 -m "AbstractNote v0.2.0"
+git push origin v0.2.0
 ```
 
-or dispatch without `dry_run` (`gh workflow run release.yml --ref main -f version=0.1.1`), which
+or dispatch without `dry_run` (`gh workflow run release.yml --ref main -f version=0.2.0`), which
 creates the tag itself. Afterwards check
 [pypi.org/project/abstractnote](https://pypi.org/project/abstractnote/),
 [npmjs.com/package/@abstractframework/note](https://www.npmjs.com/package/@abstractframework/note)
 and the GitHub release, then install from a clean environment:
-`pip install "abstractnote[gateway]==0.1.1"`.
+`pip install "abstractnote[gateway]==0.2.0"`.
 
 The Apple Watch app is not published by this workflow.
