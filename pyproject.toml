@@ -21,9 +21,9 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "abstractmemory>=0.3.1",
+    "abstractmemory>=0.4.0",
     "abstractsemantics>=0.0.5",
-    "abstractruntime>=0.10.2",
+    "abstractruntime>=0.15.0",
     "abstractcore>=2.26.3",
     "pydantic>=2.0",
     # Louvain community detection over the entity graph (backlog 0030); pure Python, no compiled parts.
@@ -35,7 +35,7 @@ dependencies = [
 [project.optional-dependencies]
 # The gateway must carry the AbstractNote seam (abstractgateway.abstractnote_seam); 0.15.11 is
 # the first AbstractGateway release that does. abstractnote.gateway refuses to import without it.
-gateway = ["abstractgateway>=0.15.11", "fastapi>=0.110"]
+gateway = ["abstractgateway>=0.17.0", "fastapi>=0.110"]
 dev = ["pytest>=7.0", "ruff>=0.1"]
 
 [project.scripts]

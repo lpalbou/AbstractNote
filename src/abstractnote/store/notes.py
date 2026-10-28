@@ -306,23 +306,64 @@ class NoteStore:
             "run_id": r["run_id"], "ops": _uj(r["ops_json"], []), "summary": r["summary"],
             "source": _uj(r["source_json"]), "warnings": _uj(r["warnings_json"], []),
             "applied_index": bool(r["applied_index"]), "applied_kg": bool(r["applied_kg"]),
+            "ledger": ({k: v for k, v in (("run_id", r["ledger_run_id"]), ("seq", r["ledger_seq"]),
+                                          ("step_id", r["ledger_step_id"])) if v is not None}
+                       if r["ledger_run_id"] else None),
+            "sources": _uj(r["sources_json"], []) or [],
             "context": _uj(r["context_json"]) if "context_json" in r.keys() else None,
         }
 
     def insert_revision(self, rev: Dict[str, Any]) -> bool:
-        """Write the revision row (the intent). Returns False when the id exists (no-op)."""
+        """Write the revision row (the intent), with its ledger address and the note's sources (backlog 0037).
+        Returns False when the id exists (no-op)."""
+        ledger = rev.get("ledger") or {}
         with self.lock:
             cur = self.conn.execute(
                 "INSERT OR IGNORE INTO revisions(revision_id, note_id, attempt, action, target, at, recorded_at,"
                 " run_id, ops_json, summary, source_json, warnings_json, result_json, applied_index, applied_kg,"
-                " context_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?)",
+                " context_json, ledger_run_id, ledger_seq, ledger_step_id, sources_json)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?)",
                 (rev["revision_id"], rev.get("note_id"), rev.get("attempt"), rev.get("action"), rev.get("target"),
                  rev["at"], rev["recorded_at"], rev.get("run_id"), _j(rev.get("ops") or []), rev.get("summary") or "",
                  _j(rev.get("source")) if rev.get("source") is not None else None, _j(rev.get("warnings") or []),
                  _j(rev.get("result")) if rev.get("result") is not None else None,
-                 _j(rev["context"]) if rev.get("context") is not None else None),
+                 _j(rev["context"]) if rev.get("context") is not None else None,
+                 ledger.get("run_id"), ledger.get("seq"), ledger.get("step_id"),
+                 _j(rev["sources"]) if rev.get("sources") else None),
             )
             return cur.rowcount > 0
+
+    def note_run_label(self, note_id: Optional[str]) -> Optional[str]:
+        """The note's ``run_id`` when it is a bare label rather than a captured step (no ``ledger_seq`` and no
+        ``ledger_step_id``): a run id given by a caller or a model, or written before backlog 0037. Never a
+        source (:func:`abstractnote.ledger.step_ref`); the projection carries it in ``extra.note_run_id``."""
+        if not note_id:
+            return None
+        r = self.q1("SELECT run_id, ledger_seq, ledger_step_id FROM notes WHERE note_id=?", (note_id,))
+        if r is None or not r["run_id"] or r["ledger_seq"] is not None or r["ledger_step_id"]:
+            return None
+        return str(r["run_id"])
+
+    def note_sources(self, note_id: Optional[str]) -> List[Dict[str, Any]]:
+        """A note's ledger sources as AbstractMemory ``SourceRef`` dicts (backlog 0037): the step that captured it
+        (only when the row names that step: a bare ``run_id`` is a label, see :meth:`note_run_label`), its body
+        stored as an artifact, its attachments' artifacts in their order. Empty for a note captured outside a run
+        without an artifact store (the CLI, importers) and for no note."""
+        from ..ledger import artifact_ref, step_address, step_ref, unique_refs
+
+        if not note_id:
+            return []
+        r = self.q1("SELECT run_id, ledger_seq, ledger_step_id, body_artifact_json FROM notes WHERE note_id=?",
+                    (note_id,))
+        if r is None:
+            return []
+        refs: List[Optional[Dict[str, Any]]] = [step_ref(step_address(r["run_id"], r["ledger_seq"],
+                                                                      r["ledger_step_id"])),
+                                                artifact_ref(_uj(r["body_artifact_json"]))]
+        for a in self.q("SELECT artifact_ref_json FROM attachments WHERE note_id=? AND artifact_ref_json IS NOT NULL"
+                        " ORDER BY position, attachment_id", (note_id,)):
+            refs.append(artifact_ref(_uj(a[0])))
+        return unique_refs(refs)
 
     def pending_revisions(self) -> List[sqlite3.Row]:
         return self.q("SELECT * FROM revisions WHERE abandoned=0 AND (applied_index=0 OR applied_kg=0) ORDER BY seq")

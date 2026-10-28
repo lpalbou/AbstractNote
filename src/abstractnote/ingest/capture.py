@@ -26,6 +26,7 @@ from pydantic import ValidationError
 
 from .. import ids
 from ..model import FILING_KINDS, URGENCY_PRIORITY, CaptureResult, Location, Provenance
+from ..ledger import note_columns
 from ..store.notes import _j, note_vector_text
 from ..store.queue import PRIORITY_NORMAL
 from .blobs import BlobStore
@@ -103,11 +104,18 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
             about: Optional[Dict[str, Any]] = None,
             default_client: str = "cli", vision: Any = None, stt: Any = None, now: Optional[str] = None,
             inline: bool = False, inline_run_id: Optional[str] = None, title_is_text: bool = True,
-            ) -> CaptureResult:
+            ledger: Optional[Dict[str, Any]] = None, artifact_store: Any = None) -> CaptureResult:
     """Store one note. ``attachments`` are resolved inputs: ``{"data": bytes, "mime"?, "filename"?, "artifact_ref"?,
     "last_modified"?}`` (``last_modified``: the file's modification time as the client knows it, ISO 8601 or epoch
     milliseconds; the web sends ``File.lastModified``). ``source.origin.pasted`` (a live client's flag that the text
-    was pasted) makes the client's time a stand-in the text may correct (basis ``pasted_text``)."""
+    was pasted) makes the client's time a stand-in the text may correct (basis ``pasted_text``).
+
+    ``ledger`` is the address of the runtime step capturing it (``{run_id, seq?, step_id?}``; ``run_id``, when
+    also given, must name the same run) and ``artifact_store`` AbstractRuntime's artifact store: with one, the
+    body text is stored as an artifact of the capture run (tags ``kind=note_body``, ``note_id``) and the note
+    keeps ``{artifact_id, run_id?}`` in ``body_artifact_json`` (backlog 0037; AbstractMemory ADR 0003 decision
+    11). Without one (the CLI, importers) the note has no body artifact. A store that fails does not lose the
+    note: the capture goes on, with a warning and a log line."""
     text = "" if text is None else str(text)
     atts = list(attachments or [])
     if not text.strip() and not atts:
@@ -116,6 +124,7 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
         raise ValueError("The priority must be 0 (bulk), 1 (normal), 2 (high) or 3 (urgent).")
     if (importer is None) != (source_key is None):
         raise ValueError("An import needs both the importer name and the source key.")
+    led = note_columns(run_id, ledger)
     nb.require_embedder()  # before anything is written
     now = now or ids.utc_now()
     occurred = ids.normalize_time(occurred_at, field="occurred_at") if occurred_at else now
@@ -240,6 +249,7 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
                 similar.append({"note_id": nid, "title": r["title"], "occurred_at": r["occurred_at"],
                                 "score": round(score, 4)})
 
+    body_artifact = _store_body(artifact_store, text, note_id, led["run_id"], warnings)
     prio = int(priority) if priority is not None else PRIORITY_NORMAL
     size = len(text) + sum(len(t) for t in extracted_texts)
     with nb.store.tx() as c:
@@ -248,8 +258,9 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
             "text_hash": text_hash, "occurred_at": occurred, "received_at": now, "source_json": _j(src),
             "client": src.get("client"), "location_json": _j(loc) if loc else None, "priority": prio,
             "priority_explicit": 1 if priority is not None else 0, "status": "received",
-            "session_id": session_id, "run_id": run_id, "idempotency_key": idempotency_key, "size": size,
+            "session_id": session_id, **led, "idempotency_key": idempotency_key, "size": size,
             "vector_key": vkey, "about_json": _j(about_ref) if about_ref else None,
+            "body_artifact_json": _j(body_artifact) if body_artifact else None,
         })
         if about_ref:
             c.execute("INSERT OR IGNORE INTO note_links(src_note_id, dst_note_id, predicate, score, matched_by,"
@@ -282,6 +293,37 @@ def capture(nb: Any, text: str = "", *, title: Optional[str] = None, occurred_at
         attachments=[_att_out({**r, "artifact_ref": None}) for r in att_rows], warnings=warnings,
         occurred_at=occurred, date_basis=basis, date_sentence=date_sentence(occurred, basis),
     )
+
+
+NOTE_BODY_KIND = "note_body"  # the tag of a note body stored as an artifact
+
+
+def _store_body(artifact_store: Any, text: str, note_id: str, run_id: Optional[str],
+                warnings: List[str]) -> Optional[Dict[str, Any]]:
+    """Store the body text as an artifact of the capture run; ``{artifact_id, run_id?}`` or None (no store, no
+    text, or a store that failed: then a warning and a log line, never a lost note)."""
+    if artifact_store is None or not text.strip():
+        return None
+    from abstractruntime.storage.artifacts import compute_artifact_id
+
+    data = text.encode("utf-8")
+    # The id is the run-namespaced content address, computed here and passed explicitly so the id checked is the
+    # id written. The same words captured twice in one run (two idempotency keys) are one artifact: the second
+    # note points at it and never rewrites its tags (the first note keeps its ``note_id`` tag; review N6).
+    artifact_id = compute_artifact_id(data, run_id=run_id)
+    try:
+        meta = artifact_store.get_metadata(artifact_id)
+        if meta is None:
+            meta = artifact_store.store(data, content_type="text/plain", run_id=run_id, artifact_id=artifact_id,
+                                        tags={"kind": NOTE_BODY_KIND, "note_id": note_id})
+    except Exception as exc:  # noqa: BLE001 - the note is the user's; the artifact is its ledger copy
+        _log.warning("capture %s: the note body could not be stored as an artifact: %s", note_id, exc)
+        warnings.append(f"The note was saved, but its text could not be stored as an artifact ({exc}).")
+        return None
+    out: Dict[str, Any] = {"artifact_id": str(meta.artifact_id)}
+    if run_id:
+        out["run_id"] = run_id
+    return out
 
 
 def _att_out(a: Dict[str, Any]) -> Dict[str, Any]:

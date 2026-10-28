@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional
 from ..recall import communities as _communities
 from ..recall import expand as _expand
 from ..recall import reflect as _reflect
-from ..recall.insights import write_insight
 from ..recall.search import search
 from .context import ToolContext
 
@@ -66,7 +65,8 @@ def note_anniversaries(ctx: ToolContext, limit: int = 20, since: Optional[str] =
 def note_insight_write(ctx: ToolContext, kind: str, title: str, body: str,
                        evidence_note_ids: Optional[List[str]] = None, entity_ids: Optional[List[str]] = None,
                        run_id: Optional[str] = None) -> Dict[str, Any]:
-    return write_insight(ctx.nb, kind, title, body, evidence_note_ids or [], entity_ids or [], _blank(run_id))
+    # through the notebook, which stamps the runtime step writing it (backlog 0037)
+    return ctx.nb.write_insight(kind, title, body, evidence_note_ids or [], entity_ids or [], _blank(run_id))
 
 
 def note_communities_recompute(ctx: ToolContext, resolution: Optional[float] = None,

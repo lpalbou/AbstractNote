@@ -39,7 +39,7 @@ pip install "abstractnote[gateway]"
 abstractnote --help
 ```
 
-This brings AbstractMemory 0.3.1 or later and AbstractGateway 0.15.11 or later, the first gateway
+This brings AbstractMemory 0.4.0 or later, AbstractRuntime 0.14.0 or later and AbstractGateway 0.15.11 or later, the first gateway
 release that carries the AbstractNote integration (`abstractgateway.abstractnote_seam`): with
 `abstractnote` installed in the gateway's environment, every user gets the note tools, the note
 read API under `/api/gateway/note` and the note workflows. `pip install abstractnote` alone is

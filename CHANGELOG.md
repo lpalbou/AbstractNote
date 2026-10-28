@@ -7,6 +7,17 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 ## [Unreleased]
 
 ### Added
+- **Every statement says where it came from** (backlog 0037): what the notebook learns from a note now
+  names the steps of AbstractRuntime's ledger that captured the note and that understood it (the run and
+  the ledger row), and the note's text and attachments as stored files of the capture run. When a later note
+  supersedes or retracts a statement, the closing carries the same. Corrections a person makes on the web page
+  (retract, redate, undo a merge, confirm a match, close a task) do not run as steps of the ledger yet: they
+  name the revision and its account, but no ledger source. A run id typed by a caller or a model is kept as a
+  label, never as a source. The shape is AbstractMemory's (its ADR 0003), so the notebook's knowledge can
+  move into the plane's memory with its sources, where it stays yours (readable by your own other
+  applications, by nobody else by default). Inside the gateway a captured note's text is also
+  stored as an artifact of the capture run; captures from the command line and importers are unchanged.
+  Nothing is filled in for notes written before this version.
 - **Ideas understood differently reach what relies on them** (ADR 0008 §4a): when an earlier note changes what
   an idea is (its statements, its relations, what it is, or deeply its description), the later notes about the
   ideas that rest on it are understood again too, strongest first and in the order things happened, and each
@@ -15,6 +26,17 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
   consolidation with nothing new changes nothing.
 
 ### Changed
+- **Requires AbstractRuntime 0.14.0** (its step context and `LedgerStore.get_record`, ADR 0009): a note
+  tool reads the run and ledger row of the step it runs in from the runtime; neither a flow nor a model passes
+  it. The floor is `abstractruntime>=0.15.0` (0.14.0 was released without the facade; the facade ships as 0.15.0). The `[gateway]` extra floors `abstractgateway>=0.17.0` (the memory routes, the strict owner rule). This release waits until AbstractRuntime 0.15.0 and
+  AbstractMemory 0.4.0 are on PyPI (root ADR-0034: never released above an unpublished floor).
+- **Notebooks open as before**: the new fields are added to an existing notebook when it opens, empty
+  for what it already holds; the notebook's format version stays 4 (the live notebooks' version, now the
+  baseline of this package).
+- **Requires AbstractMemory 0.4.0**: a statement placed between two earlier beliefs now moves the
+  older belief's end date through AbstractMemory's public `narrow_assertion`; AbstractNote no longer
+  writes AbstractMemory's private table (backlog 0034). The floor is `abstractmemory>=0.4.0`, the
+  release that carries it.
 - **What a thing is**: the description of a person, project or tool now says what it is (its kind,
   its role or purpose, and what it belongs to or works with), instead of the latest thing
   that happened to it. It is rewritten only when a note changes

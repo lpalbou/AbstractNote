@@ -18,7 +18,7 @@ python3 -m venv .venv
 
 The `[gateway]` extra adds AbstractGateway 0.15.11 or later, the first release that carries the
 AbstractNote integration; leave it out (`pip install abstractnote`) if you only want a headless
-notebook. AbstractMemory 0.3.1 or later, AbstractRuntime and AbstractCore come with the package.
+notebook. AbstractMemory 0.4.0 or later, AbstractRuntime 0.14.0 or later and AbstractCore come with the package.
 
 The examples below call `abstractnote` directly; activate the environment first
 (`. .venv/bin/activate`) or prefix the commands with `.venv/bin/`.

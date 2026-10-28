@@ -17,6 +17,10 @@ SCHEMA_VERSION = 4  # 2: entities.name_key/display_name/key_clash_with, entity_a
 #                    3: ADR 0008 (revisions.context_json, reinterpret_marks, note_dependencies, soft-removed mentions,
 #                    topics and tasks of a superseded interpretation, retired entities);
 #                    4: ADR 0008 §4a (idea_changes, the propagated fields of reinterpret_marks)
+# Not bumped for backlog 0037 (the ledger address of a note and of a revision, the note's sources, the body
+# artifact): those are nullable columns added on open (``_ADDED_COLUMNS``), NULL on older rows, read by nothing
+# that changes the behaviour of existing data (memory transition: the baseline is this schema-4 line, operator
+# decision 1).
 
 TRUTH_TABLES = ("meta", "notes", "attachments", "note_links", "queue", "revisions", "vectors", "context_packets",
                 "reinterpret_marks", "idea_changes", "reading_confirmations")
@@ -60,7 +64,10 @@ CREATE TABLE IF NOT EXISTS notes (
   entity_ids_json TEXT,
   acked_at TEXT,
   about_json TEXT,
-  seq INTEGER
+  seq INTEGER,
+  ledger_seq INTEGER,
+  ledger_step_id TEXT,
+  body_artifact_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_notes_occurred ON notes(occurred_at);
 CREATE INDEX IF NOT EXISTS idx_notes_received ON notes(received_at);
@@ -146,7 +153,11 @@ CREATE TABLE IF NOT EXISTS revisions (
   applied_index INTEGER NOT NULL DEFAULT 0,
   applied_kg INTEGER NOT NULL DEFAULT 0,
   abandoned INTEGER NOT NULL DEFAULT 0,
-  error TEXT
+  error TEXT,
+  ledger_run_id TEXT,
+  ledger_seq INTEGER,
+  ledger_step_id TEXT,
+  sources_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_revisions_note ON revisions(note_id);
 CREATE INDEX IF NOT EXISTS idx_revisions_at ON revisions(at);
@@ -507,15 +518,23 @@ TRIGGERS = """
 -- ADR 0003: the revision log is append-only. What a revision IS (its identity, ops, source and dependency record)
 -- never changes once written; only the bookkeeping of its application (applied_index, applied_kg, result_json,
 -- abandoned, error) moves, and its summary/warnings are completed by its own apply, never after it was applied.
-CREATE TRIGGER IF NOT EXISTS revisions_append_only BEFORE UPDATE ON revisions
+-- Backlog 0037 (review T1): where a revision came from (its ledger address and the note's sources) is part of what
+-- it is: written on INSERT, never updated. The trigger is dropped and created again in one transaction on every
+-- open (``ensure_schema``), so a notebook created with an earlier body of it gets this one.
+BEGIN IMMEDIATE;
+DROP TRIGGER IF EXISTS revisions_append_only;
+CREATE TRIGGER revisions_append_only BEFORE UPDATE ON revisions
 WHEN OLD.revision_id IS NOT NEW.revision_id OR OLD.note_id IS NOT NEW.note_id OR OLD.attempt IS NOT NEW.attempt
   OR OLD.action IS NOT NEW.action OR OLD.target IS NOT NEW.target OR OLD.at IS NOT NEW.at
   OR OLD.recorded_at IS NOT NEW.recorded_at OR OLD.run_id IS NOT NEW.run_id OR OLD.ops_json IS NOT NEW.ops_json
   OR OLD.source_json IS NOT NEW.source_json OR OLD.context_json IS NOT NEW.context_json
+  OR OLD.ledger_run_id IS NOT NEW.ledger_run_id OR OLD.ledger_seq IS NOT NEW.ledger_seq
+  OR OLD.ledger_step_id IS NOT NEW.ledger_step_id OR OLD.sources_json IS NOT NEW.sources_json
   OR (OLD.applied_index = 1 AND (OLD.summary IS NOT NEW.summary OR OLD.warnings_json IS NOT NEW.warnings_json))
 BEGIN
   SELECT RAISE(ABORT, 'The revision log is append-only (ADR 0003): a written revision is never changed.');
 END;
+COMMIT;
 """
 
 
@@ -545,14 +564,23 @@ def connect(path: str) -> sqlite3.Connection:
 
 # Columns added after the first notebooks were created (in-place upgrade on open).
 _ADDED_COLUMNS = {
-    "notes": [("about_json", "TEXT")],
+    # backlog 0037, no version bump (see SCHEMA_VERSION; precedent ``notes.about_json``): where a note and a
+    # revision came from in AbstractRuntime's ledger. On a note: the capture step (``run_id`` is the run;
+    # ``ledger_seq`` the ledger row when the runtime gave it, ``ledger_step_id`` the step) and the note body stored
+    # as an artifact of that run (``{artifact_id, run_id?}``). On a revision: the tool step that applied it
+    # (``ledger_run_id``, ``ledger_seq``, ``ledger_step_id``; ``run_id`` keeps its own meaning, e.g. a
+    # consolidation id) and the note's sources at that time (``sources_json``: AbstractMemory ``SourceRef``
+    # dicts). NULL on rows written before; set on INSERT only (the revision log stays append-only).
+    "notes": [("about_json", "TEXT"), ("ledger_seq", "INTEGER"), ("ledger_step_id", "TEXT"),
+              ("body_artifact_json", "TEXT")],
     # schema 3 (ADR 0008): a retired entity (``entity.retire``), a task a re-understanding withdrew, the
     # dependency record of a revision (``context_json``)
     "entities": [("name_key", "TEXT"), ("display_name", "TEXT"), ("key_clash_with", "TEXT"),
                  ("retired_revision_id", "TEXT"), ("retired_at", "TEXT")],
     "tasks": [("removed_revision_id", "TEXT")],
     "entity_aliases": [("alias_key", "TEXT")],
-    "revisions": [("context_json", "TEXT")],
+    "revisions": [("context_json", "TEXT"), ("ledger_run_id", "TEXT"), ("ledger_seq", "INTEGER"),
+                  ("ledger_step_id", "TEXT"), ("sources_json", "TEXT")],
     # schema 4 (ADR 0008 §4a): a mark raised because an idea the note relies on was understood differently
     # (``reason_code`` direct | propagated, its source entity and re-understanding, the impact carried, the hops)
     "reinterpret_marks": [("reason_code", "TEXT NOT NULL DEFAULT 'direct'"), ("source_entity_id", "TEXT"),
@@ -571,6 +599,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_name_key ON entities(name_key)
   WHERE merged_into IS NULL AND key_clash_with IS NULL;
 CREATE INDEX IF NOT EXISTS idx_entities_name_key_all ON entities(name_key);
 CREATE INDEX IF NOT EXISTS idx_alias_key ON entity_aliases(alias_key);
+CREATE INDEX IF NOT EXISTS idx_revisions_ledger_run ON revisions(ledger_run_id);
 """
 
 #: Meta key set when a migration found entities written before canonical names: the next write
@@ -665,7 +694,12 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ROLLBACK")
         raise
     conn.executescript(POST_DDL)
-    conn.executescript(TRIGGERS)
+    try:
+        conn.executescript(TRIGGERS)  # one transaction: the trigger is never absent for another connection
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
     try:
         conn.executescript(FTS_DDL)
     except sqlite3.OperationalError as exc:  # pragma: no cover - every supported Python ships FTS5

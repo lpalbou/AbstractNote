@@ -3,10 +3,13 @@
 Every claim becomes a ``TripleAssertion`` (``assertion_id = claim_id``); entity
 names, aliases and merges become ``schema:name``, ``skos:altLabel`` and
 ``schema:sameAs`` assertions. The triple store is append-only: the only
-in-place change is ``close_assertion(assertion_id, valid_until)`` (an additive
-AbstractMemory method), always paired with a journal ``ClosureRecord`` so that
+in-place changes are ``close_assertion(assertion_id, valid_until)`` and
+``narrow_assertion`` (both public AbstractMemory methods), always paired with a journal ``ClosureRecord`` so that
 ``TripleQuery(active_at=...)`` and ranked retrieval both agree with the note
-index. Every query passes ``owner_id="abstractnote"``.
+index. Every query passes ``owner_id="abstractnote"``. A window already closed
+later is moved earlier with AbstractMemory's public ``narrow_assertion`` (the
+``after_claim_id`` of ``claim.insert_before``); nothing here touches the
+store's private attributes (backlog 0034).
 
 Vectors are never computed here: the note index embeds each canonical text
 once (``VectorCache``) and the triple store reads them through
@@ -24,6 +27,7 @@ from abstractmemory import ClosureRecord, SQLiteJournal, SQLiteTripleStore, Trip
 from abstractmemory.canonical_text import canonical_text
 
 from .. import ids
+from ..ledger import provenance
 from ..model import CERTAINTY_CONFIDENCE
 from .embeddings import VectorCache, vector_key
 
@@ -76,8 +80,9 @@ class _LookupEmbedder:
 
 
 def claim_assertion(payload: Dict[str, Any], rev: Dict[str, Any], subject_kind: Optional[str],
-                    object_kind: Optional[str], *, run_id: Optional[str] = None) -> TripleAssertion:
-    """The ``TripleAssertion`` of one ``claim.add`` payload (docs/data-model.md, projection table)."""
+                    object_kind: Optional[str]) -> TripleAssertion:
+    """The ``TripleAssertion`` of one ``claim.add`` payload (docs/data-model.md, projection table). Its
+    provenance names the revision's ledger sources (:func:`abstractnote.ledger.provenance`, backlog 0037)."""
     literal = payload.get("object_id") is None
     attrs: Dict[str, Any] = {
         KIND_ATTR: "claim", "certainty": payload["certainty"], "stance": payload.get("stance") or "assert",
@@ -92,19 +97,15 @@ def claim_assertion(payload: Dict[str, Any], rev: Dict[str, Any], subject_kind: 
         attrs["evidence_quote"] = payload["evidence"]
     if payload.get("of_claim_id"):  # a copy of a note-index claim (claim.revise / claim.reopen, ADR 0008)
         attrs[CLAIM_ATTR] = payload["of_claim_id"]
-    prov = {
-        "source": "abstractnote", "note_id": payload.get("note_id") or rev.get("note_id"),
-        "revision_id": rev["revision_id"], "run_id": run_id or rev.get("run_id"),
-        "evidence_quote": payload.get("evidence"), "recorded_at": rev["recorded_at"],
-    }
+    prov = provenance(rev, note_id=payload.get("note_id") or rev.get("note_id"),
+                      evidence_quote=payload.get("evidence"))
     return TripleAssertion(
         subject=payload["subject_id"], predicate=payload["predicate"],
         object=payload["object_literal"] if literal else payload["object_id"],
         scope=SCOPE, owner_id=OWNER_ID, observed_at=payload["observed_at"],
         valid_from=payload.get("valid_from"), valid_until=payload.get("valid_until"),
         confidence=CERTAINTY_CONFIDENCE.get(payload["certainty"], 0.5),
-        provenance={k: v for k, v in prov.items() if v is not None}, attributes=attrs,
-        assertion_id=payload["claim_id"],
+        provenance=prov, attributes=attrs, assertion_id=payload["claim_id"],
     )
 
 
@@ -150,8 +151,7 @@ def label_assertion(entity_id: str, predicate: str, value: str, kind: str, rev: 
     return TripleAssertion(
         subject=entity_id, predicate=predicate, object=value, scope=SCOPE, owner_id=OWNER_ID,
         observed_at=rev["at"], valid_from=rev["at"] if kind == "same_as" else None,
-        provenance={"source": "abstractnote", "revision_id": rev["revision_id"], "recorded_at": rev["recorded_at"],
-                    **({"note_id": rev["note_id"]} if rev.get("note_id") else {})},
+        provenance=provenance(rev),
         attributes=attrs, assertion_id=ids.kg_assertion_id(entity_id, predicate, value),
     )
 
@@ -283,38 +283,24 @@ class ClaimStore:
                 c = dict(c, kind="retract")
             if self.store.close_assertion(c["assertion_id"], c["valid_until"]):
                 closed += 1
-            elif c.get("narrow") and self.narrow_assertion(c["assertion_id"], c["valid_until"]):
+            elif c.get("narrow") and self.store.narrow_assertion(c["assertion_id"], c["valid_until"]):
+                # AbstractMemory's public narrow (its ADR 0003 decision 7): moves an already-closed window
+                # earlier, refuses to widen one; an AbstractMemory without it fails here, loudly (backlog 0034).
                 closed += 1
             self.journal.append_closure(ClosureRecord(
                 assertion_id=c["assertion_id"], kind=c["kind"], reason=c["reason"],
-                replacement_ids=tuple(c["replacement_ids"]), observed_at=_journal_time(rev["recorded_at"]),
+                replacement_ids=tuple(c["replacement_ids"]),
+                # observation time = the revision's ``at`` (the note's date, or the person's correction time), as
+                # AbstractMemory's MemoryGraph stamps a closure (its ADR 0003 decision 5; review N8); the record
+                # time stays in ``extra.recorded_at``
+                observed_at=_journal_time(rev["at"]),
                 actor="abstractnote",
-                provenance={"revision_id": rev["revision_id"], "note_id": rev.get("note_id"),
-                            "valid_until": c["valid_until"]},
+                # the contract's shape (contract §2, §7): the closing revision, its note and the new end of the
+                # window in ``extra``; nothing outside the six keys, so AbstractMemory's Provenance.from_dict reads it
+                provenance=provenance(rev, valid_until=c["valid_until"]),
                 closure_id=ids.closure_id(rev["revision_id"], c["assertion_id"], c["kind"]),
             ))
         return {"added": len(adds), "closed": closed}
-
-    def narrow_assertion(self, assertion_id: str, valid_until: str) -> bool:
-        """Move an already-closed window EARLIER (a retrospective note placed between two beliefs). The only
-        in-place change besides ``close_assertion``, and like it limited to ``valid_until``: the content, provenance,
-        FTS row and vector are untouched. AbstractMemory has no public method for it (``close_assertion`` only
-        closes open windows), so this writes the store's own table through its connection; a store without them
-        fails loudly (seam: an additive ``narrow_assertion`` in AbstractMemory should replace this)."""
-        store = self.store
-        table, conn, lock = store._table, store._conn, store._lock  # noqa: SLF001 - see the docstring
-        with lock:
-            cur = conn.cursor()
-            cur.execute("BEGIN IMMEDIATE")
-            try:
-                cur.execute(f"UPDATE {table} SET valid_until=? WHERE assertion_id=? AND valid_until IS NOT NULL AND"
-                            " valid_until>?", (valid_until, assertion_id, valid_until))
-                changed = int(cur.rowcount or 0) > 0
-                cur.execute("COMMIT")
-            except BaseException:
-                cur.execute("ROLLBACK")
-                raise
-        return changed
 
     # ------------------------------------------------------------------ reads
 

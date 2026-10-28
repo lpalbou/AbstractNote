@@ -48,7 +48,9 @@ revision points back to the note(s) that caused it.
 | `priority` | int 0..3 | 3 urgent, 2 high, 1 normal, 0 bulk. |
 | `status` | enum | `received`, `queued`, `processing`, `processed`, `failed`, `duplicate`, `archived`. |
 | `duplicate_of` | note id or null | Set only when the same idempotency key or import source key arrives again (a retry), never for the same words on another occasion. |
-| `session_id`, `run_id` | text | The gateway session and the run that captured it, when applicable. |
+| `session_id`, `run_id` | text | The gateway session and the AbstractRuntime run that captured it, when applicable (a capture inside a runtime step: the run of that step, read from the runtime, never passed by a flow or a model). A run id given by a caller with no step behind it (`capture(run_id=...)`, the optional `run_id` of `note_insight_write`, notes written before backlog 0037) is kept as a label only: it is never a source of what the note teaches (`ledger_seq` and `ledger_step_id` are null for it). Inside a runtime step a given run id must be the step's own run, or the write is refused. |
+| `ledger_seq`, `ledger_step_id` | int, text, or null | The ledger row (`seq` of the step's STARTED record) and the step id of the `note_capture` tool step that captured it, when the runtime reported them; never invented (backlog 0037). Null for notes captured outside a run and for notes written before. |
+| `body_artifact` | `{artifact_id, run_id?}` or null | The note body stored as an AbstractRuntime artifact of the capture run (tags `kind=note_body`, `note_id`), when the capture had an artifact store (inside the gateway, or `NoteRunner.local(..., artifact_store=...)`). Null for the CLI and importers, and for notes captured before (writing their bodies is the operator's one-time projection decision). Column `body_artifact_json`. |
 | `archived_at` | ISO or null | Notes are archived, never deleted. |
 
 ### Attachment
@@ -162,9 +164,11 @@ bookkeeping of its application (`applied_index`, `applied_kg`, `result_json`, `a
 | `applied_index`, `applied_kg` | flags set after each projection commits; recovery replays revisions whose flags are not both set (idempotent thanks to deterministic ids) |
 | `at` | the note's `occurred_at` (history time) |
 | `recorded_at` | when the processor applied it (system time) |
-| `run_id` | the processing run (ledger) |
+| `run_id` | an AbstractNote-local run id when one applies (a consolidation's `cs_<...>`); not the ledger address |
 | `action` | null for a note's first understanding; `note.reinterpret` for a re-understanding (ADR 0008, id from `(note.reinterpret, note_id, the revision it supersedes)`); the user action otherwise |
 | `context_json` | the dependency record (ADR 0008): what the reading saw, `{as_of, entities, claims, summaries: {entity_id: revision_id}, notes, mention_queries, looked_up}` (see "Re-understanding"); null on revisions written before schema 3 (`context_unknown`) and on user actions |
+| `ledger` | `{run_id, seq?, step_id?}` or null: the AbstractRuntime tool step that applied it (for a processed note, the `note_apply_revision` step of the `note-process` run, whose STARTED ledger row holds the extraction and linking verbatim as the tool's arguments). Read from the runtime's step context when the caller passes none; `seq` only when the runtime reported it. Columns `ledger_run_id`, `ledger_seq`, `ledger_step_id` (backlog 0037). |
+| `sources` | the note's own ledger sources when the revision was written (AbstractMemory `SourceRef` dicts: the capture `step` or `run`, the body `artifact`, each attachment's `artifact`), fixed on the row so a replay or a rebuild projects the same provenance. Column `sources_json`. |
 | `ops` | ordered list of operations |
 | `summary` | one sentence written by the processor ("Linked the LUT budget decision to Castor; superseded the earlier plan.") |
 
@@ -303,13 +307,17 @@ warning in its revision (ADR 0007).
 
 ## Time
 
-AbstractNote is bitemporal, and every note carries three dates that answer three different questions:
+AbstractNote is bitemporal, and every note carries three dates that answer three different questions. In
+AbstractMemory's vocabulary (its ADR 0003 decision 5) the three axes are **event time** (the validity window,
+read with `active_at`), **observation time** (`observed_at`, the note's date, read with `as_of`) and **record
+time** (`recorded_at`, when the mind learned it, read with `as_recorded`, the as-received view); the table names
+the AbstractNote fields of each:
 
 | Date | Field | Question it answers |
 |---|---|---|
-| Authored (history time) | `occurred_at`, `claim.observed_at`, `revision.at` | "When was this written or did it happen?" "What did the graph look like on day X?" |
-| Valid | `claim.valid_from`, `claim.valid_until` | "What did I believe about X at time T?" |
-| Archive-accepted (system time) | `received_at` (and `processed_at`, `revision.recorded_at`) | "What did my archive hold on date R?" "What has the processor done since I last looked?" |
+| Authored (history time; AbstractMemory: observation time) | `occurred_at`, `claim.observed_at`, `revision.at` | "When was this written or did it happen?" "What did the graph look like on day X?" |
+| Valid (AbstractMemory: event time) | `claim.valid_from`, `claim.valid_until` | "What did I believe about X at time T?" |
+| Archive-accepted (system time; AbstractMemory: record time) | `received_at` (and `processed_at`, `revision.recorded_at`) | "What did my archive hold on date R?" "What has the processor done since I last looked?" |
 
 The axes are independent: an import received today can hold notes authored years ago, and a note
 written in January can say something stopped being true in March.
@@ -651,7 +659,7 @@ Every claim is written to the AbstractMemory store as a `TripleAssertion`:
 | `observed_at` | the claim's `observed_at` (note time) |
 | `valid_from`, `valid_until` | the claim's window |
 | `confidence` | mapped from certainty: stated 0.9, probable 0.7, possible 0.5, reported 0.6, disputed 0.3 |
-| `provenance` | `{source: "abstractnote", note_id, revision_id, run_id, evidence_quote, recorded_at}` |
+| `provenance` | AbstractMemory's provenance shape (its ADR 0003, `abstractmemory.graph.Provenance`; see "Ledger provenance" below) |
 | `attributes` | `{subject_type, object_type, certainty, stance, literal?, evidence_quote?, abstractnote_kind}` (`abstractnote_kind` is `claim`, `name`, `alias` or `same_as`) |
 
 Entity names and aliases are written as `(entity_id, schema:name, "Name")` and
@@ -661,9 +669,9 @@ AbstractMemory store method introduced for this purpose (it updates `valid_until
 still open and leaves everything else untouched), and records a journal
 `ClosureRecord(kind="supersede")` so both `TripleQuery(active_at=...)` and ranked retrieval agree
 with the note index. A `claim.insert_before` closes the OLDER copy the same way (never the later belief), and moves
-the window of the belief before it back with `ClaimStore.narrow_assertion` (`valid_until` only, earlier only, with
-its own closure record): AbstractMemory has no public method for an already-closed window yet, so AbstractNote
-writes that one column of its own triple store's table (a seam: an additive AbstractMemory method should replace it).
+the window of the belief before it back with AbstractMemory's public `narrow_assertion(assertion_id, valid_until)`
+(`valid_until` only, earlier only, refusing an open window or a widening; with its own closure record;
+AbstractMemory 0.4.0, backlog 0034).
 A `claim.start_earlier` cannot widen the assertion either (its content, `observed_at` and `valid_from`, is
 append-only): the earlier evidence is an ADDITIVE assertion of the same statement for the moved part of the
 window, `[new start, previous start)`, observed at the earlier note's date, with provenance naming the earlier
@@ -691,3 +699,51 @@ notebook opened without the embedder it is pinned to opens read-only: reads and 
 work, and anything that would write or embed refuses with a plain sentence. A retraction (user
 action or a note's `retract` stance) closes the assertion
 the same way with `ClosureRecord(kind="retract")`; an undone merge closes its `schema:sameAs`.
+
+### Ledger provenance
+
+Schema: the notebook format stays at version 4 (the baseline, operator decision 1 of the memory transition); the
+ledger columns (`notes.ledger_seq`, `notes.ledger_step_id`, `notes.body_artifact_json`, `revisions.ledger_run_id`,
+`revisions.ledger_seq`, `revisions.ledger_step_id`, `revisions.sources_json`) are added to an existing notebook when
+it opens, NULL on its rows, and written once, when a note or a revision is inserted, and `rebuild()` copies them.
+The revision log's append-only trigger (`revisions_append_only`) refuses an UPDATE of a revision's ledger columns
+like one of its ops; it is dropped and created again on every open, so a notebook made with its earlier body gets
+this one.
+
+Every projected assertion (claims, names, aliases, merges) and every journal closure carries the provenance shape
+of AbstractMemory ADR 0003 (decisions 8-11), so `abstractmemory.graph.Provenance.from_dict` reads it unchanged:
+
+```
+{"sources": [SourceRef, ...],      # the revision's ledger step, then the note's sources (below)
+ "derived_from": [],
+ "actor": "abstractnote",
+ "reader": "<provider/model>" | null,   # when the revision's source names the model; no flow passes it yet
+ "reason": null,
+ "extra": {"revision_id", "recorded_at", "note_id"?, "evidence_quote"?, "step_id"?, "valid_until"?,
+           "run_id"?, "note_run_id"?}}       # the last two: bare run ids, labels only
+```
+
+`sources` lists, without repeats: the step that applied the revision (`{"kind": "step", run_id, seq, step_id}`
+when the runtime reported the ledger row, else `{"kind": "run", run_id}` with the step id in `extra.step_id`),
+the step that captured the note, the note body's artifact and each attachment's artifact (`{"kind":
+"artifact", artifact_id, run_id?}`). A closure's `extra` names the closing revision and the window's new end
+(`valid_until`). Only an address that names its step (a `seq` or a `step_id`, as the
+runtime's step context always does) is a source: a bare run id, given by a caller or written before, is a label,
+carried in `extra.run_id` (the revision's) or `extra.note_run_id` (its note's) and never in `sources`. A
+revision written outside any run, about a note captured outside any run without an artifact store (the CLI, an
+importer, a test), names no source; nothing is invented for it. Neither does a person's correction from the web
+(retract, redate, unmerge, confirm, task close: `POST /note/...` routes that write the notebook directly, outside
+any runtime step): its assertions and closures carry `actor: "abstractnote"` and `extra.revision_id`, whose
+revision row names the action and `source = {client, account}`, and no source (backlog 0033 phase 2). Revisions and notes written
+before this change carry none either (their grounding is the operator's one-time projection, backlog 0033).
+In AbstractMemory's terms `sources[*].key()` is `step:<run_id>#<seq>`, `run:<run_id>` or `artifact:<id>`; the
+runtime's `LedgerStore.get_record(run_id, seq)` returns the row a `step` ref names.
+
+An existing `kg.sqlite3` keeps the earlier flat provenance (`{source: "abstractnote", note_id, revision_id, ...}`)
+on the assertions it already holds until `rebuild()`, which rewrites them in this shape with empty `sources`
+(their revisions named no step); phase 2 adopts them with an `import`/`migration` revision (backlog 0033).
+
+Transitional (backlog 0033): AbstractNote still writes this projection to its own `kg.sqlite3`. Phase 2 moves it
+onto AbstractMemory's `MemoryGraph.apply_revision` through the gateway, into the plane's one mind (AbstractMemory
+ADR 0003 decisions 1-3), where this shape is required (`ProvenanceRequired` for a write that names neither a
+source nor a memory it was derived from).

@@ -1,7 +1,7 @@
 # ADR 0003: The revision log is the truth; the index and the AbstractMemory store are projections
 
 **Status**: Accepted, transitional. Amended 2026-10-27 (operator ruling): its direction is superseded by
-AbstractMemory ADR 0002; see "Amendment" below.  
+AbstractMemory ADR 0002, its target set by AbstractMemory ADR 0003; see the two amendments below.  
 **Date**: 2026-10-19
 
 ## Context
@@ -39,3 +39,30 @@ The decision above is therefore transitional, kept only until each capability ex
 
 Backlog: 0033 (converge onto AbstractMemory), 0034 (no private writes), 0035 (hand the ripple prototype to
 AbstractMemory).
+
+## Amendment (2026-10-27, AbstractMemory ADR 0003)
+
+AbstractMemory ADR 0003 (`abstractmemory/docs/adr/0003-one-graph-ledger-provenance-and-revisions.md`) sets the
+target this ADR converges to:
+
+- **One graph, several minds.** The notebook's graph converges into the plane's one mind (decisions 1-3): the
+  notebook's `kg.sqlite3`, the plane's KG store and the note index's knowledge become one home under
+  `<plane>/abstractmemory/` (which store backs it, SQLite or LanceDB, is AbstractMemory's decision 3, pending).
+  "The notebook's triple store is not the plane's shared KG store" (Decision above) is superseded on where the
+  knowledge lives, not on who reads it: visibility is strict ownership (decision 2, amended 2026-10-27, operator
+  ruling): the notebook's knowledge is its owner's, readable by the owner's other applications and by nobody else
+  by default; the plane is not a sharing scope.
+- **A revision is the unit of change there too** (decisions 6-7): AbstractMemory's `MemoryGraph.apply_revision`
+  (ops `assert`, `close` with kind and successor, `narrow`) is where this ADR's revision log moves (backlog 0033
+  phase 2); `NoteStore.project` becomes its client.
+- **Provenance is mandatory and typed** (decisions 8-11). Done here first (backlog 0037): every projected
+  assertion and every closure carries `{sources, derived_from, actor: "abstractnote", reader, reason, extra}`
+  with `sources` = the AbstractRuntime step that applied the revision (`step` ref `(run_id, seq)` when the runtime
+  reports the row), the step that captured the note, the note body as an artifact of the capture run, and the
+  attachments' artifacts; the revision row keeps its ledger address and the note's sources so a replay or a
+  rebuild projects the same provenance. The columns are added on open (no schema version change).
+- **Three time axes** (decision 5): AbstractNote's history, valid and system times are AbstractMemory's
+  observation, event and record times (docs/data-model.md, Time).
+
+The phases (foundations, the revision log moves, capabilities, thin client) and the operator decisions they wait
+on are in backlog 0033.
