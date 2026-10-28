@@ -1,17 +1,36 @@
 /**
- * Start the note flows and follow them: the ledger SSE stream shows the
- * `answer_user` message as soon as it exists; the run's terminal `output`
- * (`output.response`, `output.note_id`, ...) comes from `GET /runs/{id}`. If the
- * stream fails, the app polls the run and its ledger pages instead.
+ * Start the note flows and follow them through AbstractGateway's replay view (gateway >= 0.17.0,
+ * `GET runs/{id}/view` + `/view/stream`, the runtime's one reconstruction of the run tree; root backlog
+ * 0993, runtime 0854): the answer as soon as the view has it, progress from its activities, and a run
+ * that waits for a person is reported as waiting instead of being followed forever. The run's terminal
+ * `output` (`output.response`, `output.note_id`, ...) is read once from `GET /runs/{id}`.
+ *
+ * A gateway without the view (its route answers FastAPI's 404 "Not Found") is followed the earlier way,
+ * labeled (`RunState.source = "ledger_fold"` with `sourceReason`): the ledger SSE stream shows the
+ * `answer_user` message; if the stream fails, the app polls the run and its ledger pages.
  *
  * Ledger frames (abstractgateway/docs/api.md "Stream ledger updates"):
  *   event: step  data: {"cursor": n, "record": {effect: {type, payload}, status, result, ...}}
  *   event: done  data: {"run_id", "cursor", "status": "terminal"}
  */
 
-import type { Api } from "./api";
+import { createReplayViewTransport, projectReplayView, ReplayViewFold, type ReplayViewActivity, type ReplayViewInteraction } from "@abstractframework/panel-chat";
+import { ApiError, type Api } from "./api";
 
-export type RunState = { run_id?: string; status: string; output?: Record<string, unknown> | null; error?: unknown; waiting?: unknown };
+/** A person-facing wait the view names (a question or an approval somewhere in the run tree). */
+export type RunWaiting = { kind: ReplayViewInteraction["kind"]; run_id: string; prompt: string | null };
+
+export type RunState = {
+  run_id?: string;
+  status: string;
+  output?: Record<string, unknown> | null;
+  error?: unknown;
+  waiting?: unknown;
+  /** Where the run was followed: the gateway's replay view, or this app's own ledger reads. */
+  source?: "replay_view" | "ledger_fold";
+  /** Why it was not the replay view (`source: "ledger_fold"`). */
+  sourceReason?: string;
+};
 
 export const TERMINAL = new Set(["completed", "failed", "cancelled", "canceled", "stopped"]);
 
@@ -55,6 +74,15 @@ export function stepWords(record: unknown): string | null {
   return null;
 }
 
+/** One activity of the replay view as a progress line (the same words as `stepWords`), or null. */
+export function activityWords(activity: ReplayViewActivity): string | null {
+  if (activity.kind === "subworkflow") return "Dug through your history";
+  if (activity.status !== "completed") return null;
+  if (activity.kind === "tool") return (activity.tool_calls || []).map((c) => STEP_TOOLS[String(c?.name || "")]).find(Boolean) || null;
+  if (activity.kind === "llm") return "Wrote the answer";
+  return null;
+}
+
 /** Parse one SSE `step` frame's data into its record (null when unreadable). */
 export function recordFromFrame(data: string): { cursor: number; record: unknown } | null {
   try {
@@ -81,6 +109,12 @@ const RUNTIME_PREFIX = "Runtime error: ";
  * (docs/api.md). Null when the run succeeded.
  */
 export function runErrorText(run: RunState): string | null {
+  if (run.status === "waiting") {
+    const w = (run.waiting && typeof run.waiting === "object" ? run.waiting : {}) as Partial<RunWaiting>;
+    const what = w.kind === "tool_approval" ? "an approval" : "an answer";
+    const prompt = typeof w.prompt === "string" && w.prompt.trim() ? `: “${w.prompt.trim()}”` : "";
+    return `This run is waiting for ${what}${prompt}. Answer it where the gateway's runs are shown (AbstractCode or the Observer); this page does not answer runs.`;
+  }
   const out = (run.output && typeof run.output === "object" ? run.output : {}) as Record<string, unknown>;
   const failed = run.status !== "completed" || out.success === false;
   if (!failed) return null;
@@ -96,27 +130,114 @@ export type EventSourceLike = {
 };
 
 export type FollowOptions = {
-  onAnswer?: (text: string, source: "stream" | "ledger") => void;
-  /** Every ledger record as it arrives (progress lines: see `stepWords`). */
-  onStep?: (record: unknown) => void;
+  onAnswer?: (text: string, source: "view" | "stream" | "ledger") => void;
+  /** A progress line as the run advances (`activityWords` from the view, `stepWords` from the ledger). */
+  onProgress?: (words: string) => void;
   /** Injected for tests; default `new EventSource(url)`. */
   eventSource?: (url: string) => EventSourceLike;
   sleep?: (ms: number) => Promise<void>;
   /** Poll delays (ms) after the stream fails; the last one repeats. */
   pollMs?: number[];
   signal?: { aborted: boolean };
+  /** View stream reconnects before giving up (default 5). */
+  viewRetries?: number;
 };
+
+type Settled = { status: "terminal" } | { status: "waiting"; waiting: RunWaiting };
+
+/**
+ * Follow the run through the replay view. Resolves with the terminal run (one `GET /runs/{id}` for its
+ * output) or a waiting one; `{unavailable}` when the gateway has no view route.
+ */
+async function followView(api: Api & { raw: NonNullable<Api["raw"]> }, runId: string, opts: FollowOptions): Promise<RunState | { unavailable: string }> {
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const transport = createReplayViewTransport({ fetch: (path, init) => api.raw(path, init) });
+  let read;
+  try {
+    read = await transport.getView(runId);
+  } catch (e) {
+    if (e && typeof e === "object" && (e as Error).name === "ReplayViewUnavailableError") return { unavailable: (e as Error).message };
+    throw e;
+  }
+  if (read.notModified) throw new ApiError(502, "The gateway answered 304 to a first read of the run.");
+  const fold = new ReplayViewFold();
+  fold.adopt(read.view, read.etag);
+  const shown = new Set<string>();
+  let answered = false;
+  const settle = (): Settled | null => {
+    const view = fold.view!;
+    const p = projectReplayView(view);
+    for (const a of view.activities || []) {
+      const words = activityWords(a);
+      if (words && !shown.has(words)) {
+        shown.add(words);
+        opts.onProgress?.(words);
+      }
+    }
+    if (!answered) {
+      const answer = p.messages.find((m) => m.role === "assistant" && (m.kind === "answer" || m.kind === "final") && m.content.trim());
+      if (answer) {
+        answered = true;
+        opts.onAnswer?.(answer.content, "view");
+      }
+    }
+    if (TERMINAL.has(p.status)) return { status: "terminal" };
+    if (view.interaction) return { status: "waiting", waiting: { kind: view.interaction.kind, run_id: view.interaction.run_id, prompt: view.interaction.prompt ?? null } };
+    return null;
+  };
+  let settled = settle();
+  const retries = opts.viewRetries ?? 5;
+  // A stream that ends without `done` is reconnected from the last applied frame; one that delivers
+  // nothing counts toward the limit (an accept-then-close never loops for ever).
+  let failures = 0;
+  while (!settled && !fold.terminal) {
+    if (opts.signal?.aborted) return { status: "cancelled", source: "replay_view" };
+    const ctrl = new AbortController();
+    let delivered = false;
+    try {
+      await transport.streamView(runId, {
+        lastEventId: fold.lastEventId,
+        signal: ctrl.signal,
+        onFrame: (frame) => {
+          const outcome = fold.apply(frame);
+          if (outcome !== "view" && outcome !== "delta") return;
+          delivered = true;
+          settled = settle();
+          if (settled) ctrl.abort();
+        },
+      });
+    } catch (e) {
+      // A refusal of the session is final (the api already sent the app back to sign-in).
+      if (!ctrl.signal.aborted && (e as { status?: unknown })?.status === 401) throw e;
+    }
+    if (settled || fold.terminal) break;
+    failures = delivered ? 0 : failures + 1;
+    if (failures >= retries) throw new ApiError(0, "The run's live view stopped answering.", "network");
+    await sleep([300, 700, 1500, 2500, 4000][Math.min(failures, 4)]);
+  }
+  if (settled?.status === "waiting") return { run_id: runId, status: "waiting", waiting: settled.waiting, source: "replay_view" };
+  const run = await api.get<RunState>(`runs/${encodeURIComponent(runId)}`);
+  return { ...run, source: "replay_view" };
+}
 
 /**
  * Follow a run to its end. Resolves with the terminal run (from `GET /runs/{id}`).
  * Rejects only when the run cannot be read (the api's retries are exhausted).
  */
 export async function followRun(api: Api, runId: string, opts: FollowOptions = {}): Promise<RunState> {
+  const viewed = await followView(api as Api & { raw: NonNullable<Api["raw"]> }, runId, opts);
+  if (!("unavailable" in viewed)) return viewed;
+  const legacy = await followLedger(api, runId, opts);
+  return { ...legacy, source: "ledger_fold", sourceReason: viewed.unavailable };
+}
+
+/** The earlier way (gateways before the replay view): the ledger stream, else polling. */
+async function followLedger(api: Api, runId: string, opts: FollowOptions): Promise<RunState> {
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const pollMs = opts.pollMs ?? [700, 1000, 1500, 2500, 4000];
   let answered = false;
   let cursor = 0;
-  const seen = (text: string, source: "stream" | "ledger") => {
+  const seen = (text: string, source: "view" | "stream" | "ledger") => {
     if (answered) return;
     answered = true;
     opts.onAnswer?.(text, source);
@@ -136,7 +257,8 @@ export async function followRun(api: Api, runId: string, opts: FollowOptions = {
         const frame = recordFromFrame(String(ev.data));
         if (!frame) return;
         cursor = Math.max(cursor, frame.cursor);
-        opts.onStep?.(frame.record);
+        const words = stepWords(frame.record);
+        if (words) opts.onProgress?.(words);
         const text = answerFromRecord(frame.record);
         if (text) seen(text, "stream");
       });
@@ -161,10 +283,11 @@ export async function followRun(api: Api, runId: string, opts: FollowOptions = {
   // Poll: the run for its status, its ledger pages for the early answer and the progress.
   for (let i = 0; ; i++) {
     if (opts.signal?.aborted) return { status: "cancelled" };
-    if (!answered || opts.onStep) {
+    if (!answered || opts.onProgress) {
       const page = await api.get<{ items?: Array<{ cursor?: number; record?: unknown }>; next_after?: number }>(`runs/${encodeURIComponent(runId)}/ledger`, { after: cursor, limit: 200 });
       for (const item of page.items || []) {
-        opts.onStep?.(item.record ?? item);
+        const words = stepWords(item.record ?? item);
+        if (words) opts.onProgress?.(words);
         const text = answerFromRecord(item.record ?? item);
         if (text) seen(text, "ledger");
       }

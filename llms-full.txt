@@ -40,7 +40,7 @@ runtime and one notebook per user, app hosting), **AbstractRuntime** and **Abstr
 capture and understanding workflows), **AbstractMemory** (temporal facts) and **AbstractCore**
 (models, structured output, embeddings).
 
-Status: version 0.2.0, alpha. The Python package is `abstractnote` on PyPI and the web app is
+Status: version 0.3.0, alpha. The Python package is `abstractnote` on PyPI and the web app is
 `@abstractframework/note` on npm (see [Install](#install)).
 
 ## What you get
@@ -617,7 +617,11 @@ POST /api/gateway/runs/start
 ```
 
 Response: `{"run_id": "..."}`. Read the answer from `GET /runs/{run_id}` when `status` is
-`completed` (`output.response`, `output.note_id`, `output.status`), or follow
+`completed` (`output.response`, `output.note_id`, `output.status`). To show the answer earlier, follow the run's
+replay view (AbstractGateway 0.17.0: `GET /runs/{run_id}/view`, then `GET /runs/{run_id}/view/stream` with
+`Last-Event-ID`; the web app does this with `@abstractframework/panel-chat`'s `createReplayViewTransport`): its
+`messages` carry the answer, its `activities` the progress, and its `interaction` a question or an approval the run
+waits for (the web app reports such a run as waiting). On an older gateway, follow
 `GET /runs/{run_id}/ledger/stream` and show the `answer_user` message as soon as it appears.
 
 Dates (ADR 0008 §7, data-model.md "Document dates"). `occurred_at` is when the person wrote the note: send it for
@@ -3461,6 +3465,22 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+## [0.3.0] - 2026-10-28
+
+### Changed
+- **The web app follows a run through the gateway's replay view** (AbstractGateway 0.17.0, framework backlog 0993,
+  AbstractRuntime 0854): Capture and Remember read `GET runs/{id}/view` and its stream (`@abstractframework/panel-chat`
+  0.6.0 `createReplayViewTransport`, `ReplayViewFold`, `projectReplayView`) instead of the ledger stream and ledger
+  pages: the answer as soon as the view has it, progress from the view's activities, and the run's output read once
+  when it ends. A run that waits for a person (an approval or a question anywhere in its tree) is now said to be
+  waiting, with its question, instead of being followed until it times out: "This run is waiting for an answer:
+  “…”. Answer it where the gateway's runs are shown (AbstractCode or the Observer); this page does not answer runs."
+- A gateway without the view (before 0.17.0; its route answers 404 "Not Found") is followed the earlier way, and the
+  run says so (`source: "ledger_fold"` with the reason). Any other failure of the view read is reported, never
+  hidden by the fallback. A view stream that closes without sending anything is reconnected a bounded number of
+  times.
+- `@abstractframework/panel-chat` ^0.6.0 (was ^0.4.1) and `@abstractframework/ui-kit` ^0.9.2 (was ^0.8.7).
 
 ## [0.2.0] - 2026-10-28
 

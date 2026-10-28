@@ -30,7 +30,7 @@ export type CaptureItem = {
   about?: About | null;
   state: CaptureState;
   answer?: string;
-  answerSource?: "stream" | "ledger" | "output";
+  answerSource?: "view" | "stream" | "ledger" | "output";
   runId?: string;
   noteId?: string;
   note?: Pick<Note, "note_id" | "kind" | "title" | "topics" | "status" | "entities" | "revisits" | "revision" | "occurred_at"> | null;

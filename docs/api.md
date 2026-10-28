@@ -30,7 +30,11 @@ POST /api/gateway/runs/start
 ```
 
 Response: `{"run_id": "..."}`. Read the answer from `GET /runs/{run_id}` when `status` is
-`completed` (`output.response`, `output.note_id`, `output.status`), or follow
+`completed` (`output.response`, `output.note_id`, `output.status`). To show the answer earlier, follow the run's
+replay view (AbstractGateway 0.17.0: `GET /runs/{run_id}/view`, then `GET /runs/{run_id}/view/stream` with
+`Last-Event-ID`; the web app does this with `@abstractframework/panel-chat`'s `createReplayViewTransport`): its
+`messages` carry the answer, its `activities` the progress, and its `interaction` a question or an approval the run
+waits for (the web app reports such a run as waiting). On an older gateway, follow
 `GET /runs/{run_id}/ledger/stream` and show the `answer_user` message as soon as it appears.
 
 Dates (ADR 0008 §7, data-model.md "Document dates"). `occurred_at` is when the person wrote the note: send it for

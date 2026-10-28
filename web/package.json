@@ -1,6 +1,6 @@
 {
   "name": "@abstractframework/note",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "AbstractNote web app: capture notes, explore what they connect, and remember how your understanding changed.",
   "type": "module",
   "author": "Laurent-Philippe Albou",
@@ -40,8 +40,8 @@
   },
   "dependencies": {
     "@abstractframework/app-server": "^0.1.12",
-    "@abstractframework/panel-chat": "^0.4.1",
-    "@abstractframework/ui-kit": "^0.8.7",
+    "@abstractframework/panel-chat": "^0.6.0",
+    "@abstractframework/ui-kit": "^0.9.2",
     "d3-force": "^3.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
