@@ -6,6 +6,28 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-28
+
+### Changed
+- **The web app follows a run through the gateway's replay view** (AbstractGateway 0.17.0, framework backlog 0993,
+  AbstractRuntime 0854): Capture and Remember read `GET runs/{id}/view` and its stream (`@abstractframework/panel-chat`
+  0.6.0 `createReplayViewTransport`, `ReplayViewFold`, `projectReplayView`) instead of the ledger stream and ledger
+  pages: the answer as soon as the view has it, progress from the view's activities, and the run's output read once
+  when it ends. A run that waits for a person (an approval or a question anywhere in its tree) is now said to be
+  waiting, with its question, instead of being followed indefinitely: "This run is waiting for an answer:
+  “…”. Answer it where the gateway's runs are shown (AbstractCode or the Observer); this page does not answer runs."
+- A gateway without the view (before 0.17.0; its route answers 404 "Not Found") is followed the earlier way, and the
+  run says so (`source: "ledger_fold"` with the reason). Any other failure of the view read is reported, never
+  hidden by the fallback. A view stream that closes without sending anything is reconnected a bounded number of
+  times.
+- Following a run through the view: the early answer is the root run's own `answer_user`; the run's summary is
+  read until it says the run ended (the runtime records the end before it saves the run); a failed first read is
+  tried again like every read; a refused stream (401, 403, 404) is final and a failing one keeps the gateway's
+  reason; leaving Capture or Remember closes the run's live view.
+- The mock gateway (`npm run dev:mock`) serves the replay view of its runs (`GET runs/{id}/view` + its stream);
+  `createMockGateway({ replayView: false })` answers those paths as a gateway before 0.17.0 does.
+- `@abstractframework/panel-chat` ^0.6.0 (was ^0.4.1) and `@abstractframework/ui-kit` ^0.9.2 (was ^0.8.7).
+
 ## [0.2.0] - 2026-10-28
 
 ### Added

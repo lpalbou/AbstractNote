@@ -48,7 +48,8 @@ describe("runCapture", () => {
         const status = noteStatuses.length > 1 ? noteStatuses.shift() : noteStatuses[0];
         return new Response(JSON.stringify({ note_id: "nt_x", title: "Met Dana", kind: "event", occurred_at: base.occurred_at, status, entities: status === "processed" ? [{ entity_id: "ex:person-dana", name: "Dana", kind: "person" }] : [], revisits: [] }));
       }
-      return new Response("{}", { status: 404 });
+      // A gateway before the replay view (0.17.0): FastAPI's unmatched-route 404.
+      return new Response(JSON.stringify({ detail: "Not Found" }), { status: 404 });
     });
     const api = createApi({ fetch: fetch as unknown as typeof globalThis.fetch, sleep: async () => undefined, csrf: () => "c" });
     const states: Array<Partial<CaptureItem>> = [];
@@ -84,6 +85,7 @@ describe("runCapture", () => {
       const u = String(url);
       if (u.endsWith("runs/start")) return new Response(JSON.stringify({ run_id: "r1" }));
       if (u.endsWith("runs/r1")) return new Response(JSON.stringify({ status: "completed", output: { success: false, error: "Runtime error: Local file paths are not accepted here; upload the file as an attachment instead." } }));
+      if (u.includes("/view")) return new Response(JSON.stringify({ detail: "Not Found" }), { status: 404 });
       return new Response(JSON.stringify({ items: [], next_after: 0 }));
     });
     const api = createApi({ fetch: fetch as unknown as typeof globalThis.fetch, sleep: async () => undefined, csrf: () => "c" });

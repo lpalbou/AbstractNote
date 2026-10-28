@@ -75,6 +75,9 @@ export function createMockGateway(options = {}) {
   const processDelayMs = Number(options.processDelayMs ?? 6000);
   const liveProcessing = Boolean(options.liveProcessing);
   const stepMs = Number(options.stepMs ?? 3000);
+  // AbstractGateway 0.17.0 serves the replay view (`GET runs/{id}/view` + `/view/stream`). `replayView: false`
+  // models an older gateway: FastAPI's unmatched-route 404 for those paths.
+  const replayView = options.replayView !== false;
   const db = buildSeed();
   const sessions = new Map();
   const runs = new Map();
@@ -707,6 +710,71 @@ export function createMockGateway(options = {}) {
     }, delay);
   }
 
+  // ------------------------------------------------------------ replay view (mock of replay_view_v1)
+  /**
+   * The run's replay view from the mock's own records, in the served shape (`replay_view_v1`): status, the
+   * root's `answer_user` messages, one activity per record, the cursor token (ETag / SSE id). The mock's runs
+   * have no sub-runs and never wait on a person, so `interaction` is null and `runs` has the root only.
+   */
+  function mockView(run) {
+    const n = run.records.length;
+    const prefix = run.run_id.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 8) || "_";
+    const token = `${prefix}:${n}~${run.status}`;
+    const KIND = { tool_calls: "tool", llm_call: "llm", start_subworkflow: "subworkflow", answer_user: "answer" };
+    const messages = [];
+    const activities = [];
+    run.records.forEach((rec, i) => {
+      const seq = i + 1;
+      const type = String(rec.effect?.type || "");
+      const order = [rec.started_at, run.run_id, seq];
+      if (type === "answer_user") {
+        const text = rec.result?.message ?? rec.effect?.payload?.message ?? "";
+        messages.push({ id: `${run.run_id}:${rec.step_id}:answer_user`, role: "assistant", kind: "answer", text, run_id: run.run_id, step_ids: [rec.step_id], seqs: [seq], source: "answer_user", artifact_ids: [], order });
+      }
+      const calls = Array.isArray(rec.effect?.payload?.tool_calls) ? rec.effect.payload.tool_calls : [];
+      activities.push({
+        id: `${run.run_id}:${rec.step_id}`, run_id: run.run_id, execution_id: rec.step_id, node_id: rec.node_id, kind: KIND[type] || type || "step",
+        effect_type: type || null, name: rec.node_id, status: rec.status, started_at: rec.started_at, ended_at: rec.ended_at, seqs: [seq], step_ids: [rec.step_id], order,
+        ...(type === "tool_calls" ? { tool_calls: calls.map((c, k) => ({ id: String(k), name: c.name, arguments: c.arguments ?? {}, status: rec.status })) } : {}),
+      });
+    });
+    return {
+      version: "replay_view_v1", root_run_id: run.run_id, workflow: { id: `abstractnote@mock:${run.flow_id}`, bundle_id: "abstractnote", bundle_version: "mock", flow_id: run.flow_id, entrypoint: run.flow_id },
+      session_id: run.session_id || null, status: run.status, display_status: null, cursor: { token, records: n, runs: { [run.run_id]: n } },
+      runs: [{ run_id: run.run_id, parent_run_id: null, status: run.status, display_status: null, depth: 0, order: ["", "", 0, run.run_id], waiting: null, holds_interaction: false, records: n, first_seq: n ? 1 : null, last_seq: n || null }],
+      interaction: null, open_waits: [], messages, activities, artifacts: [], usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, llm_calls: activities.filter((a) => a.kind === "llm").length }, warnings: [],
+    };
+  }
+  function viewRoute(req, res, run, stream) {
+    const view = mockView(run);
+    const etag = `"${view.cursor.token}"`;
+    if (!stream) {
+      if (String(req.headers["if-none-match"] || "") === etag) {
+        res.writeHead(304, { ETag: etag, "Cache-Control": "no-cache" });
+        return res.end();
+      }
+      return send(res, 200, view, { ETag: etag, "Cache-Control": "no-cache" });
+    }
+    // The stream: the whole view (a `view` frame) unless the client holds the current token, then a
+    // `view` frame per change (the real gateway sends `delta` frames; a `view` frame is valid too), and
+    // `done` once the run is terminal.
+    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+    const frame = () => {
+      const v = mockView(run);
+      res.write(`id: ${v.cursor.token}\nevent: view\ndata: ${JSON.stringify(v)}\n\n`);
+    };
+    const end = () => {
+      res.write(`event: done\ndata: ${JSON.stringify({ run_id: run.run_id, status: "terminal" })}\n\n`);
+      res.end();
+      run.listeners.delete(listener);
+    };
+    const listener = { step: frame, done: () => { frame(); end(); } };
+    if (String(req.headers["last-event-id"] || "") !== view.cursor.token) frame();
+    if (run.status !== "running") return end();
+    run.listeners.add(listener);
+    req.on("close", () => run.listeners.delete(listener));
+  }
+
   // ------------------------------------------------------------ routes
   function sse(req, res, run, after) {
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
@@ -810,6 +878,14 @@ export function createMockGateway(options = {}) {
       else if (body.flow_id === "note-recall") startRecall(run);
       else return fail(res, 404, "Unknown flow.");
       return send(res, 200, { run_id: run.run_id });
+    }
+    m = p.match(/^\/api\/gateway\/runs\/([^/]+)\/view(\/stream)?$/);
+    if (m) {
+      // FastAPI's own body for a route it does not have (what a gateway before 0.17.0 answers).
+      if (!replayView) return send(res, 404, { detail: "Not Found" });
+      const run = runs.get(m[1]);
+      if (!run) return fail(res, 404, `Run '${m[1]}' not found`);
+      return viewRoute(req, res, run, Boolean(m[1] && m[2]));
     }
     m = p.match(/^\/api\/gateway\/runs\/([^/]+)(\/ledger(\/stream)?)?$/);
     if (m) {

@@ -8,7 +8,8 @@ function fakeApi(routes: Record<string, unknown[]>) {
   const fetch = vi.fn(async (url: RequestInfo | URL) => {
     const path = String(url).replace(/^api\/gateway\//, "").split("?")[0];
     const queue = routes[path];
-    if (!queue || !queue.length) return new Response(JSON.stringify({ detail: "no" }), { status: 404 });
+    // A gateway before the replay view: FastAPI's unmatched-route 404.
+    if (!queue || !queue.length) return new Response(JSON.stringify({ detail: "Not Found" }), { status: 404 });
     const body = queue.length > 1 ? queue.shift() : queue[0];
     return new Response(JSON.stringify(body), { status: 200 });
   });

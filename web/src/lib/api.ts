@@ -192,7 +192,24 @@ export function createApi(options: ApiOptions = {}) {
     return ref as { $artifact: string };
   }
 
-  return { get, poll, post, put, upload, url: (path: string, params?: Record<string, unknown>) => `${API_PREFIX}${path}${queryString(params)}` };
+  /**
+   * A raw read under the gateway API (the replay view's GET with its ETag, and its SSE stream): the
+   * Response as received, no retry (the caller reconnects), the browser session's credentials. A 401
+   * calls `onUnauthorized` like every other request.
+   */
+  async function raw(path: string, init: RequestInit = {}): Promise<Response> {
+    let resp: Response;
+    try {
+      resp = await doFetch(`${API_PREFIX}${path}`, { ...init, credentials: "same-origin", cache: "no-store" });
+    } catch (e) {
+      if (init.signal?.aborted) throw e;
+      throw new ApiError(0, "No answer.", "network");
+    }
+    if (resp.status === 401) options.onUnauthorized?.();
+    return resp;
+  }
+
+  return { get, poll, post, put, upload, raw, url: (path: string, params?: Record<string, unknown>) => `${API_PREFIX}${path}${queryString(params)}` };
 }
 
 /**

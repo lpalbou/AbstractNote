@@ -57,6 +57,8 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
   const stick = useRef(true);
   const pastedText = useRef(false);
   const alive = useRef(true);
+  // Closes the runs' live views when the page goes away (`update` is a no-op by then).
+  const leaving = useRef<AbortController>(new AbortController());
   const inlineRef = useRef(processInline);
   inlineRef.current = processInline;
 
@@ -64,9 +66,11 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
 
   useEffect(() => {
     alive.current = true;
+    leaving.current = new AbortController();
     const previews = previewsFor.current;
     return () => {
       alive.current = false;
+      leaving.current.abort();
       for (const urls of previews.values()) for (const u of urls) if (u) URL.revokeObjectURL(u);
     };
   }, []);
@@ -86,7 +90,7 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
   }, []);
 
-  const deps = useMemo(() => ({ api, sessionId, processInline: () => inlineRef.current, update, alive: () => alive.current }), [api, sessionId, update]);
+  const deps = useMemo(() => ({ api, sessionId, processInline: () => inlineRef.current, update, alive: () => alive.current, signal: () => leaving.current.signal }), [api, sessionId, update]);
 
   // A reload resumes watching the notes that were still being organized.
   useEffect(() => {

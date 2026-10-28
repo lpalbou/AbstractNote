@@ -11,7 +11,7 @@ runtime and one notebook per user, app hosting), **AbstractRuntime** and **Abstr
 capture and understanding workflows), **AbstractMemory** (temporal facts) and **AbstractCore**
 (models, structured output, embeddings).
 
-Status: version 0.2.0, alpha. The Python package is `abstractnote` on PyPI and the web app is
+Status: version 0.3.0, alpha. The Python package is `abstractnote` on PyPI and the web app is
 `@abstractframework/note` on npm (see [Install](#install)).
 
 ## What you get
