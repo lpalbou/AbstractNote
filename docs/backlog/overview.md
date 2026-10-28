@@ -7,7 +7,7 @@ Last reconciled: 2026-10-28 (0038 npm publish added; 0033 carries the phase 2 op
 |---|---|
 | planned | 5 (0038; track `planned/v1/`: 0029; track `planned/memory_convergence/`: 0033, 0035, 0036) |
 | proposed | 9 |
-| completed | 23 (track `completed/v1/`: 21; track `completed/memory_convergence/`: 0034, 0037) |
+| completed | 24 (track `completed/v1/`: 21; track `completed/memory_convergence/`: 0034, 0037; 0039 web pin on the kit's message footer spec) |
 | deprecated | 1 (0015) |
 | recurrent | 1 (0901) |
 
