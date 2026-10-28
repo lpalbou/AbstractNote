@@ -1,17 +1,17 @@
 # AbstractNote backlog overview
 
-Last reconciled: 2026-10-27 (memory convergence track added; proposed 0015 deprecated; 0034 and 0037 completed; 0033 rewritten as the phased plan)
+Last reconciled: 2026-10-28 (0038 npm publish added; 0033 carries the phase 2 open decisions 3, 4, 8, 10, 12, 13, 14; earlier 2026-10-27: memory convergence track added; proposed 0015 deprecated; 0034 and 0037 completed; 0033 rewritten as the phased plan)
 
 ## Counts
 | State | Count |
 |---|---|
-| planned | 4 (track `planned/v1/`: 0029; track `planned/memory_convergence/`: 0033, 0035, 0036) |
+| planned | 5 (0038; track `planned/v1/`: 0029; track `planned/memory_convergence/`: 0033, 0035, 0036) |
 | proposed | 9 |
 | completed | 23 (track `completed/v1/`: 21; track `completed/memory_convergence/`: 0034, 0037) |
 | deprecated | 1 (0015) |
 | recurrent | 1 (0901) |
 
-Next free id: 0038.
+Next free id: 0039.
 
 ## Priorities and recommended order
 0. Operator ruling 2026-10-27: AbstractMemory owns the memory graph (AbstractMemory ADR 0002; ADRs 0003 and 0008
@@ -24,6 +24,7 @@ Next free id: 0038.
 
 ## Ledgers
 ### Planned
+- [0038 npm publish of `@abstractframework/note` (0.2.0 rejected E404, trusted publisher)](planned/0038_npm_publish_of_abstractframework_note.md)
 - [0029 Ingest the rest of the framework's history into the operator's notebook](planned/v1/0029_ingest_the_rest_of_the_framework_history.md)
 
 - [0033 Converge the notebook's knowledge graph onto AbstractMemory](planned/memory_convergence/0033_converge_onto_abstractmemory.md)
