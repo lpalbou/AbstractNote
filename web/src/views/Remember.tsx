@@ -564,10 +564,14 @@ function useAsk(initialTopic: string) {
   // Quick is instant: it follows the typing (a short pause only to spare a request per key).
   const dq = useDebounced(q.trim(), 150);
   const alive = useRef(true);
+  // Closes the run's live view when the page goes away (the answer would have nowhere to go).
+  const leaving = useRef<AbortController>(new AbortController());
   useEffect(() => {
     alive.current = true;
+    leaving.current = new AbortController();
     return () => {
       alive.current = false;
+      leaving.current.abort();
     };
   }, []);
   useEffect(() => {
@@ -592,6 +596,7 @@ function useAsk(initialTopic: string) {
     try {
       const runId = await startFlow(api, "note-recall", sessionId, { question, effort, as_of: at, since: filters.since ?? null, until: filters.until ?? null, entities: filters.entities, topics });
       const run = await followRun(api, runId, {
+        signal: leaving.current.signal,
         onProgress: (words) => {
           if (!alive.current) return;
           setAsked((prev) => (prev && prev.state === "asking" && !(prev.steps || []).includes(words) ? { ...prev, steps: [...(prev.steps || []), words] } : prev));
@@ -618,7 +623,7 @@ function useAsk(initialTopic: string) {
         process_inline: false,
         context: { attachments: [], answer: { question: a.question, evidence_note_ids: (a.output?.evidence || []).map((e) => e.note_id) } },
       });
-      const run = await followRun(api, runId);
+      const run = await followRun(api, runId, { signal: leaving.current.signal });
       const refused = runErrorText(run);
       setSaved(refused === null ? "Saved as a note." : run.status === "waiting" ? refused : "The answer could not be saved.");
     } catch {

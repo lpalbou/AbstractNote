@@ -81,6 +81,8 @@ export type CaptureDeps = {
   sleep?: (ms: number) => Promise<void>;
   follow?: Omit<FollowOptions, "onAnswer">;
   alive?: () => boolean;
+  /** The page's leave signal: the run's live view closes when it aborts. */
+  signal?: () => AbortSignal | undefined;
 };
 
 /** Run one capture to its answer (and, when queued, until processed). Never throws. */
@@ -104,8 +106,10 @@ export async function runCapture(item: CaptureItem, files: File[], deps: Capture
     const runId = await startFlow(api, "note-capture", deps.sessionId, captureInput({ ...item, artifacts }, deps.processInline(), deps.sessionId));
     update(item.id, { runId });
     let answered = false;
+    const leave = deps.signal?.();
     const run = await followRun(api, runId, {
       ...deps.follow,
+      ...(leave ? { signal: leave } : {}),
       onAnswer: (text, source) => {
         answered = true;
         update(item.id, { answer: text, answerSource: source });

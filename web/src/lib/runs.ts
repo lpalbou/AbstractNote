@@ -15,7 +15,7 @@
  */
 
 import { createReplayViewTransport, projectReplayView, ReplayViewFold, type ReplayViewActivity, type ReplayViewInteraction } from "@abstractframework/panel-chat";
-import { ApiError, type Api } from "./api";
+import { ApiError, READ_BACKOFF_MS, retryable, type Api } from "./api";
 
 /** A person-facing wait the view names (a question or an approval somewhere in the run tree). */
 export type RunWaiting = { kind: ReplayViewInteraction["kind"]; run_id: string; prompt: string | null };
@@ -138,30 +138,46 @@ export type FollowOptions = {
   sleep?: (ms: number) => Promise<void>;
   /** Poll delays (ms) after the stream fails; the last one repeats. */
   pollMs?: number[];
-  signal?: { aborted: boolean };
+  /** Stop following (the page went away): an AbortSignal also closes the open view stream at once. */
+  signal?: AbortSignal | { aborted: boolean };
   /** View stream reconnects before giving up (default 5). */
   viewRetries?: number;
 };
 
 type Settled = { status: "terminal" } | { status: "waiting"; waiting: RunWaiting };
 
+const statusOf = (e: unknown): number => Number((e as { status?: unknown })?.status ?? 0) || 0;
+const detailOf = (e: unknown): string => {
+  const d = (e as { detail?: unknown })?.detail;
+  return typeof d === "string" && d.trim() ? d.trim() : e instanceof Error ? e.message : String(e);
+};
+
 /**
- * Follow the run through the replay view. Resolves with the terminal run (one `GET /runs/{id}` for its
- * output) or a waiting one; `{unavailable}` when the gateway has no view route.
+ * Follow the run through the replay view. Resolves with the terminal run (its summary read until it says
+ * terminal: the runtime appends the completion record before it saves the run) or a waiting one;
+ * `{unavailable}` when the gateway has no view route.
  */
-async function followView(api: Api & { raw: NonNullable<Api["raw"]> }, runId: string, opts: FollowOptions): Promise<RunState | { unavailable: string }> {
+async function followView(api: Api, runId: string, opts: FollowOptions): Promise<RunState | { unavailable: string }> {
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const external = opts.signal;
   const transport = createReplayViewTransport({ fetch: (path, init) => api.raw(path, init) });
+  // The first read is retried like every other read (ADR-0039): a blip is not a failed run.
   let read;
-  try {
-    read = await transport.getView(runId);
-  } catch (e) {
-    if (e && typeof e === "object" && (e as Error).name === "ReplayViewUnavailableError") return { unavailable: (e as Error).message };
-    throw e;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      read = await transport.getView(runId, external instanceof AbortSignal ? { signal: external } : {});
+      break;
+    } catch (e) {
+      if (e && typeof e === "object" && (e as Error).name === "ReplayViewUnavailableError") return { unavailable: (e as Error).message };
+      if (external?.aborted) return { status: "cancelled", source: "replay_view" };
+      if (!retryable(statusOf(e)) || attempt >= READ_BACKOFF_MS.length) throw e instanceof ApiError ? e : new ApiError(statusOf(e), detailOf(e));
+      await sleep(READ_BACKOFF_MS[attempt]);
+    }
   }
   if (read.notModified) throw new ApiError(502, "The gateway answered 304 to a first read of the run.");
   const fold = new ReplayViewFold();
   fold.adopt(read.view, read.etag);
+  const root = read.view.root_run_id || runId;
   const shown = new Set<string>();
   let answered = false;
   const settle = (): Settled | null => {
@@ -175,10 +191,11 @@ async function followView(api: Api & { raw: NonNullable<Api["raw"]> }, runId: st
       }
     }
     if (!answered) {
-      const answer = p.messages.find((m) => m.role === "assistant" && (m.kind === "answer" || m.kind === "final") && m.content.trim());
+      // The early answer is the root run's own `answer_user` (a sub-run's reply is not the flow's answer).
+      const answer = (view.messages || []).find((m) => m.run_id === root && m.source === "answer_user" && m.role === "assistant" && m.text.trim());
       if (answer) {
         answered = true;
-        opts.onAnswer?.(answer.content, "view");
+        opts.onAnswer?.(answer.text, "view");
       }
     }
     if (TERMINAL.has(p.status)) return { status: "terminal" };
@@ -188,11 +205,15 @@ async function followView(api: Api & { raw: NonNullable<Api["raw"]> }, runId: st
   let settled = settle();
   const retries = opts.viewRetries ?? 5;
   // A stream that ends without `done` is reconnected from the last applied frame; one that delivers
-  // nothing counts toward the limit (an accept-then-close never loops for ever).
+  // nothing counts toward the limit (an accept-then-close never loops for ever). A refusal (401, 403,
+  // 404) is final.
   let failures = 0;
+  let lastError: unknown = null;
   while (!settled && !fold.terminal) {
-    if (opts.signal?.aborted) return { status: "cancelled", source: "replay_view" };
+    if (external?.aborted) return { status: "cancelled", source: "replay_view" };
     const ctrl = new AbortController();
+    const stop = () => ctrl.abort();
+    if (external instanceof AbortSignal) external.addEventListener("abort", stop, { once: true });
     let delivered = false;
     try {
       await transport.streamView(runId, {
@@ -207,17 +228,32 @@ async function followView(api: Api & { raw: NonNullable<Api["raw"]> }, runId: st
         },
       });
     } catch (e) {
-      // A refusal of the session is final (the api already sent the app back to sign-in).
-      if (!ctrl.signal.aborted && (e as { status?: unknown })?.status === 401) throw e;
+      if (!ctrl.signal.aborted) {
+        if ([401, 403, 404].includes(statusOf(e))) throw e instanceof ApiError ? e : new ApiError(statusOf(e), detailOf(e));
+        lastError = e;
+      }
+    } finally {
+      if (external instanceof AbortSignal) external.removeEventListener("abort", stop);
     }
+    if (external?.aborted) return { status: "cancelled", source: "replay_view" };
     if (settled || fold.terminal) break;
     failures = delivered ? 0 : failures + 1;
-    if (failures >= retries) throw new ApiError(0, "The run's live view stopped answering.", "network");
+    if (failures >= retries) {
+      const why = lastError ? `: ${detailOf(lastError)}` : " (it closed without sending anything)";
+      throw new ApiError(statusOf(lastError), `The run's live view stopped answering${why}.`, "network");
+    }
     await sleep([300, 700, 1500, 2500, 4000][Math.min(failures, 4)]);
   }
   if (settled?.status === "waiting") return { run_id: runId, status: "waiting", waiting: settled.waiting, source: "replay_view" };
-  const run = await api.get<RunState>(`runs/${encodeURIComponent(runId)}`);
-  return { ...run, source: "replay_view" };
+  // The view is terminal; the summary (the run's `output`) can lag by one save. Bounded.
+  const pollMs = opts.pollMs ?? [300, 700, 1000, 1500, 2500, 4000];
+  for (let i = 0; ; i++) {
+    const run = await api.get<RunState>(`runs/${encodeURIComponent(runId)}`);
+    if (TERMINAL.has(String(run.status))) return { ...run, source: "replay_view" };
+    if (external?.aborted) return { status: "cancelled", source: "replay_view" };
+    if (i >= 8) throw new ApiError(0, `The run ended (${fold.view?.status}) but its result was not saved yet; try again in a moment.`, "lagging");
+    await sleep(pollMs[Math.min(i, pollMs.length - 1)]);
+  }
 }
 
 /**
@@ -225,7 +261,7 @@ async function followView(api: Api & { raw: NonNullable<Api["raw"]> }, runId: st
  * Rejects only when the run cannot be read (the api's retries are exhausted).
  */
 export async function followRun(api: Api, runId: string, opts: FollowOptions = {}): Promise<RunState> {
-  const viewed = await followView(api as Api & { raw: NonNullable<Api["raw"]> }, runId, opts);
+  const viewed = await followView(api, runId, opts);
   if (!("unavailable" in viewed)) return viewed;
   const legacy = await followLedger(api, runId, opts);
   return { ...legacy, source: "ledger_fold", sourceReason: viewed.unavailable };
