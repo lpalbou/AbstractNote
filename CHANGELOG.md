@@ -6,6 +6,9 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 
 ## [Unreleased]
 
+### Changed
+- The web app builds with `@abstractframework/panel-chat` ^0.6.4 and `@abstractframework/ui-kit` ^0.9.5 (were ^0.6.0 and ^0.9.2). It renders no chat message card (the composer, Markdown and the replay-view projection only), so the kit's message footer spec (AbstractUIC 0.8.4, backlog 0064) changes nothing on screen; the pin keeps the app on the kit the other apps ship.
+
 ## [0.3.0] - 2026-10-28
 
 ### Changed
