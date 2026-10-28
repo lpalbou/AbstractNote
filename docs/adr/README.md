@@ -9,4 +9,4 @@
 | [0005](0005-eventual-consistency-queue-and-processor-automation.md) | Eventual consistency: queue, priorities, processor automation | Accepted |
 | [0006](0006-apple-client-credential-storage.md) | Apple client credential storage is file-sealed | Proposed |
 | [0007](0007-nothing-stops-or-drops-silently.md) | Nothing stops or drops silently (root ADR-0026 in AbstractNote) | Accepted |
-| [0008](0008-interpretation-is-a-derived-view.md) | Interpretation is a derived view; nothing understood is final (retrospective ingestion) | Proposed (amended 2026-10-27: the mechanism moves to AbstractMemory, its ADRs 0001-0002) |
+| [0008](0008-interpretation-is-a-derived-view.md) | Interpretation is a derived view; nothing understood is final (retrospective ingestion; §4a: deep changes reach the ideas that relied on them) | Proposed (amended 2026-10-27: the mechanism moves to AbstractMemory, its ADRs 0001-0002) |

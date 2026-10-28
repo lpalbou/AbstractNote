@@ -756,6 +756,7 @@ export function EntityPanel({ id, at, onFocus, slots, onTheme }: { id: string; a
                     </button>
                   ) : null}
                   {(e.merged_from || []).length ? <MergedFrom ids={e.merged_from || []} /> : null}
+                  {e.retired ? <p className="nt-muted">{e.retired.sentence}</p> : null}
                 </div>
                 {timeline.data ? <Sparkline dates={noteDates} from={range.from} to={range.to} label={`${e.name} activity`} /> : null}
               </header>

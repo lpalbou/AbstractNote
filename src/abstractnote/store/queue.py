@@ -12,6 +12,19 @@ Every failed attempt is also written to ``queue_errors`` (note, attempt, time, e
 ``last_error`` holds only the latest cause and a successful processing clears it, so the log is where
 the causes of retries stay readable (``errors``; ``summary`` shows the last :data:`ERRORS_SHOWN` per
 failed note).
+
+A note read against statements that were closed while it was being read is put back once (``ack`` outcome
+``requeue``): same priority, no failure counted, available at once, :data:`STALE_REQUEUE_ERROR` in ``queue_errors``;
+:meth:`Queue.requeued_stale` says it was, so the next reading is applied even if it is stale again.
+
+Claims (ADR 0008 §8: nothing is understood twice). A note being understood outside a drain carries a claim on its
+row: ``inline_run_id`` (note-capture with ``process_inline``, set in the enqueue's transaction, before the quick
+filing and the inline note-process) or ``reinterpret_run_id`` (the re-understanding stage), each with its
+``*_until`` time. A drain never leases a claimed note, and a note leased by a drain or claimed one way cannot be
+claimed the other way. A claim ends with the outcome (``ack``) or :meth:`Queue.release`; :meth:`Queue.heartbeat`
+moves its end on. A claim whose run died is leasable once :data:`CLAIM_S` (15 minutes, the drain's own
+:data:`LEASE_S`) has passed since its last heartbeat: the next lease clears it and logs the cause in
+``queue_errors`` (:data:`CLAIM_STOPPED_ERROR`) without counting a failure.
 """
 
 from __future__ import annotations
@@ -27,7 +40,18 @@ MAX_FAILURES = 3
 LEASE_MAX_ITEMS = 100   # notes one lease takes at most (the processor's max_items is 1..200 over several leases)
 PRIORITY_BULK, PRIORITY_NORMAL, PRIORITY_HIGH, PRIORITY_URGENT = 0, 1, 2, 3
 STOPPED_ERROR = "Processing stopped before it finished."
+#: How long a claim (inline or re-understanding) keeps drains away after its last heartbeat.
+CLAIM_S = LEASE_S
+CLAIM_KINDS = ("inline", "reinterpret")
+CLAIM_STOPPED_ERROR = {
+    "inline": "Understanding it right away stopped before it finished; it is understood from the queue instead.",
+    "reinterpret": "Understanding it again stopped before it finished; it can be taken again.",
+}
 ERRORS_SHOWN = 3  # recent causes per failed note in the queue summary
+#: The recorded reason of a drain's one re-queue of a note read against statements that changed while it was read
+#: (review 4.1, ADR 0008 §5): nothing of that reading was applied; the next lease reads it again on what holds now.
+STALE_REQUEUE_ERROR = ("The notebook changed while this note was being read (a statement it builds on was closed"
+                       " meanwhile); it is read again.")
 
 
 def _plus(ts: str, seconds: int) -> str:
@@ -51,6 +75,83 @@ class Queue:
     def set_priority(self, conn: Any, note_id: str, priority: int) -> None:
         conn.execute("UPDATE queue SET priority=? WHERE note_id=?", (int(priority), note_id))
 
+    # ------------------------------------------------------------------ claims (inline, re-understanding)
+
+    @staticmethod
+    def _kind(kind: str) -> str:
+        if kind not in CLAIM_KINDS:
+            raise ValueError("A claim is inline or reinterpret.")
+        return kind
+
+    def claim(self, note_id: str, kind: str, run_id: Optional[str] = None, *, conn: Any = None,
+              now: Optional[str] = None) -> bool:
+        """Claim the note for an understanding outside a drain (``inline`` or ``reinterpret``) until
+        :data:`CLAIM_S` from now. False (nothing written) when a drain holds a live lease on it or a live claim of
+        the other kind (or another run's of this kind) is on it; raises when it has no queue row."""
+        kind = self._kind(kind)
+        now = now or ids.utc_now()
+        rid = str(run_id or f"{kind}@{now}")
+        if conn is None:
+            with self.store.tx() as c:
+                return self._claim(c, note_id, kind, rid, now)
+        return self._claim(conn, note_id, kind, rid, now)
+
+    def _claim(self, c: Any, note_id: str, kind: str, rid: str, now: str) -> bool:
+        row = c.execute("SELECT * FROM queue WHERE note_id=?", (note_id,)).fetchone()
+        if row is None:
+            raise ValueError("That note is not in the queue.")
+        if row["state"] == "leased" and row["lease_until"] and row["lease_until"] > now:
+            return False
+        other = "reinterpret" if kind == "inline" else "inline"
+        if row[f"{other}_run_id"] and (row[f"{other}_until"] or "") > now:
+            return False
+        if row[f"{kind}_run_id"] and row[f"{kind}_run_id"] != rid and (row[f"{kind}_until"] or "") > now:
+            return False
+        c.execute(f"UPDATE queue SET {kind}_run_id=?, {kind}_until=? WHERE note_id=?",
+                  (rid, _plus(now, CLAIM_S), note_id))
+        return True
+
+    def heartbeat(self, note_id: str, *, now: Optional[str] = None) -> bool:
+        """Move the end of the note's live claims to :data:`CLAIM_S` from now (the run is still working on it).
+        False when it has none."""
+        now = now or ids.utc_now()
+        moved = False
+        with self.store.tx() as c:
+            for kind in CLAIM_KINDS:
+                cur = c.execute(f"UPDATE queue SET {kind}_until=? WHERE note_id=? AND {kind}_run_id IS NOT NULL"
+                                f" AND {kind}_until>?", (_plus(now, CLAIM_S), note_id, now))
+                moved = moved or cur.rowcount == 1
+        return moved
+
+    def release(self, note_id: str, kind: str, run_id: Optional[str] = None) -> None:
+        """End a claim (the run is done with the note); ``run_id`` given: only that run's claim."""
+        kind = self._kind(kind)
+        with self.store.tx() as c:
+            if run_id is None:
+                c.execute(f"UPDATE queue SET {kind}_run_id=NULL, {kind}_until=NULL WHERE note_id=?", (note_id,))
+            else:
+                c.execute(f"UPDATE queue SET {kind}_run_id=NULL, {kind}_until=NULL WHERE note_id=? AND"
+                          f" {kind}_run_id=?", (note_id, str(run_id)))
+
+    def claimed(self, note_id: str, *, now: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """The live claim on a note, ``{kind, run_id, until}``, else None."""
+        now = now or ids.utc_now()
+        row = self.store.q1("SELECT * FROM queue WHERE note_id=?", (note_id,))
+        for kind in CLAIM_KINDS:
+            if row is not None and row[f"{kind}_run_id"] and (row[f"{kind}_until"] or "") > now:
+                return {"kind": kind, "run_id": row[f"{kind}_run_id"], "until": row[f"{kind}_until"]}
+        return None
+
+    def _expire_claims(self, c: Any, now: str) -> None:
+        """Claims whose run stopped (no heartbeat for :data:`CLAIM_S`): cleared, and the cause logged in
+        ``queue_errors`` (not a failure: the note was never leased)."""
+        for kind in CLAIM_KINDS:
+            for r in c.execute(f"SELECT note_id, attempts FROM queue WHERE {kind}_run_id IS NOT NULL AND"
+                               f" {kind}_until<=?", (now,)).fetchall():
+                c.execute("INSERT INTO queue_errors(note_id, attempt, at, error) VALUES (?,?,?,?)",
+                          (r["note_id"], int(r["attempts"] or 0), now, CLAIM_STOPPED_ERROR[kind]))
+                c.execute(f"UPDATE queue SET {kind}_run_id=NULL, {kind}_until=NULL WHERE note_id=?", (r["note_id"],))
+
     def lease(self, worker_id: str, max_items: int = 1, *, now: Optional[str] = None) -> Dict[str, Any]:
         worker = str(worker_id or "").strip()
         if not worker:
@@ -66,9 +167,12 @@ class Queue:
             for r in c.execute("SELECT note_id, failures FROM queue WHERE state='leased' AND lease_until<=?",
                                (now,)).fetchall():
                 self._fail(c, r["note_id"], int(r["failures"]) + 1, STOPPED_ERROR, now)
+            self._expire_claims(c, now)
+            # A note claimed by a live inline or re-understanding run is never leased (ADR 0008 §8).
             rows = c.execute(
                 "SELECT note_id, priority, attempts FROM queue WHERE state='queued' AND"
-                " (next_attempt_at IS NULL OR next_attempt_at<=?)"
+                " (next_attempt_at IS NULL OR next_attempt_at<=?) AND inline_run_id IS NULL AND"
+                " reinterpret_run_id IS NULL"
                 " ORDER BY priority DESC, occurred_at ASC, size ASC, note_id ASC LIMIT ?", (now, n)).fetchall()
             until = _plus(now, LEASE_S)
             for r in rows:
@@ -82,43 +186,72 @@ class Queue:
                               "lease_until": until})
         return {"items": items, "limit_applied": n}
 
-    def _fail(self, c: Any, note_id: str, failures: int, error: str, now: str) -> Dict[str, Any]:
+    def _fail(self, c: Any, note_id: str, failures: int, error: str, now: str, *,
+              final: bool = False) -> Dict[str, Any]:
         row = c.execute("SELECT attempts FROM queue WHERE note_id=?", (note_id,)).fetchone()
         c.execute("INSERT INTO queue_errors(note_id, attempt, at, error) VALUES (?,?,?,?)",
                   (note_id, int(row["attempts"]) if row else 0, now, error))
-        if failures >= MAX_FAILURES:
+        if final or failures >= MAX_FAILURES:
             c.execute("UPDATE queue SET state='failed', failures=?, last_error=?, failed_at=?, leased_by=NULL,"
-                      " lease_until=NULL, next_attempt_at=NULL WHERE note_id=?", (failures, error, now, note_id))
+                      " lease_until=NULL, next_attempt_at=NULL, inline_run_id=NULL, inline_until=NULL"
+                      " WHERE note_id=?", (failures, error, now, note_id))
             c.execute("UPDATE notes SET status='failed' WHERE note_id=? AND archived_at IS NULL", (note_id,))
             return {"note_id": note_id, "status": "failed"}
         nxt = _plus(now, RETRY_BACKOFF_S[min(failures - 1, len(RETRY_BACKOFF_S) - 1)])
         c.execute("UPDATE queue SET state='queued', failures=?, last_error=?, leased_by=NULL, lease_until=NULL,"
-                  " next_attempt_at=? WHERE note_id=?", (failures, error, nxt, note_id))
+                  " next_attempt_at=?, inline_run_id=NULL, inline_until=NULL WHERE note_id=?",
+                  (failures, error, nxt, note_id))
         c.execute("UPDATE notes SET status='queued' WHERE note_id=? AND archived_at IS NULL", (note_id,))
         return {"note_id": note_id, "status": "queued", "next_attempt_at": nxt}
 
     def ack(self, note_id: str, outcome: str, error: Optional[str] = None, revision_id: Optional[str] = None, *,
-            now: Optional[str] = None) -> Dict[str, Any]:
-        if outcome not in ("ok", "error"):
-            raise ValueError("The outcome must be ok or error.")
+            now: Optional[str] = None, final: bool = False) -> Dict[str, Any]:
+        """The outcome of processing ``note_id``. A failure is retried with backoff up to :data:`MAX_FAILURES`; a
+        ``final`` one (a cause no retry can change, such as a note with no text to read) marks it ``failed`` at
+        once, its reason in ``queue_errors`` and ``last_error`` like any other (B item 11, FIX1). ``requeue``: the
+        reading was not applied because the notebook changed while it was read (:data:`STALE_REQUEUE_ERROR`); the
+        note goes back to the queue at once at its priority, no failure counted, the reason logged."""
+        if outcome not in ("ok", "error", "requeue"):
+            raise ValueError("The outcome must be ok, error or requeue.")
         now = now or ids.utc_now()
         with self.store.tx() as c:
             row = c.execute("SELECT * FROM queue WHERE note_id=?", (note_id,)).fetchone()
             if row is None:
                 raise ValueError("That note is not in the queue.")
+            if outcome == "requeue":
+                if row["state"] != "leased":
+                    raise ValueError("Only a note a drain is reading can be put back in the queue.")
+                reason = str(error or STALE_REQUEUE_ERROR)
+                c.execute("INSERT INTO queue_errors(note_id, attempt, at, error) VALUES (?,?,?,?)",
+                          (note_id, int(row["attempts"] or 0), now, reason))
+                c.execute("UPDATE queue SET state='queued', last_error=?, leased_by=NULL, lease_until=NULL,"
+                          " next_attempt_at=NULL WHERE note_id=?", (reason, note_id))
+                c.execute("UPDATE notes SET status='queued' WHERE note_id=? AND archived_at IS NULL", (note_id,))
+                return {"note_id": note_id, "status": "queued", "requeued": True, "priority": row["priority"]}
             if outcome == "ok":
                 if revision_id is not None and c.execute(
                         "SELECT 1 FROM revisions WHERE revision_id=? AND note_id=? AND applied_index=1",
                         (revision_id, note_id)).fetchone() is None:
                     raise ValueError("That revision was not applied to this note.")
                 c.execute("UPDATE queue SET state='done', done_at=?, leased_by=NULL, lease_until=NULL,"
-                          " next_attempt_at=NULL WHERE note_id=?", (now, note_id))
+                          " next_attempt_at=NULL, inline_run_id=NULL, inline_until=NULL WHERE note_id=?",
+                          (now, note_id))
                 c.execute("UPDATE notes SET status='processed', processed_at=COALESCE(processed_at, ?)"
                           " WHERE note_id=? AND archived_at IS NULL", (now, note_id))
                 return {"note_id": note_id, "status": "processed"}
             if row["state"] == "done":
                 return {"note_id": note_id, "status": "processed"}
-            return self._fail(c, note_id, int(row["failures"]) + 1, str(error or "Processing failed."), now)
+            return self._fail(c, note_id, int(row["failures"]) + 1, str(error or "Processing failed."), now,
+                              final=final)
+
+    def requeued_stale(self, note_id: str) -> bool:
+        """The note was already put back once because the notebook changed while it was read."""
+        return self.store.q1("SELECT 1 FROM queue_errors WHERE note_id=? AND error=? LIMIT 1",
+                             (note_id, STALE_REQUEUE_ERROR)) is not None
+
+    def leased(self, note_id: str) -> bool:
+        """A drain holds the note (its reading's outcome is the drain's ``ack``)."""
+        return self.store.q1("SELECT 1 FROM queue WHERE note_id=? AND state='leased'", (note_id,)) is not None
 
     def retry(self, note_id: str, *, now: Optional[str] = None) -> Dict[str, Any]:
         """Re-queue a failed note (user action from the queue panel)."""

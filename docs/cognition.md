@@ -19,7 +19,7 @@ AbstractFlow's `wf_common`) into `src/abstractnote/flows/json/*.json`; the bundl
 | `note-recall` | `abstractnote.recall.v1` and `abstractcode.agent.v1` | clients, agents, per question | answer a question at the requested effort |
 | `note-mine` | internal subflow | `note-recall` (deep) | multi-step mining across time; writes a dossier insight |
 | `note-reflect` | `abstractnote.reflect.v1` | a scheduled automation | surface open loops, contradictions, resurfaced material, connections |
-| `note-consolidate` | `abstractnote.consolidate.v1` | the consolidation automation, "Consolidate now" | merge duplicates, refresh the groups and their names, stale summaries and then-and-now, then reflect |
+| `note-consolidate` | `abstractnote.consolidate.v1` | the consolidation automation, "Consolidate now" | merge duplicates, understand again the notes an earlier note changed, refresh the groups and their names, stale summaries and then-and-now, then reflect |
 
 Every flow exposes `provider` and `model` start pins. Blank means the gateway's default text
 model. The processor automation carries the user's "filing model" (a small fast model is
@@ -58,13 +58,24 @@ flowchart TD
   stream the ledger show it immediately) and as `output.response` when the run ends (clients
   that poll the run read it there). `process_inline` is the client's choice: the web app sends
   its "Instant linking" setting (`process_inline_default`, off by default); the watch always
-  sends `false` and shows the filing answer.
+  sends `false` and shows the filing answer. The answer says where a date from a file came from
+  ("Dated 2 July 2019 from the document."); the processed answer says it when the note's own text
+  dated it (data-model.md "Document dates"). A note with nothing to read is refused by `note_capture`.
+- **Nothing is understood twice** (ADR 0008 §8). `note_capture` with `process_inline` claims the
+  queue row (`inline_run_id`, the capture run's id) in the same transaction as the enqueue, before
+  the quick filing, so no drain leases the note while note-capture files and understands it; the
+  outcome ends the claim either way: `note_queue_ack ok`, or, when note-process failed,
+  `note_queue_ack error` with the child's sentence (a failed attempt in `queue_errors`, retried by
+  the processor) and then the capture run ends with that sentence. See "Claims" under the queue.
 
 ### note-process
 
 ```mermaid
 flowchart TD
-    S[on_flow_start note_id, provider?, model?] --> X[tool note_context<br/>text, extracted attachment text,<br/>similar notes, candidate entities,<br/>recent claims about them, topics]
+    S[on_flow_start note_id, provider?, model?] --> FN{tool note_filing_context<br/>no kind yet?}
+    FN -- yes --> NF[subflow note-file<br/>the capture's quick filing]
+    FN -- no --> X
+    NF --> X[tool note_context<br/>text, extracted attachment text,<br/>similar notes, candidate entities,<br/>recent claims about them, topics]
     X --> P1[code: extraction packet<br/>per section]
     P1 --> E[llm_call extract<br/>resp_schema Extraction]
     E --> R[tool note_resolve_candidates<br/>per mention: alias, full-text, vector candidates]
@@ -75,10 +86,33 @@ flowchart TD
     A --> Z[on_flow_end revision summary]
 ```
 
-1. **Context** (`note_context`): what the notebook already knows that is relevant: the nearest
-   notes, entities whose names or aliases appear in the text or whose embeddings are close,
-   their current summaries and their most recent active claims, the open tasks that mention
-   them, and the topic vocabulary. This is the "look at the existing knowledge" step.
+0. **Filing, when the note has none** (W27). Imports store notes without the quick filing a live capture gets
+   (eval2: 985 of 988 understood imported notes had no kind and no filing topics). `note_filing_context` answers
+   `needed` (no kind, not an insight, not archived, something to read) with what the capture's filing sees (the
+   note's own text, whole, or its files' extracted text when it has none; the nearest notes by its stored vector;
+   its recorded revisits; the topic names); `needed` runs the `note-file` subflow: the capture's own filing
+   packet, prompt, `QuickFiling` schema and settings (one call, thinking off, 400 output tokens), then
+   `note_file` with the kind, up to 4 topics, the title when the note has none, the language and the one line,
+   never the urgency (the note keeps its place in the queue). A filing that fails fails the note (its sentence
+   in `queue_errors`), never a silent skip. A note filed at capture goes straight on. The notes understood
+   before this step existed are filed by `abstractnote refile --missing` (api.md "CLI") or `POST /note/refile`
+   (the same repair on the gateway, each note one run on your runtime): the same `note-file`
+   flow per note, oldest first, within `--max-items` and `--budget-s`, one `refile_runs` row per repair updated
+   after every note (`done`, `filed`, `skipped` with each reason, `kinds`, `not_reached`) and closed
+   `completed`, `completed_with_gaps` or `interrupted`, with one sentence of what is left (ADR 0007).
+1. **Context** (`note_context`): what the notebook already knows that is relevant, **as of the note's
+   date** (ADR 0008 §2; `as_of` = the note's `occurred_at`): the nearest notes, entities whose names or
+   aliases appear in the text or whose embeddings are close, each as it was known then (its latest summary
+   dated on or before that day, its statements believed then: observed by that day, or said by a later note
+   to hold already then) and, apart, what was recorded LATER (statements and summaries of a later day), the
+   open tasks that mention them, and the topic vocabulary. A note written after everything sees no LATER part
+   at all. It also returns `context`, the digest of what the note is understood against
+   (`{as_of, entities, claims, summaries, later_claims, omitted}`: the entity ids and claim ids shown, the
+   revision of the summary shown for each entity, the later claims offered, and per entity what the linking
+   cards' budget left out); `note_resolve_candidates` adds its candidates to the same digest, which the packet
+   row keeps and the built revision carries (`context`, ADR 0008 §3, next to `used`: the entities, statements
+   and tasks the revision's ops resolved to, `revise.used_of`). This is the "look at the existing knowledge"
+   step.
 2. **Extract** (`Extraction` schema), once per section: summary, mentions (name, kind, aliases
    seen, role in the note), claims (subject, predicate, object, literal flag, certainty, stance,
    evidence excerpt, optional validity dates), tasks (opened, completed), time references, and
@@ -86,13 +120,22 @@ flowchart TD
    "Prompts and bounds"); the predicate vocabulary from the AbstractSemantics registry is in the
    static system prompt and `ex:` is allowed for the rest.
 3. **Resolve candidates** (`note_resolve_candidates`): for every mention, up to three existing
-   entities with their kind, aliases, summary, last seen date, how they matched, and their most
-   recent active claims.
+   entities with their kind, aliases, summary and statements as known on the note's date, their LATER
+   block, last seen date and how they matched (`matched_by`, and `match`: `alias` when the mention's name or
+   an alias has the canonical name key of the entity's name or one of its aliases). An alias match is always a
+   candidate, past the three if need be (ADR 0008 §6), and the packet records it (`alias_matches`). Each
+   mention carries the predicates of the note's statements about it (`predicates`, from the merge step): every
+   statement of a candidate on those predicates, believed then or LATER, is in the packet (indexed, so the
+   linking can name it), whatever the per-card count; the others fill the card up to its bound, those whose
+   predicate shares a word with the note's first (a ranking only, never a decision).
 4. **Link** (`Linking` schema), once per part of at most 15 mentions: the model decides, per
    mention, `reuse` (a candidate index), `create`, or `merge` (two candidate indexes); per
-   claim, whether it `restates` an existing claim (reinforce), `refines` it (new claim, old stays
-   active), `supersedes` it (close the old one) or `contradicts` it (both stay, marked disputed),
-   naming the existing claim by its `#` index in the packet; per task, open or close by index, quoting
+   claim, whether it `restates` an existing claim (reinforce; for a LATER one, its start moves back to the
+   note's date), `refines` it (new claim, old stays active), `supersedes` it (close the old one),
+   `contradicts` it (both stay, marked disputed) or is `earlier_state_of` a LATER one (the same kind of
+   fact with the value it had before: placed before it, never closing it), naming the existing claim by its
+   `#` index in the packet (the index decides, whatever the predicate is called: a statement linked this way
+   to a statement of the same subject under another spelling adopts the existing predicate); per task, open or close by index, quoting
    the note's words that say it is done (`evidence`).
    Each part carries the claims whose subject is one of its mentions (the first part also the
    tasks and the open tasks they may close); claim, task and packet indexes stay those of the
@@ -109,9 +152,11 @@ flowchart TD
    marks the note `processed`. The checks (data-model.md "Identity and de-duplication" and "Time"): a merge applies
    only with the same kind, a shared name or alias key, fewer than 5 notes on the merged entry and one merge per
    entry per note (else a close match for review); values (numbers, versions, ids, links, tokens, the generic
-   words list) are literals, never entities; `supersedes`/`contradicts` only on the same resolved subject and
-   predicate; time-aware placement: a note older than the statement it supersedes is inserted before it as the
-   earlier belief (`claim.insert_before`), never closing it; a task closes only with the note's own words and never
+   words list) are literals, never entities; `supersedes`/`contradicts`/`earlier_state_of` only on the same resolved subject (the named
+   statement's predicate is adopted when the spelling differs, `predicate_adopted`); time-aware placement: a
+   note older than the statement it supersedes, and a statement `earlier_state_of` a later one, is inserted
+   before it as the earlier belief (`claim.insert_before`), never closing it; an older note restating a belief
+   moves its start back (`claim.start_earlier`); a task closes only with the note's own words and never
    from an older note; a stated `document_date` redates a note whose date is approximate (`note.redate`); no window
    ends before it starts. A note older than what is known about an entity marks it (stale summary, then-versus-now
    dropped, `graph_version`) for the consolidation. The response lists created and merged entities, claims added and superseded, and
@@ -120,6 +165,45 @@ flowchart TD
 Large notes: `note_context` splits texts beyond the model's budget into sections; `note-process`
 loops over sections for extraction and merges mentions and claims before linking, so no text is
 ever truncated.
+
+**Validity of model answers** (ADR 0008 §8, `process/validate.py`). A structured answer can parse and still be
+corrupt: the structured-output lane of a remote model spills the rest of the answer into a string field
+(`...approved by the board.","reason":"same organization","aliases":["Zorn Labs"]},{`), loses decisions, or
+answers `reuse` with no candidate. An answer is invalid when:
+
+- a prose field (`summary`, `reason`, `revision_summary`, `name`, `aliases`; in an extraction also `role` and
+  `topics`) holds a fragment of the answer's own structure: one of the schema's field names closed by `":`
+  (`reason":`, `"aliases":`), or a closing quote followed by a closing brace or bracket and then a comma, another
+  closer or the end (`"},{`, `"]}`); a fragment that appears verbatim in the note's words (or, for a linking, in the
+  extraction it links) is the note's, not a corruption. Fields that quote the note (`evidence`, `quote`, a literal
+  object, a task's text, a time reference) are never read, so a note about a JSON API is never refused;
+- a decision names no candidate from its list (`reuse` or `unsure` without a candidate index of that mention,
+  `merge` without two of them) or decides a mention the note does not have. Until 2026-10-20 such a decision was
+  applied in part (the mention was created as new with a warning); it is now invalid;
+- an index is answered twice in contradiction: a mention with two decisions, a statement with two relations or
+  once naming an existing statement and once none, a task once closing an open task and once none (null, an
+  empty string and an empty list are the same absent value). One statement linked to several existing ones with
+  the same relation (or one task closing several) is valid; the first link is applied and the others are named in
+  a `multi_link` revision warning ("multi_link: statement 0 was linked to 2 existing statements; only the link to
+  #3 (supersedes) was applied, the link to #5 was not."), never dropped silently (ADR 0007).
+
+note-process checks every extraction (per section) and every linking (per part) in a code node that runs the very
+source of `validate.py`: an invalid answer is asked once more with a fresh call (a linking: the same message
+followed by what was wrong, "Your previous answer to this message could not be used: ...", since the bare message
+again gave the same answer in 5 of 7 live retries; an extraction shares the re-read of a section that names
+nothing); a second invalid answer ends note-process with its sentence ("The model's
+linking answer was malformed twice (the summary of “Zorn Labs” holds a piece of the answer's structure
+(reason":)); nothing from it was applied."), which the drain acknowledges as a failed attempt (`queue_errors`,
+the usual backoff and three-failure rule). `note_apply_revision` checks the merged answers again and refuses an
+invalid one with the same sentence, so nothing of a corrupt answer is ever applied in part, whoever calls it.
+The known source (2026-10-20, OVH `gpt-oss-120b` with AbstractCore's native `response_format: json_schema`): the
+server's constrained decoding writes an object's properties in alphabetical order and lets the model skip the
+optional ones, so a `reuse` written before its `candidate` loses the candidate, and a `reason` the model wants after
+`summary` (the last key) can only go inside the summary string. With every property listed as required (optional
+ones nullable) the same calls came back sound (6 of 6 notes, no retry). Measured on the 2026-10-20 ledgers
+(gw18080, read-only): retro-B 14 of 27 link answers invalid (3 fragments, 11
+candidate-less reuses, 2 contradicting duplicates), retro-A 17 of 23, the watch 0 of 10, the 1,000-note import 12
+of 1,446 (0.8 %); no extraction answer invalid (0 of 1,495); no fragment found in a quoted field.
 
 ### note-drain and the queue
 
@@ -135,12 +219,55 @@ flowchart TD
     P --> K[tool note_queue_ack outcome, error?]
     K --> B{budget left?}
     B -- yes --> L
-    B -- no --> Z
+    B -- no --> C[tool note_communities_recompute only_if_due]
+    H -- none --> C
+    C --> Z
 ```
 
+- **Themes at the end of the batch** (ADR 0008 §5). Any ingest can change the groups, so every drain ends
+  with `note_communities_recompute {only_if_due: true}` (`recall.communities.refresh_if_due`): the
+  communities are found again (no model) when the batch made them due (`communities.due`): never computed
+  yet (and at least 3 live entities), at least one note dated earlier than what was known applied since the
+  last computation (`DUE_RETRO_NOTES = 1`, the retrospective marks of data-model.md "Retrospective
+  insertion"), a note understood again (`note.reinterpret`) since then, or `DUE_REVISIONS = 20` revisions
+  applied since then (or `DUE_REVISIONS_SHARE` = 10 % of the revisions at the last computation, when that
+  is more). "Since" is counted on the revision log's sequence (`seq_at_compute` in `meta.communities`).
+  Imports only queue their notes, so the drain that understands an import batch is where it ends. Naming
+  stays with the consolidation: a recompute keeps the label of every group that changed little and marks
+  stale the ones whose membership moved, and the drain's answer says what naming will cost:
+  `communities: {recomputed, due, reasons, revisions_since, retro_notes_since, reinterpreted_since,
+  labels_waiting, label_calls, ...the recompute counts}` (`revisions_since` = what made it due, counted
+  before the computation; `label_calls` = groups waiting for a name / 5). The response adds "The themes
+  were updated (4 groups, 2 to name next time)." A failure is said in the response ("The themes could not
+  be updated: ...") and does not fail the drain or undo its notes.
+
+- **Claims.** A note being understood outside a drain carries a claim on its queue row: `inline_run_id`
+  (note-capture with `process_inline`) or `reinterpret_run_id` (the re-understanding stage), each with its
+  `*_until` time. `note_queue_lease` never leases a claimed note; a note leased by a drain, or claimed one way,
+  cannot be claimed the other way (`Queue.claim` answers false). A claim ends with the outcome (`ack`) or
+  `Queue.release`; `Queue.heartbeat` (called by `note_file`) moves its end on. The reinterpret stage claims each
+  note it hands to the model (`note_reinterpret_next`; a note a drain or an inline understanding holds is held
+  with "It is being understood right now; it is read again next time." and its mark waits for the next pass)
+  and the apply of the re-reading releases it (a failure the next round reports releases it too). A claim
+  whose run died is leasable once `CLAIM_S` (15 minutes, as a drain's lease) has passed since its last heartbeat:
+  the next lease clears it and logs "Understanding it right away stopped before it finished; it is understood from
+  the queue instead." in `queue_errors`, not counted as a failure.
 - A lease lasts 15 minutes. Acknowledging a failure increments `attempts` and schedules a retry
   (after 1 minute, then after 10 minutes); the third failure sets the note to `failed`, visible in
-  the web app's queue panel with the error, and offers a manual retry.
+  the web app's queue panel with the error, and offers a manual retry. A note with no text to read (no words,
+  no title, no extracted file text: `process.context.note_sections` finds no section; note-process stops with
+  "The note has no text to read.") fails at its first failure: `note_queue_ack` checks the stored note, records
+  the reason in `queue_errors` and `last_error` and sets it `failed` at once, since no retry can give it text.
+- **The notebook changed while a note was read** (review 4.1, ADR 0008 §5). A reading that would replace a
+  statement closed by a revision recorded after the note's context packet was stored (a person retracted it, a
+  re-understanding closed it) is not applied when a drain holds the note: `note_apply_revision` answers
+  `{revision_id: null, requeue: true, reason, stale_context}`, the drain acknowledges `requeue`, and the note goes
+  back to the queue once, at its priority, available at once, no failure counted, "The notebook changed while
+  this note was being read (a statement it builds on was closed meanwhile); it is read again." in `queue_errors`
+  and `last_error`. The next reading builds a fresh packet; if it is stale again it is applied (its statement kept
+  as new, with the warning): a note is put back at most once (`Queue.requeued_stale`). The drain's answer lists it
+  under `requeued` and says "1 note is read again: the notebook changed while it was being read." An inline
+  understanding (not leased) applies with the warning.
 - An expired lease (the drain stopped, for example on a gateway restart) is not taken over at once:
   the next drain that leases counts it as a failure ("Processing stopped before it finished.") with
   the same backoff, and a drain retakes the note once that backoff has passed. It counts toward the
@@ -288,20 +415,42 @@ keeps the notebook's derived memory fresh, in stages, each reporting its progres
 | Stage | What runs | Model |
 |---|---|---|
 | `normalize` | `note_entities_normalize`: the entries that share a canonical name are merged (`Notebook.normalize_entities`, one reversible revision per merge) | none |
+| `reinterpret` | loop (ADR 0008): `note_reinterpret_next` (1) -> the `note-process` flow as a subflow for that note -> the next, until no marked note is left for this pass or the budget is spent (below). Two tiers, each in history order: the notes marked directly (they used what changed) and those marked because an idea they rely on changed deeply with an impact of at least 0.25 first, then the weaker ones (§4a, data-model.md "Deep changes reach the ideas that relied on them"); a re-reading that changes an idea deeply marks, one hop further, the later notes of the ideas that rely on it, and they are read in the same pass | as note-process, per note read again (0 for a note settled unchanged) |
 | `communities` | `note_communities_recompute` (as in note-reflect) | none |
 | `labels` | loop: `note_communities_pending` (5, `exclude` = the groups skipped this run) -> the reflect naming step (`CommunityLabels`, by index; asked once more when a group is left out) -> `note_communities_label`, until none waits that was not skipped, or the budget is spent | 1 call per 5 groups (2 when the first answer leaves one out) |
 | `summaries` | loop: `note_entities_stale_summaries` (8) -> `llm_call summaries` (`EntitySummaries`: `[{index, summary}]`; `summaries_again` when an entry is left out or empty) -> `note_entities_set_summaries`, until none is stale that was not offered this run, or the budget is spent | 1 call per 8 entries (2 when the first answer leaves one out) |
 | `then_now` | `note_then_now_refresh`: the then-versus-now cache of every entry this run merged into or summarised | none |
 | `reflect` | the note-reflect flow as a subflow (open loops, tensions, resurfacing, anniversaries -> insights; its naming finds nothing left) | as note-reflect |
 
+Summaries are dated knowledge (ADR 0008 §2). Each summary describes the entry as of a date (`at`: the
+date of the note that wrote it), the summary history is ordered by that date and then by the revision log
+(`store.notes.SUMMARY_ORDER`), and the CURRENT summary (`entities.summary`, the card) is the last one in that
+order, never the one written last: a 2022 archive processed after the 2026 notes keeps its 2022 summary in
+the history and leaves the card to 2026. A summary written by an interpretation of a note that a later
+re-interpretation of the same note superseded (`note.reinterpret`, ADR 0008 §1) is out of the history and
+is never current (`store.notes.summary_superseded_sql`); applying the re-interpretation selects the current
+summary of the entries it described again (`refresh_superseded_summaries`). As received before the
+re-interpretation, the old summary is still what the archive held.
+
 A summary is stale when it is empty, when it is still the placeholder an entry was created with (the
 revision builder recorded "No summary was written for <name>; it was described from this note." and no
-summary was written since), or when a note mention or a statement about the entry (or an entry merged into
-it) was recorded by a revision after its latest summary's revision. Nothing reads the summary's wording
-(ADR 0004). Each entry handed to the model carries its name, kind, other names, current summary, its
-strongest statements in words (at most 8) and its 3 newest note excerpts; the prompt
-(`process/prompts/entity_summaries`) asks for at most two sentences, third person, present tense, nothing
-the statements and notes do not say. The answers are mapped back by index. Nothing stops or is left out
+summary was written since), when a note dated earlier than what the notebook knew of the entry was applied
+after its current summary (`retrospective`: `Notebook.retro_state()["stale_summaries"]`), or when a note
+mention or a statement about the entry (or an entry merged into it) was recorded by a revision after its
+CURRENT summary's revision (`changed`; a statement its own note's re-interpretation closed is not counted).
+They are refreshed in that order (empty and placeholders, retrospective, then the most changed). Nothing
+reads the summary's wording (ADR 0004). Each entry handed to the model carries its name, kind, other names,
+current summary, `as_of` (the date of its latest note), its strongest statements that hold now in words
+with the date each started (at most 8; among equals the most recent first), its dated history earliest first
+(`history`: the summaries of earlier dates, the earliest and the 5 latest; `earlier`: statements that held
+from one date until another and ended, the earliest and the 7 latest) and 5 note excerpts, newest first: up
+to 3 the current summary does not account for yet (mentioned by a revision recorded after it, marked `new`,
+even when dated earlier: an older project's notes are what the entry must absorb), then the newest note, the
+earliest one and the newest of the rest, with `omitted: {claims, notes, history, earlier}` counting
+what the selection left out (shown to the model when not zero); the prompt
+(`process/prompts/entity_summaries`) asks for at most two sentences, third person, present tense, what the
+entry is now having been what its history shows, nothing the message does not say. The answers are mapped
+back by index. Nothing stops or is left out
 silently (ADR 0007, the incident of 2026-10-20 where one empty answer ended the stage as "completed" with 536
 summaries stale): a round whose answer leaves out an offered entry or group (or answers it empty) asks once
 more with the same prompt; what is still unanswered is skipped for this run (reported with the round's
@@ -311,9 +460,55 @@ stage) and never offered again in the run, and the loop goes on. A summary over 
 {summaries, labels, reasons}` (the skipped items still pending, plus what the budget did not reach:
 `budget_spent`, `not_reached`) and closes the run as `completed_with_gaps` when anything was left out; the
 run's answer then reads "Consolidated with gaps: …" followed by the end-user notice ("12 summaries could not be
-refreshed this time; they will be tried again next time."). Each round's summaries are one revision (`action: entity.summary`,
-`run_id` = the consolidation id, source client `consolidation`), so the summary history keeps every version
-and a rebuild replays it.
+refreshed this time; they will be tried again next time."). Each round's summaries are one
+revision (`action: entity.summary`, `run_id` = the consolidation id, source client `consolidation`), each op
+dated `as_of` = the entry's latest dated knowledge (its last mention, or its current summary's date when
+later): the new summary is current until a note dated later writes one, and a note dated between that
+knowledge and the consolidation is never hidden behind it. The summary history keeps every version and a
+rebuild replays it.
+
+**Re-understanding** (stage `reinterpret`, ADR 0008; the records and marks are in data-model.md
+"Re-understanding"). A note understood without its foundation is understood again when the foundation
+arrives: when a note is applied, the later notes whose current interpretation USED what it touched are marked
+(with the reason and the note that caused it), and this stage reads them again. `note_reinterpret_next` takes
+the pending marks of the open consolidation in history order (date, then received time, then id), each note at
+most once per pass (a mark that arrives for a note the pass already read waits for the next pass). Before any
+model call it runs the no-call check: the note's context is looked up again (the same `note_context` and
+`note_resolve_candidates` lookups, with the mention names its last reading asked) and compared with the
+dependency record of its current interpretation, on what was known at the note's date (the entities, the
+statements and similar notes recorded on or before it, the summaries written for a date on or before it), leaving
+out what that reading itself wrote; equal: the note is `unchanged`, its mark is consumed and no model is called.
+Otherwise the note goes through `note-process` (filing is not repeated; a note without a kind is filed first): its context leaves out its own previous
+reading (its statements and tasks) and shows again what that reading had closed; the apply sees that the pass took
+the note's mark and builds a `note.reinterpret` revision (or records `unchanged` when the new reading's statements,
+mentions, tasks and topics equal the old ones; summaries alone do not count; what this re-reading saw, `related`
+included, is appended to `reading_confirmations` for the current reading, never written into the revision, so the
+next wave from the same unchanged idea needs no call). A re-understanding marks only
+notes after it in history order, so a pass is one forward sweep and ends; a second pass with no new earlier note
+has no mark to read and calls no model. A note read again three times in one UTC day waits for the next day
+(`REINTERPRET_PER_DAY`, skipped with that reason). A note that cannot be read again (the model fails) is skipped
+for this run with its reason (the W26 shape: `stages_json.reinterpret.skipped_ids`, a warning on the
+`abstractnote.consolidation` logger), its mark waits (with the error) and its previous interpretation stays
+current; the stage goes on with the next note. The time budget stops the stage before it takes the next note:
+what is left is `results.not_reached.reinterpret`. The close reports `reinterpreted`, `unchanged` and
+`reinterpret_failed` (read from the marks), and `left_out.reinterpret` = the skipped notes still marked plus what the
+budget did not reach; a run that left notes is `completed_with_gaps` and its notice says "3 notes could not be
+understood again this time; they will be read again next time." The progress line reads "Re-understanding 12
+notes" (web: "Re-understanding 3 of 12 notes"); `GET /note/consolidation` `pending.reinterpret` gives the count
+before the run, and `consolidation.state(nb)["reinterpret"]` the count by entity and the reasons.
+
+Deep changes spread (ADR 0008 §4a). Each applied re-understanding is measured against the reading it replaced (per
+entity: retired or joined, the summary's embedding distance, the share of its statements and of its relations
+replaced) and, when an idea changed deeply, the later notes of the ideas that rely on it through statements are
+marked `propagated` with the impact the change carries (decay 0.5 per hop, nothing under 0.1, never more than the
+re-reading was given), so a wave dies within three hops and cycles end. Those notes are read in the same pass, after
+the direct ones when their impact is low, with the "Understood differently since this note was read" block in
+their linking packet (what changed about the idea, as known on their date; never a number). The model decides: a
+re-reading that comes out the same writes nothing and the spread stops there. Before the run,
+`reinterpret.propagated` gives the notes waiting for that reason by source idea and `may_follow`, an upper bound of
+how many more may follow; during it the progress line says "Re-understanding 12 notes (5 because Zorn changed)"
+(`run.propagated`); a budget stop reports `left_out.propagated` and its sources, and the notice adds "of which 5
+follow from ideas understood differently".
 
 The start pins are `budget_s` (default 3600: the loops stop starting rounds after it), `limit` (the reflect
 stage's insight limit, default 10), `thinking` (`on` or `off`, default `off`, wired to both model steps) and
@@ -357,13 +552,23 @@ models from them and repairs invalid output. Python mirrors live in `abstractnot
  "document_date": {"iso": "ISO date", "basis": "stated in the text", "quote": "the exact words"} or null}
 ```
 
-Fields with a default may be left out by the model (the runtime fills the default): in
-Extraction `aliases` ([]), `object_is_literal` (false), `certainty` (stated), `stance` (assert),
-`valid_from`, `valid_until`, `due`, `iso` and `document_date` (null; given only when the header says the note's
-date is approximate and the text states its own date); in Linking `candidate` (null),
-`merge_candidates` ([]), `name` (""), `kind` (null), `aliases` ([]), `reason` (""), `existing`
-(null), `closes_open_task` (null) and `evidence` ("": a close without it is not applied). `claims` lists only the statements that relate to an
-existing one (a statement left out is `new`) and `tasks` only those that close an open task.
+**Every schema a model is handed is strict** (`process.schemas.strict`, applied once in `flows.build.load_schemas`,
+the source of every `llm_call` node's `resp_schema`): every property of every object, nested objects and array
+items included, is listed in `required`; a property that has a default in the definitions below becomes nullable
+(`"type": ["<t>", "null"]`, and `null` joins an enumeration), its description says "null when not applicable" (or
+"null when empty", `null means "stated"`), and its `default` is dropped. The model writes every field, null when it
+has nothing to say, and the parsing reads null as the default (the pydantic mirrors' `_null_means_default`;
+`validate.py` reads null as absent). Why: a remote structured-output decoder (OVH) writes an object's properties in
+alphabetical order and skips the optional ones (see "Validity" above). `tests/test_strict_schemas.py` fails on any
+sent schema with a property outside `required`, checks the schema AbstractCore's openai-compatible provider sends
+(the runtime's pydantic model, `model_json_schema()`), and compiles each schema with Outlines, the local MLX
+provider's constrained decoding. The nullable fields: in Extraction `aliases` (null = []), `object_is_literal`
+(false), `certainty` (stated), `stance` (assert), `valid_from`, `valid_until`, `due`, `iso` and `document_date`
+(null; given only when the header says the note's date is approximate and the text states its own date); in
+Linking `candidate`, `merge_candidates` ([]), `name` (""), `kind`, `aliases` ([]), `reason` (""), `existing`,
+`closes_open_task` and `evidence` ("": a close without it is not applied); in EntitySummaries `ties` ([]). `claims`
+lists only the statements that relate to an existing one (a statement left out is `new`) and `tasks` only those
+that close an open task.
 
 **Linking** (indexes refer to the candidate lists in the context packet; enumerations are JSON
 Schema enums)
@@ -372,7 +577,7 @@ Schema enums)
 {"mentions": [{"ref": "m1", "decision": "reuse|create|merge|unsure", "candidate": 0,
                "merge_candidates": [0, 1], "name": "preferred name", "kind": "person|org|project|concept|place|event|artifact|software|thing",
                "aliases": ["..."], "summary": "what the entity is on the note's date, one or two sentences: for create and unsure, and for a reused entity whose description this note changes; otherwise null (a missing one is a warning, never a failed note)", "reason": "short"}],
- "claims": [{"index": 0, "relation_to_existing": "new|restates|refines|supersedes|contradicts",
+ "claims": [{"index": 0, "relation_to_existing": "new|restates|refines|supersedes|contradicts|earlier_state_of",
              "existing": 0, "reason": "short"}],
  "tasks": [{"index": 0, "closes_open_task": 0, "evidence": "the note's words that say it is done"}],
  "revision_summary": "one sentence"}
@@ -393,8 +598,15 @@ and merged into the flow schemas by `flows.build.load_schemas`)
 flow schemas by `flows.build.flow_schemas`)
 
 ```json
-{"summaries": [{"index": 0, "summary": "at most two sentences, third person, present tense"}]}
+{"summaries": [{"index": 0, "ties": ["each project, organisation or person a note marked new ties the entry to, with its role and date"],
+                "summary": "at most two sentences, third person, present tense, naming every tie listed in ties"}]}
 ```
+
+`ties` (default `[]`) is written before the summary: the prompt asks the model to read every note the packet marks
+`new` (one the current summary does not account for yet, which may be dated earlier) and list what it ties the entry
+to, then to name every listed tie in the summary while keeping it a dated description of what the entry is (the
+current role and the new ties first; older detail stays in the history). It is a scaffold for the answer: nothing
+stores it or compares it with the summary's words (ADR 0004).
 
 ## Prompts and bounds
 
@@ -469,9 +681,10 @@ sections, each read whole).
 
 | Packet | Bound (`abstractnote.process.packets`) |
 |---|---|
-| Extraction orientation | names and kinds of at most 15 known entities (no claims), the predicates of their current statements (at most 15, the most used first; `schema:mentions` never), at most 50 topics (the note's own first, then the most used), 5 similar notes by title and date, 8 open tasks, one line each |
-| Candidates per mention | 3 (`note_resolve_candidates`) |
-| Candidate card | name, kind, up to 5 aliases, summary (at most 240 characters; `[LATER]` when it was written on a later day than the note), last seen, and at most 3 active claims as one line each, those with a predicate the note also uses first (`LATER than this note` when first seen on a later day) |
+| Extraction orientation | names and kinds of at most 15 known entities, the predicates of their statements (at most 15, the most used first; `schema:mentions` never), their statement slots as `- subject predicate value (date)` with the predicate spelled as stored, the latest value per subject and predicate, believed then and recorded later apart (at most 30, `KNOWN_SLOTS`; the rest counted on a line), at most 50 topics (the note's own first, then the most used), 5 similar notes by title and date, 8 open tasks, one line each |
+| Candidates per mention | 3 (`note_resolve_candidates`), plus every alias match past them |
+| Candidate card | name, kind, up to 5 aliases, the summary as known on the note's date (at most 240 characters; "nothing was recorded about it by this note's date" when none), last seen when not later than the note; the statements believed then (`#index subject predicate value (since date)`, or `(from date to date)`, or `(stated later, said to hold since date)`): every one on a predicate the note uses, then the others up to 3 in all, the rest counted (`(+n more not shown)`); then, when the notebook recorded more after the note's date, the block `LATER (recorded after this note's date — do not restate; say if a statement is an earlier state of one of these):` with every later statement on the note's predicates and the others up to 12 (`LATER_CLAIMS_PER_CANDIDATE`), in date order, and the latest 2 later summaries (`summary as of date: ...`), the rest counted on a line |
+| Omissions | what a linking card leaves out is counted per entity in the packet digest (`omitted`) and said in the revision (`packet_omitted: ...`), never only in the prompt (root ADR-0026) |
 | Mentions per linking call | 15; the rest go to further calls for the same note, merged back |
 | Statement lines | subject, predicate, object, certainty, stance, evidence (at most 200 characters) |
 | Open tasks in linking | only when the note has tasks, at most 8 |
@@ -483,8 +696,16 @@ names nothing although it has text, even when read a second time."). `note_apply
 leaves out, with a warning, a mention whose name and aliases never occur as whole words in the
 note's own text (its title and header do not count: names copied from the context packet are
 refused); a statement about it is skipped, one pointing at it keeps the name as text. A reused
-entity gains only the aliases the linking lists for it, and `unsure` without a candidate is
-created as new with a warning. The prompts also state: reuse an entity only when the mention
+entity gains only the aliases the linking lists for it (the prompt asks to list every name the note uses for
+it that the candidate does not have yet, such as an older name or an abbreviation), and `unsure` without a
+candidate is created as new with a warning. A mention created apart from (or reused as another entity than) a
+candidate that matched it by name or alias key is kept apart with a `skos:closeMatch` review item to that
+candidate, and so is a created entity one of whose aliases is a live entity's canonical name (ADR 0008 §6). In
+time (data-model.md "Retrospective insertion"): `earlier_state_of` must name a statement first seen after the
+note's date and not said to hold already on it, about the same subject (else a warning and `new`); a `new`
+statement beside LATER statements on its subject and predicate is kept and said (`parallel_belief: ...`); a
+`supersedes` of a statement no longer believed on the note's date is kept as new with a warning; one that
+empties the replaced statement's window (the same time) says so. The prompts also state: reuse an entity only when the mention
 names that very thing (a part, version, file or tool of X is a new entity related to X); one to
 three topics; no statement whose only content is that the text mentions something (`schema:mentions`, `ex:mentions` or any other word for it), and
 `dcterms:hasPart` only when stated; proposals and plans are `possible`; a superseded statement
@@ -499,11 +720,15 @@ summaries, a third of those dates after the note); one or two sentences, at most
 is never a sentence about the note or one event ("Dana confirmed the schedule"): the linking
 rewrites a reused entity's summary only when the note changes what it is, folding the new fact into
 the current description, and answers null when the entity only did something (that is a statement).
-The candidate card marks a summary written on a later day than the note `[LATER]` and such statements
-`LATER than this note` (`context.summary_at`, the history date of the current summary); the prompt
-says to use them only to recognise the entity, so an earlier note describes the entity from itself
-and the earlier statements (its summary is stored at its own date; the latest stays current). The
-consolidation's summary prompt asks for the same description in the present tense.
+The candidate card shows the summary as known on the note's date and puts later summaries and statements
+in the LATER block (`context.entity_view` with `as_of`); the linking message ends with "Write every summary as
+of <the note's date>, this note's date: what the entity was then, from this note and what was known then; never
+use what was recorded later.", and the prompt says to use the LATER block only to recognise the entity and to
+place a statement, never in a summary. So an earlier note describes the entity as of its date (its summary is
+stored at its own date in the summary history; the latest dated one stays current), and when a reused candidate
+had no summary by then, the prompt asks for one. A create that the canonical name rewrites into a reuse
+(data-model.md "Entity") keeps its summary as dated history when the entity's current summary describes a later
+day. The consolidation's summary prompt asks for the same description in the present tense.
 
 ## Prompt cache, thinking and output caps
 

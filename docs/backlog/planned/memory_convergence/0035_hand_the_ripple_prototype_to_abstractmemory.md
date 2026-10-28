@@ -31,6 +31,13 @@ propagation.py` and `src/abstractnote/recall/activation.py`; the design brief is
 `untracked/briefs/R6-propagation-design.md`; ADR 0008 records the R6 constants (decay 0.5, floor 0.1, one hop
 per pass, budgeted stage, no-call settle).
 
+Update 2026-10-27 (memory transition, operator decision 1: the AbstractNote baseline is the serve worktree's
+schema-4 line merged into `main`, branch `feat/memory-graph-note-baseline`): that line integrated R6, so
+`recall/propagation.py`, the `idea_changes` table and the reinterpret marks are in the package from this merge on;
+`recall/activation.py` is not (it stays on `retro/integration`). The outcome of this item is unchanged: the
+generic ripple is handed to AbstractMemory 0054 and then removed from this package; until then the merged code
+is a prototype that is used and kept working, not extended.
+
 ## Validation
 The handover note exists in AbstractMemory 0054; `main` contains no `recall/propagation.py` or
 `recall/activation.py`; after AbstractMemory's release, the retro acceptance scenarios (ADR 0008 Validation) pass

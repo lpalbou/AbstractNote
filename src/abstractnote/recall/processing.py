@@ -33,18 +33,20 @@ from .. import ids
 from .shapes import note_ref
 
 BUNDLE_ID = "abstractnote"
-FLOWS = ("note-drain", "note-process", "note-reflect", "note-recall", "note-mine", "note-capture")
+FLOWS = ("note-drain", "note-process", "note-reflect", "note-recall", "note-mine", "note-capture", "note-file")
 STEPS = ("context", "extract", "resolve", "link", "apply", "filing", "search", "synthesize")
 
 #: Node id (of an effect node: ``llm_call`` / ``tool_calls`` / ``subflow``) -> step, per flow. ``None`` = the
 #: node has no step of its own (bookkeeping); ``CHILD`` = a subflow: the step is the active child's.
 CHILD = "<child>"
 STEP_OF_NODE: Dict[str, Dict[str, Optional[str]]] = {
-    "note-process": {"context": "context", "extract": "extract", "extract_again": "extract",
-                     "resolve": "resolve", "link": "link", "apply": "apply"},
+    "note-process": {"filing_need": "filing", "filing": CHILD, "context": "context", "extract": "extract", "extract_again": "extract",
+                     "resolve": "resolve", "link": "link", "link_again": "link", "apply": "apply"},
+    # the quick filing of a stored note without a kind (the refile --missing repair runs it per note)
+    "note-file": {"filing_context": "filing", "filing": "filing", "file": "filing"},
     "note-capture": {"capture": "filing", "filing": "filing", "file": "filing", "process": CHILD,
-                     "inline_ack": None},
-    "note-drain": {"lease": None, "process": CHILD, "ack": None},
+                     "inline_ack": None, "inline_fail": None},
+    "note-drain": {"lease": None, "process": CHILD, "ack": None, "communities": None},
     "note-recall": {"search": "search", "expand": "search", "synthesize": "synthesize", "mine": CHILD},
     "note-mine": {"search": "search", "step_search": "search", "plan": "synthesize", "findings": "synthesize",
                   "dossier": "synthesize", "write": "synthesize"},
@@ -55,11 +57,15 @@ STEP_OF_NODE: Dict[str, Dict[str, Optional[str]]] = {
     # The consolidation (backlog 0032) reports its own stages (GET /note/processing "consolidation"); it is not
     # an active note run, so its nodes have no step here (its reflect subflow's steps are the child's).
     "note-consolidate": {**{n: None for n in (
-        "begin", "fail_end", "p_norm_start", "normalize", "p_norm_done", "p_comm_start", "communities", "p_comm_done",
+        "begin", "fail_end", "p_norm_start", "normalize", "p_norm_done",
+        "re_count", "p_re_start", "re_next", "p_re", "re_final", "p_re_done",
+        "p_comm_start", "communities", "p_comm_done",
         "p_labels_start", "communities_pending", "communities_names", "communities_names_again", "communities_label",
         "p_labels", "stale_count", "p_sum_start", "stale", "summaries", "summaries_again", "set_summaries", "p_sum",
         "p_tn_start", "then_now", "p_tn_done",
-        "p_reflect_start", "p_reflect_done", "finish")}, "reflect": CHILD},
+        "p_reflect_start", "p_reflect_done", "finish")}, "reflect": CHILD,
+        # ADR 0008: the note being understood again is a note-process child (its steps are the child's)
+        "re_process": CHILD},
 }
 
 BUCKET_S = 300

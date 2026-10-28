@@ -16,7 +16,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from .graph import Flow
 from .prompts_fallback import FLOW_PROMPT_VARS
@@ -26,7 +26,7 @@ JSON_DIR = Path(__file__).resolve().parent / "json"
 
 BUNDLE_ID = "abstractnote"
 ENTRYPOINTS = ["note-capture", "note-drain", "note-recall", "note-reflect", "note-consolidate"]
-INTERNAL_FLOWS = ["note-process", "note-mine"]
+INTERNAL_FLOWS = ["note-process", "note-mine", "note-file"]
 ALL_FLOWS = ENTRYPOINTS + INTERNAL_FLOWS
 
 INTERFACES = {
@@ -37,6 +37,7 @@ INTERFACES = {
     "note-consolidate": ["abstractnote.consolidate.v1"],
     "note-process": [],
     "note-mine": [],
+    "note-file": [],
 }
 
 #: Tools each flow may call (the automations' `_runtime.allowed_tools` is the union).
@@ -47,7 +48,7 @@ NOTE_TOOLS = [
     "note_resurface", "note_anniversaries", "note_insight_write", "note_communities_recompute",
     "note_communities_pending", "note_communities_label", "note_consolidation_begin", "note_consolidation_progress",
     "note_consolidation_end", "note_entities_normalize", "note_entities_stale_summaries", "note_entities_set_summaries",
-    "note_then_now_refresh",
+    "note_then_now_refresh", "note_reinterpret_next", "note_mark_reinterpret", "note_filing_context",
 ]
 
 DRAIN_DEFAULTS = {"max_items": 20, "budget_s": 90}
@@ -127,6 +128,37 @@ def packet_code(functions: List[str], tail: str) -> str:
     return "\n".join(body)
 
 
+def validate_code(tail: str) -> str:
+    """A code-node body that defines :mod:`abstractnote.process.validate`'s flow functions (its constants first),
+    then ``tail``: the note-process checks of a model answer run the very same source as the apply step."""
+    import ast
+    import inspect
+
+    from ..process import validate
+
+    body = [f"{k} = {getattr(validate, k)!r}" for k in sorted(vars(validate)) if k.isupper()]
+    for name in validate.FLOW_FUNCTIONS:
+        tree = ast.parse(inspect.getsource(getattr(validate, name)))
+        fn = tree.body[0]
+        fn.returns = None
+        for a in [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs, fn.args.vararg, fn.args.kwarg]:
+            if a is not None:
+                a.annotation = None
+        body.append(ast.unparse(fn))
+    body.append(tail.strip())
+    return "\n".join(body)
+
+
+#: note-process: the candidates each mention was offered (``note_resolve_candidates``), by ref.
+_CANDIDATE_COUNTS = (
+    "cands = {}\n"
+    "for r in resolved or []:\n"
+    "    if isinstance(r, dict):\n"
+    "        cands[str(r.get('ref'))] = len([c for c in (r.get('candidates') or []) if isinstance(c, dict)])\n"
+    "texts = [str(s.get('text') or '') for s in (sections or []) if isinstance(s, dict)]\n"
+)
+
+
 # ------------------------------------------------------------------ inputs
 
 
@@ -159,14 +191,18 @@ def flow_schemas() -> Dict[str, Dict[str, Any]]:
 
 
 def load_schemas() -> Dict[str, Dict[str, Any]]:
-    """The structured-output schemas: the core lane's when importable, checked against ours, plus
-    :func:`flow_schemas` (refused when the core lane defines one of them differently)."""
+    """The structured-output schemas every ``llm_call`` node is handed: the core lane's when importable, checked
+    against ours, plus :func:`flow_schemas` (refused when the core lane defines one of them differently), each made
+    :func:`abstractnote.process.schemas.strict` (every property required, an optional one nullable: FIX1). This is
+    the one place a schema reaches a model."""
     out = _core_schemas()
     for name, schema in flow_schemas().items():
         if name in out and _skeleton(out[name]) != _skeleton(schema):
             raise RuntimeError(f"{name} differs between abstractnote.process.schemas and its flow-side definition")
         out[name] = schema
-    return out
+    from ..process.schemas import strict
+
+    return {name: strict(schema) for name, schema in out.items()}
 
 
 def _core_schemas() -> Dict[str, Dict[str, Any]]:
@@ -275,9 +311,12 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
             "attachments": ("array", ("attachments", "value")),
             "about": ("object", ("about", "value")),
             "answer": ("object", ("answer", "value")),
+            # claims the queue row for the inline understanding in the enqueue's transaction (ADR 0008 §8)
+            "process_inline": ("boolean", S("process_inline")),
         },
         [("note_id", "string"), ("status", "string"), ("first_saved_at", "string"), ("received_at", "string"),
-         ("similar", "array"), ("revisits", "array"), ("topics", "array"), ("warnings", "array")],
+         ("similar", "array"), ("revisits", "array"), ("topics", "array"), ("warnings", "array"),
+         ("occurred_at", "string"), ("date_basis", "string"), ("date_sentence", "string")],
         after=("start", "exec-out"),
     )
     f.code(
@@ -348,6 +387,8 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
         "dates = [d for d in dates if d]\n"
         "if dates:\n"
         "    parts.append(\"You noted this on \" + dates[0] + \".\")\n"
+        "if str(dated or \"\").strip():\n"
+        "    parts.append(str(dated).strip())\n"
         "for w in warnings or []:\n"
         "    if isinstance(w, str) and w.strip():\n"
         "        parts.append(w.strip())\n"
@@ -355,7 +396,7 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
         inputs={
             "kind": ("string", ("filing_fields", "kind")), "title": ("string", ("filing_fields", "title")),
             "similar": ("array", (cap, "similar")), "revisits": ("array", (cap, "revisits")),
-            "warnings": ("array", (cap, "warnings")),
+            "warnings": ("array", (cap, "warnings")), "dated": ("string", (cap, "date_sentence")),
         },
         outputs=[("message", "string")],
     )
@@ -374,7 +415,37 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
         "model": ("model", S("model")),
     }, [("response", "string"), ("revision_id", "string"), ("revision", "object")])
     f.then("inline_branch", "process", "true")
-    f.child_check("process_ok", "Understood?", "process")
+    # The outcome is recorded either way (the claim ends with it): a failure is a failed attempt in the queue log
+    # (queue_errors) with the child's own sentence, then the run ends with that sentence.
+    f.code(
+        "inline_outcome", "Understood?",
+        "o = output if isinstance(output, dict) else {}\n"
+        "c = child_output if isinstance(child_output, dict) else {}\n"
+        "err = str(c.get(\"error\") or o.get(\"error\") or \"\")\n"
+        "for prefix in (\"Runtime error: \", \"Execution error: \"):\n"
+        "    if err.startswith(prefix):\n"
+        "        err = err[len(prefix):]\n"
+        "failed = c.get(\"success\") is False or o.get(\"success\") is False or bool(err) or not o.get(\"revision_id\")\n"
+        "return {\"ok\": not failed, \"failure\": (err or \"The note could not be processed.\") if failed else \"\"}",
+        inputs={"output": ("object", ("process", "output")), "child_output": ("object", ("process", "child_output"))},
+        outputs=[("ok", "boolean"), ("failure", "string")],
+    )
+    f.then("process", "inline_outcome")
+    f.if_("inline_ok", "Understood?", ("inline_outcome", "ok"))
+    f.then("inline_outcome", "inline_ok")
+    failed_ack = f.tool_step(
+        "inline_fail", "Record the failure", "note_queue_ack",
+        {"note_id": ("string", (cap, "note_id")), "outcome": ("string", "error"),
+         "error": ("string", ("inline_outcome", "failure"))},
+        [("status", "string")],
+        after=("inline_ok", "false"),
+    )
+    f.code(
+        "inline_failed", "Say why",
+        "raise ValueError(str(failure or \"The note could not be processed.\"))",
+        inputs={"failure": ("string", ("inline_outcome", "failure"))}, outputs=[("checked", "boolean")],
+    )
+    f.then(failed_ack, "inline_failed")
     ack = f.tool_step(
         "inline_ack", "Mark it processed", "note_queue_ack",
         {
@@ -382,13 +453,16 @@ def build_capture(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
             "revision_id": ("string", ("process", "revision_id")),
         },
         [("status", "string")],
-        after=("process_ok", "exec-out"),
+        after=("inline_ok", "true"),
     )
     f.code(
         "processed_msg", "Processed answer",
         "extra = str(summary or \"\").strip()\n"
-        "return {\"message\": (str(message) + \" \" + extra).strip()}",
-        inputs={"message": ("string", ("saved_msg", "message")), "summary": ("string", ("process", "response"))},
+        "rev = revision if isinstance(revision, dict) else {}\n"
+        "dated = str(rev.get(\"date_sentence\") or \"\").strip()\n"
+        "return {\"message\": \" \".join(x for x in (str(message or \"\").strip(), dated, extra) if x)}",
+        inputs={"message": ("string", ("saved_msg", "message")), "summary": ("string", ("process", "response")),
+                "revision": ("object", ("process", "revision"))},
         outputs=[("message", "string")],
     )
     f.then(ack, "processed_msg")
@@ -446,10 +520,82 @@ else:
         merged["document_date"] = dated[0]
     if warnings:
         merged["warnings"] = warnings
-names = [{"ref": m.get("ref"), "name": m.get("name"), "kind": m.get("kind"), "aliases": m.get("aliases") or []}
-         for m in merged.get("mentions") or []]
+slots = {}
+for c in merged.get("claims") or []:
+    for end in (c.get("subject"), None if c.get("object_is_literal") else c.get("object")):
+        if end is not None and c.get("predicate") and c.get("predicate") not in slots.setdefault(str(end), []):
+            slots[str(end)].append(c.get("predicate"))
+names = [{"ref": m.get("ref"), "name": m.get("name"), "kind": m.get("kind"), "aliases": m.get("aliases") or [],
+          "predicates": slots.get(str(m.get("ref")), [])} for m in merged.get("mentions") or []]
 return {"extraction": merged, "mentions": names}
 '''
+
+
+def _file_if_needed(f: Flow, schemas: Dict[str, Any], prompts: Dict[str, str], after: Tuple[str, str]
+                    ) -> Tuple[List[Tuple[str, str]], str]:
+    """The quick filing of a stored note that has no kind yet (an imported note: imports skip the filing a live
+    capture gets; eval2: 985 of 988 understood imported notes had none): ``note_filing_context`` -> the capture's own
+    filing packet, prompt, ``QuickFiling`` schema and settings (thinking off, one call) -> ``note_file`` with the
+    kind, up to 4 topics, the title when the note has none, its language and one line (never the urgency: the note
+    keeps its place in the queue). A note that has a kind goes straight on. Returns the exits the flow continues
+    from (filed, not needed) and the context node id. note-file is the one flow that holds these steps."""
+    S = lambda p: ("start", p)  # noqa: E731
+    need = f.tool_step(
+        "filing_context", "Does it need filing?", "note_filing_context", {"note_id": ("string", S("note_id"))},
+        [("needed", "boolean"), ("occurred_at", "string"), ("title", "string"), ("text", "string"),
+         ("similar", "array"), ("revisits", "array"), ("topics", "array")],
+        after=after,
+    )
+    f.if_("needs_filing", "No kind yet?", (need, "needed"))
+    f.then(need, "needs_filing")
+    f.code(
+        "filing_packet", "What filing sees",
+        packet_code(["clip", "note_envelope", "filing_packet"],
+                    "return {\"packet\": filing_packet(note_id, occurred_at, title, text, similar, revisits, topics)}"),
+        inputs={"note_id": ("string", S("note_id")), "occurred_at": ("string", (need, "occurred_at")),
+                "title": ("string", (need, "title")), "text": ("string", (need, "text")),
+                "similar": ("array", (need, "similar")), "revisits": ("array", (need, "revisits")),
+                "topics": ("array", (need, "topics"))},
+        outputs=[("packet", "object")],
+    )
+    f.then("needs_filing", "filing_packet", "true")
+    f.template("filing_prompt", "Filing prompt", prompts["quick_filing"], {"packet": ("filing_packet", "packet")})
+    f.llm("filing", "File it quickly", schema=schemas["QuickFiling"], prompt=("filing_prompt", "result"),
+          provider=S("provider"), model=S("model"), **_step("quick_filing", prompts))
+    f.then("filing_packet", "filing")
+    f.break_object("filing_fields", "Filing", ("filing", "data"), [
+        ("title", "string"), ("kind", "string"), ("topics", "array"), ("language", "string"), ("one_line", "string"),
+    ])
+    filed = f.tool_step(
+        "file", "File the note", "note_file",
+        {"note_id": ("string", S("note_id")), "title": ("string", ("filing_fields", "title")),
+         "kind": ("string", ("filing_fields", "kind")), "topics": ("array", ("filing_fields", "topics")),
+         "language": ("string", ("filing_fields", "language")),
+         "one_line": ("string", ("filing_fields", "one_line"))},
+        [("priority", "number"), ("status", "string"), ("topics_not_assigned", "array")],
+        after=("filing", "exec-out"),
+    )
+    return [(filed, "exec-out"), ("needs_filing", "false")], need
+
+
+def build_file(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, Any]:
+    """note-file: the quick filing of one stored note without a kind (note-process runs it first, as a subflow, so
+    the bundle carries it; the ``refile --missing`` repair runs it per note)."""
+    f = Flow("note-file", "File a stored note", "Give a stored note without a kind its kind and topics.",
+             interfaces=INTERFACES["note-file"])
+    f.start([("note_id", "string"), *_model_pins()], {"note_id": "", "provider": "", "model": ""})
+    exits, need = _file_if_needed(f, schemas, prompts, ("start", "exec-out"))
+    f.end("end", "Filed", {
+        "response": ("string", "Filed."), "note_id": ("string", ("start", "note_id")), "filed": ("boolean", True),
+        "kind": ("string", ("filing_fields", "kind")), "topics": ("array", ("filing_fields", "topics")),
+    })
+    f.then(exits[0][0], "end", exits[0][1])
+    f.end("end_not_needed", "Already filed", {
+        "response": ("string", "It already has a kind."), "note_id": ("string", ("start", "note_id")),
+        "filed": ("boolean", False),
+    })
+    f.then(exits[1][0], "end_not_needed", exits[1][1])
+    return f.finish()
 
 
 def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, Any]:
@@ -473,14 +619,27 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
     )
     f.then("start", "thinking")
     TH = ("thinking", "value")
+    # a stored note without a kind (an import) gets the quick filing a live capture gets (the note-file subflow), then
+    # is read; a filing that fails fails the note (its sentence in the queue log), never a silent skip
+    need = f.tool_step("filing_need", "Does it need filing?", "note_filing_context",
+                       {"note_id": ("string", S("note_id"))}, [("needed", "boolean")], after=("thinking", "exec-out"))
+    f.if_("unfiled", "No kind yet?", (need, "needed"))
+    f.then(need, "unfiled")
+    f.subflow("filing", "File it", "note-file", {
+        "note_id": ("string", S("note_id")), "provider": ("provider_text", S("provider")),
+        "model": ("model", S("model")),
+    }, [("filed", "boolean")])
+    f.then("unfiled", "filing", "true")
+    f.child_check("filing_checked", "Filed?", "filing")
     ctx = f.tool_step(
         "context", "Look at what is known", "note_context",
         {"note_id": ("string", S("note_id")), "max_chars": ("number", SECTION_CHARS)},
         [("note", "object"), ("sections", "array"), ("similar_notes", "array"),
          ("candidate_entities", "array"), ("open_tasks", "array"), ("topics", "array"),
-         ("vocabulary", "array")],
-        after=("thinking", "exec-out"),
+         ("vocabulary", "array"), ("context", "object")],
+        after=("filing_checked", "exec-out"),
     )
+    f.then("unfiled", "context_args", "false")
     f.code(
         "sections", "Sections to read",
         "if not isinstance(sections, list) or not sections:\n"
@@ -508,12 +667,16 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
           provider=S("provider"), model=S("model"), thinking_from=TH, **_step("extract", prompts))
     f.then("extract_packet", "extract")
     # A section with text that names nothing is read once more (the model sometimes answers valid
-    # empty lists); a second empty answer is kept and flagged in the revision's warnings.
+    # empty lists); a second empty answer is kept and flagged in the revision's warnings. A structurally
+    # corrupt answer (process/validate.py, ADR 0008 §8) is read once more too; a second one fails the note.
     f.code(
-        "nothing_named", "Nothing named?",
-        "d = data if isinstance(data, dict) else {}\n"
-        "text = str((item or {}).get(\"text\") or \"\") if isinstance(item, dict) else str(item or \"\")\n"
-        f"return {{\"again\": not (d.get(\"mentions\") or []) and len(text.strip()) >= {EMPTY_RETRY_MIN_CHARS}}}",
+        "nothing_named", "Nothing named, or a corrupt answer?",
+        validate_code(
+            "d = data if isinstance(data, dict) else {}\n"
+            "text = str((item or {}).get(\"text\") or \"\") if isinstance(item, dict) else str(item or \"\")\n"
+            "corrupt = extraction_problems(d, text)\n"
+            f"empty = not (d.get(\"mentions\") or []) and len(text.strip()) >= {EMPTY_RETRY_MIN_CHARS}\n"
+            "return {\"again\": bool(corrupt) or empty}"),
         inputs={"data": ("object", ("extract", "data")), "item": ("object", ("each_section", "item"))},
         outputs=[("again", "boolean")],
     )
@@ -526,17 +689,30 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
           provider=S("provider"), model=S("model"), thinking_from=TH, **_step("extract", prompts))
     f.then("read_again", "extract_again", "true")
     f.code(
-        "flag_empty", "Flag a part that names nothing",
-        "d = dict(data) if isinstance(data, dict) else {}\n"
-        "if not (d.get(\"mentions\") or []):\n"
-        "    d[\"warnings\"] = list(d.get(\"warnings\") or []) + [\"A part of this note names nothing although it has \"\n"
-        "                                                  \"text, even when read a second time.\"]\n"
-        "return {\"entry\": d}",
-        inputs={"data": ("object", ("extract_again", "data"))}, outputs=[("entry", "object")],
+        "flag_empty", "Flag a part that names nothing (a corrupt answer fails)",
+        validate_code(
+            "d = dict(data) if isinstance(data, dict) else {}\n"
+            "text = str((item or {}).get(\"text\") or \"\") if isinstance(item, dict) else str(item or \"\")\n"
+            "corrupt = extraction_problems(d, text)\n"
+            "if corrupt:\n"
+            "    return {\"entry\": d, \"failed\": True, \"failure\": problems_sentence(\"reading\", corrupt, True)}\n"
+            "if not (d.get(\"mentions\") or []):\n"
+            "    d[\"warnings\"] = list(d.get(\"warnings\") or []) + [\"A part of this note names nothing although it has \"\n"
+            "                                                  \"text, even when read a second time.\"]\n"
+            "return {\"entry\": d, \"failed\": False, \"failure\": \"\"}"),
+        inputs={"data": ("object", ("extract_again", "data")), "item": ("object", ("each_section", "item"))},
+        outputs=[("entry", "object"), ("failed", "boolean"), ("failure", "string")],
     )
     f.then("extract_again", "flag_empty")
+    # Inside the loop a raising node would only end the iteration: an end node stops the run with the problem.
+    f.if_("reread_corrupt", "Corrupt twice?", ("flag_empty", "failed"))
+    f.then("flag_empty", "reread_corrupt")
+    f.end("stopped_reading", "Stopped: the reading was corrupt twice", {
+        "response": ("string", ("flag_empty", "failure")), "error": ("string", ("flag_empty", "failure")),
+        "success": ("boolean", False)})
+    f.then("reread_corrupt", "stopped_reading", "true")
     f.add_to_list("keep_retry", "Keep the second reading", "extractions", ("flag_empty", "entry"))
-    f.then("flag_empty", "keep_retry")
+    f.then("reread_corrupt", "keep_retry", "false")
     f.get_var("extractions", "extractions", [])
     f.code("merge", "Merge the sections", MERGE_EXTRACTIONS,
            inputs={"extractions": ("array", ("extractions", "value"))},
@@ -550,7 +726,8 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
     )
     f.code(
         "link_parts", "What linking sees",
-        packet_code(["clip", "note_envelope", "note_header", "claim_line", "candidate_card", "link_batches"],
+        packet_code(["clip", "later_than", "predicate_terms", "slot_first", "note_envelope", "note_header",
+                     "claim_line", "candidate_card", "link_batches"],
                     "return {\"items\": link_batches(note, extraction, resolved, open_tasks)}"),
         inputs={"note": ("object", (ctx, "note")), "extraction": ("object", ("merge", "extraction")),
                 "resolved": ("array", (res, "mentions")), "open_tasks": ("array", (ctx, "open_tasks"))},
@@ -563,8 +740,51 @@ def build_process(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str,
     f.llm("link", "Link", schema=schemas["Linking"], prompt=("link_prompt", "result"),
           provider=S("provider"), model=S("model"), thinking_from=TH, **_step("link", prompts))
     f.then("each_link", "link", "loop")
+    # A structurally corrupt linking answer (process/validate.py, ADR 0008 §8) is asked once more with a fresh
+    # call; a second corrupt answer fails the note (its error is the problem), so nothing is applied in part.
+    link_inputs = {"resolved": ("array", (res, "mentions")), "extraction": ("object", ("merge", "extraction")),
+                   "sections": ("array", ("sections", "items"))}
+    # The second call is told what was wrong (live 2026-10-20: the same prompt again gave the same candidate-less
+    # reuse in 8 of 8 retries on gpt-oss-120b), after the very same message, so the cached prefix is unchanged.
+    f.code(
+        "link_valid", "A sound answer?",
+        validate_code(_CANDIDATE_COUNTS
+                      + "problems = link_problems(data, cands, context_text(texts, extraction))\n"
+                        "again = str(prompt or \"\")\n"
+                        "if problems:\n"
+                        "    again += (\"\\n\\nYour previous answer to this message could not be used: \" + \"; \".join(problems[:5])\n"
+                        "              + \". Answer again in full: a reuse or unsure decision gives its candidate's index from that \"\n"
+                        "              \"mention's list (or the decision is create), and every text field holds only its own text.\")\n"
+                        "return {\"ok\": not problems, \"retry_prompt\": again}"),
+        inputs={"data": ("object", ("link", "data")), "prompt": ("string", ("link_prompt", "result")), **link_inputs},
+        outputs=[("ok", "boolean"), ("retry_prompt", "string")],
+    )
+    f.then("link", "link_valid")
+    f.if_("link_ok", "Sound?", ("link_valid", "ok"))
+    f.then("link_valid", "link_ok")
     f.add_to_list("keep_linking", "Keep the linking", "linkings", ("link", "data"))
-    f.then("link", "keep_linking")
+    f.then("link_ok", "keep_linking", "true")
+    f.llm("link_again", "Link again", schema=schemas["Linking"], prompt=("link_valid", "retry_prompt"),
+          provider=S("provider"), model=S("model"), thinking_from=TH, **_step("link", prompts))
+    f.then("link_ok", "link_again", "false")
+    f.code(
+        "link_checked", "A sound second answer (else the note fails)",
+        validate_code(_CANDIDATE_COUNTS
+                      + "problems = link_problems(data, cands, context_text(texts, extraction))\n"
+                        "return {\"entry\": data, \"failed\": bool(problems),\n"
+                        "        \"failure\": problems_sentence(\"linking\", problems, True) if problems else \"\"}"),
+        inputs={"data": ("object", ("link_again", "data")), **link_inputs},
+        outputs=[("entry", "object"), ("failed", "boolean"), ("failure", "string")],
+    )
+    f.then("link_again", "link_checked")
+    f.if_("relink_corrupt", "Corrupt twice?", ("link_checked", "failed"))
+    f.then("link_checked", "relink_corrupt")
+    f.end("stopped_linking", "Stopped: the linking was corrupt twice", {
+        "response": ("string", ("link_checked", "failure")), "error": ("string", ("link_checked", "failure")),
+        "success": ("boolean", False)})
+    f.then("relink_corrupt", "stopped_linking", "true")
+    f.add_to_list("keep_relinking", "Keep the second linking", "linkings", ("link_checked", "entry"))
+    f.then("relink_corrupt", "keep_relinking", "false")
     f.get_var("linkings", "linkings", [])
     f.code("merge_links", "Merge the linking parts",
            packet_code(["merge_linkings"], "return {\"linking\": merge_linkings(linkings)}"),
@@ -604,7 +824,7 @@ def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, A
         "budget = float(budget_s if budget_s is not None else 90)\n"
         "now = time.time()\n"
         "return {\"updates\": {\"drain_deadline\": now + budget, \"drain_left\": left, \"drain_continue\": True,\n"
-        "        \"drain_processed\": 0, \"drain_failed\": 0, \"drain_errors\": [],\n"
+        "        \"drain_processed\": 0, \"drain_failed\": 0, \"drain_errors\": [], \"drain_requeued\": [],\n"
         "        \"drain_worker\": \"drain-\" + str(int(now * 1000))}}",
         inputs={"max_items": ("number", S("max_items")), "budget_s": ("number", S("budget_s"))},
         outputs=[("updates", "object")],
@@ -646,6 +866,10 @@ def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, A
         "for prefix in (\"Runtime error: \", \"Execution error: \"):\n"
         "    if err.startswith(prefix):\n"
         "        err = err[len(prefix):]\n"
+        "rev = o.get(\"revision\") if isinstance(o.get(\"revision\"), dict) else {}\n"
+        "if not err and c.get(\"success\") is not False and rev.get(\"requeue\"):\n"
+        "    # the notebook changed while the note was read: nothing was applied, it goes back once (review 4.1)\n"
+        "    return {\"outcome\": \"requeue\", \"failure\": str(rev.get(\"reason\") or \"\"), \"revision_id\": None}\n"
         "failed = c.get(\"success\") is False or o.get(\"success\") is False or bool(err) or not o.get(\"revision_id\")\n"
         "return {\"outcome\": \"error\" if failed else \"ok\",\n"
         "        \"failure\": (str(err) if err else \"The note could not be processed.\") if failed else None,\n"
@@ -663,25 +887,31 @@ def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, A
     )
     for vid, name, default in (("left", "drain_left", 0), ("deadline", "drain_deadline", 0),
                                ("processed", "drain_processed", 0), ("failed", "drain_failed", 0),
-                               ("errors", "drain_errors", [])):
+                               ("errors", "drain_errors", []), ("requeued", "drain_requeued", [])):
         f.get_var(vid, name, default)
     f.code(
         "budget", "Budget left?",
         "import time\n"
         "ok = outcome == \"ok\"\n"
+        "again = outcome == \"requeue\"\n"
         "errs = list(errors or [])\n"
-        "if not ok:\n"
+        "back = list(requeued or [])\n"
+        "if again:\n"
+        "    back.append({\"note_id\": note_id, \"reason\": failure})\n"
+        "elif not ok:\n"
         "    errs.append({\"note_id\": note_id, \"error\": failure})\n"
         "remaining = int(left or 0) - 1\n"
         "return {\"updates\": {\"drain_left\": remaining,\n"
         "        \"drain_processed\": int(processed or 0) + (1 if ok else 0),\n"
-        "        \"drain_failed\": int(failed or 0) + (0 if ok else 1), \"drain_errors\": errs,\n"
+        "        \"drain_failed\": int(failed or 0) + (0 if ok or again else 1), \"drain_errors\": errs,\n"
+        "        \"drain_requeued\": back,\n"
         "        \"drain_continue\": remaining > 0 and time.time() < float(deadline or 0)}}",
         inputs={
             "outcome": ("string", ("outcome", "outcome")), "failure": ("string", ("outcome", "failure")),
             "note_id": ("string", ("pick", "note_id")), "left": ("number", ("left", "value")),
             "deadline": ("number", ("deadline", "value")), "processed": ("number", ("processed", "value")),
             "failed": ("number", ("failed", "value")), "errors": ("array", ("errors", "value")),
+            "requeued": ("array", ("requeued", "value")),
         },
         outputs=[("updates", "object")],
     )
@@ -689,27 +919,51 @@ def build_drain(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, A
     f.set_vars("budget_vars", "Remember the budget", ("budget", "updates"))
     f.then("budget", "budget_vars")
     for vid, name, default in (("r_processed", "drain_processed", 0), ("r_failed", "drain_failed", 0),
-                               ("r_errors", "drain_errors", [])):
+                               ("r_errors", "drain_errors", []), ("r_requeued", "drain_requeued", [])):
         f.get_var(vid, name, default)
+    # The end of the batch (ADR 0008 §5): the themes are found again when what was applied made them due (notes
+    # dated earlier than what was known, notes understood again, many revisions; no model). A failure is reported
+    # in the answer, never silent, and does not undo the notes processed.
+    themes = f._tool_nodes("communities", "Themes due?", "note_communities_recompute", {"only_if_due": ("boolean", True)},
+                           [("recomputed", "boolean")], ("drain_loop", "done"), raising=False)
     f.code(
         "report", "Report",
         "n = int(processed or 0)\n"
         "k = int(failed or 0)\n"
-        "if n == 0 and k == 0:\n"
+        "back = list(requeued or [])\n"
+        "if n == 0 and k == 0 and not back:\n"
         "    msg = \"Nothing to process.\"\n"
         "else:\n"
         "    msg = \"Processed \" + str(n) + (\" note.\" if n == 1 else \" notes.\")\n"
         "    if k:\n"
         "        msg = msg[:-1] + \"; \" + str(k) + (\" could not be processed.\" if k > 1 else \" could not be processed.\")\n"
-        "return {\"message\": msg, \"processed\": n, \"failed\": k, \"errors\": list(errors or [])}",
+        "    if back:\n"
+        "        b = len(back)\n"
+        "        msg += \" \" + str(b) + (\" note is\" if b == 1 else \" notes are\") + \" read again: the notebook changed while\"\n"
+        "        msg += (\" it was\" if b == 1 else \" they were\") + \" being read.\"\n"
+        "c = dict(themes) if isinstance(themes, dict) else {}\n"
+        "if themes_failed:\n"
+        "    c = {\"recomputed\": False, \"error\": str(themes_failure or \"\")}\n"
+        "    msg += \" The themes could not be updated: \" + str(themes_failure or \"no reason was given.\")\n"
+        "elif c.get(\"recomputed\"):\n"
+        "    g = int(c.get(\"communities\") or 0)\n"
+        "    w = int(c.get(\"labels_waiting\") or 0)\n"
+        "    msg += \" The themes were updated (\" + str(g) + (\" group\" if g == 1 else \" groups\")\n"
+        "    msg += ((\", \" + str(w) + \" to name next time).\") if w else \").\")\n"
+        "return {\"message\": msg, \"processed\": n, \"failed\": k, \"errors\": list(errors or []), \"communities\": c,\n"
+        "        \"requeued\": back}",
         inputs={"processed": ("number", ("r_processed", "value")), "failed": ("number", ("r_failed", "value")),
-                "errors": ("array", ("r_errors", "value"))},
-        outputs=[("message", "string"), ("processed", "number"), ("failed", "number"), ("errors", "array")],
+                "errors": ("array", ("r_errors", "value")), "requeued": ("array", ("r_requeued", "value")),
+                "themes": ("object", (themes, "tool_output")),
+                "themes_failed": ("boolean", (themes, "failed")), "themes_failure": ("string", (themes, "failure"))},
+        outputs=[("message", "string"), ("processed", "number"), ("failed", "number"), ("errors", "array"),
+                 ("communities", "object"), ("requeued", "array")],
     )
-    f.then("drain_loop", "report", "done")
+    f.then(themes, "report")
     f.end("end", "Done", {
         "response": ("string", ("report", "message")), "processed": ("number", ("report", "processed")),
         "failed": ("number", ("report", "failed")), "errors": ("array", ("report", "errors")),
+        "communities": ("object", ("report", "communities")), "requeued": ("array", ("report", "requeued")),
     })
     f.then("report", "end")
     return f.finish(automation_defaults=AUTOMATION_DEFAULTS["note-drain"])
@@ -1166,8 +1420,13 @@ SUMMARY_VIEW_CODE = (
     "for i, p in enumerate(items or []):\n"
     "    if not isinstance(p, dict):\n"
     "        continue\n"
-    "    view.append({\"index\": i, \"name\": p.get(\"name\"), \"kind\": p.get(\"kind\"), \"aliases\": p.get(\"aliases\") or [],\n"
-    "                 \"summary\": p.get(\"summary\"), \"statements\": p.get(\"claims\") or [], \"notes\": p.get(\"notes\") or []})\n"
+    "    e = {\"index\": i, \"name\": p.get(\"name\"), \"kind\": p.get(\"kind\"), \"aliases\": p.get(\"aliases\") or [],\n"
+    "         \"summary\": p.get(\"summary\"), \"as_of\": p.get(\"as_of\"), \"statements\": p.get(\"claims\") or [],\n"
+    "         \"history\": p.get(\"history\") or [], \"earlier\": p.get(\"earlier\") or [], \"notes\": p.get(\"notes\") or []}\n"
+    "    left = {k: v for k, v in (p.get(\"omitted\") or {}).items() if v}\n"
+    "    if left:\n"
+    "        e[\"omitted\"] = left\n"
+    "    view.append(e)\n"
     "return {\"view\": view, \"any\": len(view) > 0}"
 )
 
@@ -1231,11 +1490,15 @@ SUMMARY_RETRY_CODE = (
 )
 #: Why an offered item is skipped for this run (the stage's ``reasons``, the warning log, ``left_out.reasons``).
 NO_LABEL_REASON = "The model gave no name for these groups, even when asked a second time."
+NO_REINTERPRET_REASON = "It could not be understood again this time."
 NO_SUMMARY_REASON = "The model gave no summary for these entries, even when asked a second time."
 
 
 def build_consolidate(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[str, Any]:
-    """note-consolidate (backlog 0032, docs/cognition.md): normalize -> communities -> labels (loop, 5 per call) ->
+    """note-consolidate (backlog 0032, docs/cognition.md): normalize -> reinterpret (ADR 0008: loop, one marked note at a
+    time through note-process, in history order, each once per pass, budget-bounded; a note whose context did not
+    change is settled unchanged by the next call without a model; a note that cannot be understood again is skipped
+    with its reason and its mark waits) -> communities -> labels (loop, 5 per call) ->
     summaries (loop, 8 per call, budget-bounded) -> then_now -> reflect (subflow), each stage reporting its
     progress. A labelling or summary round whose answer leaves out an offered item asks once more; what is still
     unanswered is skipped for this run (reported with the round's progress, so it is logged and counted; the labels
@@ -1334,7 +1597,8 @@ def build_consolidate(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[
         "        \"labels_continue\": True, \"labels_done\": 0, \"labels_inflight\": False, \"labels_skipped\": [],\n"
         "        \"labels_left\": 0, \"labels_budget\": False, \"labels_answer\": [],\n"
         "        \"sum_continue\": True, \"sum_done\": 0, \"sum_inflight\": False, \"sum_skipped\": 0,\n"
-        "        \"sum_left\": 0, \"sum_budget\": False, \"sum_answer\": []}}",
+        "        \"sum_left\": 0, \"sum_budget\": False, \"sum_answer\": [],\n"
+        "        \"re_continue\": True, \"re_inflight\": False, \"re_failed\": [], \"re_budget\": False}}",
         inputs={"budget_s": ("number", S("budget_s"))}, outputs=[("updates", "object")],
     )
     f.then(begun, "init")
@@ -1348,6 +1612,78 @@ def build_consolidate(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[
            inputs={"merges": ("number", (norm, "merges")), "planned": ("number", (begun, "planned_merges"))},
            outputs=[("done", "number"), ("total", "number")], exec_lane=False)
     cont = report("p_norm_done", "normalize", ("norm_total", "done"), ("norm_total", "total"), cont)
+
+    # ---- reinterpret (loop, ADR 0008): the notes an earlier note made out of date, one at a time, in history order
+    re_first, cont = step("re_count", "Notes to understand again", "note_reinterpret_next", {"limit": ("number", 0)},
+                          [("done", "number"), ("total", "number"), ("pending", "number")], cont)
+    cont = report("p_re_start", "reinterpret", (re_first, "done"), (re_first, "total"), cont)
+    f.get_var("re_go", "re_continue", False)
+    f.while_("re_loop", "While notes wait to be understood again", ("re_go", "value"))
+    f.then(cont[0], "re_loop", cont[1])
+    flags("re_begin", "A re-understanding round", {"re_inflight": True, "re_continue": False}, ("re_loop", "loop"))
+    f.get_var("re_deadline", "cons_deadline", 0)
+    f.code("re_time", "Time left?", "import time\nreturn {\"in_time\": time.time() < float(deadline or 0)}",
+           inputs={"deadline": ("number", ("re_deadline", "value"))}, outputs=[("in_time", "boolean")])
+    f.then("re_begin", "re_time")
+    f.if_("re_in_time", "Time left to understand a note again?", ("re_time", "in_time"))
+    f.then("re_time", "re_in_time")
+    flags("re_spent", "The time is spent", {"re_inflight": False, "re_continue": False, "re_budget": True},
+          ("re_in_time", "false"))
+    f.get_var("re_failed_last", "re_failed", [])
+    re_next, cont = step("re_next", "Next note to understand again", "note_reinterpret_next",
+                         {"limit": ("number", cons.REINTERPRET_BATCH), "failed": ("array", ("re_failed_last", "value"))},
+                         [("items", "array"), ("done", "number"), ("total", "number"), ("pending", "number")],
+                         ("re_in_time", "true"))
+    f.code("re_pick", "The note",
+           "first = items[0] if isinstance(items, list) and items else None\n"
+           "return {\"has_item\": isinstance(first, dict),"
+           " \"note_id\": first.get(\"note_id\") if isinstance(first, dict) else None}",
+           inputs={"items": ("array", (re_next, "items"))}, outputs=[("has_item", "boolean"), ("note_id", "string")])
+    f.then(cont[0], "re_pick", cont[1])
+    f.if_("re_has", "A note to read again?", ("re_pick", "has_item"))
+    f.then("re_pick", "re_has")
+    flags("re_none", "Nothing left to read again", {"re_inflight": False, "re_continue": False, "re_failed": []},
+          ("re_has", "false"))
+    f.subflow("re_process", "Understand the note again", "note-process", {
+        "note_id": ("string", ("re_pick", "note_id")), "provider": ("provider_text", S("provider")),
+        "model": ("model", S("model")), "thinking": ("string", S("thinking")),
+    }, [("revision_id", "string")])
+    f.then("re_has", "re_process", "true")
+    f.code(
+        "re_outcome", "Understood again?",
+        "o = output if isinstance(output, dict) else {}\n"
+        "c = child_output if isinstance(child_output, dict) else {}\n"
+        "err = str(c.get(\"error\") or o.get(\"error\") or \"\")\n"
+        "for prefix in (\"Runtime error: \", \"Execution error: \"):\n"
+        "    if err.startswith(prefix):\n"
+        "        err = err[len(prefix):]\n"
+        "failed = c.get(\"success\") is False or o.get(\"success\") is False or bool(err)\n"
+        f"skipped = [{{\"id\": note_id, \"reason\": err or {NO_REINTERPRET_REASON!r}}}] if failed else []\n"
+        "return {\"skipped\": skipped, \"done\": int(done or 0) + 1, \"total\": max(int(total or 0), int(done or 0) + 1),\n"
+        "        \"updates\": {\"re_failed\": skipped, \"re_inflight\": False, \"re_continue\": True}}",
+        inputs={"output": ("object", ("re_process", "output")), "child_output": ("object", ("re_process", "child_output")),
+                "note_id": ("string", ("re_pick", "note_id")), "done": ("number", (re_next, "done")),
+                "total": ("number", (re_next, "total"))},
+        outputs=[("skipped", "array"), ("done", "number"), ("total", "number"), ("updates", "object")],
+    )
+    f.then("re_process", "re_outcome")
+    cont = report("p_re", "reinterpret", ("re_outcome", "done"), ("re_outcome", "total"), ("re_outcome", "exec-out"),
+                  skipped=("re_outcome", "skipped"), reason=NO_REINTERPRET_REASON)
+    f.set_vars("re_vars", "Remember the round", ("re_outcome", "updates"))
+    f.then(cont[0], "re_vars", cont[1])
+    # after the loop: a round that did not reach its end ends the run; the last failure is recorded on its mark
+    f.get_var("re_unfinished", "re_inflight", False)
+    f.if_("re_broke", "Did understanding again stop half-way?", ("re_unfinished", "value"))
+    f.then("re_loop", "re_broke", "done")
+    f.code("re_broke_msg", "Understanding again failed",
+           "return {\"message\": \"Understanding the notes again did not finish.\"}",
+           inputs={}, outputs=[("message", "string")], exec_lane=False)
+    fail_from("re_broke", "true", ("re_broke_msg", "message"))
+    f.get_var("re_failed_end", "re_failed", [])
+    re_last, cont = step("re_final", "Notes understood again", "note_reinterpret_next",
+                         {"limit": ("number", 0), "failed": ("array", ("re_failed_end", "value"))},
+                         [("done", "number"), ("total", "number"), ("pending", "number")], ("re_broke", "false"))
+    cont = report("p_re_done", "reinterpret", (re_last, "done"), (re_last, "total"), cont)
 
     # ---- communities
     cont = report("p_comm_start", "communities", 0, 1, cont)
@@ -1582,31 +1918,35 @@ def build_consolidate(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[
     # ---- end
     # what the time budget did not reach (the close adds the skipped items still pending: left_out)
     for name, var, default in (("end_sum_budget", "sum_budget", False), ("end_sum_left", "sum_left", 0),
-                               ("end_labels_budget", "labels_budget", False), ("end_labels_left", "labels_left", 0)):
+                               ("end_labels_budget", "labels_budget", False), ("end_labels_left", "labels_left", 0),
+                               ("end_re_budget", "re_budget", False)):
         f.get_var(name, var, default)
     f.code("results", "Results",
-           "sb, lb = bool(sum_budget), bool(labels_budget)\n"
+           "sb, lb, rb = bool(sum_budget), bool(labels_budget), bool(re_budget)\n"
            "return {\"results\": {\"communities\": int(communities or 0), \"insights\": int(insights or 0),\n"
-           "        \"budget_spent\": sb or lb, \"not_reached\": {\"summaries\": int(sum_left or 0) if sb else 0,\n"
-           "                                                \"labels\": int(labels_left or 0) if lb else 0}}}",
+           "        \"budget_spent\": sb or lb or rb, \"not_reached\": {\"summaries\": int(sum_left or 0) if sb else 0,\n"
+           "                                                \"labels\": int(labels_left or 0) if lb else 0,\n"
+           "                                                \"reinterpret\": int(re_left or 0) if rb else 0}}}",
            inputs={"communities": ("number", (comm, "communities")),
                    "insights": ("number", ("reflect_outcome", "insights")),
                    "sum_budget": ("boolean", ("end_sum_budget", "value")), "sum_left": ("number", ("end_sum_left", "value")),
                    "labels_budget": ("boolean", ("end_labels_budget", "value")),
-                   "labels_left": ("number", ("end_labels_left", "value"))},
+                   "labels_left": ("number", ("end_labels_left", "value")),
+                   "re_budget": ("boolean", ("end_re_budget", "value")), "re_left": ("number", (re_last, "pending"))},
            outputs=[("results", "object")], exec_lane=False)
     ended, cont = step("finish", "Close the consolidation", "note_consolidation_end",
                        {"status": ("string", "completed"), "results": ("object", ("results", "results"))},
                        [("merges", "number"), ("labelled", "number"), ("summaries_refreshed", "number"),
                         ("insights", "number"), ("communities", "number"), ("status", "string"),
-                        ("notice", "string")], cont)
+                        ("notice", "string"), ("reinterpreted", "number"), ("unchanged", "number")], cont)
     f.code(
         "report", "Report",
         "def n(x, one, many):\n"
         "    x = int(x or 0)\n"
         "    return str(x) + \" \" + (one if x == 1 else many)\n"
         "head = \"Consolidated with gaps: \" if status == \"completed_with_gaps\" else \"Consolidated: \"\n"
-        "msg = (head + n(merges, \"merge\", \"merges\") + \", \" + n(labelled, \"group named\", \"groups named\")\n"
+        "again = (n(reinterpreted, \"note understood again\", \"notes understood again\") + \", \") if reinterpreted else \"\"\n"
+        "msg = (head + n(merges, \"merge\", \"merges\") + \", \" + again + n(labelled, \"group named\", \"groups named\")\n"
         "       + \", \" + n(summaries, \"summary refreshed\", \"summaries refreshed\") + \", \"\n"
         "       + n(insights, \"insight\", \"insights\") + \".\")\n"
         "if notice:\n"
@@ -1614,7 +1954,8 @@ def build_consolidate(schemas: Dict[str, Any], prompts: Dict[str, str]) -> Dict[
         "return {\"message\": msg}",
         inputs={"merges": ("number", (ended, "merges")), "labelled": ("number", (ended, "labelled")),
                 "summaries": ("number", (ended, "summaries_refreshed")), "insights": ("number", (ended, "insights")),
-                "status": ("string", (ended, "status")), "notice": ("string", (ended, "notice"))},
+                "status": ("string", (ended, "status")), "notice": ("string", (ended, "notice")),
+                "reinterpreted": ("number", (ended, "reinterpreted"))},
         outputs=[("message", "string")],
     )
     f.then(cont[0], "report", cont[1])
@@ -1633,6 +1974,7 @@ BUILDERS = {
     "note-drain": build_drain,
     "note-recall": build_recall,
     "note-mine": build_mine,
+    "note-file": build_file,
     "note-reflect": build_reflect,
     "note-consolidate": build_consolidate,
 }

@@ -116,6 +116,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-items", type=int, default=20)
     p.add_argument("--budget-s", type=float, default=90.0)
 
+    p = sub.add_parser("refile", help="file the understood notes that have no kind (imports skipped the filing)")
+    _common(p)
+    p.add_argument("--missing", action="store_true", help="the understood notes without a kind (required)")
+    p.add_argument("--local", action="store_true", help="run the filing flow here (headless)")
+    p.add_argument("--provider")
+    p.add_argument("--model")
+    p.add_argument("--max-items", type=int, default=50)
+    p.add_argument("--budget-s", type=float, default=600.0)
+
     p = sub.add_parser("bundle", help="pack the abstractnote .flow bundle")
     p.add_argument("--out", type=Path, default=Path("."))
 
@@ -196,6 +205,25 @@ def _cmd_process(args: argparse.Namespace) -> Any:
     return _runner(args).run_drain(max_items=args.max_items, budget_s=args.budget_s)
 
 
+def _cmd_refile(args: argparse.Namespace) -> Any:
+    _client_mode(args)
+    if not args.missing:
+        raise ValueError("Say which notes to file: --missing (the understood notes without a kind).")
+    if not args.local:
+        raise NotImplementedError("Filing through a gateway is not available here; use --local with --provider and "
+                                  "--model.")
+    if not args.notebook:
+        raise ValueError("Say which notebook with --notebook DIR.")
+    from .ingest.refile import refile_missing
+
+    runner = _runner(args)
+    with _open(args) as nb:
+        nb.require_embedder()
+        return refile_missing(nb, lambda note_id: runner.run("note-file", {"note_id": note_id}),
+                              max_items=args.max_items, budget_s=args.budget_s,
+                              model=f"{args.provider}/{args.model}")
+
+
 def _cmd_normalize(args: argparse.Namespace) -> Any:
     # A dry run needs no embedder: a notebook pinned to a model that is not available here opens read-only for
     # meaning, which is enough to list the groups; the merges themselves need the notebook's model.
@@ -262,6 +290,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 out = nb.dedupe_sources(args.account, client="cli", dry_run=args.dry_run)
         elif args.command == "process":
             out = _cmd_process(args)
+        elif args.command == "refile":
+            out = _cmd_refile(args)
         elif args.command == "bundle":
             out = _cmd_bundle(args)
         elif args.command == "processor":

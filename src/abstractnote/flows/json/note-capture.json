@@ -284,6 +284,11 @@
             "type": "object"
           },
           {
+            "id": "process_inline",
+            "label": "process_inline",
+            "type": "boolean"
+          },
+          {
             "id": "permissions",
             "label": "permissions",
             "type": "string"
@@ -305,7 +310,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "arguments = {}\nif text is not None and text != \"\":\n    arguments[\"text\"] = text\nif title is not None and title != \"\":\n    arguments[\"title\"] = title\nif occurred_at is not None and occurred_at != \"\":\n    arguments[\"occurred_at\"] = occurred_at\nif location is not None and location != \"\":\n    arguments[\"location\"] = location\nif source is not None and source != \"\":\n    arguments[\"source\"] = source\nif idempotency_key is not None and idempotency_key != \"\":\n    arguments[\"idempotency_key\"] = idempotency_key\nif priority is not None and priority != \"\":\n    arguments[\"priority\"] = priority\nif session_id is not None and session_id != \"\":\n    arguments[\"session_id\"] = session_id\nif attachments is not None and attachments != \"\":\n    arguments[\"attachments\"] = attachments\nif about is not None and about != \"\":\n    arguments[\"about\"] = about\nif answer is not None and answer != \"\":\n    arguments[\"answer\"] = answer\nreturn {\"tool_calls\": [{\"name\": \"note_capture\", \"call_id\": \"capture\", \"arguments\": arguments}]}\n"
+        "codeBody": "arguments = {}\nif text is not None and text != \"\":\n    arguments[\"text\"] = text\nif title is not None and title != \"\":\n    arguments[\"title\"] = title\nif occurred_at is not None and occurred_at != \"\":\n    arguments[\"occurred_at\"] = occurred_at\nif location is not None and location != \"\":\n    arguments[\"location\"] = location\nif source is not None and source != \"\":\n    arguments[\"source\"] = source\nif idempotency_key is not None and idempotency_key != \"\":\n    arguments[\"idempotency_key\"] = idempotency_key\nif priority is not None and priority != \"\":\n    arguments[\"priority\"] = priority\nif session_id is not None and session_id != \"\":\n    arguments[\"session_id\"] = session_id\nif attachments is not None and attachments != \"\":\n    arguments[\"attachments\"] = attachments\nif about is not None and about != \"\":\n    arguments[\"about\"] = about\nif answer is not None and answer != \"\":\n    arguments[\"answer\"] = answer\nif process_inline is not None and process_inline != \"\":\n    arguments[\"process_inline\"] = process_inline\nreturn {\"tool_calls\": [{\"name\": \"note_capture\", \"call_id\": \"capture\", \"arguments\": arguments}]}\n"
       }
     },
     {
@@ -438,6 +443,21 @@
             "type": "array"
           },
           {
+            "id": "occurred_at",
+            "label": "occurred_at",
+            "type": "string"
+          },
+          {
+            "id": "date_basis",
+            "label": "date_basis",
+            "type": "string"
+          },
+          {
+            "id": "date_sentence",
+            "label": "date_sentence",
+            "type": "string"
+          },
+          {
             "id": "tool_output",
             "label": "tool_output",
             "type": "object"
@@ -455,7 +475,7 @@
       "type": "code",
       "position": {
         "x": 1440.0,
-        "y": 424.0
+        "y": 502.0
       },
       "data": {
         "nodeType": "code",
@@ -728,7 +748,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "CANDIDATES_PER_MENTION = 3\nCLAIMS_PER_CANDIDATE = 3\nEVIDENCE_CHARS = 200\nKNOWN_NAMES = 15\nKNOWN_PREDICATES = 15\nLINK_MENTIONS_PER_CALL = 15\nOPEN_TASKS = 8\nSIMILAR_NOTES = 5\nSUMMARY_CHARS = 240\nTOPICS = 50\ndef clip(text, limit):\n    \"\"\"One line of at most ``limit`` characters, cut at a word boundary (packet views only).\"\"\"\n    s = ' '.join(str(text or '').split())\n    if len(s) <= limit:\n        return s\n    cut = s[:limit].rsplit(' ', 1)[0]\n    return (cut or s[:limit]).rstrip(' ,;:') + '…'\ndef note_envelope():\n    \"\"\"The user message's head ``<runtime_metadata>`` envelope: the SAME bytes for every call.\n\n    The runtime keeps an envelope that is already at the head of a message byte for byte and\n    stamps a fresh per-second one only on a message without one; a per-call timestamp there would\n    end the shared prefix after a few tokens. The note's own time and id go at the END of the\n    message (``note_header``), where they cannot break the cached prefix.\"\"\"\n    return '<runtime_metadata>{\"time\": \"the note\\'s own date is on the last line of this message\"}</runtime_metadata>'\ndef filing_packet(note_id, occurred_at, title, text, similar, revisits, topics):\n    \"\"\"The dynamic half of the quick filing prompt: ``{envelope, title, text, context, header}``.\"\"\"\n    lines = []\n    sims = []\n    for s in (similar or [])[:SIMILAR_NOTES]:\n        if isinstance(s, dict) and (s.get('title') or s.get('note_id')):\n            sims.append('“' + clip(s.get('title') or 'untitled', 100) + '” (' + str(s.get('occurred_at') or '')[:10] + ')')\n    if sims:\n        lines.append('Similar earlier notes: ' + '; '.join(sims) + '.')\n    days = [str(r.get('occurred_at') or '')[:10] for r in revisits or [] if isinstance(r, dict) and r.get('occurred_at')]\n    if days:\n        lines.append('Earlier notes with the same words: ' + ', '.join(days[:5]) + '.')\n    shown = [str(t) for t in topics or [] if str(t).strip()][:TOPICS]\n    if shown:\n        lines.append('Existing topics: ' + ', '.join(shown) + '.')\n    when = str(occurred_at or '')[:16].replace('T', ' ')\n    return {'envelope': note_envelope(), 'header': 'About this note (not part of its text): ' + str(note_id or '') + (', written ' + when + ' (now, for this note)' if when else '') + '.', 'title': clip(title, 200) if str(title or '').strip() else '(none)', 'text': str(text or '').rstrip(), 'context': '\\n'.join(lines) if lines else 'Nothing related is saved yet.'}\nreturn {\"packet\": filing_packet(note_id, occurred_at or received_at, title, text, similar, revisits, topics)}\n"
+        "codeBody": "CANDIDATES_PER_MENTION = 3\nCHANGED_LABEL = 'Understood differently since this note was read (ideas this note relies on, as known on its date; read the note again in their light, and answer as before where its meaning does not change):'\nCLAIMS_PER_CANDIDATE = 3\nEVIDENCE_CHARS = 200\nKNOWN_NAMES = 15\nKNOWN_PREDICATES = 15\nKNOWN_SLOTS = 30\nLATER_CLAIMS_PER_CANDIDATE = 12\nLATER_LABEL = \"LATER (recorded after this note's date — do not restate; say if a statement is an earlier state of one of these):\"\nLATER_SUMMARIES_PER_CANDIDATE = 2\nLINK_MENTIONS_PER_CALL = 15\nOPEN_TASKS = 8\nSIMILAR_NOTES = 5\nSUMMARY_CHARS = 240\nTOPICS = 50\ndef clip(text, limit):\n    \"\"\"One line of at most ``limit`` characters, cut at a word boundary (packet views only).\"\"\"\n    s = ' '.join(str(text or '').split())\n    if len(s) <= limit:\n        return s\n    cut = s[:limit].rsplit(' ', 1)[0]\n    return (cut or s[:limit]).rstrip(' ,;:') + '…'\ndef note_envelope():\n    \"\"\"The user message's head ``<runtime_metadata>`` envelope: the SAME bytes for every call.\n\n    The runtime keeps an envelope that is already at the head of a message byte for byte and\n    stamps a fresh per-second one only on a message without one; a per-call timestamp there would\n    end the shared prefix after a few tokens. The note's own time and id go at the END of the\n    message (``note_header``), where they cannot break the cached prefix.\"\"\"\n    return '<runtime_metadata>{\"time\": \"the note\\'s own date is on the last line of this message\"}</runtime_metadata>'\ndef filing_packet(note_id, occurred_at, title, text, similar, revisits, topics):\n    \"\"\"The dynamic half of the quick filing prompt: ``{envelope, title, text, context, header}``.\"\"\"\n    lines = []\n    sims = []\n    for s in (similar or [])[:SIMILAR_NOTES]:\n        if isinstance(s, dict) and (s.get('title') or s.get('note_id')):\n            sims.append('“' + clip(s.get('title') or 'untitled', 100) + '” (' + str(s.get('occurred_at') or '')[:10] + ')')\n    if sims:\n        lines.append('Similar earlier notes: ' + '; '.join(sims) + '.')\n    days = [str(r.get('occurred_at') or '')[:10] for r in revisits or [] if isinstance(r, dict) and r.get('occurred_at')]\n    if days:\n        lines.append('Earlier notes with the same words: ' + ', '.join(days[:5]) + '.')\n    shown = [str(t) for t in topics or [] if str(t).strip()][:TOPICS]\n    if shown:\n        lines.append('Existing topics: ' + ', '.join(shown) + '.')\n    when = str(occurred_at or '')[:16].replace('T', ' ')\n    return {'envelope': note_envelope(), 'header': 'About this note (not part of its text): ' + str(note_id or '') + (', written ' + when + ' (now, for this note)' if when else '') + '.', 'title': clip(title, 200) if str(title or '').strip() else '(none)', 'text': str(text or '').rstrip(), 'context': '\\n'.join(lines) if lines else 'Nothing related is saved yet.'}\nreturn {\"packet\": filing_packet(note_id, occurred_at or received_at, title, text, similar, revisits, topics)}\n"
       }
     },
     {
@@ -1218,6 +1238,11 @@
             "type": "array"
           },
           {
+            "id": "dated",
+            "label": "dated",
+            "type": "string"
+          },
+          {
             "id": "permissions",
             "label": "permissions",
             "type": "string"
@@ -1239,7 +1264,7 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "titles = []\nfor s in similar or []:\n    t = s.get(\"title\") if isinstance(s, dict) else None\n    if t and t not in titles:\n        titles.append(t)\nparts = [\"Saved as \" + str(kind or \"note\") + \" \\u201c\" + str(title or \"\") + \"\\u201d.\"]\nif titles:\n    parts.append(\"Related: \" + \", \".join(titles[:3]) + \".\")\ndates = [str(r.get(\"occurred_at\") or \"\")[:10] for r in (revisits or []) if isinstance(r, dict)]\ndates = [d for d in dates if d]\nif dates:\n    parts.append(\"You noted this on \" + dates[0] + \".\")\nfor w in warnings or []:\n    if isinstance(w, str) and w.strip():\n        parts.append(w.strip())\nreturn {\"message\": \" \".join(parts)}\n"
+        "codeBody": "titles = []\nfor s in similar or []:\n    t = s.get(\"title\") if isinstance(s, dict) else None\n    if t and t not in titles:\n        titles.append(t)\nparts = [\"Saved as \" + str(kind or \"note\") + \" \\u201c\" + str(title or \"\") + \"\\u201d.\"]\nif titles:\n    parts.append(\"Related: \" + \", \".join(titles[:3]) + \".\")\ndates = [str(r.get(\"occurred_at\") or \"\")[:10] for r in (revisits or []) if isinstance(r, dict)]\ndates = [d for d in dates if d]\nif dates:\n    parts.append(\"You noted this on \" + dates[0] + \".\")\nif str(dated or \"\").strip():\n    parts.append(str(dated).strip())\nfor w in warnings or []:\n    if isinstance(w, str) and w.strip():\n        parts.append(w.strip())\nreturn {\"message\": \" \".join(parts)}\n"
       }
     },
     {
@@ -1436,7 +1461,7 @@
       }
     },
     {
-      "id": "process_ok",
+      "id": "inline_outcome",
       "type": "code",
       "position": {
         "x": 6720.0,
@@ -1474,6 +1499,257 @@
             "type": "execution"
           },
           {
+            "id": "ok",
+            "label": "ok",
+            "type": "boolean"
+          },
+          {
+            "id": "failure",
+            "label": "failure",
+            "type": "string"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "o = output if isinstance(output, dict) else {}\nc = child_output if isinstance(child_output, dict) else {}\nerr = str(c.get(\"error\") or o.get(\"error\") or \"\")\nfor prefix in (\"Runtime error: \", \"Execution error: \"):\n    if err.startswith(prefix):\n        err = err[len(prefix):]\nfailed = c.get(\"success\") is False or o.get(\"success\") is False or bool(err) or not o.get(\"revision_id\")\nreturn {\"ok\": not failed, \"failure\": (err or \"The note could not be processed.\") if failed else \"\"}\n"
+      }
+    },
+    {
+      "id": "inline_ok",
+      "type": "if",
+      "position": {
+        "x": 7200.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "if",
+        "label": "Understood?",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "condition",
+            "label": "condition",
+            "type": "boolean"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "true",
+            "label": "true",
+            "type": "execution"
+          },
+          {
+            "id": "false",
+            "label": "false",
+            "type": "execution"
+          }
+        ]
+      }
+    },
+    {
+      "id": "inline_fail_args",
+      "type": "code",
+      "position": {
+        "x": 7680.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Record the failure: arguments",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "note_id",
+            "label": "note_id",
+            "type": "string"
+          },
+          {
+            "id": "outcome",
+            "label": "outcome",
+            "type": "string"
+          },
+          {
+            "id": "error",
+            "label": "error",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox",
+          "outcome": "error"
+        },
+        "functionName": "transform",
+        "codeBody": "arguments = {}\nif note_id is not None and note_id != \"\":\n    arguments[\"note_id\"] = note_id\nif outcome is not None and outcome != \"\":\n    arguments[\"outcome\"] = outcome\nif error is not None and error != \"\":\n    arguments[\"error\"] = error\nreturn {\"tool_calls\": [{\"name\": \"note_queue_ack\", \"call_id\": \"inline_fail\", \"arguments\": arguments}]}\n"
+      }
+    },
+    {
+      "id": "inline_fail",
+      "type": "tool_calls",
+      "position": {
+        "x": 8160.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "tool_calls",
+        "label": "Record the failure",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "tool_calls",
+            "label": "tool_calls",
+            "type": "array"
+          },
+          {
+            "id": "allowed_tools",
+            "label": "allowed_tools",
+            "type": "array"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "success",
+            "label": "success",
+            "type": "boolean"
+          }
+        ],
+        "pinDefaults": {
+          "allowed_tools": [
+            "note_queue_ack"
+          ]
+        },
+        "effectConfig": {
+          "allowed_tools": [
+            "note_queue_ack"
+          ]
+        }
+      }
+    },
+    {
+      "id": "inline_fail_out",
+      "type": "code",
+      "position": {
+        "x": 8640.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Record the failure: result",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "results",
+            "label": "results",
+            "type": "array"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "status",
+            "label": "status",
+            "type": "string"
+          },
+          {
+            "id": "tool_output",
+            "label": "tool_output",
+            "type": "object"
+          }
+        ],
+        "pinDefaults": {
+          "permissions": "sandbox"
+        },
+        "functionName": "transform",
+        "codeBody": "r = results[0] if isinstance(results, list) and results else None\nfailure = None\nout = None\nif not isinstance(r, dict):\n    failure = \"note_queue_ack returned no result.\"\nelif not r.get(\"success\"):\n    failure = str(r.get(\"error\") or \"note_queue_ack failed.\")\nelse:\n    out = r.get(\"output\")\n    if not isinstance(out, dict):\n        failure = \"note_queue_ack returned something other than an object.\"\nif failure is not None:\n    raise ValueError(failure)\nreturn dict(out, tool_output=out)\n"
+      }
+    },
+    {
+      "id": "inline_failed",
+      "type": "code",
+      "position": {
+        "x": 9120.0,
+        "y": 0.0
+      },
+      "data": {
+        "nodeType": "code",
+        "label": "Say why",
+        "inputs": [
+          {
+            "id": "exec-in",
+            "label": "",
+            "type": "execution"
+          },
+          {
+            "id": "failure",
+            "label": "failure",
+            "type": "string"
+          },
+          {
+            "id": "permissions",
+            "label": "permissions",
+            "type": "string"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "exec-out",
+            "label": "",
+            "type": "execution"
+          },
+          {
             "id": "checked",
             "label": "checked",
             "type": "boolean"
@@ -1483,15 +1759,15 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "o = output if isinstance(output, dict) else {}\nc = child_output if isinstance(child_output, dict) else {}\nif c.get(\"success\") is False or o.get(\"success\") is False:\n    err = str(c.get(\"error\") or o.get(\"error\") or \"The step could not finish.\")\n    for prefix in (\"Runtime error: \", \"Execution error: \"):\n        if err.startswith(prefix):\n            err = err[len(prefix):]\n    raise ValueError(err)\nreturn {\"checked\": True}\n"
+        "codeBody": "raise ValueError(str(failure or \"The note could not be processed.\"))\n"
       }
     },
     {
       "id": "inline_ack_args",
       "type": "code",
       "position": {
-        "x": 7200.0,
-        "y": 0.0
+        "x": 7680.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "code",
@@ -1547,8 +1823,8 @@
       "id": "inline_ack",
       "type": "tool_calls",
       "position": {
-        "x": 7680.0,
-        "y": 0.0
+        "x": 8160.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "tool_calls",
@@ -1603,8 +1879,8 @@
       "id": "inline_ack_out",
       "type": "code",
       "position": {
-        "x": 8160.0,
-        "y": 0.0
+        "x": 8640.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "code",
@@ -1654,8 +1930,8 @@
       "id": "processed_msg",
       "type": "code",
       "position": {
-        "x": 8640.0,
-        "y": 0.0
+        "x": 9120.0,
+        "y": 320.0
       },
       "data": {
         "nodeType": "code",
@@ -1675,6 +1951,11 @@
             "id": "summary",
             "label": "summary",
             "type": "string"
+          },
+          {
+            "id": "revision",
+            "label": "revision",
+            "type": "object"
           },
           {
             "id": "permissions",
@@ -1698,14 +1979,14 @@
           "permissions": "sandbox"
         },
         "functionName": "transform",
-        "codeBody": "extra = str(summary or \"\").strip()\nreturn {\"message\": (str(message) + \" \" + extra).strip()}\n"
+        "codeBody": "extra = str(summary or \"\").strip()\nrev = revision if isinstance(revision, dict) else {}\ndated = str(rev.get(\"date_sentence\") or \"\").strip()\nreturn {\"message\": \" \".join(x for x in (str(message or \"\").strip(), dated, extra) if x)}\n"
       }
     },
     {
       "id": "end_processed",
       "type": "on_flow_end",
       "position": {
-        "x": 9120.0,
+        "x": 9600.0,
         "y": 0.0
       },
       "data": {
@@ -1848,6 +2129,13 @@
       "sourceHandle": "value",
       "target": "capture_args",
       "targetHandle": "answer"
+    },
+    {
+      "id": "e-start-process_inline-capture_args-process_inline",
+      "source": "start",
+      "sourceHandle": "process_inline",
+      "target": "capture_args",
+      "targetHandle": "process_inline"
     },
     {
       "id": "e-start-exec-out-capture_args-exec-in",
@@ -2179,6 +2467,13 @@
       "targetHandle": "warnings"
     },
     {
+      "id": "e-capture_out-date_sentence-saved_msg-dated",
+      "source": "capture_out",
+      "sourceHandle": "date_sentence",
+      "target": "saved_msg",
+      "targetHandle": "dated"
+    },
+    {
       "id": "e-file_out-exec-out-saved_msg-exec-in",
       "source": "file_out",
       "sourceHandle": "exec-out",
@@ -2263,24 +2558,101 @@
       "targetHandle": "exec-in"
     },
     {
-      "id": "e-process-output-process_ok-output",
+      "id": "e-process-output-inline_outcome-output",
       "source": "process",
       "sourceHandle": "output",
-      "target": "process_ok",
+      "target": "inline_outcome",
       "targetHandle": "output"
     },
     {
-      "id": "e-process-child_output-process_ok-child_output",
+      "id": "e-process-child_output-inline_outcome-child_output",
       "source": "process",
       "sourceHandle": "child_output",
-      "target": "process_ok",
+      "target": "inline_outcome",
       "targetHandle": "child_output"
     },
     {
-      "id": "e-process-exec-out-process_ok-exec-in",
+      "id": "e-process-exec-out-inline_outcome-exec-in",
       "source": "process",
       "sourceHandle": "exec-out",
-      "target": "process_ok",
+      "target": "inline_outcome",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-inline_outcome-ok-inline_ok-condition",
+      "source": "inline_outcome",
+      "sourceHandle": "ok",
+      "target": "inline_ok",
+      "targetHandle": "condition"
+    },
+    {
+      "id": "e-inline_outcome-exec-out-inline_ok-exec-in",
+      "source": "inline_outcome",
+      "sourceHandle": "exec-out",
+      "target": "inline_ok",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-capture_out-note_id-inline_fail_args-note_id",
+      "source": "capture_out",
+      "sourceHandle": "note_id",
+      "target": "inline_fail_args",
+      "targetHandle": "note_id"
+    },
+    {
+      "id": "e-inline_outcome-failure-inline_fail_args-error",
+      "source": "inline_outcome",
+      "sourceHandle": "failure",
+      "target": "inline_fail_args",
+      "targetHandle": "error"
+    },
+    {
+      "id": "e-inline_ok-false-inline_fail_args-exec-in",
+      "source": "inline_ok",
+      "sourceHandle": "false",
+      "target": "inline_fail_args",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-inline_fail_args-tool_calls-inline_fail-tool_calls",
+      "source": "inline_fail_args",
+      "sourceHandle": "tool_calls",
+      "target": "inline_fail",
+      "targetHandle": "tool_calls"
+    },
+    {
+      "id": "e-inline_fail_args-exec-out-inline_fail-exec-in",
+      "source": "inline_fail_args",
+      "sourceHandle": "exec-out",
+      "target": "inline_fail",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-inline_fail-results-inline_fail_out-results",
+      "source": "inline_fail",
+      "sourceHandle": "results",
+      "target": "inline_fail_out",
+      "targetHandle": "results"
+    },
+    {
+      "id": "e-inline_fail-exec-out-inline_fail_out-exec-in",
+      "source": "inline_fail",
+      "sourceHandle": "exec-out",
+      "target": "inline_fail_out",
+      "targetHandle": "exec-in"
+    },
+    {
+      "id": "e-inline_outcome-failure-inline_failed-failure",
+      "source": "inline_outcome",
+      "sourceHandle": "failure",
+      "target": "inline_failed",
+      "targetHandle": "failure"
+    },
+    {
+      "id": "e-inline_fail_out-exec-out-inline_failed-exec-in",
+      "source": "inline_fail_out",
+      "sourceHandle": "exec-out",
+      "target": "inline_failed",
       "targetHandle": "exec-in"
     },
     {
@@ -2298,9 +2670,9 @@
       "targetHandle": "revision_id"
     },
     {
-      "id": "e-process_ok-exec-out-inline_ack_args-exec-in",
-      "source": "process_ok",
-      "sourceHandle": "exec-out",
+      "id": "e-inline_ok-true-inline_ack_args-exec-in",
+      "source": "inline_ok",
+      "sourceHandle": "true",
       "target": "inline_ack_args",
       "targetHandle": "exec-in"
     },
@@ -2345,6 +2717,13 @@
       "sourceHandle": "response",
       "target": "processed_msg",
       "targetHandle": "summary"
+    },
+    {
+      "id": "e-process-revision-processed_msg-revision",
+      "source": "process",
+      "sourceHandle": "revision",
+      "target": "processed_msg",
+      "targetHandle": "revision"
     },
     {
       "id": "e-inline_ack_out-exec-out-processed_msg-exec-in",

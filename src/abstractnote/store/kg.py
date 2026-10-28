@@ -30,6 +30,32 @@ from .embeddings import VectorCache, vector_key
 OWNER_ID = "abstractnote"
 SCOPE = "global"
 KIND_ATTR = "abstractnote_kind"  # claim | name | alias | same_as
+#: ADR 0008: the AbstractMemory closure kind of a statement a re-understanding withdrew (never written as a retraction).
+REINTERPRETED_KIND = "reinterpreted"
+#: The attribute naming the note-index claim of an assertion that is a later COPY of it (a statement read again with
+#: another certainty, or re-opened: AbstractMemory content is append-only and a window cannot widen).
+CLAIM_ATTR = "claim_id"
+
+
+def supports_reinterpreted() -> bool:
+    """Whether the installed AbstractMemory accepts the closure kind ``reinterpreted`` (an additive kind of
+    abstractmemory 0.3.2; ADR 0008)."""
+    try:
+        ClosureRecord(assertion_id="probe", kind=REINTERPRETED_KIND, reason="probe")
+    except ValueError:
+        return False
+    return True
+
+
+def require_reinterpreted() -> None:
+    """Fail loudly when the installed AbstractMemory lacks the closure kind (no silent mapping to a retraction)."""
+    if not supports_reinterpreted():
+        import abstractmemory
+
+        raise RuntimeError(
+            f"The installed AbstractMemory ({getattr(abstractmemory, '__version__', 'unknown version')}) has no closure"
+            " kind 'reinterpreted', which understanding a note again needs (ADR 0008); install an abstractmemory that"
+            " has it.")
 
 
 class _LookupEmbedder:
@@ -64,6 +90,8 @@ def claim_assertion(payload: Dict[str, Any], rev: Dict[str, Any], subject_kind: 
         attrs["literal"] = True
     if payload.get("evidence"):
         attrs["evidence_quote"] = payload["evidence"]
+    if payload.get("of_claim_id"):  # a copy of a note-index claim (claim.revise / claim.reopen, ADR 0008)
+        attrs[CLAIM_ATTR] = payload["of_claim_id"]
     prov = {
         "source": "abstractnote", "note_id": payload.get("note_id") or rev.get("note_id"),
         "revision_id": rev["revision_id"], "run_id": run_id or rev.get("run_id"),
@@ -78,6 +106,40 @@ def claim_assertion(payload: Dict[str, Any], rev: Dict[str, Any], subject_kind: 
         provenance={k: v for k, v in prov.items() if v is not None}, attributes=attrs,
         assertion_id=payload["claim_id"],
     )
+
+
+#: Attribute naming the claim an earlier-evidence assertion belongs to (``claim.start_earlier``).
+EARLIER_OF_ATTR = "earlier_evidence_of"
+
+
+def earlier_evidence_id(payload: Dict[str, Any], rev_note_id: Optional[str]) -> Optional[str]:
+    """The id of the additive assertion a ``claim.start_earlier`` writes (None when it writes none: no known start,
+    or the window already covered the date); deterministic from the claim and the earlier note."""
+    start, before = payload.get("valid_from"), payload.get("previous_valid_from")
+    if not start or not before or start >= before:
+        return None
+    return ids.claim_id(payload.get("note_id") or rev_note_id or "", payload["claim_id"], "claim.start_earlier", start)
+
+
+def earlier_evidence_assertion(payload: Dict[str, Any], rev: Dict[str, Any], subject_kind: Optional[str],
+                               object_kind: Optional[str]) -> Optional[TripleAssertion]:
+    """The additive assertion of a ``claim.start_earlier``: the same statement from the earlier note, valid from the
+    new start to the claim's previous start (``observed_at`` = the earlier note's date). None when the window did
+    not move (no known start, or it already covered the date): nothing to add. Its id is deterministic from the
+    claim and the earlier note, so a replay adds nothing twice."""
+    aid = earlier_evidence_id(payload, rev.get("note_id"))
+    if aid is None:
+        return None
+    start, before = payload["valid_from"], payload["previous_valid_from"]
+    base = claim_assertion({**payload, "valid_from": start, "valid_until": before,
+                            "observed_at": payload["observed_at"], "claim_id": aid},
+                           rev, subject_kind, object_kind)
+    attrs = dict(base.attributes or {})
+    attrs[EARLIER_OF_ATTR] = payload["claim_id"]
+    return TripleAssertion(
+        subject=base.subject, predicate=base.predicate, object=base.object, scope=base.scope, owner_id=base.owner_id,
+        observed_at=base.observed_at, valid_from=base.valid_from, valid_until=base.valid_until,
+        confidence=base.confidence, provenance=base.provenance, attributes=attrs, assertion_id=base.assertion_id)
 
 
 def label_assertion(entity_id: str, predicate: str, value: str, kind: str, rev: Dict[str, Any]) -> TripleAssertion:
@@ -159,9 +221,44 @@ class ClaimStore:
                                    "kind": "supersede", "narrow": True,
                                    "reason": p.get("reason") or "replaced by an earlier-found belief",
                                    "replacement_ids": (p["claim_id"],)})
+            elif name == "claim.start_earlier":
+                # TripleAssertion content is append-only: the earlier evidence is an ADDITIVE assertion of the same
+                # statement for the moved part of the window [new start, old start), pointing at the claim
+                # (``earlier_evidence_of``), so ``active_at`` agrees with the note index; the belief before it is
+                # narrowed like an insert_before's (data-model.md "AbstractMemory projection").
+                earlier = earlier_evidence_assertion(p, rev, kinds.get(p["subject_id"]),
+                                                     kinds.get(p.get("object_id") or ""))
+                if earlier is not None:
+                    adds.append(earlier)
+                if p.get("after_claim_id") and p.get("after_valid_until"):
+                    closes.append({"assertion_id": p["after_claim_id"], "valid_until": p["after_valid_until"],
+                                   "kind": "supersede", "narrow": True,
+                                   "reason": p.get("reason") or "an earlier note shows the later belief held then",
+                                   "replacement_ids": (p["claim_id"],)})
+            elif name == "claim.start_restore":
+                # ADR 0008 (R1 x R2): the reading whose earlier evidence moved the start back was withdrawn; each
+                # additive earlier-evidence assertion it wrote closes empty with the kind reinterpreted
+                for e in p.get("earlier_assertions") or []:
+                    closes.append({"assertion_id": e["assertion_id"], "valid_until": e["empty_at"],
+                                   "kind": REINTERPRETED_KIND, "narrow": True, "replacement_ids": (),
+                                   "reason": p.get("reason") or "the earlier evidence was understood again"})
             elif name == "claim.retract":
                 closes.append({"assertion_id": p["claim_id"], "valid_until": p.get("valid_until") or rev["at"],
                                "kind": "retract", "reason": p.get("reason") or "retracted", "replacement_ids": ()})
+            elif name == "claim.reinterpret":
+                # ADR 0008: the withdrawn reading's copy closes empty (at its own start), whatever closed it before
+                closes.append({"assertion_id": p.get("assertion_id") or p["claim_id"], "valid_until": p["valid_until"],
+                               "kind": REINTERPRETED_KIND, "narrow": True, "replacement_ids": (),
+                               "reason": p.get("reason") or "the note was understood again"})
+            elif name in ("claim.revise", "claim.reopen"):
+                # the statement as it now reads is a new copy (content is append-only, a window cannot widen); the
+                # copy it replaces closes empty with the kind reinterpreted, naming the new one
+                a = dict(p["assertion"])
+                adds.append(claim_assertion(a, rev, kinds.get(a["subject_id"]), kinds.get(a.get("object_id") or "")))
+                closes.append({"assertion_id": p["previous_assertion_id"], "valid_until": p["empty_at"],
+                               "kind": REINTERPRETED_KIND, "narrow": True, "replacement_ids": (a["claim_id"],),
+                               "reason": p.get("reason") or ("read again" if name == "claim.revise" else
+                                                             "re-opened: the reading that closed it was withdrawn")})
         return adds, closes
 
     def texts_for(self, adds: Sequence[TripleAssertion]) -> List[str]:
@@ -179,6 +276,8 @@ class ClaimStore:
                 warnings.filterwarnings("error", message=r"#FALLBACK: embedder failed", category=RuntimeWarning)
                 self.store.add(adds)
         closed = 0
+        if any(c["kind"] == REINTERPRETED_KIND for c in closes):
+            require_reinterpreted()
         for c in closes:
             if c["kind"] == "supersede" and not c["replacement_ids"]:
                 c = dict(c, kind="retract")
@@ -226,9 +325,13 @@ class ClaimStore:
         return self.store.query(TripleQuery(**kwargs))
 
     def active_claim_ids(self, at: str) -> List[str]:
-        """Claim assertion ids AbstractMemory considers active at ``at``."""
+        """Note-index claim ids AbstractMemory considers active at ``at`` (a copy written by a re-understanding names
+        its claim in ``attributes.claim_id``)."""
         rows = self.query(active_at=ids.normalize_time(at, field="at"))
-        return sorted(a.assertion_id for a in rows if (a.attributes or {}).get(KIND_ATTR) == "claim")
+        # an earlier-evidence assertion (claim.start_earlier) stands for the claim it moved back; a copy written by
+        # a re-understanding names its claim
+        return sorted({(a.attributes or {}).get(EARLIER_OF_ATTR) or (a.attributes or {}).get(CLAIM_ATTR)
+                       or a.assertion_id for a in rows if (a.attributes or {}).get(KIND_ATTR) == "claim"})
 
     def count(self) -> int:
         return len(self.query())
@@ -241,8 +344,9 @@ def kinds_from_index(conn: sqlite3.Connection, rev: Dict[str, Any]) -> Dict[str,
     """Entity kinds needed to type a revision's claim assertions."""
     wanted = set()
     for op in rev.get("ops") or []:
-        if op["op"] == "claim.add":
+        if op["op"] in ("claim.add", "claim.revise", "claim.reopen", "claim.start_earlier"):
             p = op.get("payload") or {}
+            p = p.get("assertion") or p if op["op"] != "claim.add" else p
             wanted.add(p["subject_id"])
             if p.get("object_id"):
                 wanted.add(p["object_id"])

@@ -1,7 +1,9 @@
 """Memory consolidation (backlog 0032, docs/cognition.md "note-consolidate").
 
 A third automation per notebook runs the ``note-consolidate`` flow in stages (:data:`STAGES`): merge duplicate
-entities (normalize), recompute the communities, name the pending or stale ones (labels), refresh the entity
+entities (normalize), understand again the notes an earlier note made out of date (reinterpret, ADR 0008: in history
+order, each note once per pass, with progress and ETA; a note whose context did not change since it was understood is
+``unchanged`` without a model call), recompute the communities, name the pending or stale ones (labels), refresh the entity
 summaries that are placeholders or whose notes or statements changed since the summary (summaries), refresh the
 then-versus-now caches of what was touched (then_now) and run the reflect steps (reflect).
 
@@ -16,13 +18,23 @@ Which summaries are stale is decided structurally, never from their wording (ADR
 - ``placeholder``: the summary is still the one the entry was created with, and the creating revision carries the
   revision builder's own warning that no summary was written (``process.revise``: "No summary was written for
   <name>; it was described from this note.");
+- ``retrospective``: a note dated earlier than what the notebook knew of the entry was applied after its current
+  summary (``Notebook.retro_state()["stale_summaries"]``, ADR 0008 §2): what the entry is now must be understood
+  again with that earlier foundation;
 - ``changed``: a note mention or a statement about the entry (or an entry merged into it) was recorded by a
-  revision after the revision of its latest summary. ``summary_revision_count`` is that summary revision's
+  revision after the revision of its CURRENT summary (the last one in dated order, ``store.notes.SUMMARY_ORDER``:
+  the one its card shows, not the one written last). ``summary_revision_count`` is that summary revision's
   sequence number in the revision log.
+
+The summary packet shows the entry's dated history, earliest first (``history``: the summaries each note wrote for
+its own date; ``earlier``: the statements that held once and ended), next to what holds now, so the model writes
+what the entry is now, having been what it was.
 
 A refreshed summary is an ``entity.summary`` op in a revision of its own (action ``entity.summary``, ``run_id`` =
 the consolidation id, source client ``consolidation``), so the summary history keeps every version and a rebuild
-replays it.
+replays it. Each op carries ``as_of`` = the latest dated knowledge it was derived from (the entry's last mention,
+or its current summary's date when later): the summary is dated there in the history, so it is the current one
+until a note dated later writes another, and a note dated in between is never hidden behind it.
 
 Nothing stops or is left out silently (ADR 0007, root ADR-0026). An entry or a group the model does not answer
 for, even when asked a second time, is *skipped for this run*: :func:`progress` records it on its stage
@@ -46,7 +58,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .. import ids
 
-STAGES = ("normalize", "communities", "labels", "summaries", "then_now", "reflect")
+STAGES = ("normalize", "reinterpret", "communities", "labels", "summaries", "then_now", "reflect")
 DONE = "done"
 STATUSES = ("completed", "completed_with_gaps", "failed")
 #: Closing statuses of a run that finished its stages (``end`` picks the one that tells the truth).
@@ -55,11 +67,23 @@ FINISHED = ("completed", "completed_with_gaps")
 SUMMARY_BATCH = 8            # entries per summary model call
 LABEL_BATCH = 5              # communities per labelling call (recall.communities.PENDING_LIMIT)
 PACKET_CLAIMS = 8            # statements shown per entry
-PACKET_NOTES = 3             # note excerpts shown per entry
+PACKET_NOTES = 5             # note excerpts shown per entry: the ones the current summary does not account for yet
+PACKET_NEW_NOTES = 3         # (at most this many, recorded after it, ``new``), the newest, the earliest, then newest
+PACKET_HISTORY = 6           # dated summaries shown per entry: the earliest and the latest ones (``omitted.history``)
+PACKET_EARLIER = 8           # ended statements shown per entry: the earliest and the latest ones (``omitted.earlier``)
 SUMMARY_MAX_CHARS = 600      # a longer answer is kept whole with an over_length warning (the prompt asks for two sentences)
 LAST_RUNS = 20               # finished rows kept per notebook (older ones are deleted)
 INTERRUPTED = "It stopped before finishing."
 BUDGET_REASON = "The time set aside for the consolidation ran out before it got to them."
+#: ADR 0008 stage: notes taken per ``note_reinterpret_next`` call (one model-backed re-understanding at a time).
+REINTERPRET_BATCH = 1
+#: A note understood again this many times in one UTC day waits for the next day (review §6: a stated bound on
+#: oscillation; the hold is a skip with its reason, counted in ``left_out``, never silent).
+REINTERPRET_PER_DAY = 3
+HELD_REASON = "It was understood again three times today; it waits for tomorrow."
+FAILED_REASON = "It could not be understood again this time."
+#: A note a drain or an inline understanding holds (its queue claim or lease, R4) waits for the next pass.
+BUSY_REASON = "It is being understood right now; it is read again next time."
 
 _log = logging.getLogger("abstractnote.consolidation")
 
@@ -272,8 +296,12 @@ def _left_out(nb: Any, stages: Dict[str, Any], extra: Dict[str, Any]) -> Dict[st
     def still_stale(eid: str) -> bool:
         return eid in stale or (nb.store.entity_row(eid) is not None and nb.store.canonical(eid) in stale)
 
-    out: Dict[str, Any] = {"summaries": 0, "labels": 0, "reasons": []}
-    for kind, now_pending, still in (("summaries", stale, still_stale), ("labels", waiting, waiting.__contains__)):
+    pend = nb.store.pending_marks()
+    marked = {m["note_id"] for m in pend}  # ADR 0008: notes still waiting to be read again
+    out: Dict[str, Any] = {"summaries": 0, "labels": 0, "reinterpret": 0, "propagated": 0, "propagated_from": [],
+                           "reasons": []}
+    for kind, now_pending, still in (("summaries", stale, still_stale), ("labels", waiting, waiting.__contains__),
+                                     ("reinterpret", marked, marked.__contains__)):
         skipped = [x for x in (stages.get(kind) or {}).get("skipped_ids") or [] if isinstance(x, dict)]
         left = [x for x in skipped if still(x["id"])]
         unreached = _count(reached.get(kind)) if budget else 0
@@ -283,6 +311,18 @@ def _left_out(nb: Any, stages: Dict[str, Any], extra: Dict[str, Any]) -> Dict[st
                 out["reasons"].append(why)
         if unreached and BUDGET_REASON not in out["reasons"]:
             out["reasons"].append(BUDGET_REASON)
+    # ADR 0008 §4a: of the notes left, those waiting only because an idea they rely on was understood differently
+    prop = [m for m in pend if m["reason_code"] == "propagated"]
+    if out["reinterpret"] and prop:
+        out["propagated"] = min(len(prop), out["reinterpret"])
+        counts: Dict[str, int] = {}
+        for m in prop:
+            for e in m["sources"]:
+                counts[e] = counts.get(e, 0) + 1
+        from .propagation import display_name
+
+        out["propagated_from"] = [{"entity_id": e, "name": display_name(nb.store, e), "notes": n}
+                                  for e, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:3]]
     return out
 
 
@@ -290,21 +330,30 @@ def notice(left_out: Optional[Dict[str, Any]]) -> Optional[str]:
     """The end-user sentence of a run that left something out ("12 summaries could not be refreshed this time; they
     will be tried again next time."), None when nothing was."""
     lo = left_out if isinstance(left_out, dict) else {}
-    s, g = _count(lo.get("summaries")), _count(lo.get("labels"))
+    s, g, r = _count(lo.get("summaries")), _count(lo.get("labels")), _count(lo.get("reinterpret"))
     parts = ([f"{s} {'summary' if s == 1 else 'summaries'}"] if s else []) + \
         ([f"{g} theme {'name' if g == 1 else 'names'}"] if g else [])
-    if not parts:
-        return None
-    return (f"{' and '.join(parts)} could not be refreshed this time; {'it' if s + g == 1 else 'they'} will be tried"
-            " again next time.")
+    told = None
+    if parts:
+        told = (f"{' and '.join(parts)} could not be refreshed this time; {'it' if s + g == 1 else 'they'} will be"
+                " tried again next time.")
+    if r:  # ADR 0008: notes an earlier note changed, still waiting to be understood again
+        one = r == 1
+        p = min(_count(lo.get("propagated")), r)
+        which = (f", of which {p} {'follows' if p == 1 else 'follow'} from ideas understood differently" if p and not one
+                 else (" because an idea it relies on is understood differently" if p else ""))
+        again = (f"{r} {'note' if one else 'notes'} could not be understood again this time{which};"
+                 f" {'it' if one else 'they'} will be read again next time.")
+        told = f"{told} {again[0].upper()}{again[1:]}" if told else again
+    return told
 
 
 def end(nb: Any, status: str, results: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Close the open consolidation: ``status`` completed (or completed_with_gaps) or failed; ``results`` adds to the
     counts read from the stages (``merges`` = normalize done, ``labelled`` = labels done, ``summaries_refreshed`` =
     summaries done). A failed run's ``results.error`` is its sentence. A finished run also reports ``left_out =
-    {summaries, labels, reasons}`` (:func:`_left_out`; ``results.budget_spent`` and ``results.not_reached:
-    {summaries, labels}`` say what the time budget stopped) and is closed as ``completed_with_gaps`` when anything
+    {summaries, labels, reinterpret, reasons}`` (:func:`_left_out`; ``results.budget_spent`` and ``results.not_reached:
+    {summaries, labels, reinterpret}`` say what the time budget stopped) and is closed as ``completed_with_gaps`` when anything
     was left out, ``completed`` otherwise, whatever the caller asked. Returns the finished row's ``last`` view."""
     if status not in STATUSES:
         raise ValueError("The status must be completed, completed_with_gaps or failed.")
@@ -317,6 +366,7 @@ def end(nb: Any, status: str, results: Optional[Dict[str, Any]] = None) -> Dict[
 
     out = {"merges": done("normalize"), "communities": None, "labelled": done("labels"),
            "summaries_refreshed": done("summaries"), "insights": 0}
+    out.update(pass_counts(nb, row["consolidation_id"]))  # ADR 0008: read from the marks (truth), never the caller
     for k in ("merges", "communities", "labelled", "summaries_refreshed", "insights"):
         if isinstance(extra.get(k), (int, float)) and not isinstance(extra.get(k), bool):
             out[k] = int(extra[k])
@@ -327,11 +377,12 @@ def end(nb: Any, status: str, results: Optional[Dict[str, Any]] = None) -> Dict[
         lo = _left_out(nb, stages, extra)
         out["left_out"] = lo
         out["budget_spent"] = bool(extra.get("budget_spent"))
-        status = "completed_with_gaps" if lo["summaries"] or lo["labels"] else "completed"
+        status = "completed_with_gaps" if lo["summaries"] or lo["labels"] or lo["reinterpret"] else "completed"
         if status == "completed_with_gaps":
-            _log.warning("consolidation %s completed with gaps: %d summaries and %d group names left for the next run"
-                         "%s. Reasons: %s", row["consolidation_id"], lo["summaries"], lo["labels"],
-                         " (the time budget was spent)" if out["budget_spent"] else "", " | ".join(lo["reasons"]))
+            _log.warning("consolidation %s completed with gaps: %d summaries, %d group names and %d notes to understand"
+                         " again left for the next run%s. Reasons: %s", row["consolidation_id"], lo["summaries"],
+                         lo["labels"], lo["reinterpret"], " (the time budget was spent)" if out["budget_spent"] else "",
+                         " | ".join(lo["reasons"]))
     ts = _now_ts()
     cols: Dict[str, Any] = {"finished_at": _iso(ts), "updated_ts": ts, "status": status,
                             "results_json": json.dumps(out), "error": error}
@@ -352,6 +403,8 @@ def _last_view(r: Dict[str, Any]) -> Dict[str, Any]:
             "communities": res.get("communities"), "labelled": res.get("labelled"),
             "summaries_refreshed": res.get("summaries_refreshed"), "insights": res.get("insights"),
             "left_out": lo, "budget_spent": bool(res.get("budget_spent")),
+            "reinterpreted": res.get("reinterpreted"), "unchanged": res.get("unchanged"),
+            "reinterpret_failed": res.get("reinterpret_failed"),
             "notice": notice(lo) if r["status"] == "completed_with_gaps" else None}
 
 
@@ -375,7 +428,34 @@ def run_view(nb: Any, row: Optional[Dict[str, Any]] = None) -> Optional[Dict[str
     return {"consolidation_id": row["consolidation_id"], "started_at": row["started_at"], "stage": stage,
             "stage_done": int(row["stage_done"] or 0), "stage_total": int(row["stage_total"] or 0),
             "eta_s": _eta(nb, row["consolidation_id"], stage, s),
-            "elapsed_s": max(0, int(_now_ts() - float(row["started_ts"]))), "note": row.get("note")}
+            "elapsed_s": max(0, int(_now_ts() - float(row["started_ts"]))), "note": row.get("note"),
+            "propagated": _propagated_in_pass(nb, row["consolidation_id"]) if stage == "reinterpret" else None}
+
+
+def _propagated_in_pass(nb: Any, pass_id: str) -> Dict[str, Any]:
+    """``{notes, names, sources}`` of the reinterpret stage in progress (ADR 0008 §4a): of the notes this pass reads
+    again (taken or still waiting), those it reads only because an idea they rely on was understood differently,
+    and the names of those ideas (the most frequent first, at most three; ``sources`` counts them all)."""
+    per: Dict[str, Dict[str, Any]] = {}
+    for r in nb.store.q("SELECT note_id, reason_code, source_entity_id FROM reinterpret_marks WHERE pass_id=? OR"
+                        " (pass_id IS NULL AND consumed_at IS NULL)", (pass_id,)):
+        d = per.setdefault(r["note_id"], {"direct": False, "sources": []})
+        if (r["reason_code"] or "direct") == "direct":
+            d["direct"] = True
+        elif r["source_entity_id"] and r["source_entity_id"] not in d["sources"]:
+            d["sources"].append(r["source_entity_id"])
+    counts: Dict[str, int] = {}
+    n = 0
+    for d in per.values():
+        if d["direct"]:
+            continue
+        n += 1
+        for e in d["sources"]:
+            counts[e] = counts.get(e, 0) + 1
+    top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    from .propagation import display_name
+
+    return {"notes": n, "names": [display_name(nb.store, e) for e, _ in top[:3]], "sources": len(top)}
 
 
 def history(nb: Any, limit: int = 10) -> List[Dict[str, Any]]:
@@ -396,19 +476,167 @@ def pending(nb: Any) -> Dict[str, int]:
     seq = nb.store.q1("SELECT COALESCE(MAX(seq), 0) FROM revisions WHERE applied_index=1")[0]
     meta = nb.store.meta_get("communities") or {}
     labelled = nb.store.q1("SELECT COUNT(*), SUM(label IS NULL), SUM(stale_label) FROM communities")
-    stamp = (seq, meta.get("computed_at") if isinstance(meta, dict) else None, tuple(labelled))
+    marks = nb.store.q1("SELECT COALESCE(MAX(mark_id), 0), COUNT(consumed_at), COUNT(pass_id) FROM reinterpret_marks")
+    stamp = (seq, meta.get("computed_at") if isinstance(meta, dict) else None, tuple(labelled), tuple(marks))
     hit = _pending_cache.get(key)
     if hit is not None and hit[0] == stamp:
         return dict(hit[1])
     out = {"stale_labels": int(labelled[2] or 0), "unlabelled": int(labelled[1] or 0),
-           "stale_summaries": len(_stale(nb))}
+           "stale_summaries": len(_stale(nb)), "reinterpret": len(nb.store.pending_marks())}
     _pending_cache[key] = (stamp, out)
     return dict(out)
 
 
 def state(nb: Any) -> Dict[str, Any]:
-    """``{run, last, pending}`` of a notebook (headless part of ``GET /note/consolidation``)."""
-    return {"run": run_view(nb), "last": last(nb), "pending": pending(nb)}
+    """``{run, last, pending, reinterpret}`` of a notebook (headless part of ``GET /note/consolidation``):
+    ``reinterpret`` = what waits to be understood again and why, before the stage runs (ADR 0008, review 3.2)."""
+    return {"run": run_view(nb), "last": last(nb), "pending": pending(nb), "reinterpret": nb.reinterpret_state()}
+
+
+# --------------------------------------------------------------------------- the reinterpret stage (ADR 0008)
+
+
+def pass_counts(nb: Any, pass_id: str) -> Dict[str, int]:
+    """``{reinterpreted, unchanged, reinterpret_failed}``: the notes this pass understood again, found unchanged
+    (no revision written) and could not understand again (their marks wait for the next pass)."""
+    row = nb.store.q1("SELECT COUNT(DISTINCT CASE WHEN outcome='reinterpreted' THEN note_id END),"
+                      " COUNT(DISTINCT CASE WHEN outcome='unchanged' THEN note_id END),"
+                      " COUNT(DISTINCT CASE WHEN consumed_at IS NULL AND error IS NOT NULL THEN note_id END)"
+                      " FROM reinterpret_marks WHERE pass_id=?", (pass_id,))
+    return {"reinterpreted": int(row[0] or 0), "unchanged": int(row[1] or 0), "reinterpret_failed": int(row[2] or 0)}
+
+
+def _reinterpreted_today(nb: Any, note_id: str) -> int:
+    day = ids.utc_now()[:10]
+    return int(nb.store.q1("SELECT COUNT(DISTINCT consumed_revision_id) FROM reinterpret_marks WHERE note_id=? AND"
+                           " outcome='reinterpreted' AND consumed_at>=?", (note_id, day))[0] or 0)
+
+
+def digest_unchanged(nb: Any, note_id: str) -> bool:
+    """The no-call check (ADR 0008 §4, review 1.5): the note's context read again now (as of its date: the same
+    lookups, the mention queries its last reading asked) shows the same entities, statements, summaries and similar
+    notes as the
+    context its current interpretation recorded, leaving out what that interpretation itself wrote (its entities,
+    statements and summaries), and what was recorded after the note's date (a later statement or note is no
+    foundation). True: the foundation did not change for this note, nothing to understand again. A
+    revision without a record (written before schema 3, ``context_unknown``) is never unchanged."""
+    from ..process.context import load_packet, note_context, save_packet
+    from ..process.resolve import resolve_candidates
+    from ..process.revise import reinterpret_view
+    from ..store.notebook import context_digest
+
+    s = nb.store
+    cur = s.current_interpretation(note_id)
+    if cur is None:
+        return False
+    stored = s.reading_record(note_id, cur)  # the revision's record, or what an unchanged re-reading confirmed
+    if not isinstance(stored, dict) or not stored.get("looked_up"):
+        return False
+    # ADR 0008 §4a: a note waiting because an idea it relies on was understood differently never saw that idea's
+    # card, so the digest below cannot see the change: it is settled without a call only when each source idea, as
+    # known at the note's date, is what its current reading recorded (``related``); never recorded: it is read
+    from .propagation import related_sources, related_state
+
+    note_at = s.note_row(note_id)["occurred_at"]
+    recorded = stored.get("related") or {}
+    for eid, _rid in related_sources(s, note_id):
+        if recorded.get(eid) is None or recorded[eid] != related_state(s, eid, note_at):
+            return False
+    seen = note_context(nb, note_id)
+    # the similar notes it would be shown now, kept with the packet as the tools' note_context keeps them (R6: without
+    # them the digest of now had no similar notes, so a note with an earlier similar note was never settled)
+    packet = load_packet(nb, note_id)
+    if packet is not None:
+        packet["similar_notes"] = [x.get("note_id") for x in seen.get("similar_notes") or []
+                                   if isinstance(x, dict) and x.get("note_id")]
+        save_packet(nb, note_id, packet)
+    reinterpret_view(nb, note_id, seen)
+    if stored.get("mention_queries"):
+        resolve_candidates(nb, note_id, stored["mention_queries"])
+    now = context_digest(s, s.note_row(note_id), load_packet(nb, note_id))
+    chain = set(s.interpretation_chain(note_id))
+    cq = ",".join("?" for _ in chain)
+    own_entities = {r[0] for r in s.q(f"SELECT entity_id FROM entities WHERE created_revision_id IN ({cq})", list(chain))}
+    own_claims = {r[0] for r in s.q("SELECT claim_id FROM claims WHERE note_id=?", (note_id,))}
+
+    as_of = s.note_row(note_id)["occurred_at"]
+
+    def known_then(rows: Sequence[str], table: str, key: str, col: str) -> set:
+        # forward only (ADR 0008 §4): what was recorded after the note's date (the LATER block) is no foundation
+        out = set()
+        for x in rows:
+            r = s.q1(f"SELECT {col} FROM {table} WHERE {key}=?", (x,))
+            if r is not None and r[0] and r[0] <= as_of:
+                out.add(x)
+        return out
+
+    def norm(d: Dict[str, Any]) -> Tuple[set, set, set]:
+        # entities first seen after the note's date (later growth: a new vector neighbour) are no foundation either
+        return (known_then([e for e in d.get("entities") or [] if e not in own_entities], "entities", "entity_id",
+                           "COALESCE(first_seen, created_at)"),
+                known_then([c for c in d.get("claims") or [] if c not in own_claims], "claims", "claim_id", "observed_at"),
+                known_then(d.get("notes") or [], "notes", "note_id", "occurred_at"))
+
+    (e1, c1, n1), (e2, c2, n2) = norm(stored), norm(now)
+    if e1 != e2 or c1 != c2 or n1 != n2:
+        return False
+    s1, s2 = stored.get("summaries") or {}, now.get("summaries") or {}
+    return all(s1.get(e) == s2.get(e) for e in e2 if s2.get(e) not in chain)
+
+
+def reinterpret_next(nb: Any, limit: Any = REINTERPRET_BATCH, failed: Any = None) -> Dict[str, Any]:
+    """The next notes of the open consolidation's ``reinterpret`` stage (``note_reinterpret_next``): the pass takes
+    pending marks in history order (date, received time, id), never a note it took already; a note whose context did
+    not change is consumed ``unchanged`` here without a model call, a note understood again
+    :data:`REINTERPRET_PER_DAY` times today is held (skipped with its reason); the rest are returned for the model
+    (``note-process``, whose apply reads them again). ``failed`` (``[id]`` or ``[{id, reason}]``) records the notes
+    the last round could not understand again (their marks stay pending for the next pass). ``limit`` 0 only counts.
+    Returns ``{items: [{note_id, occurred_at, reasons}], unchanged: [note_id], held: [{id, reason}], done, total,
+    pending, pass_id}`` (``done`` = understood again, unchanged, failed or held in this pass)."""
+    row = _require_open(nb)
+    pid = row["consolidation_id"]
+    for f in _skips(failed, FAILED_REASON):
+        nb.store.fail_mark(f["id"], pid, f["reason"])
+        nb.queue.release(f["id"], "reinterpret", pid)
+    try:
+        n = int(REINTERPRET_BATCH if limit in (None, "") else limit)
+    except (TypeError, ValueError):
+        raise ValueError("The limit must be a whole number.") from None
+    if not 0 <= n <= 5:
+        _log.warning("reinterpret_next: the limit %d is outside 0..5; %d was applied", n, max(0, min(n, 5)))
+    n = max(0, min(n, 5))
+    items: List[Dict[str, Any]] = []
+    unchanged: List[str] = []
+    held: List[Dict[str, str]] = []
+    while len(items) < n:
+        pend = nb.store.pending_marks(pass_id=pid, limit=1)
+        if not pend:
+            break
+        m = pend[0]
+        nid = m["note_id"]
+        nb.store.take_mark(nid, pid)
+        if _reinterpreted_today(nb, nid) >= REINTERPRET_PER_DAY:
+            nb.store.fail_mark(nid, pid, HELD_REASON)
+            held.append({"id": nid, "reason": HELD_REASON})
+            _log.warning("consolidation %s, stage reinterpret: %s held: %s", pid, nid, HELD_REASON)
+            continue
+        if digest_unchanged(nb, nid):
+            nb.store.consume_marks(nid, pid, "unchanged", None, calls=0)
+            unchanged.append(nid)
+            continue
+        # the note is read again outside a drain: claimed on its queue row (R4, ADR 0008 §8) until the apply (or the
+        # failure the next round reports) releases it; a drain's lease or an inline claim on it holds it for now
+        if not nb.queue.claim(nid, "reinterpret", pid):
+            nb.store.fail_mark(nid, pid, BUSY_REASON)
+            held.append({"id": nid, "reason": BUSY_REASON})
+            _log.warning("consolidation %s, stage reinterpret: %s held: %s", pid, nid, BUSY_REASON)
+            continue
+        items.append({"note_id": nid, "occurred_at": m["occurred_at"], "reasons": m["reasons"]})
+    counts = pass_counts(nb, pid)
+    left = len(nb.store.pending_marks(pass_id=pid))
+    done = counts["reinterpreted"] + counts["unchanged"] + counts["reinterpret_failed"]
+    return {"items": items, "unchanged": unchanged, "held": held, "done": done,
+            "total": done + len(items) + left, "pending": left + len(items), "pass_id": pid, **counts}
 
 
 # --------------------------------------------------------------------------- stale summaries
@@ -421,29 +649,36 @@ def _canon(nb: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
 
 
 def _stale(nb: Any) -> List[Dict[str, Any]]:
-    """Every live entry whose summary is empty, a placeholder or older than its notes and statements, in the order
-    they are refreshed: empty and placeholders first, then the most changed, then the most mentioned."""
+    """Every live entry whose summary is empty, a placeholder, behind an earlier note applied since (retrospective)
+    or older than its notes and statements, in the order they are refreshed: empty and placeholders first, then
+    the retrospective ones, then the most changed, then the most mentioned."""
+    from ..store.notes import LIVE_ENTITY, claim_reinterpreted_sql
+
     s = nb.store
     canon, live = _canon(nb)
     seq_of = {r[0]: int(r[1]) for r in s.q("SELECT revision_id, seq FROM revisions WHERE applied_index=1")}
-    summaries: Dict[str, Tuple[int, str]] = {}
-    for r in s.q("SELECT entity_id, revision_id FROM entity_summaries"):
-        q = seq_of.get(r[1], 0)
-        if r[0] not in summaries or q >= summaries[r[0]][0]:
-            summaries[r[0]] = (q, r[1])
+    # the CURRENT summary of each entry: the last one in dated order (the one entities.summary shows), never the one
+    # written last: a retrospective note's own summary (an earlier date) must not hide that the entry changed, and
+    # a summary of a superseded interpretation is out of the history (store.notes.summary_superseded_sql)
+    summaries: Dict[str, Tuple[int, str]] = {e: (seq_of.get(r["revision_id"], 0), r["revision_id"])
+                                             for e, r in s.current_summaries().items()}
+    # retrospective insertions marked since the current summary (W23's marks; ADR 0008 §2)
+    retro = {x["entity_id"]: int(x["marked_seq"]) for x in nb.retro_state()["stale_summaries"]}
     new_notes: Dict[str, int] = {}
     for r in s.q("SELECT entity_id, revision_id FROM entity_notes"):
         e = canon.get(r[0], r[0])
         if e in live and seq_of.get(r[1], 0) > summaries.get(e, (0, ""))[0]:
             new_notes[e] = new_notes.get(e, 0) + 1
     new_claims: Dict[str, int] = {}
-    for r in s.q("SELECT subject_id, object_id, revision_id FROM claims WHERE status!='retracted'"):
+    # a claim its own note's re-interpretation closed is not counted again (its replacement is)
+    for r in s.q("SELECT c.subject_id, c.object_id, c.revision_id FROM claims c WHERE c.status!='retracted' AND NOT"
+                 f" {claim_reinterpreted_sql('c')}"):
         q = seq_of.get(r[2], 0)
         for x in {canon.get(r[0], r[0]), canon.get(r[1], r[1]) if r[1] else None}:
             if x and x in live and q > summaries.get(x, (0, ""))[0]:
                 new_claims[x] = new_claims.get(x, 0) + 1
     rows = {r["entity_id"]: r for r in s.q("SELECT entity_id, name, display_name, summary, created_revision_id,"
-                                           " note_count FROM entities WHERE merged_into IS NULL")}
+                                           f" note_count FROM entities WHERE {LIVE_ENTITY}")}
     created_warnings: Dict[str, List[str]] = {}
     out = []
     for eid, r in rows.items():
@@ -460,19 +695,25 @@ def _stale(nb: Any) -> List[Dict[str, Any]]:
             names = {r["name"], r["display_name"] or r["name"], *s.aliases(eid)}
             if any(PLACEHOLDER_WARNING.format(name=n) in created_warnings[rid] for n in names):
                 reason = "placeholder"
+        if reason is None and eid in retro:
+            reason = "retrospective"
         if reason is None and (since["notes"] or since["claims"]):
             reason = "changed"
         if reason is None:
             continue
-        out.append({"entity_id": eid, "reason": reason, "since_summary": since, "summary_revision_count": seq,
-                    "note_count": int(r["note_count"] or 0)})
-    rank = {"empty": 0, "placeholder": 0, "changed": 1}
+        item = {"entity_id": eid, "reason": reason, "since_summary": since, "summary_revision_count": seq,
+                "note_count": int(r["note_count"] or 0)}
+        if eid in retro:
+            item["retro_marked_seq"] = retro[eid]
+        out.append(item)
+    rank = {"empty": 0, "placeholder": 0, "retrospective": 1, "changed": 2}
     out.sort(key=lambda x: (rank[x["reason"]], -(x["since_summary"]["notes"] + x["since_summary"]["claims"]),
                             -x["note_count"], x["entity_id"]))
     return out
 
 
 def _packet(nb: Any, item: Dict[str, Any], canon: Dict[str, str]) -> Dict[str, Any]:
+    from ..store.notes import claim_reinterpreted_sql
     from .changes import claim_text
     from .shapes import excerpt
 
@@ -481,25 +722,95 @@ def _packet(nb: Any, item: Dict[str, Any], canon: Dict[str, str]) -> Dict[str, A
     r = s.entity_row(eid)
     members = s.merged_members(eid)
     marks = ",".join("?" for _ in members)
-    claims = s.q(f"SELECT * FROM claims WHERE status='active' AND (subject_id IN ({marks}) OR object_id IN ({marks}))",
-                 [*members, *members])
+    claims = s.q(f"SELECT * FROM claims c WHERE c.status='active' AND (c.subject_id IN ({marks}) OR c.object_id IN"
+                 f" ({marks})) AND NOT {claim_reinterpreted_sql('c')}", [*members, *members])
+    now = ids.utc_now()
+    claims = [c for c in claims if not c["valid_until"] or c["valid_until"] > now]
+    # the strongest statements that hold now; among equals the most recent first (the past is in ``earlier`` and
+    # ``history``), so what the entry is now is never the part cut
     claims = sorted(claims, key=lambda c: (-int(c["reinforced_count"] or 0), _CERTAINTY_RANK.get(c["certainty"], 9),
-                                           c["observed_at"] or "", c["claim_id"]))
-    notes = s.q(f"SELECT DISTINCT n.* FROM entity_notes en JOIN notes n ON n.note_id=en.note_id WHERE en.entity_id IN"
-                f" ({marks}) AND n.archived_at IS NULL ORDER BY n.occurred_at DESC, n.note_id", [*members])
-    # a selection (the strongest statements, the newest notes), recorded: ``omitted`` counts what is not shown
+                                           _desc(c["observed_at"]), c["claim_id"]))
+    # the dated history, earliest first: what each note's summary said of the entry as of its own date ...
+    history: List[Dict[str, str]] = []
+    for h in s.summary_rows(members):
+        text = " ".join(str(h["summary"] or "").split())
+        if text and (not history or history[-1]["summary"] != text):
+            history.append({"date": _day(h["at"]), "summary": text})
+    history, history_omitted = _ends(history, PACKET_HISTORY)
+    # ... and what held once and ended (a belief replaced or whose window closed), in the order it held
+    ended = s.q(f"SELECT * FROM claims c WHERE (c.subject_id IN ({marks}) OR c.object_id IN ({marks})) AND c.valid_until"
+                f" IS NOT NULL AND c.valid_until<=? AND c.status IN ('active', 'superseded') AND NOT"
+                f" {claim_reinterpreted_sql('c')} ORDER BY COALESCE(c.valid_from, c.observed_at), c.claim_id",
+                [*members, *members, now])
+    earlier = [{"from": _day(c["valid_from"] or c["observed_at"]), "until": _day(c["valid_until"]),
+                "statement": claim_text(nb, c)} for c in ended if (c["valid_from"] or c["observed_at"]) != c["valid_until"]]
+    earlier, earlier_omitted = _ends(earlier, PACKET_EARLIER)
+    all_notes = list(s.q(f"SELECT n.*, MAX(v.seq) AS mention_seq FROM entity_notes en JOIN notes n ON"
+                         f" n.note_id=en.note_id LEFT JOIN revisions v ON v.revision_id=en.revision_id WHERE en.entity_id"
+                         f" IN ({marks}) AND n.archived_at IS NULL GROUP BY n.note_id ORDER BY n.occurred_at DESC,"
+                         f" n.note_id", members))
+    # what the current summary does not account for yet comes first (an earlier project's notes arriving later are
+    # what an entry must absorb, ADR 0008 §2), then the newest note, the earliest one, and the newest of the rest
+    since = int(item.get("summary_revision_count") or 0)
+    fresh = [n for n in all_notes if int(n["mention_seq"] or 0) > since]
+    chosen: List[Any] = fresh[:PACKET_NEW_NOTES]
+    for n in ([all_notes[0], all_notes[-1]] if all_notes else []) + all_notes:
+        if len(chosen) >= PACKET_NOTES:
+            break
+        if n["note_id"] not in {c["note_id"] for c in chosen}:
+            chosen.append(n)
+    new_ids = {n["note_id"] for n in fresh}
+    notes = sorted(chosen, key=lambda n: (_desc(n["occurred_at"]), n["note_id"]))  # newest first
     return {**item, "name": r["display_name"] or r["name"], "kind": r["kind"], "aliases": s.aliases(eid),
-            "summary": r["summary"], "claims": [claim_text(nb, c) for c in claims[:PACKET_CLAIMS]],
+            "summary": r["summary"], "as_of": _day(_as_of(nb, eid)),
+            "claims": [claim_text(nb, c) + (f" (since {_day(c['valid_from'])})" if c["valid_from"] else "")
+                       for c in claims[:PACKET_CLAIMS]],
+            "history": history, "earlier": earlier,
             "notes": [{"title": n["title"] or "", "date": str(n["occurred_at"] or "")[:10],
-                       "excerpt": excerpt(n["summary"] or n["one_line"] or n["text"])} for n in notes[:PACKET_NOTES]],
-            "omitted": {"claims": max(0, len(claims) - PACKET_CLAIMS), "notes": max(0, len(notes) - PACKET_NOTES)}}
+                       "excerpt": excerpt(n["summary"] or n["one_line"] or n["text"]),
+                       **({"new": True} if n["note_id"] in new_ids else {})} for n in notes],
+            # a selection, recorded (ADR 0007): what is not shown, by part
+            "omitted": {"claims": max(0, len(claims) - PACKET_CLAIMS), "notes": max(0, len(all_notes) - len(notes)),
+                        "history": history_omitted, "earlier": earlier_omitted}}
+
+
+def _desc(ts: Any) -> str:
+    """A sort key that orders ISO times newest first (each character inverted)."""
+    return "".join(chr(0x10FFFF - ord(ch)) for ch in str(ts or ""))
+
+
+def _day(ts: Any) -> str:
+    return str(ts or "")[:10]
+
+
+def _ends(items: List[Any], n: int) -> Tuple[List[Any], int]:
+    """The earliest item and the latest ``n - 1`` (the start and the recent past of a dated history), and how many
+    in between were left out (the packet's ``omitted``, shown to the model, never silent)."""
+    if len(items) <= n:
+        return items, 0
+    return [items[0], *items[len(items) - (n - 1):]], len(items) - n
+
+
+def _as_of(nb: Any, entity_id: str) -> Optional[str]:
+    """The latest dated knowledge of an entry (ADR 0008 §2): its last mention across the entries merged into it, or
+    its current summary's date when that is later; None when it has neither. A summary re-derived by the
+    consolidation is dated here (``entity.summary`` ``as_of``)."""
+    s = nb.store
+    members = s.merged_members(entity_id)
+    marks = ",".join("?" for _ in members)
+    last = s.q1(f"SELECT MAX(at) FROM entity_notes WHERE entity_id IN ({marks})", members)[0]
+    cur = s.current_summary_row(entity_id)
+    dates = [x for x in (last, cur["at"] if cur is not None else None) if x]
+    return max(dates) if dates else None
 
 
 def stale_summaries(nb: Any, limit: Any = SUMMARY_BATCH) -> Dict[str, Any]:
     """``{count, items, limit_applied}``: the next ``limit`` (0..50) stale entries as packets ``{entity_id, reason,
-    since_summary: {notes, claims}, summary_revision_count, note_count, name, kind, aliases, summary, claims: [line],
-    notes: [{title, date, excerpt}], omitted: {claims, notes}}`` (the strongest :data:`PACKET_CLAIMS` statements and
-    newest :data:`PACKET_NOTES` notes; ``omitted`` counts the rest). While a consolidation is open, an entry it was already offered is not offered
+    since_summary: {notes, claims}, summary_revision_count, note_count, name, kind, aliases, summary, as_of,
+    claims: [line], history: [{date, summary}], earlier: [{from, until, statement}], notes: [{title, date, excerpt,
+    new?}], omitted: {claims, notes, history, earlier}}`` (the strongest :data:`PACKET_CLAIMS` statements, the
+    :data:`PACKET_NOTES` notes chosen by :func:`_packet`, the ends of the dated history and of the ended statements;
+    ``omitted`` counts the rest by part). While a consolidation is open, an entry it was already offered is not offered
     again (so an entry the model skips cannot hold the loop), and ``count`` is what remains for it."""
     try:
         n = int(SUMMARY_BATCH if limit in (None, "") else limit)
@@ -520,7 +831,7 @@ def stale_summaries(nb: Any, limit: Any = SUMMARY_BATCH) -> Dict[str, Any]:
 
 def set_summaries(nb: Any, items: Sequence[Dict[str, Any]], *, account: Optional[str] = None) -> Dict[str, Any]:
     """Store ``[{entity_id, summary}]`` as one ``entity.summary`` revision (run_id = the open consolidation, when
-    there is one). An unknown or merged entry or an empty summary is left out (``left_out: [{entity_id, reason}]``);
+    there is one), each op dated ``as_of`` the entry's latest dated knowledge (:func:`_as_of`). An unknown or merged entry or an empty summary is left out (``left_out: [{entity_id, reason}]``);
     a summary over :data:`SUMMARY_MAX_CHARS` is kept whole and named in ``over_length`` (and in the revision's
     warnings); every warning is also logged on ``abstractnote.consolidation``. Returns ``{stored: [entity_id],
     revision_id, warnings, left_out, over_length}``."""
@@ -560,7 +871,11 @@ def set_summaries(nb: Any, items: Sequence[Dict[str, Any]], *, account: Optional
             warnings.append(f"over_length: the summary of {eid} has {len(text)} characters (more than"
                             f" {SUMMARY_MAX_CHARS}); it was kept whole.")
             over_length.append(eid)
-        ops.append({"op": "entity.summary", "payload": {"entity_id": eid, "summary": text}})
+        payload = {"entity_id": eid, "summary": text}
+        as_of = _as_of(nb, eid)
+        if as_of:
+            payload["as_of"] = as_of  # dated at the knowledge it was derived from (op_entity_summary)
+        ops.append({"op": "entity.summary", "payload": payload})
         stored.append(eid)
     for w in warnings:
         _log.warning("set_summaries: %s", w)

@@ -52,5 +52,6 @@ def drafts(*, report: ImportReport, paths: Sequence[str | Path], since: Optional
         digest = hashlib.sha256(data).hexdigest()
         source = {"client": "importer", "importer": IMPORTER, "origin": {"path": str(path.resolve()), "sha256": digest,
                                                                          "date_basis": basis}}
+        # the title is the file's name, not its text: a file nothing can be read from is left out at capture
         yield NoteDraft(IMPORTER, digest, "", occurred, "file", path.name, source,
-                        [{"data": data, "mime": mime, "filename": path.name}])
+                        [{"data": data, "mime": mime, "filename": path.name}], title_is_text=False)

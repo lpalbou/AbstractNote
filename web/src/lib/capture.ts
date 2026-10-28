@@ -10,15 +10,21 @@ import { followRun, runErrorText, startFlow, type FollowOptions } from "./runs";
 import type { About, Note } from "./types";
 
 export type CaptureState = "uploading" | "saving" | "queued" | "processed" | "duplicate" | "failed";
-export type CaptureFile = { name: string; size: number; type: string };
+/** `lastModified`: the file's modification time (File.lastModified, epoch ms), sent with its upload so an upload
+ * without a date of its own is dated by it (docs/api.md "Capture a note", ADR 0008 §7). */
+export type CaptureFile = { name: string; size: number; type: string; lastModified?: number };
+/** An uploaded file's reference in `context.attachments`: `last_modified` is the file's modification time. */
+export type ArtifactRef = { $artifact: string; last_modified?: number };
 
 export type CaptureItem = {
   id: string;
   key: string;
   text: string;
   files: CaptureFile[];
-  artifacts: Array<{ $artifact: string }>;
+  artifacts: ArtifactRef[];
   occurred_at: string;
+  /** The text was pasted (not typed now): its own stated date may date the note (`source.origin.pasted`). */
+  pasted?: boolean;
   location: { lat: number; lon: number; accuracy_m?: number } | null;
   /** What the note answers or comments (sent as `context.about`). */
   about?: About | null;
@@ -49,8 +55,10 @@ export function captureInput(item: CaptureItem, processInline: boolean, sessionI
     // Also added by startFlow for every run (docs/api.md); kept here so the capture input is complete on its own.
     session_id: sessionId,
     title: null,
-    occurred_at: item.occurred_at,
-    source: { client: "web" },
+    // A note of files only is dated by the files (their own date, else their last change), not by the moment of
+    // the upload; a note with words keeps the moment they were written (docs/api.md "Capture a note").
+    occurred_at: !item.text.trim() && item.files.length ? null : item.occurred_at,
+    source: item.pasted ? { client: "web", origin: { pasted: true } } : { client: "web" },
     idempotency_key: item.key,
     priority: null,
     process_inline: processInline,
@@ -86,7 +94,10 @@ export async function runCapture(item: CaptureItem, files: File[], deps: Capture
       update(item.id, { state: "uploading", error: undefined });
       const refs = [...artifacts];
       for (const f of files.slice(refs.length)) refs.push(await api.upload(f, deps.sessionId));
-      artifacts = refs.map((r) => ({ $artifact: r.$artifact }));
+      artifacts = refs.map((r, i) => {
+        const modified = item.files[i]?.lastModified;
+        return typeof modified === "number" && modified > 0 ? { $artifact: r.$artifact, last_modified: modified } : { $artifact: r.$artifact };
+      });
       update(item.id, { artifacts });
     }
     update(item.id, { state: "saving", error: undefined });

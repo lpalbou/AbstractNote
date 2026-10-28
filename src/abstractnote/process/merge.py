@@ -65,6 +65,13 @@ def merge_extractions(parts: Sequence[Dict[str, Any]]) -> Tuple[Dict[str, Any], 
             merged["document_date"] = dated[0]  # the first section that states the note's own date
         if warnings:
             merged["warnings"] = warnings
-    names = [{"ref": m.get("ref"), "name": m.get("name"), "kind": m.get("kind"), "aliases": m.get("aliases") or []}
-             for m in merged.get("mentions") or []]
+    # Each mention carries the predicates of the note's statements about it: the slots the linking packet shows
+    # whole (ADR 0008 §2, retro-design-review 2.1).
+    slots: Dict[str, List[str]] = {}
+    for c in merged.get("claims") or []:
+        for end in (c.get("subject"), None if c.get("object_is_literal") else c.get("object")):
+            if end is not None and c.get("predicate") and c["predicate"] not in slots.setdefault(str(end), []):
+                slots[str(end)].append(c["predicate"])
+    names = [{"ref": m.get("ref"), "name": m.get("name"), "kind": m.get("kind"), "aliases": m.get("aliases") or [],
+              "predicates": slots.get(str(m.get("ref")), [])} for m in merged.get("mentions") or []]
     return merged, names
