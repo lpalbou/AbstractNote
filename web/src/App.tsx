@@ -8,6 +8,7 @@ import type { Api } from "./lib/api";
 import type { NoteSettings, NoteStatus } from "./lib/types";
 import { AppContext, Spinner } from "./components/common";
 import { ConnectDialog } from "./components/ConnectDialog";
+import { NoteDocsAssistant } from "./components/DocsAssistant";
 import { Dialogs } from "./components/Dialogs";
 import { ViewBoundary } from "./components/ViewBoundary";
 import { CaptureView } from "./views/Capture";
@@ -50,14 +51,16 @@ export function App() {
   const conn = useGatewayConnection({ appName: "AbstractNote", variant: "blocking", defaultGatewayUrl: serverUrl() || undefined });
   const [appearance, setAppearance] = useAppearanceSettings("abstractnote", { defaults: { theme: "dark" } });
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [docsOpen, setDocsOpen] = useState(false);
+  const docs = useMemo(() => ({ open: docsOpen, onToggle: () => setDocsOpen((v) => !v) }), [docsOpen]);
   const user = conn.status?.gateway?.principal?.user_id || null;
   return (
     <>
       {conn.phase === "connected" ? (
-        <Shell key={user || "signed-in"} conn={conn} user={user} onAppearance={() => setAppearanceOpen(true)} />
+        <Shell key={user || "signed-in"} conn={conn} docs={docs} onAppearance={() => setAppearanceOpen(true)} />
       ) : (
         <div className="nt-app">
-          <Header conn={conn} user={null} onAppearance={() => setAppearanceOpen(true)} tabs={null} />
+          <Header conn={conn} docs={docs} onAppearance={() => setAppearanceOpen(true)} tabs={null} />
           <main className="nt-main">
             <div className="nt-center">{conn.phase === "loading" ? <Spinner label="Connecting…" /> : <p className="nt-muted">Sign in to open your notebook.</p>}</div>
           </main>
@@ -65,14 +68,20 @@ export function App() {
       )}
       <ConnectDialog {...conn.modalProps} serverUrl={serverUrl()} />
       <AfAppearanceDialog open={appearanceOpen} onClose={() => setAppearanceOpen(false)} value={appearance} onChange={setAppearance} />
+      <NoteDocsAssistant open={docsOpen} onClose={() => setDocsOpen(false)} connected={conn.phase === "connected"} />
     </>
   );
 }
 
 type Conn = ReturnType<typeof useGatewayConnection>;
+type DocsToggle = { open: boolean; onToggle: () => void };
 
-/** The header: brand, the four views, and the framework's top-right cluster (appearance, about, account, sign-in pill). */
-function Header({ conn, user, onAppearance, onSettings, tabs }: { conn: Conn; user: string | null; onAppearance: () => void; onSettings?: () => void; tabs: React.ReactNode }) {
+/**
+ * The header: brand, the four views, and the framework's top-right cluster, the kit's shared set
+ * (operator ruling 2026-10-29): docs, appearance, about and the ONE account widget (person icon,
+ * name, connection light; its menu says who and which gateway, with Copy user id and Disconnect).
+ */
+function Header({ conn, docs, onAppearance, onSettings, tabs }: { conn: Conn; docs: DocsToggle; onAppearance: () => void; onSettings?: () => void; tabs: React.ReactNode }) {
   const [versions, setVersions] = useState<AfAboutVersions | undefined>(undefined);
   const identity = useMemo(noteIdentity, []);
   const refreshVersions = useCallback(() => {
@@ -89,24 +98,18 @@ function Header({ conn, user, onAppearance, onSettings, tabs }: { conn: Conn; us
       {tabs}
       <div className="nt-header__actions">
         <AfTopBarActions
+          docs={{ open: docs.open, onToggle: docs.onToggle, label: "Docs assistant" }}
           appearance={{ onOpen: onAppearance }}
           about={{ identity, versions, onOpen: refreshVersions }}
           extraActions={
-            <>
-              {onSettings ? (
-                <button type="button" className="af-topbar__btn" aria-label="Settings" data-af-tip="Settings" onClick={onSettings}>
-                  <Icon name="gear" size={16} />
-                </button>
-              ) : null}
-              {user ? (
-                <span className="nt-account" title={`Signed in as ${user}`}>
-                  <Icon name="user" size={14} />
-                  <span>{user}</span>
-                </span>
-              ) : null}
-            </>
+            onSettings ? (
+              <button type="button" className="af-topbar__btn" aria-label="Settings" data-af-tip="Settings" onClick={onSettings}>
+                <Icon name="gear" size={16} />
+              </button>
+            ) : null
           }
-          connection={{ phase: conn.phase, signingOut: conn.signingOut, onConnect: () => conn.openModal(), onDisconnect: () => void conn.signOut() }}
+          identity="menu"
+          connection={conn}
         />
       </div>
     </header>
@@ -126,7 +129,7 @@ export async function ensureProcessor(api: Api): Promise<boolean> {
   }
 }
 
-function Shell({ conn, user, onAppearance }: { conn: Conn; user: string | null; onAppearance: () => void }) {
+function Shell({ conn, docs, onAppearance }: { conn: Conn; docs: DocsToggle; onAppearance: () => void }) {
   const onUnauthorized = useCallback(() => void conn.refresh(), [conn]);
   const api = useMemo(() => createApi({ onUnauthorized }), [onUnauthorized]);
   const sessionId = useMemo(() => captureSessionId(randomId), []);
@@ -186,7 +189,7 @@ function Shell({ conn, user, onAppearance }: { conn: Conn; user: string | null; 
   return (
     <AppContext.Provider value={ctx}>
       <div className={`nt-app${narrow ? " nt-app--narrow" : ""}`}>
-        <Header conn={conn} user={user} onAppearance={onAppearance} onSettings={() => setSettingsOpen(true)} tabs={narrow ? null : tabs} />
+        <Header conn={conn} docs={docs} onAppearance={onAppearance} onSettings={() => setSettingsOpen(true)} tabs={narrow ? null : tabs} />
         <main className="nt-main">
           {mount === "missing" ? (
             <div className="nt-center">

@@ -39,6 +39,26 @@ function sessionProxyPlugin(mode: string): Plugin {
   };
 }
 
+// The app's llms.txt ships in dist/ and is served at /llms.txt (dev too): the gateway's
+// `GET /docs/corpus?app=note` reads it from the running app to ground the Docs assistant
+// (top-bar set, 2026-10-29; the same plugin as the other apps). One file, the repo's own.
+const LLMS_TXT = resolve(__dirname, "../llms.txt");
+function llmsTxtPlugin(): Plugin {
+  return {
+    name: "abstractframework-llms-txt",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (String(req.url || "").split("?")[0] !== "/llms.txt") return next();
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        res.end(readFileSync(LLMS_TXT, "utf8"));
+      });
+    },
+    generateBundle() {
+      this.emitFile({ type: "asset", fileName: "llms.txt", source: readFileSync(LLMS_TXT, "utf8") });
+    },
+  };
+}
+
 function packageVersion(): string {
   const pkg = JSON.parse(readFileSync(resolve(__dirname, "package.json"), "utf8"));
   const version = String(pkg?.version || "").trim();
@@ -49,7 +69,7 @@ function packageVersion(): string {
 export default defineConfig(({ mode }) => ({
   // Relative asset URLs: the same build serves at / and under the gateway's /apps/note/.
   base: "./",
-  plugins: [sessionProxyPlugin(mode), react()],
+  plugins: [sessionProxyPlugin(mode), llmsTxtPlugin(), react()],
   define: { __APP_VERSION__: JSON.stringify(packageVersion()) },
   resolve: { dedupe: ["@abstractframework/ui-kit", "@abstractframework/panel-chat", "react", "react-dom"] },
   server: { host: "127.0.0.1", strictPort: false },

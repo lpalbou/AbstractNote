@@ -24,6 +24,7 @@ beforeAll(async () => {
   mkdirSync(join(dist, "assets"));
   writeFileSync(join(dist, "index.html"), '<!doctype html><html><head><title>AbstractNote</title></head><body><script type="module" src="./assets/app.js"></script></body></html>');
   writeFileSync(join(dist, "assets", "app.js"), "console.log(1)");
+  writeFileSync(join(dist, "llms.txt"), "# AbstractNote\n");
   // Nothing listens on port 9: the proxy must answer, never hang.
   server = createNoteServer({ distDir: dist, gatewayUrl: "http://127.0.0.1:9" });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
@@ -56,6 +57,13 @@ describe("app server (app-server mount contract)", () => {
     expect((await get("/graph")).status).toBe(200);
     expect((await get("/assets/nope.js")).status).toBe(404);
     expect((await get("/assets/app.js")).body).toContain("console.log");
+  });
+
+  it("serves the build's llms.txt as text/plain (the gateway's docs corpus for the Docs assistant)", async () => {
+    const r = await get("/llms.txt");
+    expect(r.status).toBe(200);
+    expect(String(r.headers["content-type"])).toMatch(/^text\/plain/);
+    expect(r.body).toBe("# AbstractNote\n");
   });
 
   it("refuses /api/* without a browser session (the page never holds a token)", async () => {

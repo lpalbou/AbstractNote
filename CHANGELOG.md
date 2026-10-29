@@ -6,7 +6,15 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 
 ## [Unreleased]
 
+### Added
+- The web app's top bar has the Docs assistant (operator ruling 2026-10-29: the docs button, Appearance, About and
+  the account are the same kit components in every app): panel-chat's `DocsAssistantDrawer`, grounded on this repo's
+  `llms.txt`, which the build now ships at `/llms.txt` (the gateway reads it for `docs/corpus?app=note`).
+
 ### Changed
+- The top bar's account is the kit's ONE account widget: person icon, name and connection light in one button, its
+  menu holding Signed in as, Gateway, Copy user id and Disconnect. It replaces the app's own account label and the
+  Disconnect pill beside it. Needs `@abstractframework/ui-kit` ^0.9.6 (was ^0.9.5). Test: `web/test/top_bar_set.test.ts`.
 - The web app builds with `@abstractframework/panel-chat` ^0.6.4 and `@abstractframework/ui-kit` ^0.9.5 (were ^0.6.0 and ^0.9.2). It renders no chat message card (the composer, Markdown and the replay-view projection only), so the kit's message footer spec (AbstractUIC 0.8.4, backlog 0064) changes nothing on screen; the pin keeps the app on the kit the other apps ship.
 
 ## [0.3.0] - 2026-10-28

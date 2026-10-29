@@ -207,9 +207,6 @@ p { margin: 0 0 6px; }
 .nt-main { flex: 1; min-height: 0; overflow: auto; }
 
 /* ---- account (beside the kit's top-right cluster) */
-.nt-account { display: inline-flex; align-items: center; gap: 5px; max-width: 160px; padding: 0 6px; color: var(--text-secondary); font-size: var(--font-size-md); white-space: nowrap; }
-.nt-account span { overflow: hidden; text-overflow: ellipsis; }
-@media (max-width: 640px) { .nt-account span { display: none; } }
 
 /* ---- cards, sections, lists */
 .nt-section { padding: 18px 24px; }
