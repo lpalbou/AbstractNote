@@ -1,11 +1,11 @@
 # AbstractNote backlog overview
 
-Last reconciled: 2026-10-28 (0038 npm publish added; 0033 carries the phase 2 open decisions 3, 4, 8, 10, 12, 13, 14; earlier 2026-10-27: memory convergence track added; proposed 0015 deprecated; 0034 and 0037 completed; 0033 rewritten as the phased plan)
+Last reconciled: 2026-10-29 (0040 shared-plane gate added from the gateway's PR #55 review; 2026-10-28: 0038 npm publish added; 0033 carries the phase 2 open decisions 3, 4, 8, 10, 12, 13, 14; earlier 2026-10-27: memory convergence track added; proposed 0015 deprecated; 0034 and 0037 completed; 0033 rewritten as the phased plan)
 
 ## Counts
 | State | Count |
 |---|---|
-| planned | 5 (0038; track `planned/v1/`: 0029; track `planned/memory_convergence/`: 0033, 0035, 0036) |
+| planned | 6 (0038, 0040; track `planned/v1/`: 0029; track `planned/memory_convergence/`: 0033, 0035, 0036) |
 | proposed | 9 |
 | completed | 24 (track `completed/v1/`: 21; track `completed/memory_convergence/`: 0034, 0037; 0039 web pin on the kit's message footer spec) |
 | deprecated | 1 (0015) |
@@ -25,6 +25,7 @@ Next free id: 0039.
 ## Ledgers
 ### Planned
 - [0038 npm publish of `@abstractframework/note` (0.2.0 rejected E404, trusted publisher)](planned/0038_npm_publish_of_abstractframework_note.md)
+- [0040 shared plane: `PUT /settings` and `POST /processor/ensure` ask for admin or the plane owner (gateway security incident 2026-10-29, PR #55)](planned/0040_shared_plane_gate_for_settings_and_processor_ensure.md)
 - [0029 Ingest the rest of the framework's history into the operator's notebook](planned/v1/0029_ingest_the_rest_of_the_framework_history.md)
 
 - [0033 Converge the notebook's knowledge graph onto AbstractMemory](planned/memory_convergence/0033_converge_onto_abstractmemory.md)
