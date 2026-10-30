@@ -1,13 +1,13 @@
 # AbstractNote backlog overview
 
-Last reconciled: 2026-10-29 (0040 shared-plane gate added from the gateway's PR #55 review; 2026-10-28: 0038 npm publish added; 0033 carries the phase 2 open decisions 3, 4, 8, 10, 12, 13, 14; earlier 2026-10-27: memory convergence track added; proposed 0015 deprecated; 0034 and 0037 completed; 0033 rewritten as the phased plan)
+Last reconciled: 2026-10-30 (0902 shared widgets locally deployed and verified; 0040 shared-plane gate added from the gateway's PR #55 review; 2026-10-28: 0038 npm publish added; 0033 carries the phase 2 open decisions 3, 4, 8, 10, 12, 13, 14; earlier 2026-10-27: memory convergence track added; proposed 0015 deprecated; 0034 and 0037 completed; 0033 rewritten as the phased plan)
 
 ## Counts
 | State | Count |
 |---|---|
-| planned | 7 (0902; 0038, 0040; track `planned/v1/`: 0029; track `planned/memory_convergence/`: 0033, 0035, 0036) |
+| planned | 6 (0038, 0040; track `planned/v1/`: 0029; track `planned/memory_convergence/`: 0033, 0035, 0036) |
 | proposed | 9 |
-| completed | 24 (track `completed/v1/`: 21; track `completed/memory_convergence/`: 0034, 0037; 0039 web pin on the kit's message footer spec) |
+| completed | 25 (0902 shared-widget local frontend deployment; track `completed/v1/`: 21; track `completed/memory_convergence/`: 0034, 0037; 0039 web pin on the kit's message footer spec) |
 | deprecated | 1 (0015) |
 | recurrent | 1 (0901) |
 
@@ -24,7 +24,6 @@ Next free global id: 0903 (0901 is the existing recurrent item).
 
 ## Ledgers
 ### Planned
-- [0902 Deploy and verify the existing shared top-bar set](planned/0902_deploy_shared_top_bar_and_verify_served_build.md) — live npm 0.1.0 predates source adoption; fix deployment drift and stale smoke selectors.
 - [0038 npm publish of `@abstractframework/note` (0.2.0 rejected E404, trusted publisher)](planned/0038_npm_publish_of_abstractframework_note.md)
 - [0040 shared plane: `PUT /settings` and `POST /processor/ensure` ask for admin or the plane owner (gateway security incident 2026-10-29, PR #55)](planned/0040_shared_plane_gate_for_settings_and_processor_ensure.md)
 - [0029 Ingest the rest of the framework's history into the operator's notebook](planned/v1/0029_ingest_the_rest_of_the_framework_history.md)
@@ -45,6 +44,7 @@ Next free global id: 0903 (0901 is the existing recurrent item).
 - [0023 Release preparation for 0.1.0](proposed/0023_release_preparation_v0_1_0.md)
 
 ### Completed
+- [0902 Deploy and verify the shared top-bar set](completed/0902_deploy_shared_top_bar_and_verify_served_build.md) — completed 2026-10-30; original `planned/0902_deploy_shared_top_bar_and_verify_served_build.md`; existing adoption deployed as local frontend override, smoke repaired (`557dc00`), 181 tests and live widget checks pass; [evidence](../../design/shared-widgets-0902/REVIEW.md).
 - [0001 Notebook store and data model](completed/v1/0001_notebook_store_and_data_model.md) — completed 2026-10-19
 - [0002 Capture, attachments and de-duplication](completed/v1/0002_capture_and_deduplication.md) — completed 2026-10-19
 - [0003 Processing pipeline: context, extraction, linking, revision](completed/v1/0003_processing_pipeline_extraction_linking_revision.md) — completed 2026-10-19

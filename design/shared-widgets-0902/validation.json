@@ -1,0 +1,92 @@
+{
+  "source_adoption": "d8cabd5",
+  "smoke_commit": "557dc00",
+  "tests_passed": 181,
+  "production_build": "pass, relative URLs checked",
+  "mock_browser": {
+    "failures": [],
+    "sharedWidgets": [
+      "docs",
+      "appearance",
+      "about",
+      "account-menu"
+    ],
+    "themes": [
+      "dark",
+      "light"
+    ],
+    "widths": [
+      1280,
+      400
+    ]
+  },
+  "deployment": {
+    "kind": "local-frontend-override",
+    "created": "2026-10-30T12:07:55.562240+00:00",
+    "installed_package_version": "0.1.0",
+    "frontend_source_version": "0.3.0",
+    "source_commit": "557dc0012f30623bd3cfbd7618b823e287764479",
+    "backup": "/Users/albou/tmp/abstractframework/runtime/apps/note/0.1.0/node_modules/@abstractframework/note/.local-frontend-backups/0902-original",
+    "previous_index_sha256": "2b3fcc6ce06e65afdff365f517c84bb09dfc0fc338d0c31ff7742f9fb286098a",
+    "files": {
+      "llms.txt": "5efa4fb8c753f9b2d556d6f0ad6667ebaefe8fc8fb38964769d848fd51e909ea",
+      "index.html": "9ef5aa6e285af04991a04f4a0fde73b9de61f60661dd434f174d821200c813ae",
+      "icon.svg": "9a891141b694531a12721c09339b901a310220fc8e391aecb3e7b4898c5b7789",
+      "assets/index-DlqNiE9C.css": "de1bafa88be4fd5cedd32a55d3bf19922a5b99897641465e15a5c766b0c58427",
+      "assets/index-CYo8uHdu.js": "6304ce98272337ae8c81d62f585370a1001812b2b27585f5a280f794ec359d24",
+      "assets/index-CYo8uHdu.js.map": "c3e30b2c9c9abe7c9f11144576e8548016c109d46cc319dc1c5c3ab41d49f62d"
+    },
+    "note": "Frontend assets only; original Node server, gateway app state, cookies and notebook data preserved. Not a registry release."
+  },
+  "live": {
+    "themes": [
+      {
+        "theme": "dark",
+        "checks": {
+          "docsVisible": true,
+          "appearanceVisible": true,
+          "aboutVisible": true,
+          "accountName": true,
+          "singleAccount": true,
+          "statusDot": true,
+          "accountMenu": true,
+          "sharedAppearance": true,
+          "sharedAbout": true,
+          "docsDrawer": true,
+          "mobileFits": true
+        }
+      },
+      {
+        "theme": "light",
+        "checks": {
+          "docsVisible": true,
+          "appearanceVisible": true,
+          "aboutVisible": true,
+          "accountName": true,
+          "singleAccount": true,
+          "statusDot": true,
+          "accountMenu": true,
+          "sharedAppearance": true,
+          "sharedAbout": true,
+          "docsDrawer": true,
+          "mobileFits": true
+        }
+      }
+    ],
+    "pageErrors": [],
+    "blockedNotebookWrites": [
+      {
+        "path": "/apps/note/api/gateway/note/processor/ensure",
+        "method": "POST"
+      },
+      {
+        "path": "/apps/note/api/gateway/note/processor/ensure",
+        "method": "POST"
+      },
+      {
+        "path": "/apps/note/api/gateway/note/processor/ensure",
+        "method": "POST"
+      }
+    ]
+  }
+}

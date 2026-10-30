@@ -36,5 +36,28 @@ and deployment evidence. Agora unavailable (connection refused).
 
 ## Metadata
 - Created: 2026-10-30
-- Status: planned
+- Status: completed
+- Completed: 2026-10-30
 - Area: web, deployment
+
+## Completion report
+
+2026-10-30: source adoption `d8cabd5` was already merged; running npm 0.1.0
+predated it. `557dc00` repairs stale browser smoke selectors and adds a shared
+widget production-build gate. 181 web tests, production build/relative-URL guard
+and header mock browser checks pass. Live dark/light/mobile widgets and account
+menu verified with no page errors. Verification blocked automatic processor-ensure
+writes; no notebook mutation was performed by the checks.
+
+Deployed current 0.3.0 frontend assets to the existing managed server's static
+dist, with full backup, old hashed assets retained, atomic index switch and
+`.local-frontend.json` provenance. This adjusts the intake's intended manager
+update: its API only accepts registry versions, and currently published 0.2.0
+also predates adoption. The Node server/installed package remain 0.1.0; no
+registry release, service installation or app-manager metadata change was made.
+Existing 0038 covers publication of current source, needed for future fresh
+registry installs; its older claim that only 0.1.0 is published is now stale.
+No new ADR or unrelated changes.
+
+[Visual review and deployment procedure](../../../design/shared-widgets-0902/REVIEW.md),
+[validation and hashes](../../../design/shared-widgets-0902/validation.json).
