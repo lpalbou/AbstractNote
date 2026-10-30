@@ -12,11 +12,11 @@
  *     (Remember's first screen must fit 1280x800), plus the states of the design pass.
  *
  *   PLAYWRIGHT_BROWSERS_PATH=<scratch> node scripts/screens.mjs [--out DIR] [--themes a,b] [--widths 1280,400]
- *       [--gateway-url URL --user U --token T] [--only-smoke]
+ *       [--gateway-url URL --user U --token T] [--only-smoke] [--only-header]
  */
 
 import * as http from "node:http";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -96,11 +96,40 @@ async function main() {
     await page.locator("#gateway-session-user").fill(args.user || "demo");
     await page.locator("#gateway-session-token").fill(args.token || MOCK_TOKEN);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await page.locator(".nt-account").waitFor({ timeout: 20_000 });
-    check((await page.locator(".nt-account").innerText()).trim() === (args.user || "demo"), "signed in through the kit dialog: the header names the account");
-    check((await page.locator(".af-topbar__pill").innerText()).trim().length > 0, "the header carries the framework's sign-in pill");
+    const account = page.locator('.af-topbar__identity--menu');
+    await account.waitFor({ timeout: 20_000 });
+    check((await account.locator('.af-topbar__identity-label').innerText()).trim() === (args.user || "demo"), "signed in through the kit dialog: shared account names the user");
+    check(await page.locator('.af-topbar__pill, .nt-account').count() === 0, "one shared account control replaces the old account and connection pill");
     await page.locator(".nt-main .nt-section, .nt-main .nt-stream").first().waitFor({ timeout: 20_000 }).catch(() => undefined);
     await page.screenshot({ path: join(OUT, "header-dark-1280.png"), clip: { x: 0, y: 0, width: 1280, height: 120 } });
+
+    // The production bundle must expose the shared set, not just source-level prop pins.
+    for (const theme of ["dark", "light"]) {
+      await page.evaluate(t => localStorage.setItem("af_appearance_abstractnote_v1", JSON.stringify({theme:t,font_scale:"md",header_density:"standard"})), theme);
+      await page.reload();await account.waitFor();
+      const cluster=page.getByRole('group',{name:'App actions',exact:true});
+      for(const cls of ['docs','appearance','about']) check(await cluster.locator(`.af-topbar__btn--${cls}`).isVisible(), `${theme}: shared ${cls} control is visible`);
+      await account.click();check(await page.getByRole('menuitem',{name:'Disconnect',exact:true}).isVisible(), `${theme}: account opens the shared menu`);await page.keyboard.press('Escape');
+      await cluster.locator('.af-topbar__btn--appearance').click();
+      const appearance=page.getByRole('dialog',{name:'Appearance',exact:true});await appearance.waitFor();
+      check(await appearance.getByText('Font size',{exact:true}).isVisible(), `${theme}: appearance opens the shared theme and typography dialog`);
+      await appearance.getByRole('button',{name:'Close',exact:true}).click();
+      await cluster.locator('.af-topbar__btn--about').click();
+      const about=page.locator('.af-about[role="dialog"]');await about.waitFor();
+      check((await about.innerText()).includes('AbstractNote'), `${theme}: About uses the shared dialog and app identity`);await page.keyboard.press('Escape');
+      await cluster.locator('.af-topbar__btn--docs').click();
+      check(await page.getByPlaceholder('Ask about AbstractNote…').isVisible(), `${theme}: shared docs drawer opens`);await page.keyboard.press('Escape');
+      for(const width of [1280,400]) {
+        await page.setViewportSize({width,height:860});
+        check(await cluster.evaluate(e=>e.getBoundingClientRect().right<=innerWidth+1&&e.getBoundingClientRect().left>=0), `${theme}: ${width}px shared widgets stay inside viewport`);
+        await page.screenshot({path:join(OUT,`shared-header-${theme}-${width}.png`)});
+      }
+      await page.setViewportSize({width:1280,height:800});
+    }
+    if (args['only-header']) {
+      writeFileSync(join(OUT,'header-validation.json'),JSON.stringify({failures,sharedWidgets:['docs','appearance','about','account-menu'],themes:['dark','light'],widths:[1280,400]},null,2)+'\n');
+      return;
+    }
 
     // ---- Capture smoke (S3 + M8)
     await page.goto(`${base}#/capture`);
