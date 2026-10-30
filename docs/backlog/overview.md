@@ -5,13 +5,13 @@ Last reconciled: 2026-10-29 (0040 shared-plane gate added from the gateway's PR 
 ## Counts
 | State | Count |
 |---|---|
-| planned | 6 (0038, 0040; track `planned/v1/`: 0029; track `planned/memory_convergence/`: 0033, 0035, 0036) |
+| planned | 7 (0902; 0038, 0040; track `planned/v1/`: 0029; track `planned/memory_convergence/`: 0033, 0035, 0036) |
 | proposed | 9 |
 | completed | 24 (track `completed/v1/`: 21; track `completed/memory_convergence/`: 0034, 0037; 0039 web pin on the kit's message footer spec) |
 | deprecated | 1 (0015) |
 | recurrent | 1 (0901) |
 
-Next free id: 0039.
+Next free global id: 0903 (0901 is the existing recurrent item).
 
 ## Priorities and recommended order
 0. Operator ruling 2026-10-27: AbstractMemory owns the memory graph (AbstractMemory ADR 0002; ADRs 0003 and 0008
@@ -24,6 +24,7 @@ Next free id: 0039.
 
 ## Ledgers
 ### Planned
+- [0902 Deploy and verify the existing shared top-bar set](planned/0902_deploy_shared_top_bar_and_verify_served_build.md) — live npm 0.1.0 predates source adoption; fix deployment drift and stale smoke selectors.
 - [0038 npm publish of `@abstractframework/note` (0.2.0 rejected E404, trusted publisher)](planned/0038_npm_publish_of_abstractframework_note.md)
 - [0040 shared plane: `PUT /settings` and `POST /processor/ensure` ask for admin or the plane owner (gateway security incident 2026-10-29, PR #55)](planned/0040_shared_plane_gate_for_settings_and_processor_ensure.md)
 - [0029 Ingest the rest of the framework's history into the operator's notebook](planned/v1/0029_ingest_the_rest_of_the_framework_history.md)
