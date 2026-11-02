@@ -51,7 +51,7 @@ API, read the note API for views, and never send user, tenant or runtime identif
   address defaults to the app server's own `--gateway-url` (given to the page by `bin/server.js`);
   the last address and account are remembered per browser (the address only while the server still
   points there); a refused sign-in reads as one sentence, and `AfTopBarActions` (Settings, then the
-  kit's shared set: the Docs assistant, Appearance, About, and the ONE account widget: person icon,
+  kit's shared set: the Docs assistant, Appearance, About, and one account widget: person icon,
   name and connection light, whose menu holds Signed in as, Gateway, Copy user id and Disconnect;
   signed out, the Connect pill). The Docs assistant is panel-chat's `DocsAssistantDrawer`, grounded on
   this repo's `llms.txt` (the build ships it at `/llms.txt`; the gateway reads it for

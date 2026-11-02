@@ -43,6 +43,10 @@ capture and understanding workflows), **AbstractMemory** (temporal facts) and **
 Status: version 0.3.0, alpha. The Python package is `abstractnote` on PyPI and the web app is
 `@abstractframework/note` on npm (see [Install](#install)).
 
+What's new in 0.3.0: the web app follows runs through the gateway's replay view and says when a run waits
+for an answer, the top bar carries the shared Docs assistant and one account widget, and Capture uses the
+shared composer. See [CHANGELOG.md](CHANGELOG.md#030---2026-11-02).
+
 ## What you get
 
 - **Capture anywhere**: the web app, the Apple Watch app, the `abstractnote` command line, and
@@ -2858,7 +2862,10 @@ the note tools bound to a local notebook directory). This is how the importers a
 bulk, how the test suite exercises the flows with a scripted model, and how you can run the
 processor on a machine that is not the gateway host. The recipe follows AbstractRuntime's
 `test_kg_learn_and_recall_contract` harness (`compile_visualflow_tree`, `WorkflowRegistry`,
-`build_effect_handlers`, drive subflow waits).
+`build_effect_handlers`, drive subflow waits). A model client you pass to `NoteRunner.with_llm` (the test
+suite's `ScriptedLLM` is one) answers AbstractRuntime's `generate(**kwargs)` contract: every AbstractNote call is
+structured, carried as a JSON schema in `params["response_schema"]` and `params["response_schema_name"]`
+(AbstractRuntime 0.16.0 and later) or as a validator class in `params["response_model"]` (AbstractRuntime 0.15).
 
 ---
 
@@ -3004,8 +3011,8 @@ Explore view already covers "what did this look like then".
 ## The Capture view
 
 A stream of your notes as you wrote them, with the composer at the bottom. You type or paste,
-attach files (images show a preview), drop images, or dictate; Enter saves and Shift+Enter starts
-a new line; with your permission the browser attaches your location. Under each note one short
+attach files with the composer's Add files button (images show a preview; a note can be files
+alone), drop images, or dictate; Enter saves and Shift+Enter starts a new line; with your permission the browser attaches your location. Under each note one short
 acknowledgement shows one state at a time, as a word and a symbol: **Sending**, **Received**,
 **Organizing**, then **Organized** or **Needs attention**. Once organized, the note's title and the
 entities it links to come first, with the line "Organized · Added to #lut · event · 2 links" under
@@ -3102,8 +3109,12 @@ API, read the note API for views, and never send user, tenant or runtime identif
   signed in; the app server exchanges the token for an HTTP-only session that survives reloads). The
   address defaults to the app server's own `--gateway-url` (given to the page by `bin/server.js`);
   the last address and account are remembered per browser (the address only while the server still
-  points there); a refused sign-in reads as one sentence, and `AfTopBarActions` (appearance, About, Settings,
-  the signed-in account, and the Connect / Disconnect pill), and an empty notebook invites the first
+  points there); a refused sign-in reads as one sentence, and `AfTopBarActions` (Settings, then the
+  kit's shared set: the Docs assistant, Appearance, About, and one account widget: person icon,
+  name and connection light, whose menu holds Signed in as, Gateway, Copy user id and Disconnect;
+  signed out, the Connect pill). The Docs assistant is panel-chat's `DocsAssistantDrawer`, grounded on
+  this repo's `llms.txt` (the build ships it at `/llms.txt`; the gateway reads it for
+  `docs/corpus?app=note`). An empty notebook invites the first
   note or `abstractnote import`. At start the app asks
   `GET /note/status`: a 401 opens the sign-in dialog; a 404 while `GET /me` answers shows "AbstractNote
   is not installed on this gateway." instead of the views.
@@ -3466,30 +3477,51 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 
 ## [Unreleased]
 
-### Changed
-- The web app builds with `@abstractframework/panel-chat` ^0.6.4 and `@abstractframework/ui-kit` ^0.9.5 (were ^0.6.0 and ^0.9.2). It renders no chat message card (the composer, Markdown and the replay-view projection only), so the kit's message footer spec (AbstractUIC 0.8.4, backlog 0064) changes nothing on screen; the pin keeps the app on the kit the other apps ship.
+## [0.3.0] - 2026-11-02
 
-## [0.3.0] - 2026-10-28
+This release mostly changes the web app (`@abstractframework/note`). The Python package `abstractnote` keeps the
+dependency floors of 0.2.0 and works with AbstractRuntime 0.15 and 0.16.
+
+### Added
+- **The top bar has the Docs assistant**: the docs button opens panel-chat's `DocsAssistantDrawer`, grounded on
+  this repository's `llms.txt`, which the web build ships at `/llms.txt` (the gateway reads it for
+  `docs/corpus?app=note`). The top bar now holds the same shared set as the other AbstractFramework apps: the Docs
+  assistant, Appearance, About and the account.
 
 ### Changed
-- **The web app follows a run through the gateway's replay view** (AbstractGateway 0.17.0, framework backlog 0993,
-  AbstractRuntime 0854): Capture and Remember read `GET runs/{id}/view` and its stream (`@abstractframework/panel-chat`
-  0.6.0 `createReplayViewTransport`, `ReplayViewFold`, `projectReplayView`) instead of the ledger stream and ledger
-  pages: the answer as soon as the view has it, progress from the view's activities, and the run's output read once
-  when it ends. A run that waits for a person (an approval or a question anywhere in its tree) is now said to be
-  waiting, with its question, instead of being followed indefinitely: "This run is waiting for an answer:
-  “…”. Answer it where the gateway's runs are shown (AbstractCode or the Observer); this page does not answer runs."
+- **The web app follows a run through the gateway's replay view** (AbstractGateway 0.17.0): Capture and Remember
+  read `GET runs/{id}/view` and its stream (`@abstractframework/panel-chat` `createReplayViewTransport`,
+  `ReplayViewFold`, `projectReplayView`) instead of the ledger stream and ledger pages: the answer as soon as the
+  view has it, progress from the view's activities, and the run's output read once when it ends. A run that waits
+  for a person (an approval or a question anywhere in its tree) is said to be waiting, with its question, instead
+  of being followed indefinitely: "This run is waiting for an answer: “…”. Answer it where the gateway's runs are
+  shown (AbstractCode or the Observer); this page does not answer runs."
 - A gateway without the view (before 0.17.0; its route answers 404 "Not Found") is followed the earlier way, and the
   run says so (`source: "ledger_fold"` with the reason). Any other failure of the view read is reported, never
   hidden by the fallback. A view stream that closes without sending anything is reconnected a bounded number of
   times.
 - Following a run through the view: the early answer is the root run's own `answer_user`; the run's summary is
-  read until it says the run ended (the runtime records the end before it saves the run); a failed first read is
-  tried again like every read; a refused stream (401, 403, 404) is final and a failing one keeps the gateway's
-  reason; leaving Capture or Remember closes the run's live view.
-- The mock gateway (`npm run dev:mock`) serves the replay view of its runs (`GET runs/{id}/view` + its stream);
+  read until it says the run ended; a failed first read is tried again like every read; a refused stream (401,
+  403, 404) is final and a failing one keeps the gateway's reason; leaving Capture or Remember closes the run's
+  live view.
+- **The top bar's account is one widget**: person icon, name and connection light in one button, its menu holding
+  Signed in as, Gateway, Copy user id and Disconnect. It replaces the app's own account label and the Disconnect
+  pill beside it; signed out, the Connect pill stays.
+- **Capture's note box is the shared rounded multiline composer** from `@abstractframework/panel-chat` 0.7.0: the
+  composer renders the Add files button itself, so the separate paperclip button beside it is gone, and Save is
+  enabled for a note that carries only files. Enter still saves and Shift+Enter still starts a new line. Files
+  dropped on the Docs assistant go to the assistant only, never also into the note.
+- **`ScriptedLLM` answers AbstractRuntime 0.16.0's structured calls**: from 0.16.0 the runtime sends a structured
+  call to a model client as a JSON schema (`params["response_schema"]` and `params["response_schema_name"]`), not as
+  a validator class; `ScriptedLLM` builds the validator with the runtime's own `prepare_response_model`, and still
+  accepts the validator class AbstractRuntime 0.15 sends (`params["response_model"]`). If you pass a model client of
+  your own to `NoteRunner.with_llm`, it must read the shape your installed runtime sends: a client that reads only
+  `response_model` stops working on AbstractRuntime 0.16.0. Runs on a real model (`NoteRunner.with_model`, the
+  gateway) are unchanged.
+- The mock gateway (`npm run dev:mock`) serves the replay view of its runs (`GET runs/{id}/view` and its stream);
   `createMockGateway({ replayView: false })` answers those paths as a gateway before 0.17.0 does.
-- `@abstractframework/panel-chat` ^0.6.0 (was ^0.4.1) and `@abstractframework/ui-kit` ^0.9.2 (was ^0.8.7).
+- The web app requires `@abstractframework/panel-chat` ^0.7.0 (was ^0.4.1) and `@abstractframework/ui-kit`
+  ^0.9.12 (was ^0.8.7).
 
 ## [0.2.0] - 2026-10-28
 

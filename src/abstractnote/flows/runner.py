@@ -62,7 +62,7 @@ class ScriptedLLM:
         raise AssertionError(f"ScriptedLLM: no AbstractNote schema has the fields {sorted(fields)}")
 
     def generate(self, *, prompt: str = "", params: Optional[Dict[str, Any]] = None, **kwargs: Any) -> Dict[str, Any]:
-        model = (params or {}).get("response_model")
+        model = structured_model(params)
         if model is None:
             raise AssertionError("ScriptedLLM answers structured calls only (the AbstractNote flows make no other)")
         name = self.schema_name(model)
@@ -82,6 +82,24 @@ class ScriptedLLM:
         validated = model.model_validate(null_filled(value, self._schemas[name])).model_dump(mode="json")
         self.calls.append({"schema": name, "prompt": prompt, "system": kwargs.get("system_prompt"), "data": validated})
         return {"data": validated, "content": json.dumps(validated), "metadata": {}, "finish_reason": "stop"}
+
+
+def structured_model(params: Optional[Mapping[str, Any]]) -> Any:
+    """The response model of a structured ``generate`` call, in either shape AbstractRuntime sends.
+
+    AbstractRuntime 0.15 passes the validator class as ``params["response_model"]``; 0.16.0 and later pass the
+    JSON schema as data (``params["response_schema"]`` and ``params["response_schema_name"]``) and leave building
+    the validator to the client, with the runtime's own ``prepare_response_model``. ``None`` for an
+    unstructured call."""
+    params = params or {}
+    if params.get("response_model") is not None:
+        return params["response_model"]
+    schema = params.get("response_schema")
+    if schema is None:
+        return None
+    from abstractruntime.integrations.abstractcore.structured_output import prepare_response_model
+
+    return prepare_response_model(schema, name=str(params.get("response_schema_name") or "StructuredOutput"))
 
 
 def _accepts_null(schema: Any) -> bool:

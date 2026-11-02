@@ -799,4 +799,7 @@ the note tools bound to a local notebook directory). This is how the importers a
 bulk, how the test suite exercises the flows with a scripted model, and how you can run the
 processor on a machine that is not the gateway host. The recipe follows AbstractRuntime's
 `test_kg_learn_and_recall_contract` harness (`compile_visualflow_tree`, `WorkflowRegistry`,
-`build_effect_handlers`, drive subflow waits).
+`build_effect_handlers`, drive subflow waits). A model client you pass to `NoteRunner.with_llm` (the test
+suite's `ScriptedLLM` is one) answers AbstractRuntime's `generate(**kwargs)` contract: every AbstractNote call is
+structured, carried as a JSON schema in `params["response_schema"]` and `params["response_schema_name"]`
+(AbstractRuntime 0.16.0 and later) or as a validator class in `params["response_model"]` (AbstractRuntime 0.15).

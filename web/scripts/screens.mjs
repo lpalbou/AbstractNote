@@ -4,7 +4,7 @@
  * gateway (`--gateway-url URL --user U --token T`):
  *   - starts the production server (bin/server.js) in-process on 127.0.0.1;
  *   - signs in through the app's own connection endpoint (the session proxy);
- *   - Capture: sends a note, checks the early answer from the ledger stream
+ *   - Capture: sends a note, checks the early answer from the gateway's replay view
  *     equals GET /runs/{id} output.response (review 01 check S3: the reply shows
  *     in the acknowledgement's details until the note is organized), and waits
  *     until the note is organized and its links appear (M8);
@@ -121,6 +121,7 @@ async function main() {
       check(await page.getByPlaceholder('Ask about AbstractNote…').isVisible(), `${theme}: shared docs drawer opens`);await page.keyboard.press('Escape');
       for(const width of [1280,400]) {
         await page.setViewportSize({width,height:860});
+        await page.waitForTimeout(300); // the header re-lays out after a resize
         check(await cluster.evaluate(e=>e.getBoundingClientRect().right<=innerWidth+1&&e.getBoundingClientRect().left>=0), `${theme}: ${width}px shared widgets stay inside viewport`);
         await page.screenshot({path:join(OUT,`shared-header-${theme}-${width}.png`)});
       }
@@ -135,7 +136,7 @@ async function main() {
     await page.goto(`${base}#/capture`);
     const text = `Met Dana about the watch timeline; she wants a beta by December. (${new Date().toISOString().slice(11, 19)})`;
     await page.getByRole("textbox", { name: "Note" }).fill(text);
-    await page.locator('input[type="file"]').setInputFiles({ name: "budget.txt", mimeType: "text/plain", buffer: Buffer.from("LUT budget: 25k for the quarter.\n") });
+    await page.getByRole("main").locator('input[type="file"]').setInputFiles({ name: "budget.txt", mimeType: "text/plain", buffer: Buffer.from("LUT budget: 25k for the quarter.\n") });
     const upload = page.waitForResponse((r) => r.url().includes("api/gateway/attachments/upload"));
     const startResp = page.waitForResponse((r) => r.url().includes("api/gateway/runs/start") && r.request().method() === "POST");
     await page.getByRole("button", { name: "Save" }).click();
@@ -161,7 +162,7 @@ async function main() {
       if (["completed", "failed", "cancelled"].includes(run?.status)) break;
       await page.waitForTimeout(500);
     }
-    check(source === "stream", `the answer came from the ledger stream (got ${source})`);
+    check(source === "view", `the answer came from the replay view (got ${source})`);
     check(typeof run?.output?.response === "string" && run.output.response.trim() === shown, `"Saved as" shown equals GET /runs/{id} output.response${run?.output?.response?.trim() === shown ? "" : ` (shown ${JSON.stringify(shown)} vs ${JSON.stringify(run?.output?.response)})`}`);
     // M8: the queued note is re-read until processed (live: the processor automation runs every 2 minutes).
     await page.locator('.nt-ack[data-state="organized"]').last().waitFor({ timeout: live ? 300_000 : 30_000 });
