@@ -14,6 +14,10 @@ capture and understanding workflows), **AbstractMemory** (temporal facts) and **
 Status: version 0.3.0, alpha. The Python package is `abstractnote` on PyPI and the web app is
 `@abstractframework/note` on npm (see [Install](#install)).
 
+What's new in 0.3.0: the web app follows runs through the gateway's replay view and says when a run waits
+for an answer, the top bar carries the shared Docs assistant and one account widget, and Capture uses the
+shared composer. See [CHANGELOG.md](CHANGELOG.md#030---2026-11-02).
+
 ## What you get
 
 - **Capture anywhere**: the web app, the Apple Watch app, the `abstractnote` command line, and

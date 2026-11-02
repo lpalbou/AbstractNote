@@ -6,38 +6,51 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-02
+
+This release mostly changes the web app (`@abstractframework/note`). The Python package `abstractnote` keeps the
+dependency floors of 0.2.0 and works with AbstractRuntime 0.15 and 0.16.
+
 ### Added
-- The web app's top bar has the Docs assistant (operator ruling 2026-10-29: the docs button, Appearance, About and
-  the account are the same kit components in every app): panel-chat's `DocsAssistantDrawer`, grounded on this repo's
-  `llms.txt`, which the build now ships at `/llms.txt` (the gateway reads it for `docs/corpus?app=note`).
+- **The top bar has the Docs assistant**: the docs button opens panel-chat's `DocsAssistantDrawer`, grounded on
+  this repository's `llms.txt`, which the web build ships at `/llms.txt` (the gateway reads it for
+  `docs/corpus?app=note`). The top bar now holds the same shared set as the other AbstractFramework apps: the Docs
+  assistant, Appearance, About and the account.
 
 ### Changed
-- The top bar's account is the kit's ONE account widget: person icon, name and connection light in one button, its
-  menu holding Signed in as, Gateway, Copy user id and Disconnect. It replaces the app's own account label and the
-  Disconnect pill beside it. Needs `@abstractframework/ui-kit` ^0.9.6 (was ^0.9.5). Test: `web/test/top_bar_set.test.ts`.
-- The web app builds with `@abstractframework/panel-chat` ^0.6.4 and `@abstractframework/ui-kit` ^0.9.5 (were ^0.6.0 and ^0.9.2). It renders no chat message card (the composer, Markdown and the replay-view projection only), so the kit's message footer spec (AbstractUIC 0.8.4, backlog 0064) changes nothing on screen; the pin keeps the app on the kit the other apps ship.
-
-## [0.3.0] - 2026-10-28
-
-### Changed
-- **The web app follows a run through the gateway's replay view** (AbstractGateway 0.17.0, framework backlog 0993,
-  AbstractRuntime 0854): Capture and Remember read `GET runs/{id}/view` and its stream (`@abstractframework/panel-chat`
-  0.6.0 `createReplayViewTransport`, `ReplayViewFold`, `projectReplayView`) instead of the ledger stream and ledger
-  pages: the answer as soon as the view has it, progress from the view's activities, and the run's output read once
-  when it ends. A run that waits for a person (an approval or a question anywhere in its tree) is now said to be
-  waiting, with its question, instead of being followed indefinitely: "This run is waiting for an answer:
-  “…”. Answer it where the gateway's runs are shown (AbstractCode or the Observer); this page does not answer runs."
+- **The web app follows a run through the gateway's replay view** (AbstractGateway 0.17.0): Capture and Remember
+  read `GET runs/{id}/view` and its stream (`@abstractframework/panel-chat` `createReplayViewTransport`,
+  `ReplayViewFold`, `projectReplayView`) instead of the ledger stream and ledger pages: the answer as soon as the
+  view has it, progress from the view's activities, and the run's output read once when it ends. A run that waits
+  for a person (an approval or a question anywhere in its tree) is said to be waiting, with its question, instead
+  of being followed indefinitely: "This run is waiting for an answer: “…”. Answer it where the gateway's runs are
+  shown (AbstractCode or the Observer); this page does not answer runs."
 - A gateway without the view (before 0.17.0; its route answers 404 "Not Found") is followed the earlier way, and the
   run says so (`source: "ledger_fold"` with the reason). Any other failure of the view read is reported, never
   hidden by the fallback. A view stream that closes without sending anything is reconnected a bounded number of
   times.
 - Following a run through the view: the early answer is the root run's own `answer_user`; the run's summary is
-  read until it says the run ended (the runtime records the end before it saves the run); a failed first read is
-  tried again like every read; a refused stream (401, 403, 404) is final and a failing one keeps the gateway's
-  reason; leaving Capture or Remember closes the run's live view.
-- The mock gateway (`npm run dev:mock`) serves the replay view of its runs (`GET runs/{id}/view` + its stream);
+  read until it says the run ended; a failed first read is tried again like every read; a refused stream (401,
+  403, 404) is final and a failing one keeps the gateway's reason; leaving Capture or Remember closes the run's
+  live view.
+- **The top bar's account is one widget**: person icon, name and connection light in one button, its menu holding
+  Signed in as, Gateway, Copy user id and Disconnect. It replaces the app's own account label and the Disconnect
+  pill beside it; signed out, the Connect pill stays.
+- **Capture's note box is the shared rounded multiline composer** from `@abstractframework/panel-chat` 0.7.0: the
+  composer renders the Add files button itself, so the separate paperclip button beside it is gone, and Save is
+  enabled for a note that carries only files. Enter still saves and Shift+Enter still starts a new line. Files
+  dropped on the Docs assistant go to the assistant only, never also into the note.
+- **`ScriptedLLM` answers AbstractRuntime 0.16.0's structured calls**: from 0.16.0 the runtime sends a structured
+  call to a model client as a JSON schema (`params["response_schema"]` and `params["response_schema_name"]`), not as
+  a validator class; `ScriptedLLM` builds the validator with the runtime's own `prepare_response_model`, and still
+  accepts the validator class AbstractRuntime 0.15 sends (`params["response_model"]`). If you pass a model client of
+  your own to `NoteRunner.with_llm`, it must read the shape your installed runtime sends: a client that reads only
+  `response_model` stops working on AbstractRuntime 0.16.0. Runs on a real model (`NoteRunner.with_model`, the
+  gateway) are unchanged.
+- The mock gateway (`npm run dev:mock`) serves the replay view of its runs (`GET runs/{id}/view` and its stream);
   `createMockGateway({ replayView: false })` answers those paths as a gateway before 0.17.0 does.
-- `@abstractframework/panel-chat` ^0.6.0 (was ^0.4.1) and `@abstractframework/ui-kit` ^0.9.2 (was ^0.8.7).
+- The web app requires `@abstractframework/panel-chat` ^0.7.0 (was ^0.4.1) and `@abstractframework/ui-kit`
+  ^0.9.12 (was ^0.8.7).
 
 ## [0.2.0] - 2026-10-28
 

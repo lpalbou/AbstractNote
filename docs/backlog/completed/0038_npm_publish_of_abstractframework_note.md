@@ -1,4 +1,4 @@
-# npm publish of `@abstractframework/note` (0.2.0 rejected E404; 0.1.1 never published)
+# Completed: npm publish of `@abstractframework/note` (0.2.0 rejected E404; 0.1.1 never published)
 
 ## Summary
 The v0.2.0 release (run 40628871300, 2026-10-28) published `abstractnote` 0.2.0 to PyPI but the job
@@ -37,6 +37,12 @@ app catalog and `npx @abstractframework/note` serve 0.1.0 until it is fixed.
 
 ## Metadata
 - Created: 2026-10-28
-- Status: planned
+- Status: completed 2026-11-02 (original `planned/0038_npm_publish_of_abstractframework_note.md`)
 - Area: release
 - Root link: AbstractFramework 1055 (release wave 2026-10-27)
+
+## Evidence (2026-11-02)
+- The trusted publisher was registered and run 40628871300 was rerun: it is green, `@abstractframework/note` 0.2.0
+  was published 2026-10-28T18:22:15Z and `npm view @abstractframework/note@0.2.0 dist.attestations` carries an SLSA
+  provenance attestation; GitHub release v0.2.0 exists.
+- 0.1.1 was skipped on npm (the recommended option: 0.2.0 supersedes it).

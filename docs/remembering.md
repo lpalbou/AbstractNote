@@ -138,8 +138,8 @@ Explore view already covers "what did this look like then".
 ## The Capture view
 
 A stream of your notes as you wrote them, with the composer at the bottom. You type or paste,
-attach files (images show a preview), drop images, or dictate; Enter saves and Shift+Enter starts
-a new line; with your permission the browser attaches your location. Under each note one short
+attach files with the composer's Add files button (images show a preview; a note can be files
+alone), drop images, or dictate; Enter saves and Shift+Enter starts a new line; with your permission the browser attaches your location. Under each note one short
 acknowledgement shows one state at a time, as a word and a symbol: **Sending**, **Received**,
 **Organizing**, then **Organized** or **Needs attention**. Once organized, the note's title and the
 entities it links to come first, with the line "Organized · Added to #lut · event · 2 links" under

@@ -116,28 +116,34 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
   const pendingPreviews = useMemo(() => files.map(previewOf), [files]);
   useEffect(() => () => pendingPreviews.forEach((u) => u && URL.revokeObjectURL(u)), [pendingPreviews]);
 
-  // Drop anywhere on the capture view.
+  // Drop anywhere on the capture view, except on the Docs assistant drawer: files dropped there are the drawer's.
+  // Every file drag over the window is still claimed (preventDefault), so a drop never opens the file in the tab.
   useEffect(() => {
     const presence = new DragPresence();
+    const onDrawer = (e: DragEvent) =>
+      e.target instanceof Element && e.target.closest(".pc-docs-assistant-drawer, .pc-docs-assistant") !== null;
     const enter = (e: DragEvent) => {
       if (!dragCarriesFiles(e.dataTransfer?.types)) return;
       e.preventDefault();
       presence.enter(Date.now());
-      setDragging(true);
+      setDragging(!onDrawer(e));
     };
     const over = (e: DragEvent) => {
       if (!dragCarriesFiles(e.dataTransfer?.types)) return;
       e.preventDefault();
       presence.over(Date.now());
+      setDragging(!onDrawer(e));
     };
     const leave = () => {
       if (!presence.leave(Date.now())) setDragging(false);
     };
     const drop = (e: DragEvent) => {
       if (!dragCarriesFiles(e.dataTransfer?.types)) return;
+      const theDrawers = e.defaultPrevented || onDrawer(e);
       e.preventDefault();
       presence.reset();
       setDragging(false);
+      if (theDrawers) return;
       const d = droppedFiles(e.dataTransfer);
       if (d.folders.length) setNotice(folderRefusal(d.folders));
       addFiles(d.files);
@@ -242,6 +248,7 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
             value={text}
             onChange={setText}
             onSubmit={() => void send()}
+            canSubmit={Boolean(text.trim() || files.length)}
             placeholder={about ? "Write your answer…" : "Write a note…"}
             ariaLabel="Note"
             sendLabel="Save"
@@ -264,22 +271,19 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
                 </ul>
               ) : null
             }
+            onAttach={() => fileInput.current?.click()}
+            attachLabel="Add files"
             actions={
-              <>
-                <input
-                  ref={fileInput}
-                  type="file"
-                  multiple
-                  hidden
-                  onChange={(e) => {
-                    addFiles(Array.from(e.target.files || []));
-                    e.target.value = "";
-                  }}
-                />
-                <button type="button" className="nt-icon-btn" aria-label="Add files" title="Add files" onClick={() => fileInput.current?.click()}>
-                  <Icon name="paperclip" size={18} />
-                </button>
-              </>
+              <input
+                ref={fileInput}
+                type="file"
+                multiple
+                hidden
+                onChange={(e) => {
+                  addFiles(Array.from(e.target.files || []));
+                  e.target.value = "";
+                }}
+              />
             }
             overlay={dragging ? <div className="nt-drop">Drop to add to this note</div> : null}
           />
