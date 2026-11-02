@@ -242,6 +242,7 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
             value={text}
             onChange={setText}
             onSubmit={() => void send()}
+            canSubmit={Boolean(text.trim() || files.length)}
             placeholder={about ? "Write your answer…" : "Write a note…"}
             ariaLabel="Note"
             sendLabel="Save"
@@ -264,22 +265,19 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
                 </ul>
               ) : null
             }
+            onAttach={() => fileInput.current?.click()}
+            attachLabel="Add files"
             actions={
-              <>
-                <input
-                  ref={fileInput}
-                  type="file"
-                  multiple
-                  hidden
-                  onChange={(e) => {
-                    addFiles(Array.from(e.target.files || []));
-                    e.target.value = "";
-                  }}
-                />
-                <button type="button" className="nt-icon-btn" aria-label="Add files" title="Add files" onClick={() => fileInput.current?.click()}>
-                  <Icon name="paperclip" size={18} />
-                </button>
-              </>
+              <input
+                ref={fileInput}
+                type="file"
+                multiple
+                hidden
+                onChange={(e) => {
+                  addFiles(Array.from(e.target.files || []));
+                  e.target.value = "";
+                }}
+              />
             }
             overlay={dragging ? <div className="nt-drop">Drop to add to this note</div> : null}
           />
