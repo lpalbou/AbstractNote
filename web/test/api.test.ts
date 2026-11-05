@@ -90,3 +90,30 @@ describe("api client (ADR-0039 retry rule)", () => {
     expect(readCookie("abstractnote_gateway_csrf", "abstractflow_gateway_csrf=x; abstractnote_gateway_csrf=y%3D")).toBe("y=");
   });
 });
+
+
+describe("note dictation", () => {
+  it("uploads the recording, transcribes its actual owner, and never saves a note", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const fetch = vi.fn(async (url: RequestInfo | URL, init: RequestInit = {}) => {
+      requests.push({ url: String(url), init });
+      return new Response(JSON.stringify(requests.length === 1
+        ? { run_id: "owner/recording", artifact: { $artifact: "audio-id" } }
+        : { text: "  Remember this idea.  " }), { status: 200 });
+    });
+    const api = createApi({ fetch: fetch as typeof globalThis.fetch, csrf: () => "csrf" });
+    expect(await api.transcribe(new Blob(["audio"]), "audio/mp4;codecs=mp4a", "note-session")).toBe("Remember this idea.");
+    expect(requests.map((r) => r.url)).toEqual(["api/gateway/attachments/upload", "api/gateway/runs/owner%2Frecording/audio/transcribe"]);
+    expect((requests[0].init.body as FormData).get("session_id")).toBe("note-session");
+    expect((requests[0].init.body as FormData).get("filename")).toBe("dictation.m4a");
+    expect((requests[0].init.body as FormData).get("source_path")).toMatch(/^voice\/dictation\/.+\.m4a$/);
+    expect(JSON.parse(String(requests[1].init.body))).toEqual({ audio_artifact: { $artifact: "audio-id" } });
+    for (const r of requests) expect((r.init.headers as Record<string, string>)["x-abstractnote-csrf"]).toBe("csrf");
+  });
+
+  it("does not invent a recording owner or retry failed transcription", async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ artifact: { $artifact: "audio-id" } }), { status: 200 }));
+    await expect(createApi({ fetch }).transcribe(new Blob(["audio"]), "audio/webm", "session")).rejects.toMatchObject({ code: "unreadable" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});

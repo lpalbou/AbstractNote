@@ -179,17 +179,34 @@ export function createApi(options: ApiOptions = {}) {
   }
 
   /** Upload one file into the session (refused client-side above the 25 MB limit). */
-  async function upload(file: File, sessionId: string): Promise<{ $artifact: string; filename?: string; content_type?: string }> {
+  async function uploadFile(file: File, sessionId: string, sourcePath?: string) {
     if (file.size > MAX_UPLOAD_BYTES) throw new ApiError(413, "File too large.", "too_large");
     const form = new FormData();
     form.set("session_id", sessionId);
     form.set("filename", file.name);
     form.set("content_type", file.type || "application/octet-stream");
     form.set("file", file, file.name);
-    const out = (await once("POST", "attachments/upload", form, {}, 10 * 60_000)) as { artifact?: { $artifact?: string } };
+    if (sourcePath) form.set("source_path", sourcePath);
+    const out = (await once("POST", "attachments/upload", form, {}, 10 * 60_000)) as { run_id?: string; artifact?: { $artifact?: string; run_id?: string; filename?: string; content_type?: string } };
     const ref = out?.artifact;
     if (!ref || typeof ref.$artifact !== "string") throw new ApiError(502, "The upload answer has no file reference.", "unreadable");
-    return ref as { $artifact: string };
+    return { ref: ref as { $artifact: string; filename?: string; content_type?: string }, owner: out.run_id || ref.run_id };
+  }
+
+  async function upload(file: File, sessionId: string) {
+    return (await uploadFile(file, sessionId)).ref;
+  }
+
+  /** Dictation uses the gateway's configured STT route; the transcript stays a draft. */
+  async function transcribe(blob: Blob, mime: string, sessionId: string): Promise<string> {
+    const type = (mime || blob.type || "audio/webm").split(";")[0];
+    const ext = type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : type.includes("wav") ? "wav" : "webm";
+    const { ref, owner } = await uploadFile(new File([blob], `dictation.${ext}`, { type }), sessionId, `voice/dictation/${crypto.randomUUID()}.${ext}`);
+    if (!owner) throw new ApiError(502, "The recording has no owner reference.", "unreadable");
+    const body = json({ audio_artifact: { $artifact: ref.$artifact } });
+    const out = await once("POST", `runs/${encodeURIComponent(owner)}/audio/transcribe`, body.body, body.headers, 120_000) as { text?: string };
+    if (typeof out?.text !== "string") throw new ApiError(502, "Dictation returned no text.", "unreadable");
+    return out.text.trim();
   }
 
   /**
@@ -209,7 +226,7 @@ export function createApi(options: ApiOptions = {}) {
     return resp;
   }
 
-  return { get, poll, post, put, upload, raw, url: (path: string, params?: Record<string, unknown>) => `${API_PREFIX}${path}${queryString(params)}` };
+  return { get, poll, post, put, upload, transcribe, raw, url: (path: string, params?: Record<string, unknown>) => `${API_PREFIX}${path}${queryString(params)}` };
 }
 
 /**

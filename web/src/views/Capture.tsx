@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChatComposer, DragPresence, Markdown, dragCarriesFiles, droppedFiles, folderRefusal, pastedFiles } from "@abstractframework/panel-chat";
-import { AfChipButton, Icon, randomId } from "@abstractframework/ui-kit";
+import { AfChipButton, AfVoiceMicButton, Icon, randomId, useGatewayVoice } from "@abstractframework/ui-kit";
 import { ApiError, errorSentence } from "../lib/api";
 import { ACK_ICONS, ACK_WORDS, ackState, ackSummary, pendingLine } from "../lib/ack";
 import { runCapture, tooLarge, watchNote, type CaptureFile, type CaptureItem } from "../lib/capture";
@@ -49,6 +49,11 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
   const [text, setText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [notice, setNotice] = useState("");
+  const voice = useGatewayVoice({
+    capture_mode: "hold",
+    transcribe: (blob, mime) => api.transcribe(blob, mime, sessionId),
+    on_error: setNotice,
+  });
   const [dragging, setDragging] = useState(false);
   const filesFor = useRef(new Map<string, File[]>());
   const previewsFor = useRef(new Map<string, Array<string | null>>());
@@ -248,7 +253,7 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
             value={text}
             onChange={setText}
             onSubmit={() => void send()}
-            canSubmit={Boolean(text.trim() || files.length)}
+            canSubmit={Boolean(text.trim() || files.length) && !voice.voice_ptt_recording && !voice.voice_ptt_busy}
             placeholder={about ? "Write your answer…" : "Write a note…"}
             ariaLabel="Note"
             sendLabel="Save"
@@ -273,6 +278,8 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
             }
             onAttach={() => fileInput.current?.click()}
             attachLabel="Add files"
+            trailingActions={<AfVoiceMicButton voice={voice} mode="hold" label="Hold to dictate a note"
+              onTranscript={(said) => setText((draft) => draft.trim() ? `${draft.trim()}\n${said}` : said)} />}
             actions={
               <input
                 ref={fileInput}
