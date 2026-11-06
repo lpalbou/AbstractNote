@@ -68,7 +68,7 @@ final class AppModel: ObservableObject {
     }
 
     var isMock: Bool { client.isMock }
-    var gatewayHost: String { signIn?.gateway.host() ?? (isMock ? Self.mockHost : "—") }
+    var gatewayHost: String { signIn.map { ServerAddress.label($0.gateway) } ?? (isMock ? Self.mockHost : "—") }
     var account: String? { signIn?.user ?? (isMock ? "laurent" : nil) }
     /// The watch's conversation for its notes and questions.
     var sessionId: String { signIn?.sessionId ?? "note-watch-mock" }
@@ -118,6 +118,13 @@ final class AppModel: ObservableObject {
         client = MockGatewayClient(failure: .unauthorized)
         today = nil; subject = nil; notePath = []; todayPath = []; settingsPath = []; askPath = []
         signInNotice = notice; needsSignIn = true
+    }
+
+    /// Sign out of the old authority before remembering the new one. Sign-out remembers
+    /// the previous server, so saving the replacement first would silently undo the edit.
+    func changeServer(_ url: URL) {
+        signOut(notice: "Sign in to \(ServerAddress.label(url)).")
+        UserDefaults.standard.set(url.absoluteString, forKey: SignInDefaults.lastGateway)
     }
 
     /// A sign-in made by launch arguments (or an older file) may not name the account: read it
@@ -209,7 +216,12 @@ struct LaunchOptions {
             let client = MockGatewayClient(answerDelay: ["note-sending", "ask-thinking"].contains(s) ? .seconds(3600) : .milliseconds(600),
                                            failure: failure, quiet: s == "today-quiet", canTranscribe: s != "note-no-stt",
                                            organizeAfter: s == "note-organizing" ? .seconds(3600) : .milliseconds(1800))
-            let model = AppModel(client: client, signIn: nil, file: nil, needsSignIn: s == "signin", location: location)
+            // The Server scene has an existing account, exercising the same sign-out ordering
+            // as a real address change. Its client stays mocked and no credential file is used.
+            let sampleSignIn: SavedSignIn? = s == "server"
+                ? SavedSignIn(gateway: URL(string: "http://192.0.2.1:18080")!, user: "sample",
+                              credential: .token("mock-token"), sessionId: "note-watch-mock") : nil
+            let model = AppModel(client: client, signIn: sampleSignIn, file: nil, needsSignIn: s == "signin", location: location)
             model.demo = s
             return model
         }

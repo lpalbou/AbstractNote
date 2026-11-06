@@ -114,12 +114,13 @@ public struct SignInView<Mark: View>: View {
                     .onSubmit { editingGateway = false }
             } else {
                 Button { editingGateway = true } label: {
-                    Text(gatewayURL?.host() ?? gatewayText).lineLimit(1).minimumScaleFactor(0.7)
+                    Text(gatewayURL.map(ServerAddress.label) ?? gatewayText).lineLimit(1).minimumScaleFactor(0.7)
                         .font(.rounded(.caption2)).foregroundStyle(Theme.muted.opacity(0.8))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Server \(gatewayURL?.host() ?? gatewayText)")
+                .accessibilityLabel("Server \(gatewayURL.map(ServerAddress.label) ?? gatewayText)")
                 .accessibilityHint("Change the server")
+                .accessibilityIdentifier("signin.server")
             }
         }
         .padding(.horizontal, 18)

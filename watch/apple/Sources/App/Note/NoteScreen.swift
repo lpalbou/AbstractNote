@@ -225,6 +225,12 @@ struct NoteScreen: View {
             Spacer(minLength: Space.s)
             ProblemView(problem: problem, signIn: model.signInAgain, retry: { Task { await deliver() } })
                 .accessibilityIdentifier("note.error")
+            if case .unreachable = problem {
+                NavigationLink(value: Route.server) { Text("Check server") }
+                    .buttonStyle(FilledButtonStyle(fill: Theme.neutralButton))
+                    .accessibilityIdentifier("note.checkServer")
+                    .accessibilityHint("Check the address and port; going back keeps this note")
+            }
             Button("Edit") { phase = .compose; pending = nil; runId = nil }
                 .buttonStyle(FilledButtonStyle(fill: Theme.neutralButton))
         }

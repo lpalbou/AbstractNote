@@ -101,7 +101,7 @@ struct NoteServerView: View {
     @EnvironmentObject private var model: AppModel
     var body: some View {
         ServerView(current: model.signIn?.gateway ?? (model.isMock ? URL(string: "https://\(AppModel.mockHost)") : nil)) { url in
-            model.signOut(notice: "Sign in to \(url.host() ?? url.absoluteString).")
+            model.changeServer(url)
         }
     }
 }

@@ -23,12 +23,12 @@ public struct ServerView: View {
         FitScroll {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Server address").font(.rounded(.caption2)).foregroundStyle(Theme.muted)
-                TextField("gateway.example.org", text: $text)
+                TextField("gateway.example.org:8080", text: $text)
                     .textContentType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                     .font(.rounded(.footnote))
                     .accessibilityLabel("Server address")
                     .accessibilityIdentifier("server.address")
-                Text("https is used unless you type http://, which works on your local network only.")
+                Text("Check the port as well as the address. https is used unless you type http://, which works on your local network only.")
                     .font(.rounded(.caption2)).foregroundStyle(Theme.muted)
                 if changes {
                     Text("Changing the server signs you out.").font(.rounded(.caption2)).foregroundStyle(Theme.amber)
