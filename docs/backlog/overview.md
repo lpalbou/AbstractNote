@@ -5,7 +5,7 @@ Last reconciled: 2026-11-02 (0038 completed: 0.2.0 on npm with provenance; 2026-
 ## Counts
 | State | Count |
 |---|---|
-| planned | 5 (0040; track `planned/v1/`: 0029; track `planned/memory_convergence/`: 0033, 0035, 0036) |
+| planned | 6 (0040, 0041; track `planned/v1/`: 0029; track `planned/memory_convergence/`: 0033, 0035, 0036) |
 | proposed | 9 |
 | completed | 26 (0038 npm trusted publisher; 0902 shared-widget local frontend deployment; track `completed/v1/`: 21; track `completed/memory_convergence/`: 0034, 0037; 0039 web pin on the kit's message footer spec) |
 | deprecated | 1 (0015) |
@@ -24,6 +24,7 @@ Next free global id: 0903 (0901 is the existing recurrent item).
 
 ## Ledgers
 ### Planned
+- [0041 upgrades keep the same automations: follow the latest note workflows instead of archiving and recreating (P0, with gateway 1147; filed 2026-11-07)](planned/0041_upgrades_retarget_automations_instead_of_recreating_them.md)
 - [0040 shared plane: `PUT /settings` and `POST /processor/ensure` ask for admin or the plane owner (gateway security incident 2026-10-29, PR #55)](planned/0040_shared_plane_gate_for_settings_and_processor_ensure.md)
 - [0029 Ingest the rest of the framework's history into the operator's notebook](planned/v1/0029_ingest_the_rest_of_the_framework_history.md)
 
