@@ -16,14 +16,19 @@ publishes the Python package and the web app at the same version. The Watch app 
 ### Added
 
 - **Dictate a note in the web app.** Capture's composer has a microphone beside Save: hold it, speak, release, and the
-  words are added to the draft through your gateway's speech-to-text. Nothing is saved until you press Save, and Save
-  waits while a recording is being transcribed.
+  words are added to the draft through your gateway's speech-to-text. No note is saved until you press Save, and Save
+  is unavailable while a recording is being transcribed. The recording and its transcript are kept on your gateway,
+  like any file you send it.
+- The microphone is offered only when your gateway has speech-to-text. Without it, the microphone is disabled and
+  says so; over plain http on another computer it explains that the browser needs https for the microphone. A
+  transcription that fails says so in one plain sentence, one that takes more than 2 minutes says it is still running
+  and to try again, and starting a recording no longer clears Capture's other messages.
 
 ### Fixed
 
 - **Watch: a new server address sticks.** Saving a changed address could be undone by the sign-out that followed it;
   the Watch now signs out of the old server and asks you to sign in to the new one, and remembers it after a relaunch.
-- **Watch: the server is shown with its port** (for example `192.0.2.1:8080`), and the address field reminds you to
+- **Watch: the server is shown with its port** (for example `http://192.0.2.1:8080`), and the address field reminds you to
   check the port. When a note cannot reach the server, **Check server** opens the address; going back keeps the note
   and its **Try again**.
 

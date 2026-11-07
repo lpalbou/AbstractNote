@@ -10,6 +10,8 @@
  * - A 401 anywhere calls `onUnauthorized` (the app returns to sign-in).
  */
 
+import { randomId } from "@abstractframework/ui-kit";
+
 export const API_PREFIX = "api/gateway/";
 export const CSRF_COOKIE = "abstractnote_gateway_csrf";
 export const CSRF_HEADER = "x-abstractnote-csrf";
@@ -17,6 +19,8 @@ export const CSRF_HEADER = "x-abstractnote-csrf";
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 export const READ_BACKOFF_MS = [1000, 3000];
 export const READ_TIMEOUT_MS = 30_000;
+/** How long one dictation transcription may take before the draft stops waiting for it (`transcribe`). */
+export const TRANSCRIBE_TIMEOUT_MS = 120_000;
 
 export class ApiError extends Error {
   readonly status: number;
@@ -99,14 +103,16 @@ export function createApi(options: ApiOptions = {}) {
 
   async function once(method: string, path: string, body?: BodyInit | null, headers: Record<string, string> = {}, timeout = timeoutMs): Promise<unknown> {
     const ctrl = typeof AbortController === "undefined" ? null : new AbortController();
-    const timer = ctrl ? setTimeout(() => ctrl.abort(), timeout) : null;
+    let timedOut = false;
+    const timer = ctrl ? setTimeout(() => { timedOut = true; ctrl.abort(); }, timeout) : null;
     let resp: Response;
     try {
       const h: Record<string, string> = { Accept: "application/json", ...headers };
       if (method !== "GET") h[CSRF_HEADER] = csrf();
       resp = await doFetch(`${API_PREFIX}${path}`, { method, body: body ?? undefined, headers: h, credentials: "same-origin", signal: ctrl?.signal });
     } catch {
-      throw new ApiError(0, "No answer.", "network");
+      // Status 0 either way (no answer, read retries apply); the code tells a timeout from a lost connection.
+      throw new ApiError(0, "No answer.", timedOut ? "timeout" : "network");
     } finally {
       if (timer) clearTimeout(timer);
     }
@@ -201,10 +207,10 @@ export function createApi(options: ApiOptions = {}) {
   async function transcribe(blob: Blob, mime: string, sessionId: string): Promise<string> {
     const type = (mime || blob.type || "audio/webm").split(";")[0];
     const ext = type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : type.includes("wav") ? "wav" : "webm";
-    const { ref, owner } = await uploadFile(new File([blob], `dictation.${ext}`, { type }), sessionId, `voice/dictation/${crypto.randomUUID()}.${ext}`);
+    const { ref, owner } = await uploadFile(new File([blob], `dictation.${ext}`, { type }), sessionId, `voice/dictation/${randomId()}.${ext}`);
     if (!owner) throw new ApiError(502, "The recording has no owner reference.", "unreadable");
     const body = json({ audio_artifact: { $artifact: ref.$artifact } });
-    const out = await once("POST", `runs/${encodeURIComponent(owner)}/audio/transcribe`, body.body, body.headers, 120_000) as { text?: string };
+    const out = await once("POST", `runs/${encodeURIComponent(owner)}/audio/transcribe`, body.body, body.headers, TRANSCRIBE_TIMEOUT_MS) as { text?: string };
     if (typeof out?.text !== "string") throw new ApiError(502, "Dictation returned no text.", "unreadable");
     return out.text.trim();
   }
@@ -226,7 +232,15 @@ export function createApi(options: ApiOptions = {}) {
     return resp;
   }
 
-  return { get, poll, post, put, upload, transcribe, raw, url: (path: string, params?: Record<string, unknown>) => `${API_PREFIX}${path}${queryString(params)}` };
+  /**
+   * The gateway's voice contract (`capabilities.contracts.assistant.voice`). Gateways before 0.20.2 ignore
+   * `scope` and answer the full capability list, which carries the same contract (`sttAvailable` reads both).
+   */
+  async function voiceCapabilities(): Promise<unknown> {
+    return get<unknown>("discovery/capabilities", { scope: "voice" });
+  }
+
+  return { get, poll, post, put, upload, transcribe, voiceCapabilities, raw, url: (path: string, params?: Record<string, unknown>) => `${API_PREFIX}${path}${queryString(params)}` };
 }
 
 /**
