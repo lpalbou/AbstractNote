@@ -11,8 +11,12 @@ runtime and one notebook per user, app hosting), **AbstractRuntime** and **Abstr
 capture and understanding workflows), **AbstractMemory** (temporal facts) and **AbstractCore**
 (models, structured output, embeddings).
 
-Status: version 0.3.0, alpha. The Python package is `abstractnote` on PyPI and the web app is
+Status: version 0.3.1, alpha. The Python package is `abstractnote` on PyPI and the web app is
 `@abstractframework/note` on npm (see [Install](#install)).
+
+What's new in 0.3.1: the web app's Capture screen has a microphone to dictate a note into the draft, offered when
+your gateway has speech-to-text (no note is saved until you press Save), and on the Watch a changed server address
+sticks and is shown with its port. See [CHANGELOG.md](CHANGELOG.md#031---2026-11-07).
 
 What's new in 0.3.0: the web app follows runs through the gateway's replay view and says when a run waits
 for an answer, the top bar carries the shared Docs assistant and one account widget, and Capture uses the

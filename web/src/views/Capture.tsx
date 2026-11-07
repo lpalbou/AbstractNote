@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChatComposer, DragPresence, Markdown, dragCarriesFiles, droppedFiles, folderRefusal, pastedFiles } from "@abstractframework/panel-chat";
-import { AfChipButton, AfVoiceMicButton, Icon, randomId, useGatewayVoice } from "@abstractframework/ui-kit";
+import { AfChipButton, AfVoiceMicButton, Icon, insecureContextReason, randomId, useGatewayVoice } from "@abstractframework/ui-kit";
 import { ApiError, errorSentence } from "../lib/api";
 import { ACK_ICONS, ACK_WORDS, ackState, ackSummary, pendingLine } from "../lib/ack";
 import { runCapture, tooLarge, watchNote, type CaptureFile, type CaptureItem } from "../lib/capture";
+import { dictationErrorSentence, dictationUnavailableReason, sttAvailable, type DictationCapability } from "../lib/dictation";
 import { THREAD_KEY, readLocal, writeLocal } from "../lib/local";
 import { currentPlace } from "../lib/location";
 import { navigate, type Route } from "../lib/nav";
@@ -49,10 +50,41 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
   const [text, setText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [notice, setNotice] = useState("");
+  // Dictation keeps its own line: the voice hook clears its message when a recording starts, and that must
+  // never wipe Capture's other notices (a refused folder, a file over 25 MB).
+  const [dictationNotice, setDictationNotice] = useState("");
+  // The sentence for the transcription that just failed, set by `transcribe` before the hook reports it.
+  const dictationFailure = useRef<string | null>(null);
+  const [stt, setStt] = useState<DictationCapability>("checking");
+  const insecureMic = insecureContextReason("the microphone");
+  useEffect(() => {
+    if (insecureMic) return;
+    let live = true;
+    api.voiceCapabilities().then(
+      (payload) => { if (live) setStt(sttAvailable(payload) ? "available" : "missing"); },
+      () => { if (live) setStt("unknown"); },
+    );
+    return () => { live = false; };
+  }, [api, insecureMic]);
+  const micUnavailable = dictationUnavailableReason(stt, insecureMic);
   const voice = useGatewayVoice({
     capture_mode: "hold",
-    transcribe: (blob, mime) => api.transcribe(blob, mime, sessionId),
-    on_error: setNotice,
+    transcribe: async (blob, mime) => {
+      dictationFailure.current = null;
+      try {
+        return await api.transcribe(blob, mime, sessionId);
+      } catch (err) {
+        dictationFailure.current = dictationErrorSentence(err);
+        throw err;
+      }
+    },
+    // The hook reports a failed transcription as "Transcription failed: <gateway detail>"; Capture shows its
+    // own plain sentence for it instead. Other messages (microphone permission, nothing heard) pass through.
+    on_error: (message) => {
+      const failure = dictationFailure.current;
+      dictationFailure.current = null;
+      setDictationNotice(message && failure ? failure : message);
+    },
   });
   const [dragging, setDragging] = useState(false);
   const filesFor = useRef(new Map<string, File[]>());
@@ -190,6 +222,7 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
     setText("");
     setFiles([]);
     setNotice("");
+    setDictationNotice("");
     if (about) navigate("capture");
     await runCapture(item, files, deps);
   }, [text, files, about, deps]);
@@ -249,6 +282,11 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
               {notice}
             </p>
           ) : null}
+          {dictationNotice ? (
+            <p className="nt-notice" role="alert" data-dictation-notice>
+              {dictationNotice}
+            </p>
+          ) : null}
           <ChatComposer
             value={text}
             onChange={setText}
@@ -278,8 +316,10 @@ export function CaptureView({ route, processInline }: { route: Route; processInl
             }
             onAttach={() => fileInput.current?.click()}
             attachLabel="Add files"
-            trailingActions={<AfVoiceMicButton voice={voice} mode="hold" label="Hold to dictate a note"
-              onTranscript={(said) => setText((draft) => draft.trim() ? `${draft.trim()}\n${said}` : said)} />}
+            trailingActions={stt === "checking" && !insecureMic ? null : (
+              <AfVoiceMicButton voice={voice} mode="hold" label="Hold to dictate a note" unavailableReason={micUnavailable}
+                onTranscript={(said) => setText((draft) => draft.trim() ? `${draft.trim()}\n${said}` : said)} />
+            )}
             actions={
               <input
                 ref={fileInput}

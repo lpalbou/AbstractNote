@@ -78,6 +78,12 @@ export function createMockGateway(options = {}) {
   // AbstractGateway 0.17.0 serves the replay view (`GET runs/{id}/view` + `/view/stream`). `replayView: false`
   // models an older gateway: FastAPI's unmatched-route 404 for those paths.
   const replayView = options.replayView !== false;
+  // Speech-to-text (Capture's dictation): `stt: false` models a gateway with no STT backend (its voice contract
+  // says `available: false` and a transcription fails with a 500, as AbstractGateway answers); `sttFails: true`
+  // advertises STT whose transcriptions still fail.
+  const stt = options.stt !== false;
+  const sttFails = Boolean(options.sttFails);
+  const transcriptions = [];
   const db = buildSeed();
   const sessions = new Map();
   const runs = new Map();
@@ -846,6 +852,18 @@ export function createMockGateway(options = {}) {
       for (const [sid, s] of sessions) if (s === who) sessions.delete(sid);
       return send(res, 200, { ok: true });
     }
+    if (p === "/api/gateway/discovery/capabilities") {
+      const sttContract = stt ? { available: true } : { available: false, reason: "No STT backend is configured." };
+      return send(res, 200, { capabilities: { contracts: { version: 1, assistant: { voice: { tts: { available: false }, stt: sttContract } } } } });
+    }
+    let tm = p.match(/^\/api\/gateway\/runs\/([^/]+)\/audio\/transcribe$/);
+    if (tm && method === "POST") {
+      const body = await readJson(req);
+      transcriptions.push({ run_id: decodeURIComponent(tm[1]), audio_artifact: body.audio_artifact });
+      if (!stt || sttFails) return fail(res, 500, "STT child run did not complete successfully: No STT backend is configured.");
+      if (!artifacts.has(String(body.audio_artifact?.$artifact || ""))) return fail(res, 404, "Unknown artifact.");
+      return send(res, 200, { text: "Remember this spoken idea." });
+    }
     if (p === "/api/gateway/discovery/providers") return send(res, 200, { providers: [{ name: "mlx", display_name: "MLX" }, { name: "lmstudio", display_name: "LM Studio" }, { name: "openai", display_name: "OpenAI" }] });
     let m = p.match(/^\/api\/gateway\/discovery\/providers\/([^/]+)\/models$/);
     if (m) {
@@ -866,7 +884,9 @@ export function createMockGateway(options = {}) {
       const size = Math.max(0, buf.length - 400);
       if (size > MAX_ATTACHMENT_BYTES) return fail(res, 413, "File too large.");
       const artifact_id = randomUUID().replace(/-/g, "");
-      artifacts.set(artifact_id, { artifact_id, filename, content_type, size });
+      const tail = buf.subarray(Math.max(0, buf.length - 4096)).toString("latin1");
+      const source_path = (tail.match(/name="source_path"\r\n\r\n([^\r\n]*)/) || [])[1] || null;
+      artifacts.set(artifact_id, { artifact_id, filename, content_type, size, source_path });
       return send(res, 200, { artifact: { $artifact: artifact_id, artifact_id, run_id: "session_memory_mock", content_type, filename } });
     }
 
@@ -1433,7 +1453,7 @@ export function createMockGateway(options = {}) {
     }
   }
 
-  return { handler, state: { db, runs, sessions, proc }, stop: () => liveTimer && clearInterval(liveTimer) };
+  return { handler, state: { db, runs, sessions, proc, artifacts, transcriptions }, stop: () => liveTimer && clearInterval(liveTimer) };
 }
 
 function parseArgs(argv) {
