@@ -40,8 +40,8 @@
   },
   "dependencies": {
     "@abstractframework/app-server": "^0.1.12",
-    "@abstractframework/panel-chat": "^0.7.0",
-    "@abstractframework/ui-kit": "^0.9.12",
+    "@abstractframework/panel-chat": "^0.8.2",
+    "@abstractframework/ui-kit": "^0.9.15",
     "d3-force": "^3.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
