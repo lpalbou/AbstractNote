@@ -6,6 +6,27 @@ All notable user-visible changes to AbstractNote are listed here. The format fol
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-07
+
+This release changes the web app (`@abstractframework/note`) and the Apple Watch app. The web app moves to
+AbstractUIC 0.10.2 (`@abstractframework/ui-kit` ^0.9.15, `@abstractframework/panel-chat` ^0.8.2; from ^0.9.12 /
+^0.7.0). The Python package `abstractnote` has no change: its version moves to 0.3.1 only because one release
+publishes the Python package and the web app at the same version. The Watch app is built from source.
+
+### Added
+
+- **Dictate a note in the web app.** Capture's composer has a microphone beside Save: hold it, speak, release, and the
+  words are added to the draft through your gateway's speech-to-text. Nothing is saved until you press Save, and Save
+  waits while a recording is being transcribed.
+
+### Fixed
+
+- **Watch: a new server address sticks.** Saving a changed address could be undone by the sign-out that followed it;
+  the Watch now signs out of the old server and asks you to sign in to the new one, and remembers it after a relaunch.
+- **Watch: the server is shown with its port** (for example `192.0.2.1:8080`), and the address field reminds you to
+  check the port. When a note cannot reach the server, **Check server** opens the address; going back keeps the note
+  and its **Try again**.
+
 ## [0.3.0] - 2026-11-02
 
 This release mostly changes the web app (`@abstractframework/note`). The Python package `abstractnote` keeps the
