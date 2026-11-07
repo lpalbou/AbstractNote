@@ -355,7 +355,12 @@ describe("the mock's GET /note/processing", () => {
   });
 
   it("serves the contract's keys with an ETag and answers 304 when nothing changed", async () => {
-    gw.state.proc.drain = null; // hold the simulation still for the 304
+    // Hold the whole simulation still for the 304: no drain, and no new drain, consolidation or
+    // reflection step can start between the two reads (a busy machine let the timer start one).
+    const proc = gw.state.proc;
+    const held = { consRun: proc.consRun, reflectRun: proc.reflectRun, nextPassAt: proc.nextPassAt };
+    proc.drain = null; proc.consRun = null; proc.reflectRun = null; proc.nextPassAt = Number.MAX_SAFE_INTEGER;
+    try {
     const r = await fetch(`${base}note/processing`, { headers: H });
     const body = await r.json();
     expect(Object.keys(body).sort()).toEqual(["active", "consolidation", "failed", "model", "now", "pace", "processor", "queue", "recent", "reflect"]);
@@ -367,6 +372,9 @@ describe("the mock's GET /note/processing", () => {
     expect(etag).toBeTruthy();
     const again = await fetch(`${base}note/processing`, { headers: { ...H, "If-None-Match": etag! } });
     expect(again.status).toBe(304);
+    } finally {
+      Object.assign(proc, held);
+    }
   });
 
   it("the live simulation advances a note through its steps; Move to front puts a note first", async () => {
